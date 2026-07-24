@@ -27,6 +27,44 @@ function fdShiftDate(dateStr, deltaDays) {
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// Splits `total` into `n` whole-number parts as evenly as possible, remainder
+// (from integer rounding) landing on the first parts so they always sum back
+// to `total` exactly. Used by the timeline's "split into multiple meals".
+function fdEvenSplit(total, n) {
+  const base = Math.floor(total / n);
+  const rem = Math.round(total) - base * n;
+  return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0));
+}
+// Same idea as fdEvenSplit but for display-unit amounts (pieces, which can be
+// fractional, e.g. 3 wraps over 2 meals is 1.5 each), rounded to 2 decimals
+// with any rounding drift folded into the last part so the sum stays exact.
+// Used to live-redistribute a split's OTHER fields when one gets hand-typed.
+function fdEvenSplitFloat(total, n) {
+  if (n <= 0) return [];
+  const base = Math.round((total / n) * 100) / 100;
+  const parts = Array.from({ length: n }, () => base);
+  const drift = Math.round((total - base * n) * 100) / 100;
+  parts[n - 1] = Math.round((parts[n - 1] + drift) * 100) / 100;
+  return parts;
+}
+// Scales a food-log entry's amount/macros/ingredient-snapshot by `scale`, for
+// "split into multiple meals": a fixed-composition food or recipe batch
+// scales every field (and each recipeItems ingredient) linearly by the same
+// factor, same math the quantity sheet's per-100g preview already uses.
+function fdScaleEntry(e, scale) {
+  const sc = (v) => v != null ? Math.round(v * scale) : v;
+  const sc1 = (v) => v != null ? fdRound1(v * scale) : v;
+  return {
+    quantityG: sc(e.quantityG), calories: sc(e.calories),
+    protein: sc1(e.protein), carbs: sc1(e.carbs), fat: sc1(e.fat),
+    fiber: e.fiber != null ? sc1(e.fiber) : null,
+    recipeItems: e.recipeItems ? e.recipeItems.map(ri => ({
+      ...ri, quantityG: sc(ri.quantityG), calories: sc(ri.calories),
+      protein: sc1(ri.protein), carbs: sc1(ri.carbs), fat: sc1(ri.fat),
+      fiber: ri.fiber != null ? sc1(ri.fiber) : null,
+    })) : null,
+  };
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -146,12 +184,91 @@ const FD_MEAL_CATEGORIES = [
   { id: 'snack3', label: 'Snack 3', startHour: 20, endHour: 24 },
 ];
 
+// Build the planned food-log entry a template slot materializes into on a
+// given date. Shared by the auto-fill effect (opening a day) and the immediate
+// fill when a new slot is added, so both produce an identical entry shape.
+// slot.id becomes templateSlotId, which the dedup keys off.
+function fdMaterializeSlotEntry(slot, dateISO) {
+  return {
+    // Deterministic per (day, slot): two devices auto-filling the same morning
+    // before either has synced would otherwise materialize the same slot with
+    // different random ids, and the purely id-based boot-merge would union both
+    // into duplicate meals (and double-count once checked off). A stable id makes
+    // the two rows collide so mergeById collapses them into one.
+    id: `pl_${dateISO}_${slot.id}`, date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
+    foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null,
+    quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
+    fiber: slot.fiber ?? null, recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
+    loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
+    createdAt: new Date().toISOString(),
+  };
+}
+// Does a slot's day_type apply on a given date? ('any' always; 'training' /
+// 'rest' via the plan's training-day check).
+function fdSlotMatchesDate(slot, store, dateISO) {
+  if (slot.dayType === 'any' || !slot.dayType) return true;
+  const isTraining = LB.isTrainingDayForDate(store, dateISO);
+  return slot.dayType === 'training' ? isTraining : !isTraining;
+}
+
+// Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
+// accent-bordered box when planned (not eaten yet), the same box filled with a
+// check once logged (eaten). Tapping toggles the entry's planned state.
+function FdCheckbox({ checked, onToggle }) {
+  return (
+    <button
+      data-reorder-ignore="true"
+      onClick={onToggle}
+      aria-label={checked ? 'Mark as planned' : 'Mark as eaten'}
+      style={{
+        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0, cursor: 'pointer',
+        border: `1.5px solid var(--accent)`,
+        background: checked ? 'var(--accent)' : 'transparent',
+        color: checked ? 'var(--accent-ink)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+    >
+      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
+    </button>
+  );
+}
+
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
-  const minDate = fdShiftDate(today, -14);
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
+
+  // store.foodLogs only carries FOOD_HISTORY_WINDOW_DAYS from boot; scrolling
+  // further back needs a lazy fetch (mirrors fetchSessionEntries for old
+  // session details), so history stays browsable without limit instead of
+  // silently looking empty. loadedOldDates avoids re-fetching a date already
+  // checked this session, whether or not it actually had entries.
+  const foodHistCutoff = useMemoFd(() => LB.historyWindowCutoffISO(new Date(), LB.FOOD_HISTORY_WINDOW_DAYS), []);
+  const [loadedOldDates, setLoadedOldDates] = useStateFd(() => new Set());
+  useEffectFd(() => {
+    if (curDate >= foodHistCutoff || loadedOldDates.has(curDate)) return;
+    let on = true;
+    LB.fetchFoodLogsForDates(userId, [curDate]).then(byDate => {
+      if (!on) return;
+      setLoadedOldDates(prev => new Set(prev).add(curDate));
+      const entries = byDate[curDate];
+      if (!entries || !entries.length) return;
+      // Merge fetched (authoritative) entries with any not-yet-synced local
+      // entry for the same date, e.g. the user logged something for this old
+      // date while the fetch was in flight: fetched wins on id collision,
+      // anything local-only survives alongside it, nothing is dropped either way.
+      setStore(s => {
+        const list = s.foodLogs || [];
+        const localForDate = list.filter(l => l.date === curDate);
+        const fetchedIds = new Set(entries.map(e => e.id));
+        const extraLocal = localForDate.filter(l => !fetchedIds.has(l.id));
+        return { ...s, foodLogs: [...list.filter(l => l.date !== curDate), ...entries, ...extraLocal] };
+      });
+    }).catch(() => {});
+    return () => { on = false; };
+  }, [curDate, foodHistCutoff, userId]);
 
   // Coach-assigned macros, same source and priority HealthScreen uses (coach
   // macros win over personal targets when both exist, see effectiveMacroTargets):
@@ -199,6 +316,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (changed) { try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {} }
     });
   }, []);
+
+  // Plan Mode meal templates: on opening today, auto-materialize each matching
+  // template slot (by day-type: any / training / rest) as a planned entry at
+  // its fixed hour, unless the day already has one from that slot. Runs once
+  // per day, tracked CROSS-DEVICE by a synced marker row (store.foodTemplateDays,
+  // id `<userId>_<date>`), so deleting an auto-planned entry never makes it
+  // reappear on reopen, on any device. Only for TODAY: a backdated day is never
+  // auto-filled. The manual "Apply to today" button (FoodTemplateScreen) is the
+  // escape hatch to pull the fixums back after clearing the day on purpose.
+  useEffectFd(() => {
+    if (!planMode || curDate !== today) return;
+    // Only the ACTIVE meal plan's slots auto-fill the day.
+    const activePlanId = store.activeMealTemplateId;
+    const slots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId);
+    if (!activePlanId || !slots.length) return;
+    const markerId = `${userId}_${today}`;
+    if ((store.foodTemplateDays || []).some(d => d.id === markerId)) return;
+    const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
+    const toAdd = slots
+      .filter(s => fdSlotMatchesDate(s, store, today) && !existingSlotIds.has(s.id))
+      .map(s => fdMaterializeSlotEntry(s, today));
+    setStore(s => {
+      // Re-check inside the updater against a double-run race (marker may have
+      // landed between read and commit).
+      if ((s.foodTemplateDays || []).some(d => d.id === markerId)) return s;
+      return {
+        ...s,
+        foodTemplateDays: [...(s.foodTemplateDays || []), { id: markerId, date: today }],
+        // Planned entries never touch the daily log, so no patchDaily here.
+        foodLogs: toAdd.length ? [...toAdd, ...(s.foodLogs || [])] : (s.foodLogs || []),
+      };
+    });
+  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -251,6 +401,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
   const labelInputRef = useRefFd(null);
+  // Which AI reads the nutrition label photo: 'grok' (scan-label, the
+  // long-standing default) or 'claude' (scan-label-claude), same request/
+  // response contract either way. Per-device only, not a synced setting:
+  // this is a comparison toggle, not a user-facing preference.
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -268,6 +423,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // onQtyCountChange/selectQtyUnit below rather than typed directly.
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
+  // Plan Mode, edit path only: whether the entry being edited (editingEntry)
+  // is planned or logged, so the quantity sheet's planned/logged switch can
+  // change it as part of the same save. Irrelevant for a fresh pick, whose
+  // status comes straight from the Log it / Plan it button tapped.
+  const [qtyEditPlanned, setQtyEditPlanned] = useStateFd(false);
   // id of the favorite created from the currently-open sheet, so the star
   // button can toggle it live (add on tap, remove on second tap) instead of
   // deferring the save to when the food is actually logged.
@@ -339,23 +499,363 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editUnitNewLabel, setEditUnitNewLabel] = useStateFd('');
   const [editUnitNewGrams, setEditUnitNewGrams] = useStateFd('');
 
-  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : LB.fmtDayLabel(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : curDate === fdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  // A day that hasn't happened yet can't have anything "already eaten" on it:
+  // Log it is unavailable and an edited entry can't be flipped back to logged.
+  const curDateIsFuture = curDate > today;
 
+  // Plan Mode (settings.planMode, off by default): entries carry a `planned`
+  // flag. A planned entry sits in the timeline but does NOT count toward the
+  // day's real macro totals (or the daily log / coaching) until it's checked
+  // off (planned -> logged). With plan mode off nothing here changes: no entry
+  // is ever planned, so loggedEntries === dayEntries and every total below is
+  // exactly what it was before.
+  const planMode = !!store.settings?.planMode;
+  // Keep the user's UTC offset fresh while in Plan Mode: the meal-reminder cron
+  // places "now" on the local clock via tzOffsetMinutes, and a Plan Mode user
+  // may never open the Water tab (the other writer of this value). Only writes
+  // when it actually changed (travel / DST). Same one-liner as WaterScreen.
+  useEffectFd(() => {
+    if (!planMode) return;
+    const off = -new Date().getTimezoneOffset();
+    if (store.settings?.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
+  }, [planMode]); // eslint-disable-line
+  // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
+  // mode. Controls the recurring fixum slots that auto-fill each day's plan.
+  const [templateOpen, setTemplateOpen] = useStateFd(false);
+  // Timeline entry whose overflow (kebab) action menu is open, or null. The
+  // per-row secondary actions (edit, ingredients, delete) live in this one
+  // menu instead of a cluster of inline buttons, to save width on mobile.
+  const [entryMenu, setEntryMenu] = useStateFd(null);
+  // "Split into multiple meals": an hour that stacks several items really
+  // eaten at different times (a meal-prep batch), redistributed across N
+  // times without retyping every item's amount. splitHour is the hour being
+  // split (null = sheet closed); splitHours holds the target hour for each
+  // additional meal (length splitCount-1, meal 1 stays at splitHour);
+  // splitQtys maps entry id -> per-meal DISPLAY-value STRING array (length
+  // splitCount, same input-as-you-type convention as every other quantity
+  // field here). The display value is a unit count (e.g. "Pc") whenever the
+  // matching favorite defines one (splitEntryUnit), since that's exactly why
+  // a unit gets defined, so the user never has to do the gram math by hand;
+  // otherwise grams, or kcal for an entry with no gram weight at all. The
+  // underlying scaling (splitOrigAmount/fdScaleEntry) always works in grams/
+  // kcal, splitDisplayFromAmount/splitAmountFromDisplay convert at the edges.
+  const [splitHour, setSplitHour] = useStateFd(null);
+  const [splitCount, setSplitCount] = useStateFd(2);
+  const [splitHours, setSplitHours] = useStateFd([]);
+  const [splitQtys, setSplitQtys] = useStateFd({});
+  // Snapshot of the split as it opened, to detect unsaved edits on backdrop-
+  // close (same pattern as the meal-slot draft's requestCloseDraft).
+  const splitInitialSnap = useRefFd(null);
+  // Toast for the last APPLIED split (not the sheet draft above): just enough
+  // to look the batch back up (batchId) and label the toast (count). The
+  // actual undo data (the exact pre-split entries) lives on the entries
+  // themselves now (split_batch, see undoSplitBatch), not in this local
+  // state, so the toast is only a convenience shortcut, not the only way to
+  // reach undo, see splitBatchAt/the Undo Split block in the sheet below for
+  // the persistent path. Auto-clears after a few seconds (splitUndoTimer); a
+  // second split before that just replaces it, same as any other toast.
+  const [splitUndo, setSplitUndo] = useStateFd(null);
+  const splitUndoTimer = useRefFd(null);
+  useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
+  // "Create recipe from block": the mirror of Split, folding a stacked
+  // hour's 2+ items into ONE recipe-shaped entry instead of fanning one
+  // entry out. recipeBlockHour is the hour being combined (null = sheet
+  // closed). recipeBlockSave defaults OFF: off replaces the block with a
+  // single log entry only ("temporary", no zane_food_recipes row, nothing
+  // to reuse later); on ALSO saves it as a real recipe under Quick Add,
+  // Recipes, same as building one in the recipe editor. Undo reuses the
+  // exact same split_batch/restoreSplitBatch machinery as Split (see there),
+  // tagged kind:'merge' instead of 'split'.
+  const [recipeBlockHour, setRecipeBlockHour] = useStateFd(null);
+  const [recipeBlockName, setRecipeBlockName] = useStateFd('');
+  const [recipeBlockSave, setRecipeBlockSave] = useStateFd(false);
+  const recipeBlockInitialSnap = useRefFd(null);
+  function splitEntryUnit(e) {
+    if (!(e.quantityG > 0)) return null;
+    // Trust loggedUnit alone, no favorite-guess fallback: a row logged
+    // straight in grams (loggedUnit null) is indistinguishable in the DB from
+    // an old entry logged before this column existed, so guessing via a
+    // matching favorite's units would wrongly relabel an intentional gram
+    // entry as a unit count too (the bug this replaced).
+    return e.loggedUnit || null;
+  }
+  const splitUnit = (e) => splitEntryUnit(e)?.label || ((e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal');
+  const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
+  const splitDisplayFromAmount = (e, amt) => { const u = splitEntryUnit(e); return u ? amt / u.grams : amt; };
+  const splitAmountFromDisplay = (e, display) => { const u = splitEntryUnit(e); return u ? display * u.grams : display; };
+  const splitDisplayStr = (e, amt) => String(Math.round(splitDisplayFromAmount(e, amt) * 100) / 100);
+  // Opens with a fresh even-split draft when there's actually something to
+  // split (2+ items); also opens, draft-less, when the hour holds nothing
+  // but the result of an earlier split (splitBatchAt), purely so that
+  // result has a way back to "Undo Split" (see the sheet below). Neither
+  // applies (a single item that was never split) -> no-op, same as before.
+  function openSplit(h) {
+    const entries = byHour[h] || [];
+    const batch = splitBatchAt(h);
+    if (entries.length < 2 && !batch) return;
+    setSplitHour(h);
+    if (entries.length >= 2) {
+      const qtys = {};
+      entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
+      const nextHours = [Math.min(23, h + 4)];
+      splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
+      setSplitCount(2);
+      setSplitHours(nextHours);
+      setSplitQtys(qtys);
+    } else {
+      // Undo-only open: no draft to speak of, so the snapshot matches the
+      // untouched defaults and backdrop-close never has anything to warn
+      // about here (see requestCloseSplit's dirty check).
+      splitInitialSnap.current = JSON.stringify({ count: 2, hours: [], qtys: {} });
+      setSplitCount(2);
+      setSplitHours([]);
+      setSplitQtys({});
+    }
+  }
+  // Backdrop tap used to drop the whole split configuration (meal count,
+  // hours, every hand-adjusted amount) silently.
+  async function requestCloseSplit() {
+    if (splitHour != null) {
+      const cur = JSON.stringify({ count: splitCount, hours: splitHours, qtys: splitQtys });
+      if (cur !== splitInitialSnap.current && !await confirm("Your split changes won't be applied.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    }
+    setSplitHour(null);
+  }
+  // Changing the meal count keeps meal 1 at splitHour, grows/shrinks the
+  // target-hour list (new hours default +4h from the previous one), and
+  // re-evens every item's split (any per-item hand-edits are reset, simplest
+  // to reason about rather than guessing how to redistribute a partial edit).
+  function setSplitCountTo(n) {
+    n = Math.max(2, Math.min(6, Math.round(n)));
+    const entries = byHour[splitHour] || [];
+    setSplitCount(n);
+    setSplitHours(prev => {
+      const next = prev.slice(0, n - 1);
+      while (next.length < n - 1) next.push(Math.min(23, (next[next.length - 1] ?? splitHour) + 4));
+      return next;
+    });
+    setSplitQtys(prev => {
+      const out = {};
+      for (const id in prev) {
+        const e = entries.find(x => x.id === id);
+        if (!e) { out[id] = prev[id]; continue; }
+        const totalAmt = prev[id].reduce((a, b) => a + splitAmountFromDisplay(e, fdNum(b) || 0), 0);
+        out[id] = fdEvenSplit(totalAmt, n).map(v => splitDisplayStr(e, v));
+      }
+      return out;
+    });
+  }
+  // Typing into one meal's amount fixes that value (clamped to the item's
+  // total, an eaten wrap can't reappear in a later meal) and evenly
+  // redistributes whatever's left across the other meals for that same
+  // item, so the fields always stay aware of both the total and each other
+  // instead of needing to be reconciled by hand.
+  function updateSplitQty(entryId, idx, raw) {
+    const filtered = fdDecimalFilter(raw);
+    setSplitQtys(prev => {
+      const arr = [...(prev[entryId] || [])];
+      const n = arr.length;
+      const entries = byHour[splitHour] || [];
+      const e = entries.find(x => x.id === entryId);
+      if (!e || n < 2) { arr[idx] = filtered; return { ...prev, [entryId]: arr }; }
+      const total = splitDisplayFromAmount(e, splitOrigAmount(e));
+      const typed = fdNum(filtered) || 0;
+      const clamped = Math.max(0, Math.min(total, typed));
+      arr[idx] = clamped === typed ? filtered : String(Math.round(clamped * 100) / 100);
+      const remaining = Math.round((total - clamped) * 100) / 100;
+      const others = arr.map((_, i) => i).filter(i => i !== idx);
+      const parts = fdEvenSplitFloat(remaining, others.length);
+      others.forEach((i, k) => { arr[i] = String(parts[k]); });
+      return { ...prev, [entryId]: arr };
+    });
+  }
+  function applySplit() {
+    if (splitHour == null) return;
+    const entries = byHour[splitHour] || [];
+    const hours = [splitHour, ...splitHours];
+    const now = new Date().toISOString();
+    // Every entry the split creates carries the SAME batch: {id, kind, the
+    // exact pre-split entries}, redundantly, so undoSplitBatch can restore
+    // from whichever one still exists later (see split_batch's own doc
+    // comment in docs/database.md). `entries` here are the exact original
+    // objects (not recomputed), so restoring them is a straight put-back.
+    // kind labels which direction this batch went (this is 1 hour's items
+    // fanned out to N; applyBlockRecipe's is the mirror, N items folded into
+    // 1), purely so the shared Undo UI can word itself correctly.
+    const batch = { id: LB.uid(), kind: 'split', removedEntries: entries };
+    const toAdd = [];
+    const removeIds = new Set();
+    entries.forEach(e => {
+      const origAmt = splitOrigAmount(e);
+      // splitQtys holds display values (unit count, grams, or kcal per
+      // splitUnit); convert back to the grams/kcal basis fdScaleEntry works in.
+      const amts = (splitQtys[e.id] || []).map(v => splitAmountFromDisplay(e, fdNum(v) || 0));
+      hours.forEach((h, i) => {
+        const amt = amts[i] || 0;
+        if (amt <= 0) return;
+        toAdd.push({ ...e, ...fdScaleEntry(e, origAmt > 0 ? amt / origAmt : 0), id: LB.uid(), time: `${String(h).padStart(2, '0')}:00`, createdAt: now, splitBatch: batch });
+      });
+      removeIds.add(e.id);
+    });
+    if (!toAdd.length) return;
+    setStore(s => {
+      const nextLogs = [...toAdd, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+    clearTimeout(splitUndoTimer.current);
+    setSplitUndo({ batchId: batch.id, count: hours.length, kind: 'split' });
+    splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
+    setSplitHour(null);
+  }
+  // The split_batch of the first entry at hour h that has one, or null, so
+  // the timeline button and the sheet can offer an Undo block for an hour
+  // that's the result of an earlier split OR combine (see openSplit/the
+  // Undo block in the sheet, applyBlockRecipe for the other direction).
+  function splitBatchAt(h) {
+    return (byHour[h] || []).find(e => e.splitBatch)?.splitBatch || null;
+  }
+  // Core restore, no confirmation: drops every CURRENT entry carrying this
+  // batch id (wherever they've since ended up, in case one was moved to
+  // another day) and restores the exact pre-split entries from whichever
+  // surviving sibling still carries them. No attempt to merge in a later
+  // edit, undo always means "back to before the split". No-op if nothing
+  // with this batch id remains (every entry from it was itself edited/
+  // deleted since, taking the restore data down with the last one).
+  function restoreSplitBatch(batchId) {
+    setStore(s => {
+      const logs = s.foodLogs || [];
+      const batchEntries = logs.filter(l => l.splitBatch?.id === batchId);
+      if (!batchEntries.length) return s;
+      const removedEntries = batchEntries[0].splitBatch.removedEntries;
+      const touchedDates = new Set([...batchEntries.map(l => l.date), ...removedEntries.map(l => l.date)]);
+      const nextLogs = [...removedEntries, ...logs.filter(l => l.splitBatch?.id !== batchId)];
+      let dailyLogs = s.dailyLogs || [];
+      touchedDates.forEach(d => { dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d)); });
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+  }
+  // Toast's one-tap Undo: no confirmation, same "just applied it, reverse
+  // immediately" convention every other toast in this app follows.
+  function undoSplit() {
+    if (!splitUndo) return;
+    clearTimeout(splitUndoTimer.current);
+    restoreSplitBatch(splitUndo.batchId);
+    setSplitUndo(null);
+  }
+  // Reopening the split sheet on an old result and tapping Undo can be long
+  // after the fact and much less obviously reversible than the toast, so
+  // this confirms first. kind is passed in by the caller (it already knows
+  // which one it's showing), not re-derived here.
+  async function undoSplitBatch(batchId, kind) {
+    const isMerge = kind === 'merge';
+    const ok = await confirm(
+      isMerge ? 'This deletes the combined recipe entry and restores the original entries as they were before.' : 'This deletes the split and restores the original entry as it was before.',
+      { title: isMerge ? 'Undo combine?' : 'Undo split?', ok: 'Undo', cancel: 'Cancel', danger: true }
+    );
+    if (!ok) return;
+    restoreSplitBatch(batchId);
+    if (splitUndo?.batchId === batchId) { clearTimeout(splitUndoTimer.current); setSplitUndo(null); }
+    setSplitHour(null);
+  }
+  function openBlockRecipe(h) {
+    const entries = byHour[h] || [];
+    if (entries.length < 2) return;
+    setRecipeBlockHour(h);
+    setRecipeBlockName('');
+    setRecipeBlockSave(false);
+    recipeBlockInitialSnap.current = JSON.stringify({ name: '', save: false });
+  }
+  // Backdrop tap used to drop the whole block-recipe draft (name, save
+  // toggle) silently, same pattern as requestCloseSplit.
+  async function requestCloseBlockRecipe() {
+    if (recipeBlockHour != null) {
+      const cur = JSON.stringify({ name: recipeBlockName, save: recipeBlockSave });
+      if (cur !== recipeBlockInitialSnap.current && !await confirm("Your recipe won't be created.", { title: 'Discard?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    }
+    setRecipeBlockHour(null);
+  }
+  // Folds the block's items into one recipe-shaped log entry (source:
+  // 'recipe', recipeItems built straight from them at their current
+  // amounts, no rescaling since this IS the batch, not a portion of one).
+  // recipeBlockSave additionally saves the same items as a real
+  // zane_food_recipes row (with foodId/brand/source, unlike recipeItems'
+  // own leaner shape) so it can be reused later like any other recipe;
+  // off, it's just this one entry. Tags the new entry with a split_batch
+  // (kind:'merge') the same way applySplit does, so the shared Undo
+  // machinery works for this direction too.
+  function applyBlockRecipe() {
+    if (recipeBlockHour == null) return;
+    const entries = byHour[recipeBlockHour] || [];
+    const name = recipeBlockName.trim();
+    if (entries.length < 2 || !name) return;
+    const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
+    const hasFiber = entries.some(e => e.fiber != null);
+    const now = new Date().toISOString();
+    const recipeId = recipeBlockSave ? LB.uid() : null;
+    const recipeItems = entries.map(e => ({
+      foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
+      protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
+    }));
+    const merged = {
+      id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
+      foodId: null, foodName: name, brand: null, source: 'recipe', recipeId,
+      loggedTotalPortions: 1,
+      quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      fiber: hasFiber ? fdRound1(sum('fiber')) : null,
+      recipeItems, loggedUnit: null,
+      // A block mixing planned and logged items is an edge case; conservative
+      // default (same bias warnIfOverwritingManualMacros uses elsewhere):
+      // logged unless EVERY item was still only planned.
+      planned: entries.every(e => e.planned), templateSlotId: null,
+      createdAt: now,
+      splitBatch: { id: LB.uid(), kind: 'merge', removedEntries: entries },
+    };
+    const removeIds = new Set(entries.map(e => e.id));
+    setStore(s => {
+      const nextLogs = [merged, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      const nextRecipes = recipeBlockSave
+        ? [{
+            id: recipeId, name,
+            items: entries.map(e => ({
+              foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
+              quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
+              fiber: e.fiber ?? null,
+            })),
+            portions: 1, createdAt: now, updatedAt: now,
+          }, ...(s.foodRecipes || [])]
+        : s.foodRecipes;
+      return { ...s, foodLogs: nextLogs, dailyLogs, foodRecipes: nextRecipes };
+    });
+    clearTimeout(splitUndoTimer.current);
+    setSplitUndo({ batchId: merged.splitBatch.id, count: entries.length, kind: 'merge' });
+    splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
+    setRecipeBlockHour(null);
+  }
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
     [store.foodLogs, curDate],
   );
-  const dayTotals = useMemoFd(() => ({
-    calories: dayEntries.reduce((a, e) => a + (e.calories || 0), 0),
-    protein: dayEntries.reduce((a, e) => a + (e.protein || 0), 0),
-    carbs: dayEntries.reduce((a, e) => a + (e.carbs || 0), 0),
-    fat: dayEntries.reduce((a, e) => a + (e.fat || 0), 0),
-    // Only tracked when netCarbs is on: FdCompositionBar (in the hero below)
-    // needs it to derive the same net-carb-aware total this calories field
-    // above already is, so its percentage bar never diverges from the kcal
-    // figure shown right above it in the same hero.
-    fiber: store.settings?.netCarbs ? dayEntries.reduce((a, e) => a + (e.fiber || 0), 0) : null,
-  }), [dayEntries, store.settings?.netCarbs]);
+  const loggedEntries = useMemoFd(() => dayEntries.filter(e => !e.planned), [dayEntries]);
+  const plannedEntries = useMemoFd(() => dayEntries.filter(e => e.planned), [dayEntries]);
+  // The truth of the day: only logged entries. This is what the hero shows as
+  // the actual total, what drives adherence, and what patchDaily writes to the
+  // daily log.
+  const sumTotals = (entries) => ({
+    calories: entries.reduce((a, e) => a + (e.calories || 0), 0),
+    protein: entries.reduce((a, e) => a + (e.protein || 0), 0),
+    carbs: entries.reduce((a, e) => a + (e.carbs || 0), 0),
+    fat: entries.reduce((a, e) => a + (e.fat || 0), 0),
+  });
+  const dayTotals = useMemoFd(() => sumTotals(loggedEntries), [loggedEntries]);
+  // Planning aid: where the day is headed if every planned entry gets eaten
+  // (logged + planned). Only shown when plan mode is on and the day actually
+  // has planned entries, kept strictly separate from dayTotals above so the
+  // real total is never inflated by something not yet eaten.
+  const projectedTotals = useMemoFd(() => sumTotals(dayEntries), [dayEntries]);
 
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
@@ -391,15 +891,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   // Read-only per-category totals shown above each cluster of hours in the
   // timeline (see FD_MEAL_CATEGORIES), summed straight off byHour's buckets.
+  // Category summary cards reflect the logged truth only: a planned entry
+  // shows in the timeline rows below (visually distinct) but must not inflate
+  // its meal category's kcal, same reason dayTotals excludes planned.
   const categoryTotals = useMemoFd(() => FD_MEAL_CATEGORIES.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
+        if (e.planned) continue;
         calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
       }
     }
     return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour]);
+
+  // Same category/hour grouping for the Manage-entries picker (see the
+  // copyMove* sheet below), but keeps planned entries (this picker acts on
+  // the whole day, not just the logged truth) and is always chronological:
+  // byHour's own per-hour buckets already sort ascending by time, and hours
+  // are walked low to high, unlike dayEntries itself (newest-first, for the
+  // live timeline further down).
+  const copyMoveCategories = useMemoFd(() => {
+    return FD_MEAL_CATEGORIES.map(cat => {
+      const entries = [];
+      for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
+      return { ...cat, entries };
+    }).filter(cat => cat.entries.length > 0);
+  }, [byHour]);
 
   // Flat drag-reorder slot list for the whole timeline, in EXACT render order
   // (category by category, hour by hour): one slot per logged entry, or one
@@ -463,10 +981,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [store.foodRecipes, quickQuery]);
 
-  const shiftDay = (delta) => setCurDate(d => {
-    const next = fdShiftDate(d, delta);
-    return (next > today || next < minDate) ? d : next;
-  });
+  // Unbounded both ways: backward lazy-fetches outside the boot window, forward
+  // is needed for Plan Mode (plan tomorrow's meals), matching the calendar input
+  // (no max) and the day-nav comment below.
+  const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
   // patchDaily/doAdd use in screens-water.jsx. Calories come straight from the
@@ -478,8 +996,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // if netCarbs is now globally off (mirrors DailyLogScreen.save() in
     // screens-health.jsx).
     const netForFiber = existing?.fiber != null ? true : netCarbs;
-    const has = entries.length > 0;
-    const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
+    // Only LOGGED entries feed the daily macro totals: a planned entry (Plan
+    // Mode) is not eaten yet, so it must never reach the daily log, coaching
+    // targets, or adherence until it's checked off.
+    const logged = entries.filter(e => !e.planned);
+    const has = logged.length > 0;
+    const sum = k => logged.reduce((a, e) => a + (e[k] || 0), 0);
     const calories = has ? Math.round(sum('calories')) : null;
     const protein = has ? Math.round(sum('protein')) : null;
     const carbs = has ? Math.round(sum('carbs')) : null;
@@ -511,7 +1033,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Returns false if the user backs out, so callers can leave their sheet
   // open instead of closing on a log that never happened.
   async function warnIfOverwritingManualMacros(dateStr) {
-    const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === dateStr);
+    // A day is "food-owned" (tracker manages its macros) only once it has a
+    // LOGGED entry: a purely-planned day hasn't touched the daily log yet, so
+    // planning food onto a day with manual macros must not warn or claim it.
+    const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === dateStr && !l.planned);
     if (alreadyFoodOwned) return true;
     const existingLog = (store.dailyLogs || []).find(l => l.date === dateStr);
     const hasManualMacros = existingLog && (existingLog.protein != null || existingLog.carbs != null || existingLog.fat != null || existingLog.calories != null);
@@ -531,14 +1056,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function commitEntries(entries) {
     if (!entries.length) return false;
     const dates = [...new Set(entries.map(e => e.date))];
-    for (const d of dates) {
+    // Only a LOGGED entry can overwrite a day's manual macros, so only warn
+    // for dates this batch actually logs something onto: a planned-only add
+    // leaves the daily log untouched and needs no confirmation.
+    const loggedDates = [...new Set(entries.filter(e => !e.planned).map(e => e.date))];
+    for (const d of loggedDates) {
       const ok = await warnIfOverwritingManualMacros(d);
       if (!ok) return false;
     }
     setStore(s => {
       const nextLogs = [...entries, ...(s.foodLogs || [])];
       let dailyLogs = s.dailyLogs || [];
-      for (const d of dates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      // Only re-roll the daily log for dates this batch actually LOGGED onto: a
+      // planned-only add must never reach patchDaily, which would (with no logged
+      // entries) null the day's macros and silently wipe manually-entered Health
+      // macros. loggedDates already excludes planned-only dates.
+      for (const d of loggedDates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setPendingHour(null);
@@ -585,6 +1118,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+    });
+  }
+
+  // Flip an entry between planned and logged (Plan Mode). Checking a planned
+  // entry off (planned -> logged) is the primary action on the timeline's
+  // planned cards; patchDaily then folds its macros into the day, since a
+  // logged entry counts and a planned one doesn't.
+  async function setEntryPlanned(entry, planned) {
+    // Flipping TO logged claims the day for the tracker. If this is the first
+    // logged entry on a day that carries manual Health-tab macros, warn before
+    // patchDaily overwrites them, same as a fresh logged add (commitEntries).
+    // Flipping back to planned only removes it from the day, so no warning.
+    if (!planned) {
+      const ok = await warnIfOverwritingManualMacros(entry.date);
+      if (!ok) return;
+    }
+    setStore(s => {
+      const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, planned } : l);
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
   }
@@ -640,12 +1192,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // logged hour survive, and each surviving category only lists the hours
   // that actually have entries: the live timeline always renders all 24
   // hours (so "+" is reachable everywhere), a shareable image shouldn't.
+  // Planned-but-not-yet-checked-off entries are dropped here too, same
+  // "logged truth only" rule categoryTotals already applies to its kcal
+  // sums: a screenshot is what you actually ate, an unchecked planned item
+  // (that isn't even counted in its own category's total above it) has no
+  // business appearing as its own card, and an hour with nothing BUT a
+  // still-planned entry shouldn't appear at all.
   const posterCategories = useMemoFd(() => {
     return categoryTotals
       .map(cat => {
         const hours = [];
         for (let h = cat.startHour; h < cat.endHour; h++) {
-          const es = byHour[h] || [];
+          const es = (byHour[h] || []).filter(e => !e.planned);
           if (es.length) hours.push({ hour: h, entries: es });
         }
         return { ...cat, hours };
@@ -676,6 +1234,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function toggleCopyMoveId(id) {
     setCopyMoveIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
   }
+  // Backdrop tap used to drop the whole picker (selection, target date,
+  // mode) silently. Same "Discard picks?" wording/pattern as the staged-
+  // items guard (requestLeaveFood) and FdIngredientPicker's own; phrased
+  // mode-agnostically since closing without submitting leaves every entry
+  // untouched regardless of whether Copy, Move or Delete was selected.
+  async function requestCloseCopyMove() {
+    if (copyMoveIds.length && !await confirm(`${copyMoveIds.length} picked ${copyMoveIds.length === 1 ? 'entry' : 'entries'} will be unselected.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
+    setCopyMoveOpen(false);
+  }
   // Duplicates the selected entries onto another date at their original
   // time-of-day (copy), or does the same and also removes them from
   // curDate (move). One combined setStore call so both dates' daily
@@ -687,21 +1254,46 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the same s.
   async function submitCopyMove() {
     if (!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate) return;
-    const ok = await warnIfOverwritingManualMacros(copyMoveTarget);
-    if (!ok) return;
     const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
+    // A day that hasn't happened yet can't already have something "eaten" on
+    // it: landing on a future date forces planned, regardless of whether the
+    // source entry was logged or planned itself. Planned clones never touch the
+    // target's daily log, so a future target neither warns about overwriting
+    // manual macros nor gets a patchDaily (which would null them).
+    const targetIsFuture = targetDate > today;
+    if (!targetIsFuture) {
+      const ok = await warnIfOverwritingManualMacros(targetDate);
+      if (!ok) return;
+    }
     setStore(s => {
       const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
       if (!selected.length) return s;
       const now = new Date().toISOString();
-      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now }));
+      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned }));
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
-      let dailyLogs = patchDaily(s, targetDate, nextLogs.filter(l => l.date === targetDate));
+      let dailyLogs = s.dailyLogs || [];
+      if (!targetIsFuture) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
       if (mode === 'move') {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
       return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+    setCopyMoveOpen(false);
+  }
+  // Mass delete: the same picker sheet's third mode, one patchDaily for
+  // curDate instead of one confirm + one write per entry. Mirrors
+  // deleteEntry's confirm wording (name/kcal) but for a whole selection, a
+  // count and the combined kcal rather than every individual food name.
+  async function deleteBulkEntries() {
+    if (!copyMoveIds.length) return;
+    const ids = copyMoveIds;
+    const totalKcal = dayEntries.filter(e => ids.includes(e.id)).reduce((a, e) => a + (e.calories || 0), 0);
+    const ok = await confirm(`${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} · ${totalKcal} kcal`, { title: 'Delete entries?', ok: 'Delete', cancel: 'Cancel', danger: true });
+    if (!ok) return;
+    setStore(s => {
+      const nextLogs = (s.foodLogs || []).filter(l => !ids.includes(l.id));
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
     });
     setCopyMoveOpen(false);
   }
@@ -752,8 +1344,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Nutrition-label scan: the user photographs a Nährwerttabelle, we shrink it
-  // client-side and send it to the scan-label edge function (Claude vision),
-  // then prefill the Custom Item form with what it read for the user to verify.
+  // client-side and send it to the scan-label edge function (labelScannerProvider
+  // picks xAI Grok or Claude vision, see the Scan sheet's toggle below), then
+  // prefill the Custom Item form with what it read for the user to verify.
   // A scanned label is a per-user custom item, never a shared zane_foods entry.
   async function handleLabelFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -764,7 +1357,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType);
+      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -865,10 +1458,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
-      // zane_food_logs never stores units (see matchingFavorite); a
-      // favorite matching this same name still offers its configured
-      // shortcuts, else undefined, which the quantity sheet's units?.length
-      // check treats as "no units".
+      // zane_food_logs never stores the full units picker list (see
+      // matchingFavorite); a favorite matching this same name still offers
+      // its configured shortcuts, else undefined, which the quantity
+      // sheet's units?.length check treats as "no units".
       units: item.units ?? matchingFavorite(null, item.foodName)?.units,
     });
     setP100Str(String(fdRound1(item.protein * per100)));
@@ -922,8 +1515,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
-        // zane_food_logs never stores units; fall back to a matching
-        // favorite's configured units, same as the custom branch above.
+        // zane_food_logs never stores the full units picker list; fall back
+        // to a matching favorite's configured units, same as the custom
+        // branch above.
         units: l.units ?? matchingFavorite(l.foodId, l.foodName)?.units,
       });
       setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
@@ -1000,7 +1594,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -1009,9 +1603,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // of staging a new one.
   function openEditEntry(entry) {
     setEditingEntry(entry);
+    setQtyEditPlanned(!!entry.planned);
     reAddFromRecent(entry);
   }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
+  // Backdrop tap on this sheet used to discard a typed (or scan-prefilled)
+  // custom item silently. This sheet only ever opens empty or freshly
+  // scan-prefilled (never to re-edit an already-saved entry, see
+  // openEditEntry), so "anything typed" is a safe dirty check with no
+  // false positives.
+  async function requestCloseCustomSheet() {
+    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim();
+    if (dirty && !await confirm("This item won't be saved.", { title: 'Discard item?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeCustomSheet();
+  }
 
   // Build the entry the open sheet describes right now (without logging it), so
   // both the log/ingredient action and the favorite toggle work off the same
@@ -1031,6 +1636,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       source: custom ? 'custom' : pendingFood.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      // The exact unit this entry was logged in (e.g. "Pc"), so a later
+      // "count" view (the split sheet) reads back what was actually used
+      // instead of guessing via a matching favorite's first unit.
+      loggedUnit: qtyUnitIdx != null ? (pendingFood.units?.[qtyUnitIdx] || null) : null,
       createdAt: new Date().toISOString(),
     };
   }
@@ -1050,11 +1659,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Existing favorite matching this food (by food_id for DB items, by name
-  // for custom ones), or null. zane_food_logs rows never carry their own
-  // units (only zane_food_favorites does, see openEditFavorite), so this
-  // also backs the units fallback in reAddFromRecent/openCustomAsScalable:
-  // a food re-opened from Log/Recent still offers a matching favorite's
-  // configured portion-size shortcuts instead of silently losing them.
+  // for custom ones), or null. zane_food_logs rows only ever remember the
+  // ONE unit an entry was actually logged in (loggedUnit, e.g. for the split
+  // sheet); the full picker list of available units still only lives on
+  // zane_food_favorites (see openEditFavorite), so this also backs the units
+  // fallback in reAddFromRecent/openCustomAsScalable: a food re-opened from
+  // Log/Recent still offers a matching favorite's configured portion-size
+  // shortcuts instead of silently losing them.
   function matchingFavorite(foodId, foodName) {
     return (store.foodFavorites || []).find(x => foodId ? x.foodId === foodId : (x.foodId == null && x.foodName === foodName)) || null;
   }
@@ -1128,6 +1739,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     closeEditFavorite();
   }
+  // Backdrop tap used to drop a removed/added unit (and any pending new-unit
+  // typing) silently, since edits here only land in the store via the
+  // explicit Save button. Compared against the favorite's own stored units,
+  // not "anything present", so a sheet that was simply opened and looked at
+  // never false-triggers this.
+  async function requestCloseEditFavorite() {
+    const fav = (store.foodFavorites || []).find(f => f.id === editFavId);
+    const dirty = JSON.stringify(editUnits) !== JSON.stringify(fav?.units || []) || editUnitNewLabel.trim() || editUnitNewGrams.trim();
+    if (dirty && !await confirm("Your changes to these units won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeEditFavorite();
+  }
 
   // Stages the entry (see `staged` above) instead of committing it right
   // away, so search/favorites/recent all share the same "pick, then Add N
@@ -1138,11 +1760,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // existing row by id and keeps its own original date/time (buildQtyEntry
   // only knows about curDate/entryTime(), which the sheet may have opened
   // under different than whenever the entry was originally logged).
-  function confirmLogFood() {
+  // planned: Plan Mode status for the resulting entry. On a fresh pick it comes
+  // from the Log it / Plan it button tapped; on an edit it comes from the
+  // sheet's planned/logged switch (qtyEditPlanned). Defaults false so every
+  // non-plan-mode caller logs exactly as before.
+  async function confirmLogFood(planned = false) {
     const built = buildQtyEntry();
     if (!built) return;
     if (editingEntry) {
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt };
+      // Editing an entry to Logged (qtyEditPlanned false) can be the first
+      // logged entry claiming a day that carries manual Health-tab macros; warn
+      // before patchDaily overwrites them, same as the checkbox flip.
+      if (!qtyEditPlanned) {
+        const ok = await warnIfOverwritingManualMacros(editingEntry.date);
+        if (!ok) return;
+      }
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
@@ -1150,7 +1783,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       closeQtySheet();
       return;
     }
-    const entry = built;
+    const entry = { ...built, planned };
     setStaged(list => [...list, entry]);
     // Marks pendingFood cached once this resolves (see toggleFavorite's own
     // ensureFoodCached call above), so starring then logging the same food
@@ -1166,10 +1799,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setFavedId(null);
   }
 
-  function submitCustomItem() {
+  function submitCustomItem(planned = false) {
     const entry = buildCustomEntry();
     if (!entry) return;
-    setStaged(list => [...list, entry]);
+    setStaged(list => [...list, { ...entry, planned }]);
     closeCustomSheet();
     resetCustomForm();
   }
@@ -1267,8 +1900,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const totalPortions = entry.loggedTotalPortions != null ? entry.loggedTotalPortions
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
+    const origChosen = m ? parseFloat(m[1]) : totalPortions;
+    // Rescale from the entry's OWN frozen ingredient snapshot, not the live
+    // recipe: changing the portion count of a past entry must not retroactively
+    // bake in ingredient edits made to the recipe since it was logged (that
+    // silently rewrote historical macros/daily totals). The stored recipeItems
+    // are at origChosen scale, so rebuild a full-batch (totalPortions) item list
+    // and hand THAT to the portions prompt in place of the live recipe, keeping
+    // confirmRecipeLog's normal chosen/total math but sourcing it from the
+    // snapshot. Legacy entries without a snapshot fall back to the live recipe.
+    const snap = (entry.recipeItems && entry.recipeItems.length) ? entry.recipeItems : null;
+    const promptRecipe = snap ? (() => {
+      const perTotal = origChosen ? totalPortions / origChosen : 1;
+      return { ...recipe, portions: totalPortions, items: snap.map(i => ({
+        foodName: i.foodName,
+        quantityG: (i.quantityG || 0) * perTotal,
+        protein: (i.protein || 0) * perTotal,
+        carbs: (i.carbs || 0) * perTotal,
+        fat: (i.fat || 0) * perTotal,
+        fiber: i.fiber != null ? i.fiber * perTotal : null,
+      })) };
+    })() : recipe;
     setEditingEntry(entry);
-    setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : totalPortions, totalPortions });
+    setQtyEditPlanned(!!entry.planned);
+    setRecipeLogPrompt({ recipe: promptRecipe, chosenPortions: origChosen, totalPortions });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
@@ -1290,7 +1945,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Stages the recipe (see `staged` above) same as everything else, "Add N
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
-  function confirmRecipeLog() {
+  async function confirmRecipeLog(planned = false) {
     const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
@@ -1338,14 +1993,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // and keeps its original date/time instead of staging a new one, same
     // in-place-update shape confirmLogFood uses for a non-recipe entry.
     if (editingEntry) {
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt };
+      // planned/logged comes from the sheet's own switch (qtyEditPlanned,
+      // seeded from the entry in openEditRecipeEntry), same as the non-recipe
+      // edit path. Editing to Logged can be the first logged entry claiming a
+      // day with manual Health-tab macros, so warn before patchDaily overwrites
+      // them, same as commitEntries / the checkbox flip.
+      if (!qtyEditPlanned) {
+        const ok = await warnIfOverwritingManualMacros(editingEntry.date);
+        if (!ok) return;
+      }
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
       });
       setEditingEntry(null);
     } else {
-      setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), ...built }]);
+      setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned, ...built }]);
     }
     setRecipeLogPrompt(null);
   }
@@ -1367,36 +2031,43 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
 
-  // Shown on both add-a-food tabs whenever there's a staged (picked, quantity
-  // already chosen, but not yet logged) batch, right at the top next to
-  // pendingHourBanner: collapsed to a one-line "Adding N items" + totals by
-  // default, expanding reveals the actual list. The "Add N items" commit
-  // button stays visible either way, collapsing only hides the per-item
-  // review, not the ability to commit. Lives here rather than per-tab so
-  // switching between Search and Quick Add mid-batch doesn't lose it, both
-  // (and a staged recipe, see confirmRecipeLog) stage into the same shared
-  // `staged` list.
+  // Docked bar shown whenever there's a staged (picked, quantity already
+  // chosen, but not yet logged) batch, on ANY tab, not just Search/Quick Add:
+  // rendered unconditionally in the return below, a staged pick is still
+  // part of the food module even after flipping over to Log to check
+  // something, and shouldn't quietly vanish (and be forgotten) just because
+  // the tab changed. Rendered OUTSIDE the scrolling Screen (see the wrapping
+  // div in the return below) as a fixed, non-scrolling footer, so it never
+  // scrolls out of view while paging through search results or the Quick
+  // Add lists either, the exact "forgot to hit Add and lost the picks"
+  // complaint this replaced: the previous version sat inline at the top of
+  // the scrollable content and disappeared the moment you scrolled past it.
+  // Single collapsed line by default (count, kcal + P/C/F in the same colors
+  // the Log tab's hero card uses, and the Add button, all always reachable);
+  // tapping it reveals the per-item review, growing upward off the docked
+  // bar rather than pushing the bar itself around. Lives here rather than
+  // per-tab so switching between Search and Quick Add (or over to Log and
+  // back) mid-batch doesn't lose it, both (and a staged recipe, see
+  // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
-      <div onClick={() => setPickedExpanded(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-        <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'right'}`} style={{ fontSize: 9, color: pickedExpanded ? 'var(--accent)' : UI.inkGhost, width: 9, flexShrink: 0 }} />
-        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: pickedExpanded ? 'var(--accent)' : UI.inkFaint, flex: 1 }}>
-          Adding {staged.length} item{staged.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
-        <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
-      </div>
+    // Same breathing box-shadow as the Intensity sheet (.intensity-glow,
+    // index.html): a live batch waiting to be added is easy to forget about
+    // otherwise, the glow keeps drawing the eye back to it. Regular
+    // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
+    // glow uses), since this bar sits on the normal theme-reactive Screen
+    // background and should mute along with everything else on Paper.
+    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
           {staged.map(e => (
             <div key={e.id} style={fdDraftRow}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                <span style={fdEntryMeta}>{e.time} · {e.quantityG}g · {e.calories} kcal</span>
+                <span style={fdEntryMeta}>
+                  {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                  <span style={fdMetaDivider} />
+                  <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                </span>
               </div>
               <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
                 <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
@@ -1405,13 +2076,42 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           ))}
         </div>
       )}
-      <Btn onClick={commitStagedEntries} style={{ width: '100%' }}>
-        Add {staged.length} item{staged.length === 1 ? '' : 's'}
-      </Btn>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+        <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
+          <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            Adding {staged.length} item{staged.length === 1 ? '' : 's'}
+          </span>
+          {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
+              kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
+              reads consistently with the rest of the food module. Smaller
+              (fontSize 10, same as fdEntryMeta elsewhere) and the one part
+              allowed to clip on a narrow screen, so "Adding N items" and the
+              Add button both stay fully readable no matter what. FdMacroBits
+              itself sets no font-size, it inherits this span's, same as
+              every other call site (they all sit inside an fdEntryMeta span). */}
+          <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
+            <span style={fdMetaDivider} />
+            <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
+          </span>
+        </button>
+        <Btn onClick={commitStagedEntries} style={{ flexShrink: 0, padding: '8px 18px', minHeight: 34 }}>
+          Add
+        </Btn>
+      </div>
     </div>
   ) : null;
 
   return (
+    // Wraps Screen (which still owns TopBar/content scrolling exactly as
+    // before) alongside stagedPanel as a sibling flex item instead of a
+    // scrolling child, the same "scrolling area + fixed footer" split
+    // app.jsx already uses for Screen + TabBar, so the picked-items bar
+    // stays docked to the bottom of the FoodScreen's own space (above
+    // TabBar, never overlapping it) regardless of scroll position.
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <Screen>
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
@@ -1425,8 +2125,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
                 {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
               </button>
-              <button onClick={openCopyMove} aria-label="Copy or move entries" style={fdTopAddBtn}>
-                <i className="fa-solid fa-clone" style={{ fontSize: 13 }} />
+              <button onClick={openCopyMove} aria-label="Select entries" style={fdTopAddBtn}>
+                <i className="fa-solid fa-list-check" style={{ fontSize: 13 }} />
               </button>
             </div>
           ) : undefined
@@ -1521,13 +2221,36 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
         {tab === 'log' && (
           <>
-            {/* Day nav */}
+            {/* Day nav: unbounded both ways, no reason to cap it now that curDate
+                lazy-fetches outside the boot window. Forward isn't capped at
+                today either: Plan Mode needs to plan ahead, not just log the
+                past. Calendar button jumps straight to a date instead of
+                stepping one day at a time (same icon-button + overlaid
+                invisible date input idiom Health uses, for iOS compat: a
+                native picker needs a real <input type="date"> under the tap,
+                can't be opened from a plain button). */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <button onClick={() => shiftDay(-1)} disabled={curDate <= minDate} aria-label="Previous day" style={fdNavBtn(curDate <= minDate)}>
+              <button onClick={() => shiftDay(-1)} aria-label="Previous day" style={fdNavBtn(false)}>
                 <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
               </button>
-              <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
-              <button onClick={() => shiftDay(1)} disabled={curDate >= today} aria-label="Next day" style={fdNavBtn(curDate >= today)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
+                <div style={{ position: 'relative', width: 26, height: 26, flexShrink: 0 }}>
+                  <button aria-label="Jump to date" style={{
+                    width: '100%', height: '100%', borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+                    background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
+                  </button>
+                  <input type="date" value={curDate}
+                    onChange={e => e.target.value && setCurDate(e.target.value)}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
+              <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
               </button>
             </div>
@@ -1539,8 +2262,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 macro chips, same as before there was anything to compare
                 against. */}
             <BracketFrame gold style={{ padding: 20 }}>
-              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories} />
+              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
+                projected={planMode && plannedEntries.length ? projectedTotals : null} />
             </BracketFrame>
+
+            {planMode && (
+              <button onClick={() => setTemplateOpen(true)} style={fdTemplateBtn}>
+                <i className="fa-regular fa-calendar-check" style={{ fontSize: 13, color: 'var(--accent)' }} />
+                <span style={{ flex: 1, textAlign: 'left' }}>Meal plans</span>
+                <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>
+                  {(store.foodMealPlans || []).find(p => p.id === store.activeMealTemplateId)?.name || ''}
+                </span>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+              </button>
+            )}
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
@@ -1618,7 +2353,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   // but can still be portion-edited).
                                   const isRecipe = e.source === 'recipe';
                                   const hasRecipeItems = isRecipe && e.recipeItems?.length > 0;
-                                  const canEditPortions = isRecipe && !!recipeEntryLiveRecipe(e);
                                   const expanded = expandedEntryIds.has(e.id);
                                   // Expanded, the ingredient tree joins the SAME card the
                                   // header sits in (fdEntryCard), not a separate loose list
@@ -1626,13 +2360,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   // top, ingredients branching off a trunk line below it
                                   // (FdIngredientTrunk/Tick), same idiom as the timeline's
                                   // own hour-row tree (FdHourTrunk/Tick).
+                                  // Plan Mode: a planned (not-yet-eaten) entry
+                                  // reads as a dashed, muted card. Its checkbox
+                                  // (empty accent box) is checked off to mark it
+                                  // eaten (planned -> logged); a logged entry
+                                  // shows the same box filled. Secondary actions
+                                  // (edit, ingredients, delete) live in the
+                                  // overflow menu, so the row stays narrow.
+                                  const isPlanned = !!e.planned;
                                   return (
-                                    <div key={e.id} data-reorder-item="true" style={fdEntryCard}>
+                                    <div key={e.id} data-reorder-item="true" style={isPlanned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
+                                        {planMode && (
+                                          <FdCheckbox checked={!isPlanned} onToggle={() => setEntryPlanned(e, !isPlanned)} />
+                                        )}
                                         <div
                                           onClick={() => { if (hasRecipeItems) toggleEntryExpanded(e.id); else if (!isRecipe) openEditEntry(e); }}
-                                          style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: (hasRecipeItems || !isRecipe) ? 'pointer' : 'default' }}
+                                          style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: (hasRecipeItems || !isRecipe) ? 'pointer' : 'default', opacity: isPlanned ? 0.7 : 1 }}
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
@@ -1641,20 +2386,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
                                         </div>
-                                        {canEditPortions && (
-                                          <button data-reorder-ignore="true" onClick={() => openEditRecipeEntry(e)}
-                                            aria-label="Edit portions" style={fdInlineDeleteBtn}>
-                                            <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                                          </button>
-                                        )}
-                                        {hasRecipeItems && (
-                                          <button data-reorder-ignore="true" onClick={() => toggleEntryExpanded(e.id)}
-                                            aria-label={expanded ? 'Collapse ingredients' : 'Expand ingredients'} style={fdInlineDeleteBtn}>
-                                            <i className={`fa-solid fa-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 11 }} />
-                                          </button>
-                                        )}
-                                        <button data-reorder-ignore="true" onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
-                                          <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                                        <button data-reorder-ignore="true" onClick={() => setEntryMenu(e)} aria-label="More actions" style={fdInlineDeleteBtn}>
+                                          <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
                                         </button>
                                       </div>
                                       {hasRecipeItems && expanded && (
@@ -1679,9 +2412,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   );
                                 }) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
                               </div>
-                              <button data-reorder-ignore="true" onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
-                                <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
-                              </button>
+                              <div data-reorder-ignore="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                                <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                                  <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+                                </button>
+                                {/* Once this hour stacks more than one item (a
+                                    meal-prep batch logged/planned all at one hour but
+                                    really eaten at different times, splittable across
+                                    hours without retyping every item's amount), OR it's
+                                    itself the result of an earlier split (down to a
+                                    single item by now, but still the only way back to
+                                    "Undo Split" for it). */}
+                                {(es.length > 1 || es.some(e => e.splitBatch)) && (
+                                  <button onClick={() => openSplit(h)} aria-label={`Split ${String(h).padStart(2, '0')}:00 into multiple meals`} style={fdHourAddBtn(isNow)}>
+                                    <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 11 }} />
+                                  </button>
+                                )}
+                                {/* Mirror of Split: folds this stack into one
+                                    recipe-shaped entry instead of fanning one
+                                    entry out. Only offered to actually START
+                                    that (2+ items); undoing an existing one
+                                    reuses the Split button/sheet above. */}
+                                {es.length > 1 && (
+                                  <button onClick={() => openBlockRecipe(h)} aria-label={`Create a recipe from ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                                    <i className="fa-solid fa-bowl-food" style={{ fontSize: 11 }} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
@@ -1697,7 +2454,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'search' && (
           <>
             {pendingHourBanner}
-            {stagedPanel}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
@@ -1771,7 +2527,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'quickadd' && (
           <>
             {pendingHourBanner}
-            {stagedPanel}
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
                 <button key={t.id} onClick={() => onQuickTabChange(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
@@ -1955,16 +2710,31 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
               {favedId ? 'Saved to favorites' : 'Save as favorite'}
             </button>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={confirmLogFood} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>Add</Btn>
-            </div>
+            {planMode && editingEntry && !curDateIsFuture && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
+                {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
+                  <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
+                ))}
+              </div>
+            )}
+            {planMode && !editingEntry ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
+              </div>
+            )}
           </>
         )}
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={closeCustomSheet} title="Custom item" titleColor="var(--accent)">
+      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)">
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -1994,48 +2764,188 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
           {favedId ? 'Saved to favorites' : 'Save as favorite'}
         </button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={submitCustomItem} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
-        </div>
+        {planMode ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => submitCustomItem(true)} disabled={!customValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 1.5 }}>Log it</Btn>}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
+          </div>
+        )}
       </Sheet>
 
-      {/* ── Copy/move entries from the viewed day onto another one ── */}
-      <Sheet open={copyMoveOpen} onClose={() => setCopyMoveOpen(false)} title="Copy or move entries" titleColor="var(--accent)">
+      {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
+      <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
-          Pick entries below, they land on the new day at the same time.
+          {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
-          {dayEntries.map(e => {
-            const checked = copyMoveIds.includes(e.id);
-            return (
-              <button key={e.id} onClick={() => toggleCopyMoveId(e.id)} style={fdCopyMoveRow(checked)}>
-                <div style={fdCopyMoveCheck(checked)}>
-                  {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
-                </div>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{e.foodName}</div>
-                  <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
-                </div>
-              </button>
-            );
-          })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
+          {copyMoveCategories.map(cat => (
+            <div key={cat.id}>
+              <Bezel style={{ marginBottom: 6 }}>{cat.label}</Bezel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {cat.entries.map(e => {
+                  const checked = copyMoveIds.includes(e.id);
+                  return (
+                    <button key={e.id} onClick={() => toggleCopyMoveId(e.id)} style={fdCopyMoveRow(checked)}>
+                      <div style={fdCopyMoveCheck(checked)}>
+                        {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                        <div style={fdEntryName}>{e.foodName}</div>
+                        <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-        <Field label="To" style={{ marginBottom: 14 }}>
-          <input type="date" value={copyMoveTarget} min={minDate} max={today} onChange={e => setCopyMoveTarget(e.target.value)}
-            style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
-        </Field>
+        {copyMoveMode !== 'delete' && (
+          <Field label="To" style={{ marginBottom: 14 }}>
+            <input type="date" value={copyMoveTarget} onChange={e => setCopyMoveTarget(e.target.value)}
+              style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+          </Field>
+        )}
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
           <button onClick={() => setCopyMoveMode('copy')} style={fdSegBtn(copyMoveMode === 'copy')}>Copy</button>
           <button onClick={() => setCopyMoveMode('move')} style={fdSegBtn(copyMoveMode === 'move')}>Move</button>
+          <button onClick={() => setCopyMoveMode('delete')} style={fdSegBtn(copyMoveMode === 'delete', true)}>Delete</button>
         </div>
-        <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
-          {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
-        </Btn>
+        {copyMoveMode === 'delete' ? (
+          <Btn onClick={deleteBulkEntries} disabled={!copyMoveIds.length} style={{ width: '100%', background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>
+            Delete{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
+          </Btn>
+        ) : (
+          <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
+            {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
+          </Btn>
+        )}
+      </Sheet>
+
+      {/* ── Split a stacked hour (a meal-prep batch) across multiple meal
+          times: how many meals, at what hours, and how much of each item
+          goes to each one. Deletes the original entries and replaces them
+          with the redistributed set on Split. ── */}
+      <Sheet open={splitHour != null} onClose={requestCloseSplit} title={`Split ${splitHour != null ? String(splitHour).padStart(2, '0') + ':00' : ''}`} titleColor="var(--accent)">
+        {splitHour != null && (() => {
+          const entries = byHour[splitHour] || [];
+          const batch = splitBatchAt(splitHour);
+          const canConfigure = entries.length >= 2;
+          return (
+            <>
+              {/* However this hour got here (still mid-batch, or fully
+                  reduced to one leftover item, or the single result of a
+                  block combined into a recipe), an earlier split OR combine
+                  it's part of can always be undone from here, not just the
+                  6s toast right after applying it. */}
+              {batch && (
+                <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `1px solid ${UI.hairStrong}` : 'none' }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+                    {batch.kind === 'merge'
+                      ? 'This entry was combined from a block of items. Undo it to delete the combined recipe and put the original entries back exactly as they were.'
+                      : 'This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.'}
+                  </div>
+                  <Btn kind="ghost" onClick={() => undoSplitBatch(batch.id, batch.kind)} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>
+                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> {batch.kind === 'merge' ? 'Undo Combine' : 'Undo Split'}
+                  </Btn>
+                </div>
+              )}
+              {canConfigure && (
+                <>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                    Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
+                  </div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Meals</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                    <Stepper value={splitCount} step={1} min={2} suffix={splitCount === 1 ? ' meal' : ' meals'} onChange={setSplitCountTo} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                    {[splitHour, ...splitHours].map((h, i) => (
+                      <div key={i} style={{ flex: '1 1 100px' }}>
+                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
+                        {i === 0 ? (
+                          <div style={{ ...fdInputStyle, textAlign: 'center', color: UI.inkSoft }}>{String(h).padStart(2, '0')}:00</div>
+                        ) : (
+                          <Stepper value={h} step={1} min={0} suffix=":00"
+                            onChange={v => setSplitHours(prev => prev.map((x, xi) => xi === i - 1 ? Math.max(0, Math.min(23, Math.round(v))) : x))} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
+                    {entries.map(e => {
+                      const unit = splitEntryUnit(e);
+                      return (
+                        <div key={e.id}>
+                          <div style={fdEntryName}>
+                            {e.foodName}
+                            {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>&middot; in {unit.label}</span>}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                            {[splitHour, ...splitHours].map((h, i) => (
+                              <div key={i} style={{ flex: '1 1 80px' }}>
+                                <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
+                                  type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => setSplitHour(null)} style={{ flex: 1 }}>Cancel</Btn>
+                    <Btn onClick={applySplit} style={{ flex: 2 }}>Split</Btn>
+                  </div>
+                </>
+              )}
+            </>
+          );
+        })()}
+      </Sheet>
+
+      {/* ── Combine a stacked hour's items into one recipe-shaped entry, either
+          just for this log (temporary, no library row) or also saved as a real
+          reusable recipe. ── */}
+      <Sheet open={recipeBlockHour != null} onClose={requestCloseBlockRecipe} title="Create recipe" titleColor="var(--accent)">
+        {recipeBlockHour != null && (
+          <>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+              Combines these items into one recipe entry. Off by default: it only replaces this log entry, on saves it to Quick Add, Recipes too.
+            </div>
+            <Field label="Recipe name" style={{ marginBottom: 16 }}>
+              <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" autoFocus />
+            </Field>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
+              <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20, maxHeight: 220, overflowY: 'auto' }}>
+              {(byHour[recipeBlockHour] || []).map(e => (
+                <div key={e.id} style={fdEntryRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={fdEntryName}>{e.foodName}</div>
+                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setRecipeBlockHour(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={applyBlockRecipe} disabled={!recipeBlockName.trim()} style={{ flex: 2 }}>Create recipe</Btn>
+            </div>
+          </>
+        )}
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
-      <Sheet open={!!editFavId} onClose={closeEditFavorite} title="Units" titleColor="var(--accent)">
+      <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
           Add one or more units and relogging this favorite offers a picker (grams or a count of one of them) instead of always typing grams.
         </div>
@@ -2082,6 +2992,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
         </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+              <button key={id} onClick={() => { setLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+            ))}
+          </div>
+        </div>
       </Sheet>
 
       {/* Hidden picker: opens the native camera (capture) or gallery on tap,
@@ -2126,11 +3044,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </span>
               </div>
             )}
-            <Btn onClick={confirmRecipeLog} style={{ width: '100%' }}>
-              {editingEntry
-                ? <>Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}</>
-                : <>Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}</>}
-            </Btn>
+            {editingEntry && planMode && !curDateIsFuture && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
+                {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
+                  <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
+                ))}
+              </div>
+            )}
+            {editingEntry ? (
+              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
+                Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+              </Btn>
+            ) : planMode ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+              </div>
+            ) : (
+              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
+                Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+              </Btn>
+            )}
           </>
         )}
       </Sheet>
@@ -2169,7 +3103,61 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
+
+      <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
+
+      {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
+          buttons. Recomputes its options from the open entry. */}
+      <Sheet open={!!entryMenu} onClose={() => setEntryMenu(null)} title={entryMenu?.foodName || 'Entry'} titleColor="var(--accent)">
+        {entryMenu && (() => {
+          const me = entryMenu;
+          const meIsRecipe = me.source === 'recipe';
+          const meHasItems = meIsRecipe && me.recipeItems?.length > 0;
+          const meCanPortions = meIsRecipe && !!recipeEntryLiveRecipe(me);
+          const meExpanded = expandedEntryIds.has(me.id);
+          const act = (fn) => { setEntryMenu(null); fn(); };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {meHasItems && (
+                <Btn kind="ghost" onClick={() => act(() => toggleEntryExpanded(me.id))} style={{ width: '100%' }}>
+                  <i className={`fa-solid fa-chevron-${meExpanded ? 'up' : 'down'}`} style={{ marginRight: 8 }} /> {meExpanded ? 'Hide ingredients' : 'Show ingredients'}
+                </Btn>
+              )}
+              {meCanPortions ? (
+                <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit portions
+                </Btn>
+              ) : !meIsRecipe ? (
+                <Btn kind="ghost" onClick={() => act(() => openEditEntry(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit
+                </Btn>
+              ) : null}
+              <Btn kind="ghost" onClick={() => act(() => deleteEntry(me))} style={{ width: '100%', color: UI.danger }}>
+                <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete
+              </Btn>
+            </div>
+          );
+        })()}
+      </Sheet>
     </Screen>
+    {/* Transient toast for the last applied split OR block-recipe combine
+        (see splitUndo/undoSplit), rendered the same "fixed footer sibling of
+        Screen" way as stagedPanel below so it never overlaps TabBar either.
+        Sits above stagedPanel: it's the momentary one of the two, stagedPanel
+        is the one meant to persist until dealt with. */}
+    {splitUndo && (
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+        <i className={`fa-solid ${splitUndo.kind === 'merge' ? 'fa-bowl-food' : 'fa-arrows-split-up-and-left'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, flex: 1, minWidth: 0 }}>
+          {splitUndo.kind === 'merge' ? `Combined ${splitUndo.count} items into a recipe` : `Split into ${splitUndo.count} meals`}
+        </span>
+        <button onClick={undoSplit} style={{ background: 'none', border: 'none', padding: '4px 8px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
+          Undo
+        </button>
+      </div>
+    )}
+    {stagedPanel}
+    </div>
   );
 }
 
@@ -2319,6 +3307,645 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
 // Owns its own draft (name/items/portions) entirely locally; onSave only ever
 // receives the finished shape once the user actually confirms saving.
 // `recipe` is the recipe being edited, null while creating a new one.
+// Plan Mode meal-template manager (full-page overlay, opened from FoodScreen's
+// Log tab). Manages the recurring fixum slots (store.foodTemplateSlots) that
+// auto-fill each day's plan: a slot is a food or recipe snapshot + a fixed
+// hour + a day-type filter (any / training / rest). A slot's food comes from
+// the user's existing Favorites or Recipes (the natural home of repeated
+// fixums), so there's no separate search here. Adding chooses the amount
+// (grams for a food, portions for a recipe); editing an existing slot adjusts
+// its hour and day-type (and a food slot's grams), recipe portions are set at
+// add time (re-add to change them).
+function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [pickerOpen, setPickerOpen] = useStateFd(false);
+  const [pickerTab, setPickerTab] = useStateFd('favorites');
+  const [pickerQuery, setPickerQuery] = useStateFd('');
+  const [draft, setDraft] = useStateFd(null);
+  const netCarbs = !!store.settings?.netCarbs;
+  // A flex plan has no fixed weekday schedule to look ahead at, so a Training/
+  // Rest slot's day-type match (LB.isTrainingDayForDate) can't tell in advance
+  // either, it defaults to Rest until a session is actually logged or the
+  // Health tab's Training|Rest slider is set for that day. Surfaced as a
+  // disclaimer at the day-type picker below, the exact point that choice is made.
+  const activeFlexPlan = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
+  // Snapshot of the draft as it was opened, to detect unsaved edits on
+  // backdrop-close (same pattern as RecipeEditorScreen's initialSnap).
+  const draftInitialSnap = useRefFd(null);
+  const snapDraft = d => JSON.stringify({ gramsStr: d.gramsStr, portions: d.portions, hour: d.hour, dayType: d.dayType });
+
+  // Coach mode mirrors the training PlanScreen: a My Plans / Client Templates
+  // split (by isTemplate), and a plan can be pushed to a client.
+  const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+  const coachClients = useMemoFd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
+  const [planSubTab, setPlanSubTab] = useStateFd('mine'); // 'mine' | 'templates'
+  const [pushPlan, setPushPlan] = useStateFd(null);   // plan being pushed
+  const [pushTarget, setPushTarget] = useStateFd(null); // client picked for the activate-choice step
+  const [pushBusy, setPushBusy] = useStateFd(false);
+  const [pushDone, setPushDone] = useStateFd(null);   // { clientName, planName, activated }
+
+  // Multiple named meal plans (Cut/Bulk/...), exactly one active (mirrors the
+  // training schedule model). viewedPlanId is the plan currently being edited
+  // on this screen, defaulting to the active one. When coaching, the plan list
+  // is bucketed by isTemplate (My Plans vs Client Templates).
+  const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
+  const plans = useMemoFd(() => (store.foodMealPlans || []).filter(p => !p.archived && inBucket(p)), [store.foodMealPlans, isCoach, planSubTab]);
+  const activeId = store.activeMealTemplateId;
+  // List/detail split mirroring PlanScreen + PlanViewerScreen: viewedPlanId
+  // null means the list is showing, set means a plan's own content is showing.
+  const [viewedPlanId, setViewedPlanId] = useStateFd(null);
+  const [manageOpen, setManageOpen] = useStateFd(false);  // Duplicate/Export/Delete menu
+  const [coachOpen, setCoachOpen] = useStateFd(false);    // Push to client/Mark as client template menu
+  const [nameDraft, setNameDraft] = useStateFd(null);     // { id: string|null, name } for create/rename
+  // Always land back on the list on (re)open, and bounce back to it if the
+  // viewed plan disappears from the current bucket (deleted, archived, or
+  // switched out of view by a My Plans <-> Client Templates toggle).
+  useEffectFd(() => {
+    if (!open) { setViewedPlanId(null); return; }
+    if (viewedPlanId && !plans.some(p => p.id === viewedPlanId)) setViewedPlanId(null);
+  }, [open, plans]); // eslint-disable-line react-hooks/exhaustive-deps
+  const viewedPlan = plans.find(p => p.id === viewedPlanId) || null;
+
+  const slots = useMemoFd(
+    () => [...(store.foodTemplateSlots || [])].filter(s => s.mealPlanId === viewedPlanId).sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0))),
+    [store.foodTemplateSlots, viewedPlanId],
+  );
+
+  function createPlan(name) {
+    const id = LB.uid();
+    // A plan created while in the coach's Client Templates bucket is a template
+    // (never the coach's own active eating plan).
+    const asTemplate = isCoach && planSubTab === 'templates';
+    setStore(s => {
+      const list = s.foodMealPlans || [];
+      const plan = { id, name: (name || '').trim() || 'Meal plan', archived: false, isTemplate: asTemplate, coachId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      // The first (or only) NON-template plan becomes active automatically. The
+      // membership check also excludes templates so a stale template-active
+      // state (e.g. after deleting the last real plan) self-heals: a newly
+      // created real plan then correctly claims active.
+      const makeActive = !asTemplate && (!s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived && !p.isTemplate));
+      return { ...s, foodMealPlans: [plan, ...list], ...(makeActive ? { activeMealTemplateId: id } : {}) };
+    });
+    setViewedPlanId(id);
+  }
+  function renamePlan(id, name) {
+    setStore(s => ({ ...s, foodMealPlans: (s.foodMealPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
+  }
+  function activatePlan(id) {
+    setStore(s => ({ ...s, activeMealTemplateId: id }));
+  }
+  async function deletePlan(plan) {
+    const n = (store.foodTemplateSlots || []).filter(x => x.mealPlanId === plan.id).length;
+    if (!await confirm(`Delete "${plan.name}"${n ? ` and its ${n} meal${n === 1 ? '' : 's'}` : ''}?`, { title: 'Delete plan?', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    setStore(s => {
+      const remainingPlans = (s.foodMealPlans || []).filter(p => p.id !== plan.id);
+      const remainingSlots = (s.foodTemplateSlots || []).filter(x => x.mealPlanId !== plan.id);
+      // Fall back to a real plan only, never a client template: a coach's own
+      // plans and client templates share this array, and an active template
+      // would auto-fill the coach's own day and block new plans from activating.
+      const nextActive = s.activeMealTemplateId === plan.id ? (remainingPlans.find(p => !p.archived && !p.isTemplate)?.id ?? null) : s.activeMealTemplateId;
+      return { ...s, foodMealPlans: remainingPlans, foodTemplateSlots: remainingSlots, activeMealTemplateId: nextActive };
+    });
+    setManageOpen(false);
+    setViewedPlanId(null);
+  }
+  // Independent copy in the same bucket (mine/templates), inactive until
+  // switched to, mirrors PlanScreen's duplicate(). coachId reset: the copy is
+  // a new plan in its own right, not literally the plan a coach pushed.
+  function duplicatePlan(plan) {
+    const newId = LB.uid();
+    const now = new Date().toISOString();
+    const copy = { ...plan, id: newId, name: plan.name + ' (Copy)', archived: false, coachId: null, createdAt: now, updatedAt: now };
+    const slotCopies = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id).map(s => ({ ...s, id: LB.uid(), mealPlanId: newId, createdAt: now }));
+    setStore(s => ({ ...s, foodMealPlans: [copy, ...(s.foodMealPlans || [])], foodTemplateSlots: [...(s.foodTemplateSlots || []), ...slotCopies] }));
+    setManageOpen(false);
+    setViewedPlanId(newId);
+  }
+  // Self-contained JSON: each slot already carries its own denormalized food/
+  // recipe snapshot (docs/database.md), so there's nothing to look up, unlike
+  // a training plan export that has to inline the exercises it references.
+  function exportPlan(plan) {
+    const slotsOut = (store.foodTemplateSlots || [])
+      .filter(s => s.mealPlanId === plan.id)
+      .sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0)))
+      .map(({ id, mealPlanId, createdAt, ...rest }) => rest);
+    const payload = { type: 'zane-meal-plan', version: 1, name: plan.name, slots: slotsOut };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${plan.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setManageOpen(false);
+  }
+  function saveName() {
+    if (!nameDraft) return;
+    if (nameDraft.id) renamePlan(nameDraft.id, nameDraft.name);
+    else createPlan(nameDraft.name);
+    setNameDraft(null);
+  }
+  // Backdrop tap used to drop a typed rename (or a new plan's name) silently.
+  // Compared against the name the sheet opened with, so reopening to rename
+  // and closing without touching anything never false-triggers this.
+  async function requestCloseNameDraft() {
+    if (nameDraft && nameDraft.name.trim() !== (nameDraft.initialName || '').trim() && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setNameDraft(null);
+  }
+  // Coach bucket flip (My Plans <-> Client Templates), mirrors PlanScreen's
+  // toggleTemplate. Pure flag, no data move. A template that gets flipped out
+  // of My Plans should also stop being this coach's own active plan.
+  function toggleTemplate(plan) {
+    setStore(s => ({
+      ...s,
+      foodMealPlans: (s.foodMealPlans || []).map(p => p.id === plan.id ? { ...p, isTemplate: !p.isTemplate, updatedAt: new Date().toISOString() } : p),
+      activeMealTemplateId: (!plan.isTemplate && s.activeMealTemplateId === plan.id) ? null : s.activeMealTemplateId,
+    }));
+    setCoachOpen(false);
+  }
+  // Thin wrapper over LB.pushMealPlanToClient (shared with the client-detail
+  // Nutrition tab): copies the plan + its slots (+ referenced recipes) into the
+  // client's account and optionally activates it. client is a coaching row
+  // (client.id = coachingId, client.clientId = the client user id).
+  async function pushMealPlanToClient(plan, client, activateNow) {
+    setPushBusy(true);
+    try {
+      await LB.pushMealPlanToClient({
+        plan,
+        slots: (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id),
+        recipes: store.foodRecipes || [],
+        coachUserId: userId, coachingId: client.id, clientId: client.clientId, activateNow,
+      });
+      setPushTarget(null);
+      setPushPlan(null);
+      setPushDone({ clientName: client.clientName, planName: plan.name, activated: activateNow });
+    } catch (e) {
+      await confirm(e?.message || 'Push failed. Please try again.', { title: 'Push failed', ok: 'OK', cancel: null });
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  const per100From = (m, q) => ({
+    cal: q ? (m.calories || 0) / q * 100 : 0, p: q ? (m.protein || 0) / q * 100 : 0,
+    c: q ? (m.carbs || 0) / q * 100 : 0, f: q ? (m.fat || 0) / q * 100 : 0,
+    fib: (m.fiber != null && q) ? m.fiber / q * 100 : null,
+  });
+  function openAddFood(fav) {
+    const q = fav.quantityG || 100;
+    setPickerOpen(false);
+    const d = { id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: String(q), hour: 8, dayType: 'any' };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
+  function openAddRecipe(recipe) {
+    setPickerOpen(false);
+    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
+  function openEditSlot(slot) {
+    let d;
+    if (slot.source === 'recipe') {
+      d = { id: slot.id, kind: 'recipe', recipeId: slot.recipeId ?? null, name: slot.foodName, recipe: null, portions: null, hour: slot.hour, dayType: slot.dayType, slot };
+    } else {
+      const q = slot.quantityG || 100;
+      d = { id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: String(q), hour: slot.hour, dayType: slot.dayType };
+    }
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
+  // Backdrop tap used to drop an in-progress add (or an edit's unsaved hour/
+  // day-type/amount changes) silently.
+  async function requestCloseDraft() {
+    if (draft && snapDraft(draft) !== draftInitialSnap.current && !await confirm("Your changes won't be added.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setDraft(null);
+  }
+  async function deleteSlot(slot) {
+    if (!await confirm(`${slot.foodName}`, { title: 'Remove from template?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    setStore(s => ({ ...s, foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id) }));
+  }
+
+  // Manually pull the template back into today's plan: the escape hatch for
+  // when the day's entries were cleared (on purpose or by accident) and the
+  // user changes their mind. Adds every matching slot not already present today
+  // as a planned entry, deduped by templateSlotId, bypassing the once-per-day
+  // auto-fill marker (which is exactly what's stopping auto-fill from redoing
+  // it). Closes back to the log so the result is visible right away.
+  async function applyToToday() {
+    const todayISO = LB.todayISO();
+    // Applies the ACTIVE plan (that's what auto-fills the log), regardless of
+    // which plan is being viewed.
+    const inActive = slot => slot.mealPlanId === activeId;
+    const present = new Set((store.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
+    const pending = (store.foodTemplateSlots || []).filter(slot => inActive(slot) && fdSlotMatchesDate(slot, store, todayISO) && !present.has(slot.id));
+    if (!pending.length) {
+      await confirm('Your active plan’s meals are already in today’s plan.', { title: 'Nothing to add', ok: 'OK', cancel: null });
+      return;
+    }
+    setStore(s => {
+      const present2 = new Set((s.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
+      const entries = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
+      return entries.length ? { ...s, foodLogs: [...entries, ...(s.foodLogs || [])] } : s;
+    });
+    onClose();
+  }
+
+  // Live macros for the config sheet. A food slot scales its per-100g base by
+  // the typed grams; a recipe slot (add only) scales the recipe by portions,
+  // exactly like confirmRecipeLog. A recipe EDIT keeps the slot's stored macros
+  // (only hour/day-type change), so it has no live recompute.
+  const draftBuilt = useMemoFd(() => {
+    if (!draft) return null;
+    if (draft.kind === 'food') {
+      const g = fdNum(draft.gramsStr);
+      if (g == null || !(g > 0)) return null;
+      const sc = g / 100;
+      return {
+        foodId: draft.foodId, foodName: draft.foodName, brand: draft.brand, source: draft.source,
+        quantityG: g, calories: Math.round(draft.per100.cal * sc), protein: fdRound1(draft.per100.p * sc),
+        carbs: fdRound1(draft.per100.c * sc), fat: fdRound1(draft.per100.f * sc),
+        fiber: draft.per100.fib != null ? fdRound1(draft.per100.fib * sc) : null,
+        recipeItems: null, recipeId: null, loggedTotalPortions: null,
+      };
+    }
+    if (draft.recipe) {
+      const recipe = draft.recipe;
+      const items = recipe.items || [];
+      const totalPortions = recipe.portions || 1;
+      const scale = draft.portions / totalPortions;
+      const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+      const recipeItems = items.map(i => ({
+        foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
+        calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
+        protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
+        fat: fdRound1((i.fat || 0) * scale), fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+      }));
+      return {
+        foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
+        brand: null, source: 'recipe', quantityG: Math.round(sum('quantityG') * scale),
+        calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
+        carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
+        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+        recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
+      };
+    }
+    // recipe edit: no macro recompute, reuse the existing slot's food fields.
+    return { ...draft.slot };
+  }, [draft, netCarbs]);
+
+  function saveDraft() {
+    if (!draft || !draftBuilt) return;
+    const common = { hour: draft.hour, dayType: draft.dayType };
+    const todayISO = LB.todayISO();
+    setStore(s => {
+      const list = s.foodTemplateSlots || [];
+      // Edit: update the slot only. Existing materialized entries for today keep
+      // their own (possibly already-eaten) state, not retro-rewritten from here.
+      if (draft.id) {
+        return { ...s, foodTemplateSlots: list.map(x => x.id === draft.id ? { ...x, ...draftBuilt, ...common } : x) };
+      }
+      const sortIdx = list.filter(x => x.mealPlanId === viewedPlanId).reduce((m, x) => Math.max(m, x.sortIdx || 0), 0) + 1;
+      const slot = { id: LB.uid(), ...draftBuilt, ...common, mealPlanId: viewedPlanId, sortIdx, createdAt: new Date().toISOString() };
+      // Fill today right away so a freshly added fixum shows in today's plan,
+      // not only from tomorrow's auto-fill. ONLY when this plan is the active
+      // one (an inactive plan never auto-fills, so editing it must not leak
+      // into today), the day type matches, and no copy is already there. The
+      // once-per-day marker is unaffected, and templateSlotId dedup keeps the
+      // effect from adding a second copy.
+      let foodLogs = s.foodLogs || [];
+      const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
+      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
+        foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
+      }
+      return { ...s, foodTemplateSlots: [...list, slot], foodLogs };
+    });
+    setDraft(null);
+  }
+
+  const favs = useMemoFd(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = q ? (store.foodFavorites || []).filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q)) : (store.foodFavorites || []);
+    return [...list].sort((a, b) => a.foodName.localeCompare(b.foodName));
+  }, [store.foodFavorites, pickerQuery]);
+  const recipes = useMemoFd(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = q ? (store.foodRecipes || []).filter(r => r.name.toLowerCase().includes(q)) : (store.foodRecipes || []);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [store.foodRecipes, pickerQuery]);
+
+  if (!open) return null;
+  // Meal count badge, the closest food analog to a training plan's day pills.
+  const slotCountFor = pid => (store.foodTemplateSlots || []).filter(s => s.mealPlanId === pid).length;
+
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title={viewedPlan ? viewedPlan.name : 'Meal Plans'}
+        onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
+        right={viewedPlan ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
+          </div>
+        ) : (
+          <button onClick={() => setNameDraft({ id: null, name: '', initialName: '' })} aria-label="New meal plan" style={fdTopAddBtn}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+          </button>
+        )} />
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {confirmEl}
+        {!viewedPlan && isCoach && (
+          <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} />
+        )}
+
+        {!viewedPlan ? (
+          plans.length === 0 ? (
+            <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. “Cut” or “Bulk”) to start planning your recurring meals.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {plans.filter(p => p.id === activeId).map(p => {
+                const n = slotCountFor(p.id);
+                return (
+                  <BracketFrame key={p.id} gold onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <Pill gold>active</Pill>
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: n > 0 ? 10 : 0 }}>{n} meal{n === 1 ? '' : 's'}</div>
+                    {n > 0 && (
+                      <Btn kind="ghost" onClick={e => { e.stopPropagation(); applyToToday(); }} style={{ width: '100%', marginTop: 4 }}>
+                        <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
+                      </Btn>
+                    )}
+                  </BracketFrame>
+                );
+              })}
+              {plans.filter(p => p.id !== activeId).map(p => {
+                const n = slotCountFor(p.id);
+                return (
+                  <Frame key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer', padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+                      <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      {p.isTemplate && <Pill>template</Pill>}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint }}>{n} meal{n === 1 ? '' : 's'}</div>
+                  </Frame>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          <>
+            {viewedPlan.isTemplate ? (
+              <div style={fdStatusBox(false)}>
+                <span className="label" style={{ color: UI.inkSoft, marginBottom: 0 }}>Client template</span>
+              </div>
+            ) : viewedPlanId === activeId ? (
+              <div style={fdStatusBox(true)}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
+                <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
+              </div>
+            ) : (
+              <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ width: '100%' }}>Activate</Btn>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setManageOpen(true)} style={{ flex: 1, fontSize: 12 }}>Manage</Btn>
+              {isCoach && <Btn kind="ghost" onClick={() => setCoachOpen(true)} style={{ flex: 1, fontSize: 12 }}>Coach</Btn>}
+            </div>
+
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+              Recurring meals for this plan. The active plan auto-fills each day as planned entries, filtered by day type. Check them off as you eat.
+            </div>
+
+            {slots.length === 0 ? (
+              <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
+                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
+              </Btn>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {slots.map(slot => (
+                  <div key={slot.id} style={fdEntryCard}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
+                        <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
+                        <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
+                      </div>
+                      <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
+                        <span style={fdEntryName}>
+                          <span style={fdDayTypeChip(slot.dayType)}>{slot.dayType === 'training' ? 'TRAIN' : slot.dayType === 'rest' ? 'REST' : 'DAILY'}</span>
+                          {slot.foodName}
+                        </span>
+                        <span style={fdEntryMeta}>
+                          {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                          <span style={fdMetaDivider} />
+                          <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
+                        </span>
+                      </div>
+                      <button onClick={() => openEditSlot(slot)} aria-label="Edit" style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                      </button>
+                      <button onClick={() => deleteSlot(slot)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Food source picker: the user's Favorites and Recipes */}
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add to template" titleColor="var(--accent)">
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
+          {[['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
+            <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
+          ))}
+        </div>
+        <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
+          {pickerTab === 'favorites' ? (
+            favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food to reuse it here.</div>
+            : favs.map(f => (
+              <button key={f.id} onClick={() => openAddFood(f)} style={fdPickRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{f.foodName}</div>
+                  <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            ))
+          ) : (
+            recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet.</div>
+            : recipes.map(r => (
+              <button key={r.id} onClick={() => openAddRecipe(r)} style={fdPickRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{r.name}</div>
+                  <div style={fdEntryMeta}>{r.portions} portion{r.portions === 1 ? '' : 's'}</div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            ))
+          )}
+        </div>
+      </Sheet>
+
+      {/* Slot config: amount + hour + day type */}
+      <Sheet open={!!draft} onClose={requestCloseDraft} title={draft?.foodName || draft?.name || 'Meal slot'} titleColor="var(--accent)">
+        {draft && (
+          <>
+            {draft.kind === 'food' ? (
+              <Field label="Amount (g)" style={{ marginBottom: 14 }}>
+                <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+            ) : draft.recipe ? (
+              <div style={{ marginBottom: 14 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
+                    onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                </div>
+              </div>
+            ) : null}
+            {draftBuilt && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 14, textShadow: 'none' }}>
+                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{draftBuilt.calories} kcal</span>
+                <span style={{ display: 'flex', gap: 10 }}>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {draftBuilt.protein}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {draftBuilt.carbs}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {draftBuilt.fat}</span>
+                </span>
+              </div>
+            )}
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Time</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              <Stepper value={draft.hour} step={1} min={0} max={23} suffix=":00"
+                onChange={v => setDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Day type</div>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: draft.dayType !== 'any' && activeFlexPlan ? 10 : 16 }}>
+              {[['any', 'Every day'], ['training', 'Training'], ['rest', 'Rest']].map(([id, label]) => (
+                <button key={id} onClick={() => setDraft(d => ({ ...d, dayType: id }))} style={fdSegBtn(draft.dayType === id)}>{label}</button>
+              ))}
+            </div>
+            {draft.dayType !== 'any' && activeFlexPlan && (
+              <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                  <i className="fa-solid fa-circle-info" style={{ marginRight: 5, color: UI.inkFaint }} />
+                  Your active plan is flexible, so there's no fixed schedule to check ahead of time. A day only counts as Training once you've actually trained or set it manually in the Health tab, until then it's assumed to be Rest.
+                </span>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add to template'}</Btn>
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      {/* Manage: duplicate / export / delete */}
+      <Sheet open={manageOpen} onClose={() => setManageOpen(false)} title="Manage Plan" titleColor="var(--accent)">
+        {viewedPlan && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => duplicatePlan(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-copy" style={{ marginRight: 8 }} /> Duplicate
+            </Btn>
+            <Btn kind="ghost" onClick={() => exportPlan(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-file-export" style={{ marginRight: 8 }} /> Export (JSON)
+            </Btn>
+            <Btn kind="ghost" onClick={() => deletePlan(viewedPlan)} style={{ width: '100%', color: UI.danger }}>
+              <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
+            </Btn>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Coach: push to client / template bucket */}
+      <Sheet open={coachOpen} onClose={() => setCoachOpen(false)} title="Coaching" titleColor="var(--accent)">
+        {viewedPlan && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { const p = viewedPlan; setCoachOpen(false); setPushPlan(p); }} style={{ width: '100%' }}>
+              <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push to client
+            </Btn>
+            <Btn kind="ghost" onClick={() => toggleTemplate(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-user-group" style={{ marginRight: 8 }} /> {viewedPlan.isTemplate ? 'Move to My Plans' : 'Mark as client template'}
+            </Btn>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Push: pick a client */}
+      <Sheet open={!!pushPlan && !pushTarget} onClose={() => setPushPlan(null)} title="Push to client" titleColor="var(--accent)">
+        {pushPlan && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+              Copies “{pushPlan.name}” (and any recipes it uses) into a client’s account. You’ll pick whether it activates right away.
+            </div>
+            {coachClients.length === 0 ? <div style={fdEmptyHint}>No active clients.</div> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {coachClients.map(c => (
+                  <button key={c.id} onClick={() => setPushTarget(c)} style={fdPickRow}>
+                    <span style={{ flex: 1, textAlign: 'left', ...fdEntryName }}>{c.clientName || 'Client'}</span>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Sheet>
+
+      {/* Push: activate now vs add only */}
+      <Sheet open={!!pushTarget} onClose={() => !pushBusy && setPushTarget(null)} title={pushTarget?.clientName || 'Client'} titleColor="var(--accent)">
+        {pushTarget && pushPlan && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              Activate “{pushPlan.name}” for them right away, or just add it to their meal plans and talk it through first?
+            </div>
+            <Btn onClick={() => pushMealPlanToClient(pushPlan, pushTarget, true)} disabled={pushBusy} style={{ width: '100%', marginBottom: 8 }}>
+              {pushBusy ? 'Pushing…' : 'Push & activate now'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => pushMealPlanToClient(pushPlan, pushTarget, false)} disabled={pushBusy} style={{ width: '100%' }}>
+              {pushBusy ? 'Pushing…' : 'Add only, talk to them first'}
+            </Btn>
+          </>
+        )}
+      </Sheet>
+
+      {/* Push: success */}
+      <Sheet open={!!pushDone} onClose={() => setPushDone(null)} title="Pushed" titleColor="var(--accent)">
+        {pushDone && (
+          <>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              “{pushDone.planName}” is in {pushDone.clientName}’s account{pushDone.activated ? ' and active now' : ', not activated yet'}.
+            </div>
+            <Btn onClick={() => setPushDone(null)} style={{ width: '100%' }}>Done</Btn>
+          </>
+        )}
+      </Sheet>
+
+      {/* Create / rename a plan */}
+      <Sheet open={!!nameDraft} onClose={requestCloseNameDraft} title={nameDraft?.id ? 'Rename plan' : 'New meal plan'} titleColor="var(--accent)">
+        {nameDraft && (
+          <>
+            <Field label="Name" style={{ marginBottom: 16 }}>
+              <TextInput value={nameDraft.name} onChange={v => setNameDraft(d => ({ ...d, name: v }))} placeholder="e.g. Cut, Bulk, Maintenance" />
+            </Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setNameDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveName} disabled={!nameDraft.name.trim()} style={{ flex: 2 }}>{nameDraft.id ? 'Save' : 'Create'}</Btn>
+            </div>
+          </>
+        )}
+      </Sheet>
+    </Screen>
+  );
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
@@ -2988,16 +4615,22 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
   );
 }
 
-// Macro-composition bar (protein/carbs/fat share of total energy, 4/4/9
-// kcal per g, same conversion HealthScreen's own composition bar uses):
-// two of these (one off dayTotals, one off dayTarget) let the hero compare
-// today's actual macro SPLIT against the target split at a glance, not just
-// each macro's absolute progress (the rows above already cover that).
 // Extracted from the Log tab's live hero so the exact same markup can be
 // reused verbatim in the screenshot poster below (FoodScreen), instead of
 // two copies drifting apart. Pure/presentational: everything it needs is
 // passed in, nothing read from FoodScreen's own closure.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
+// projected (Plan Mode only): logged + planned totals, shown as a small
+// "where the day is headed" line below the real numbers. null unless plan
+// mode is on AND the day has planned entries, so the default view is
+// untouched.
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
+  const projectionLine = projected ? (
+    <FdProjectionLine macros={{
+      protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
+      carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
+      fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
+    }} />
+  ) : null;
   return dayTarget ? (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -3009,10 +4642,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
           <FdHeroRow label="FAT" color={FD_MACRO_COLORS.fat} actual={dayTotals.fat} target={dayTarget.fat} unit="g" />
         </div>
       </div>
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} fiber={dayTotals.fiber} />
-        <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} fiber={dayTarget.fiber} />
-      </div>
+      {projectionLine}
     </>
   ) : (
     <div>
@@ -3025,35 +4655,33 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
         <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
         <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
       </div>
+      {projectionLine}
     </div>
   );
 }
-function FdCompositionBar({ label, protein, carbs, fat, fiber }) {
-  // Routed through LB.caloriesFromMacros (net-carb aware) instead of a
-  // plain P*4+C*4+F*9 sum, so this bar's own 100% reference never diverges
-  // from the fiber-aware total the hero's kcal number shows right above it.
-  // The clamped net-carb grams (same clamp caloriesFromMacros applies
-  // internally) also has to replace raw carbs in the CARBS segment's own
-  // numerator below, not just the total's denominator, or the three
-  // segments would stop summing to 100% the moment fiber is subtracted.
-  const netCarbsG = Math.max(0, (carbs || 0) - (fiber || 0));
-  const total = LB.caloriesFromMacros(protein, carbs, fat, fiber) || 0;
-  if (!total) return null;
-  const segs = [
-    { pct: (protein || 0) * 4 / total * 100, color: FD_MACRO_COLORS.protein },
-    { pct: netCarbsG * 4 / total * 100, color: FD_MACRO_COLORS.carbs },
-    { pct: (fat || 0) * 9 / total * 100, color: FD_MACRO_COLORS.fat },
-  ];
+// Plan Mode projection: still-to-eat macros vs. the full logged+planned
+// projection, each in its own centered column. Sits under the real totals as
+// a lighter, dashed-topped table so it reads as a forecast, not part of the
+// logged truth above it. The old standalone "+N kcal projected" line was
+// dropped as redundant once this table shipped.
+function FdProjectionLine({ macros }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: UI.inkFaint, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 8, borderRadius: 2, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden', display: 'flex' }}>
-        {segs.map((s, i) => s.pct > 0 && <div key={i} style={{ width: `${s.pct}%`, height: '100%', background: s.color }} />)}
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `1px solid ${UI.hairStrong}` }}>
+        <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
+        </div>
+      </div>
+      <div style={{ textAlign: 'center', paddingLeft: 10 }}>
+        <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+        </div>
       </div>
     </div>
   );
 }
-
 // Full-screen dim while the label photo is uploaded and read. Kept dead simple
 // (no cancel): the request is a couple of seconds and closing mid-flight would
 // just discard a result the user asked for.
@@ -3192,10 +4820,10 @@ function fdNavBtn(disabled) {
     WebkitTapHighlightColor: 'transparent',
   };
 }
-function fdSegBtn(active) {
+function fdSegBtn(active, danger) {
   return {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'transparent',
+    background: active ? (danger ? UI.danger : 'var(--accent)') : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
     textShadow: active ? 'none' : 'var(--text-lift)',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
@@ -3333,6 +4961,33 @@ function fdHourAddBtn(isNow) {
   };
 }
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+// Plan Mode: the "Meal template" entry-point button in the Log tab.
+const fdTemplateBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+// Day-type badge on a template slot row (DAILY / TRAIN / REST).
+function fdDayTypeChip(dayType) {
+  const accent = dayType !== 'any';
+  return { display: 'inline-block', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', color: accent ? 'var(--accent)' : UI.inkFaint, border: `1px solid ${accent ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 4, padding: '1px 4px', marginRight: 6, verticalAlign: 'middle', fontFamily: UI.fontUi };
+}
+// A favorite/recipe row in the template food-source picker.
+const fdPickRow = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+// FoodTemplateScreen's plan-detail TopBar "Edit" button (rename), same look
+// as PlanViewerScreen's own Edit button in screens-schedule.jsx.
+const fdEditBtn = {
+  background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+  borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+  color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+};
+// The "Active" / "Client template" status box atop a plan's detail view,
+// same shape as PlanViewerScreen's planActions active indicator.
+function fdStatusBox(gold) {
+  return {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    border: `1px solid ${gold ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
+    background: gold ? UI.goldFaint : UI.bgInset,
+    padding: '10px 14px', minHeight: 44,
+  };
+}
+const fdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // P/C/F in the same three colors the hero rows use (FD_MACRO_COLORS), so a
 // glance at any macro mention in the Log tab reads the same way, instead of

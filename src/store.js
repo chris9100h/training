@@ -9,6 +9,7 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
+const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -242,6 +243,8 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_template_slots').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_meal_plans').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -334,6 +337,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const settingsRow = {
     user_id: userId,
     active_schedule_id: backup.activeScheduleId ?? null,
+    active_meal_template_id: backup.activeMealTemplateId ?? null,
     cycle_index: backup.cycleIndex ?? 0,
     cycle_start_date: backup.cycleStartDate ?? null,
     week_plan_start_date: backup.weekPlanStartDate ?? null,
@@ -361,6 +365,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     equipment_config: sett.equipmentConfig ?? null,
     weight_fill_down: sett.weightFillDown ?? true,
     net_carbs: sett.netCarbs ?? false,
+    plan_mode: sett.planMode ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? false,
     show_coaching_tab: sett.showCoachingTab ?? false,
     be_your_own_coach: sett.beYourOwnCoach ?? false,
@@ -391,6 +396,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     water_bottle_enabled: sett.waterBottleEnabled ?? true,
     water_bottle_ml: sett.waterBottleMl ?? 1500,
     water_reminder_enabled: sett.waterReminderEnabled ?? false,
+    meal_reminder_enabled: sett.mealReminderEnabled ?? false,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -415,6 +421,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodLogs?.length ? 1 : 0)
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
+    + (backup.foodTemplateSlots?.length ? 1 : 0)
+    + (backup.foodMealPlans?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -556,6 +564,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
         fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
         recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+        logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
+        planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
       }))
     ));
     stepsDone++;
@@ -579,6 +589,23 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
         updated_at: r.updatedAt ?? new Date().toISOString(),
       }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodMealPlans?.length) {
+    prog('Uploading meal plans…');
+    await unwrap(_supabase.from('zane_food_meal_plans').upsert(
+      backup.foodMealPlans.map(p => ({
+        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodTemplateSlots?.length) {
+    prog('Uploading meal template…');
+    await unwrap(_supabase.from('zane_food_template_slots').upsert(
+      backup.foodTemplateSlots.map(templateSlotRow(userId))
     ));
     stepsDone++;
   }
@@ -798,11 +825,17 @@ const HISTORY_WINDOW_DAYS = 70;
 // How far back boot loads zane_food_logs. Unlike sessions, a food log row IS
 // its own full record (no separate heavy sub-table to window instead), so
 // this windows the whole row: entries older than this simply aren't fetched.
-// Nothing today reads food history past this (the Log tab's own day nav caps
-// backdating/browsing at 14 days), so the only effect is that anything older
-// quietly drops out of the local cache after the first boot on this window,
-// harmlessly, it's never deleted server-side (syncBase and the live store
-// both window together at boot, so there is never a diff to delete).
+// The Food tab's own day nav caps backdating/browsing at 14 days, well
+// inside the window, but the Health tab's date picker can reach further
+// back (DailyLogScreen's foodOutsideWindow lock handles that gap). Anything
+// older than this quietly drops out of the local cache after the first boot
+// on this window, harmlessly, it's never deleted server-side (syncBase and
+// the live store both window together at boot, so there is never a diff to
+// delete). Exposed on window.LB (below) instead of also being declared as
+// its own top-level const in screens-health.jsx: this file and every
+// screens-*.jsx file are classic scripts sharing one global scope, so a
+// same-named top-level const in two of them throws "already been declared"
+// and silently kills every other declaration in whichever file loads second.
 const FOOD_HISTORY_WINDOW_DAYS = 30;
 
 function historyWindowCutoffISO(now = new Date(), days = HISTORY_WINDOW_DAYS) {
@@ -928,19 +961,34 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
-    // another user's personal shortcuts (owner-only RLS, no coach-read policy).
+    // another user's personal shortcuts. Favorites are owner-only RLS; recipes
+    // DO have a coach-of-client read policy (migration 0200) but are still
+    // skipped on a coach load because the client view doesn't render them,
+    // pushMealPlanToClient fetches the client's recipes directly when it needs
+    // them for its dedup.
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Plan Mode meal-template slots (migration 0197), own store only, same
+    // owner-only reasoning as favorites/recipes above.
+    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    // Plan Mode auto-fill markers (migration 0198): which days the template was
+    // already auto-materialized for, cross-device. Only recent days matter (the
+    // fill effect only ever runs for today), so window like the food logs.
+    isCoachLoad ? null : _supabase.from('zane_food_template_days').select('id, date').eq('user_id', userId).gte('date', foodHistCutoff),
+    // Plan Mode meal plans (migration 0199): named containers (Cut/Bulk), one
+    // active. Mirrors zane_schedules. Own store only, same reasoning as the
+    // slots/favorites/recipes above.
+    isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -980,6 +1028,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
+  if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
+  if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
+  if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1136,15 +1187,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Food tracker per-entry logs (migration 0186). Denormalized at write
     // time: name/brand/macros are copied, never re-derived from foodId.
     // numeric columns come back as strings from PostgREST, parseFloat them.
-    foodLogs: (foodLogsRes?.data || []).map(l => ({
-      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
-      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
-      quantityG: parseFloat(l.quantity_g), calories: l.calories,
-      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
-      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
-      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
-      createdAt: l.created_at,
-    })),
+    foodLogs: (foodLogsRes?.data || []).map(mapFoodLogRow),
     // Food Tracker quick-add (migration 0187), own store only.
     foodFavorites: (foodFavoritesRes?.data || []).map(f => ({
       id: f.id, foodId: f.food_id ?? null, foodName: f.food_name, brand: f.brand ?? null,
@@ -1156,6 +1199,12 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
       id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
+    })),
+    foodTemplateSlots: (foodTemplateSlotsRes?.data || []).map(mapTemplateSlotRow),
+    foodTemplateDays: (foodTemplateDaysRes?.data || []).map(d => ({ id: d.id, date: d.date })),
+    foodMealPlans: (foodMealPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
+      coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1204,6 +1253,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // with the windowed sessions, so PR detection stays exact mid-session.
     exerciseBests,
     activeScheduleId: sett.active_schedule_id ?? null,
+    activeMealTemplateId: sett.active_meal_template_id ?? null,
     activeCardioPlanId: sett.active_cardio_plan_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
@@ -1232,6 +1282,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
         netCarbs: sett.net_carbs ?? false,
+        planMode: sett.plan_mode ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
@@ -1263,6 +1314,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         waterBottleEnabled: sett.water_bottle_enabled ?? true,
         waterBottleMl: sett.water_bottle_ml ?? 1500,
         waterReminderEnabled: sett.water_reminder_enabled ?? false,
+        mealReminderEnabled: sett.meal_reminder_enabled ?? false,
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
@@ -1629,6 +1681,8 @@ async function syncStore(prev, next, userId) {
       quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
       carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
       recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+      logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
+      planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
   }
@@ -1680,6 +1734,27 @@ async function syncStore(prev, next, userId) {
       updated_at: r.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
+  }
+
+  if (prev.foodTemplateSlots !== next.foodTemplateSlots) {
+    const { upsert, removed } = diffCollectionById(prev.foodTemplateSlots, next.foodTemplateSlots);
+    if (upsert.length) ops.push(_supabase.from('zane_food_template_slots').upsert(upsert.map(templateSlotRow(userId))));
+    if (removed.length) ops.push(_supabase.from('zane_food_template_slots').delete().in('id', removed.map(t => t.id)));
+  }
+
+  if (prev.foodTemplateDays !== next.foodTemplateDays) {
+    const { upsert, removed } = diffCollectionById(prev.foodTemplateDays, next.foodTemplateDays);
+    if (upsert.length) ops.push(_supabase.from('zane_food_template_days').upsert(upsert.map(d => ({ id: d.id, user_id: userId, date: d.date }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_template_days').delete().in('id', removed.map(d => d.id)));
+  }
+
+  if (prev.foodMealPlans !== next.foodMealPlans) {
+    const { upsert, removed } = diffCollectionById(prev.foodMealPlans, next.foodMealPlans);
+    if (upsert.length) ops.push(_supabase.from('zane_food_meal_plans').upsert(upsert.map(p => ({
+      id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+      coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_meal_plans').delete().in('id', removed.map(p => p.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -1769,6 +1844,7 @@ async function syncStore(prev, next, userId) {
 
   const settingsChanged =
     prev.activeScheduleId          !== next.activeScheduleId          ||
+    prev.activeMealTemplateId      !== next.activeMealTemplateId      ||
     prev.cycleIndex                !== next.cycleIndex                ||
     prev.cycleStartDate            !== next.cycleStartDate            ||
     prev.weekPlanStartDate         !== next.weekPlanStartDate         ||
@@ -1791,6 +1867,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
+    prev.settings?.planMode           !== next.settings?.planMode           ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
@@ -1826,6 +1903,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.waterBottleEnabled     !== next.settings?.waterBottleEnabled ||
     prev.settings?.waterBottleMl          !== next.settings?.waterBottleMl      ||
     prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
+    prev.settings?.mealReminderEnabled    !== next.settings?.mealReminderEnabled ||
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
@@ -1850,11 +1928,13 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
       net_carbs: next.settings?.netCarbs ?? false,
+      plan_mode: next.settings?.planMode ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
+      meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
@@ -1886,6 +1966,7 @@ async function syncStore(prev, next, userId) {
     // means "changed here"); an omitted column is left untouched on the existing
     // row by the PostgREST merge upsert.
     if (prev.activeScheduleId  !== next.activeScheduleId)  settingsRow.active_schedule_id  = next.activeScheduleId ?? null;
+    if (prev.activeMealTemplateId !== next.activeMealTemplateId) settingsRow.active_meal_template_id = next.activeMealTemplateId ?? null;
     if (prev.cycleIndex        !== next.cycleIndex)        settingsRow.cycle_index         = next.cycleIndex ?? 0;
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
@@ -1999,11 +2080,16 @@ function cacheFood(source, sourceId) {
 }
 
 // Reads a nutrition label from a photo (base64, no data: prefix) via the
-// scan-label edge function (xAI Grok vision). Returns the extracted macros so
-// the client can prefill the Custom Item form. Scanned labels are logged as
-// per-user custom items, never written to the shared zane_foods cache.
-async function scanLabel(imageBase64, mimeType) {
-  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType });
+// scan-label edge function. Two interchangeable backends share the exact
+// same request/response contract, see logbook-label-scanner-provider in
+// CLAUDE.md's localStorage-keys list for how the client picks one:
+// 'grok' (xAI Grok vision, scan-label, the long-standing default) or
+// 'claude' (Anthropic vision, scan-label-claude). Returns the extracted
+// macros so the client can prefill the Custom Item form. Scanned labels are
+// logged as per-user custom items, never written to the shared zane_foods cache.
+async function scanLabel(imageBase64, mimeType, provider) {
+  const url = provider === 'claude' ? SCAN_LABEL_CLAUDE_URL : SCAN_LABEL_URL;
+  const res = await fnFetch(url, { image: imageBase64, mimeType });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
@@ -2188,6 +2274,21 @@ async function refreshExerciseBests(userId) {
       if (r.ex_id != null && r.best_e1rm != null) bests[r.ex_id] = r.best_e1rm;
     }
     return bests;
+  } catch (_) { return null; }
+}
+
+// All-time top-N exercises by session-entry count (server aggregate, same
+// family as get_exercise_best_e1rm / get_session_stats). The client only ever
+// holds session.entries for the 70-day boot window (HISTORY_WINDOW_DAYS) plus
+// whatever old sessions happen to be cached from unrelated detail-view visits,
+// so counting entries locally would silently under-count for older accounts.
+// Returns [{ exId, count }] (already ranked/limited server-side), or null on
+// error so the caller keeps whatever it last had.
+async function fetchTopExercises(userId, limit) {
+  try {
+    const { data, error } = await _supabase.rpc('get_top_exercises', { p_user_id: userId, p_limit: limit });
+    if (error || !data) return null;
+    return data.map(r => ({ exId: r.ex_id, count: r.session_count }));
   } catch (_) { return null; }
 }
 
@@ -2599,6 +2700,87 @@ async function fetchSessionEntries(sessionIds) {
   const out = {};
   for (const id of Object.keys(bySession)) out[id] = mapEntryRows(bySession[id]);
   return out;
+}
+
+function mapFoodLogRow(l) {
+  return {
+    id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+    foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+    quantityG: parseFloat(l.quantity_g), calories: l.calories,
+    protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+    fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+    recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
+    // Which unit (e.g. "Pc") the entry was actually logged in, {label, grams},
+    // or null when logged in plain grams/kcal. Lets a "count" view (the
+    // timeline's split-into-multiple-meals sheet) read back the exact unit
+    // used instead of guessing via a matching favorite's first unit.
+    loggedUnit: l.logged_unit ?? null,
+    // {id, removedEntries} when this entry was created by "split into
+    // multiple meals" (screens-food.jsx); lets the split be undone from the
+    // timeline any time later, not just the 6s toast right after applying
+    // it. Null for an entry logged directly.
+    splitBatch: l.split_batch ?? null,
+    // Plan Mode: a planned entry sits in the timeline but does NOT count toward
+    // the day's real macro totals until checked off (planned -> logged). Absent
+    // on legacy rows -> false -> logged, so old data reads unchanged.
+    planned: l.planned ?? false, templateSlotId: l.template_slot_id ?? null,
+    createdAt: l.created_at,
+  };
+}
+
+// Plan Mode meal-template slot (zane_food_template_slots). Carries the same
+// denormalized food/recipe snapshot as a log entry (so materializing a planned
+// entry from it needs no re-fetch) plus a fixed hour and a day_type filter
+// ('any' | 'training' | 'rest').
+function mapTemplateSlotRow(r) {
+  return {
+    id: r.id, foodId: r.food_id ?? null, foodName: r.food_name, brand: r.brand ?? null,
+    source: r.source ?? null, quantityG: parseFloat(r.quantity_g), calories: r.calories,
+    protein: parseFloat(r.protein), carbs: parseFloat(r.carbs), fat: parseFloat(r.fat),
+    fiber: r.fiber != null ? parseFloat(r.fiber) : null, recipeItems: r.recipe_items ?? null,
+    recipeId: r.recipe_id ?? null, loggedTotalPortions: r.logged_total_portions ?? null,
+    hour: r.hour, dayType: r.day_type ?? 'any', sortIdx: r.sort_idx ?? 0,
+    mealPlanId: r.meal_plan_id ?? null,
+    createdAt: r.created_at,
+  };
+}
+// Store slot -> DB row (curried on userId), shared by syncStore and
+// importFromBackup so both write the exact same column set.
+function templateSlotRow(userId) {
+  return t => ({
+    id: t.id, user_id: userId, food_id: t.foodId ?? null, food_name: t.foodName,
+    brand: t.brand ?? null, source: t.source ?? null, quantity_g: t.quantityG,
+    calories: t.calories, protein: t.protein, carbs: t.carbs, fat: t.fat,
+    fiber: t.fiber ?? null, recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
+    logged_total_portions: t.loggedTotalPortions ?? null, hour: t.hour,
+    day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0, meal_plan_id: t.mealPlanId ?? null,
+  });
+}
+
+// Lazy-load food log entries for specific dates outside the boot window
+// (FOOD_HISTORY_WINDOW_DAYS), mirroring fetchSessionEntries: caller merges
+// the result into store.foodLogs. userId is explicit here (unlike
+// fetchSessionEntries, which scopes safely via a unique session_id) because
+// a bare date is NOT unique to one user: filtering by date alone would let
+// RLS return a mix of the caller's own rows and a coached client's rows that
+// happen to share a date. Every requested date gets a key in the result, even
+// when empty, so the caller can tell "fetched, genuinely no entries" apart
+// from "never asked" (see requestFoodUnlock in screens-health.jsx).
+async function fetchFoodLogsForDates(userId, dates) {
+  const ds = [...new Set((dates || []).filter(Boolean))];
+  if (!ds.length || !userId) return {};
+  const { data, error } = await _supabase.from('zane_food_logs')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+    .eq('user_id', userId)
+    .in('date', ds);
+  if (error) throw error;
+  const byDate = {};
+  for (const l of (data || [])) {
+    if (!byDate[l.date]) byDate[l.date] = [];
+    byDate[l.date].push(mapFoodLogRow(l));
+  }
+  for (const d of ds) if (!byDate[d]) byDate[d] = [];
+  return byDate;
 }
 
 function isWeekdayPlan(sch) {
@@ -3822,6 +4004,75 @@ async function loadClientStore(clientId) {
   return loadFromSupabase(clientId, 0, { coachLoad: true });
 }
 
+// Push a meal plan into a client's account (Plan Mode coaching). Copies the
+// plan + its slots, copies referenced recipes (deduped by name against the
+// client's own), enables the client's plan mode so the plan is reachable, and
+// optionally activates it. Mirrors the training pushToClient: ordered writes
+// (plan first, active pointer second) via syncStore retargeted to the client,
+// best-effort coaching note after. Shared by the coach's FoodTemplateScreen
+// and the client-detail Nutrition tab. Foods carry self-contained snapshots so
+// there is no food-library dedup, unlike a schedule push. Throws on write
+// failure; the note is best-effort. Returns the new plan id.
+async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachingId, clientId, activateNow }) {
+  const clientData = await loadClientStore(clientId);
+  // loadClientStore is a coach-load, which deliberately skips the client's
+  // recipes (loadFromSupabase nulls that query), so clientData.foodRecipes is
+  // always empty and the name-dedup below would always miss, inserting a
+  // duplicate same-named recipe on every push. Fetch the client's recipes
+  // directly instead (coach-of-client read RLS on zane_food_recipes, migration
+  // 0200). Best-effort: on failure fall back to always-copy.
+  let clientRecipes = [];
+  try {
+    const { data } = await _supabase.from('zane_food_recipes').select('id, name').eq('user_id', clientId);
+    clientRecipes = data || [];
+  } catch (_) { clientRecipes = []; }
+  const newPlanId = uid();
+  const nowISO = new Date().toISOString();
+  const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
+  const recipeIdMap = {};
+  const newRecipes = [];
+  for (const s of (slots || [])) {
+    if (!s.recipeId || s.recipeId in recipeIdMap) continue;
+    const src = (recipes || []).find(r => r.id === s.recipeId);
+    if (!src) { recipeIdMap[s.recipeId] = null; continue; }
+    const existing = clientRecipes.find(r => (r.name || '').trim().toLowerCase() === src.name.trim().toLowerCase());
+    if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
+    const nid = uid();
+    recipeIdMap[s.recipeId] = nid;
+    newRecipes.push({ id: nid, name: src.name, items: src.items || [], portions: src.portions || 1, createdAt: nowISO, updatedAt: nowISO });
+  }
+  const slotCopies = (slots || []).map(s => ({
+    ...s, id: uid(), mealPlanId: newPlanId,
+    recipeId: s.recipeId ? (recipeIdMap[s.recipeId] ?? null) : null,
+    createdAt: nowISO,
+  }));
+  const withPlan = {
+    ...clientData,
+    settings: { ...clientData.settings, planMode: true },
+    foodRecipes: [...(clientData.foodRecipes || []), ...newRecipes],
+    foodMealPlans: [...(clientData.foodMealPlans || []), planCopy],
+    foodTemplateSlots: [...(clientData.foodTemplateSlots || []), ...slotCopies],
+  };
+  await syncStore(clientData, withPlan, clientId);
+  if (activateNow) {
+    await syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, clientId);
+  }
+  try {
+    // Same 'Nutrition' thread the macros-update flow (ClientNutritionTab) posts
+    // to, not a per-plan thread: meal-plan pushes are nutrition coaching, they
+    // belong grouped with everything else under that tab, not scattered across
+    // one new thread per plan name.
+    const threadId = await getOrCreateCoachingThread(coachingId, 'Nutrition', coachUserId);
+    const body = activateNow
+      ? `Pushed a new meal plan: ${plan.name}\n\nIt's now your active plan.`
+      : `Pushed a new meal plan: ${plan.name}\n\nIt's in your meal plans but not active yet, let's talk it through before you switch to it.`;
+    await addCoachingNote(coachingId, 'general', null, null, body, coachUserId, threadId);
+  } catch (noteErr) {
+    console.warn('Meal plan pushed, but the coaching note could not be posted:', noteErr);
+  }
+  return newPlanId;
+}
+
 async function loadCoachClientsStatus() {
   const { data, error } = await _supabase.rpc('get_coach_clients_status');
   if (error) throw error;
@@ -4811,7 +5062,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
@@ -4853,15 +5104,7 @@ async function refreshHealthLogs(userId) {
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
-    foodLogs: (foodRes?.data || []).map(l => ({
-      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
-      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
-      quantityG: parseFloat(l.quantity_g), calories: l.calories,
-      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
-      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
-      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
-      createdAt: l.created_at,
-    })),
+    foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
   };
 }
 
@@ -6891,17 +7134,17 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
+  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
+  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, pushMealPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,

@@ -18,12 +18,6 @@ const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', d
 // the shared value, see GlucoseCard/BloodPressureCard/BodyTempCard.
 const HEALTH_TFS_TODAY = [{ id: '1D', days: 1 }, ...HEALTH_TFS];
 
-// How far back store.foodLogs is windowed client-side. Must mirror the
-// constant of the same name in store.js: a date older than this can still
-// have real Food Tracker rows server-side that this screen's local store
-// never receives (see foodOutsideWindow in DailyLogScreen below).
-const FOOD_HISTORY_WINDOW_DAYS = 30;
-
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
 function healthDayDiff(a, b) {
@@ -788,16 +782,41 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     () => (store.foodLogs || []).some(l => l.date === date),
     [store.foodLogs, date],
   );
-  // store.foodLogs is windowed to FOOD_HISTORY_WINDOW_DAYS days, so a date
+  // store.foodLogs is windowed to LB.FOOD_HISTORY_WINDOW_DAYS days, so a date
   // older than that can have real Food Tracker entries server-side that the
   // check above can never see locally: it would then read a genuinely
   // tracked old day as untracked. Lock those days too (can't verify locally,
   // so don't risk a silent overwrite) instead of trusting an absence that
-  // might just be the window, not the truth.
-  const foodOutsideWindow = healthDayDiff(date, LB.todayISO()) > FOOD_HISTORY_WINDOW_DAYS;
-  const foodUnverifiable = foodOutsideWindow && !foodHasTrackerEntries;
+  // might just be the window, not the truth. Reads the constant off LB
+  // rather than declaring its own copy: this file and store.js are both
+  // classic scripts sharing one global scope, so a same-named top-level
+  // const in both throws "already been declared" and silently kills every
+  // other declaration in whichever of the two loads second.
+  //
+  // Dates outside FOOD_HISTORY_WINDOW_DAYS never arrive from boot, so
+  // foodHasTrackerEntries above can't see them yet: lazy-fetch date on demand
+  // (mirrors the fetch FoodScreen uses for its own history scrollback) so the
+  // lock reflects the true state instead of guessing. foodChecking holds the
+  // lock back while that fetch is in flight, rather than briefly flashing
+  // "unlocked" for a day that turns out to have entries a moment later.
+  const foodHistCutoff = useMemoH(() => LB.historyWindowCutoffISO(new Date(), LB.FOOD_HISTORY_WINDOW_DAYS), []);
+  const [foodChecking, setFoodChecking] = useStateH(false);
+  useEffectH(() => {
+    if (date >= foodHistCutoff) { setFoodChecking(false); return; }
+    setFoodChecking(true);
+    let on = true;
+    LB.fetchFoodLogsForDates(userId, [date]).then(byDate => {
+      if (!on) return;
+      setFoodChecking(false);
+      const entries = byDate[date];
+      if (entries && entries.length) {
+        setStore(s => (s.foodLogs || []).some(l => l.date === date) ? s : { ...s, foodLogs: [...(s.foodLogs || []), ...entries] });
+      }
+    }).catch(() => { if (on) setFoodChecking(false); });
+    return () => { on = false; };
+  }, [date, foodHistCutoff, userId]);
   const [foodUnlocked, setFoodUnlocked] = useStateH(false);
-  const foodLocked = (foodHasTrackerEntries || foodOutsideWindow) && !foodUnlocked;
+  const foodLocked = (foodHasTrackerEntries || foodChecking) && !foodUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1186,9 +1205,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const requestFoodUnlock = async () => {
     const ok = await confirm(
-      foodUnverifiable
-        ? "This day is more than 30 days old, so the app can't check locally whether the Food Tracker has entries for it. If it does, editing here will be overwritten the next time you log food there."
-        : "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
+      "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
       { title: 'Overwrite food tracker?', ok: 'Continue', cancel: 'Cancel' }
     );
     if (ok) setFoodUnlocked(true);
@@ -1328,10 +1345,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || ''}</div>
             : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : ''} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
         </div>
-        {foodLocked && (
+        {foodChecking ? (
+          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Checking Food Tracker…</span>
+          </div>
+        ) : foodHasTrackerEntries && !foodUnlocked && (
           <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
             <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
-            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>{foodUnverifiable ? "Can't verify locally, over 30 days old, tap to override" : 'Managed by the Food Tracker, tap to override'}</span>
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Food Tracker, tap to override</span>
           </button>
         )}
         <div>
@@ -1741,8 +1763,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
-        {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 3 }}>{unit}</span> : ''}
+      <div className="num health-stat-value" style={{ color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
+        {value != null ? value : '—'}{value != null && unit ? <span className="health-stat-unit" style={{ color: UI.inkFaint, marginLeft: 3 }}>{unit}</span> : ''}
       </div>
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
@@ -1857,8 +1879,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
 
   const cell = (label, value, unit) => (
     <div style={{ minWidth: 0, textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
-        {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
+      <div className="num health-cell-value" style={{ color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
+        {value != null ? value : '—'}{value != null && unit ? <span className="health-cell-unit" style={{ color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
       </div>
       <div style={{ fontSize: 8.5, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
@@ -1978,6 +2000,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     (l.coachFields && Object.keys(l.coachFields).length)
   );
   const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
+  // Navigation itself is unbounded forward (a flex plan's Training|Rest
+  // override needs to reach future dates, same reasoning as the food
+  // logger), but manually logging weight/steps/water/notes for a day that
+  // hasn't happened doesn't make sense, so the LOG button stays gated.
+  const selectedIsFuture = selectedDate > today;
 
   // Flex Training|Rest override for the selected day (header slider). Only in the
   // user's own tab (setStore present, not the read-only coach view), only for a
@@ -2030,15 +2057,14 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           const has = loggedSet.has(d);
           const trained = LB.isTrainingDayForDate(store, d);
           const isToday = d === today;
-          const future = d > today;
           return (
-            <div key={d} onClick={() => !future && onSelect(d)}
+            <div key={d} onClick={() => onSelect(d)}
               style={{
                 flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                 background: sel ? UI.goldFaint : has ? UI.goldFaint : 'transparent',
                 border: `${sel ? '2px' : '0.5px'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
-                borderRadius: 4, cursor: future ? 'default' : 'pointer',
-                opacity: future ? 0.35 : 1, minHeight: 56,
+                borderRadius: 4, cursor: 'pointer',
+                minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
               <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
@@ -2078,7 +2104,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           }}>
             <i className="fa-solid fa-calendar-day" style={{ fontSize: 14 }} />
           </button>
-          <input type="date" value={selectedDate} max={LB.todayISO()}
+          <input type="date" value={selectedDate}
             onChange={e => e.target.value && onSelect(e.target.value)}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
           />
@@ -2104,7 +2130,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           </div>
         )}
         <div style={{ flex: 1 }} />
-        {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
+        {onLog && !selectedIsFuture && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: 'var(--accent-ink)', cursor: 'pointer', padding: '0 14px',
@@ -2493,6 +2519,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
+  // Whether the async coach-macros load has settled. Lets the targets cache
+  // tell a transient load-null (protect the cache) from a genuine no/removed-
+  // targets null (clear the cache). True immediately when there's no coach.
+  const [coachingMacrosLoaded, setCoachingMacrosLoaded] = useStateH(false);
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
@@ -2602,9 +2632,12 @@ function HealthScreen({ store, setStore, go, userId }) {
   };
 
   useEffectH(() => {
-    if (!coachingId) { setCoachingMacros(null); return; }
+    if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
-    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    setCoachingMacrosLoaded(false);
+    LB.loadCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+      .catch(() => { if (!cancelled) setCoachingMacrosLoaded(true); });
     return () => { cancelled = true; };
   }, [coachingId]);
 
@@ -2646,10 +2679,17 @@ function HealthScreen({ store, setStore, go, userId }) {
   // previous visit so adherence bar + target rows are visible on the first render.
   const effectiveTargets = targets ?? cachedTargets;
   useEffectH(() => {
-    if (targets === null && cachedTargets !== null) return; // don't overwrite a good cache with a transient null
+    // Only protect the cache from a null while coach macros are still loading
+    // (a real target may be about to arrive). Once the load has settled (or
+    // there's no coach), a null is genuine, no or just-removed targets, and MUST
+    // clear the cache, otherwise removed targets keep displaying and scoring
+    // adherence forever (the guard used to key off cachedTargets !== null, which
+    // could never tell a transient load-null from a real cleared-null).
+    const macrosSettled = !coachingId || coachingMacrosLoaded;
+    if (targets === null && cachedTargets !== null && !macrosSettled) return;
     try { localStorage.setItem(targetsCacheKey, JSON.stringify(targets)); } catch {}
     if (targets !== cachedTargets) setCachedTargets(targets);
-  }, [targets]);
+  }, [targets, coachingMacrosLoaded]);
 
   // The Food Tracker's rollup (screens-food.jsx) writes calories/protein/
   // carbs/fat straight into a day's log but doesn't know about targets or
@@ -2689,7 +2729,12 @@ function HealthScreen({ store, setStore, go, userId }) {
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
         }
         if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
-        reconciled.set(log.date, { ...log, adherence, targetsSnap });
+        // Bump updatedAt so sync_daily_logs_batch's `updated_at < EXCLUDED`
+        // staleness guard accepts this write. The Food-Tracker rollup already
+        // persisted this row with its own timestamp; re-sending the reconciled
+        // adherence with that SAME timestamp would be silently dropped server-
+        // side, leaving the coach/check-in with null/stale adherence forever.
+        reconciled.set(log.date, { ...log, adherence, targetsSnap, updatedAt: new Date().toISOString() });
       });
       if (!reconciled.size) return s;
       const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);

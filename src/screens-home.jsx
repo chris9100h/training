@@ -1618,8 +1618,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
   }, [isFlex, selectedSlot, dayIdx, activeDay?.id, store.sessions, store.cycleIndex, sessionDate]);
 
-  const { improvementCount, regressionCount } = useMemo(() => {
-    if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
+  const priorSessions = useMemo(() => {
+    if (!doneSession) return [];
+    // The filter + sort is identical for every entry (they all share
+    // doneSession's id/dayId/ended), so build the candidate prior-session list
+    // ONCE instead of re-spreading and re-sorting the whole history per entry
+    // (was O(entries x n log n), the single heaviest computation on Home).
+    return [...store.sessions]
+      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  }, [doneSession, store.sessions]);
+
+  const { improvementCount, regressionCount, neededPriorSessionIds } = useMemo(() => {
+    if (!doneSession) return { improvementCount: 0, regressionCount: 0, neededPriorSessionIds: [] };
     const cmp = (st, prevSet, better) => {
       if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
       const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
@@ -1629,16 +1640,28 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         : (st.kg < prevSet.kg && repsA <= repsB) || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
-    // The filter + sort is identical for every entry (they all share
-    // doneSession's id/dayId/ended), so build the candidate prior-session list
-    // ONCE instead of re-spreading and re-sorting the whole history per entry
-    // (was O(entries x n log n) — the single heaviest computation on Home).
-    const priorSessions = [...store.sessions]
-      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
-      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+    const neededIds = new Set();
     doneSession.entries.forEach(e => {
-      const prev = priorSessions.find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
-      const prevEntry = prev?.entries.find(en => en.exId === e.exId);
+      let prevSession = null;
+      for (const x of priorSessions) {
+        if (!(x.entries || []).length) {
+          if ((x.aggExercises || 0) > 0) {
+            // Windowed session (server has real data, entries not loaded
+            // locally): we can't tell whether it contains this exercise, so
+            // the search can't safely skip past it toward older sessions.
+            // Queue it for a lazy fetch and leave this entry unresolved for
+            // this render, the effect below hydrates it and this memo reruns.
+            neededIds.add(x.id);
+            break;
+          }
+          continue; // genuinely empty session (aggExercises === 0), keep looking
+        }
+        if (x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null))) {
+          prevSession = x;
+          break;
+        }
+      }
+      const prevEntry = prevSession?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
       // Compare working sets by position, warmups AND skipped sets excluded on
       // both sides so set N always lines up against set N.
@@ -1649,8 +1672,29 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const regressed = currWorking.some((st, j) => cmp(st, prevWorking[j], false));
       if (regressed) regressions++;
     });
-    return { improvementCount: improvements, regressionCount: regressions };
-  }, [doneSession, store.sessions]);
+    return { improvementCount: improvements, regressionCount: regressions, neededPriorSessionIds: [...neededIds] };
+  }, [doneSession, priorSessions]);
+
+  // A prior session used by the comparison above may sit outside the boot
+  // history window (aggExercises > 0, entries not loaded locally yet). Fetch
+  // those on demand and merge into the store, re-checking entries are still
+  // empty at merge time so a concurrent update never gets clobbered. Same
+  // idiom as fetchSessionEntries usage in SessionDetailScreen /
+  // SessionCompareScreen (screens-lib.jsx).
+  useEffect(() => {
+    if (!neededPriorSessionIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(neededPriorSessionIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => ({
+          ...st,
+          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
+        }));
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [neededPriorSessionIds]);
 
   // Fallback for the flex day-strip dot when a session's cyclePos wasn't
   // persisted (pre-migration 0176, or not yet re-synced on this device): can't

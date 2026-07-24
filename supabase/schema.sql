@@ -221,6 +221,7 @@ CREATE TABLE public.zane_skips (
 CREATE TABLE public.zane_user_settings (
   user_id uuid NOT NULL,
   active_schedule_id text,
+  active_meal_template_id text,   -- Migration 0199: active meal plan pointer (mirrors active_schedule_id)
   cycle_index integer NOT NULL DEFAULT 0,
   last_advanced_date date,
   unit text,
@@ -259,6 +260,7 @@ CREATE TABLE public.zane_user_settings (
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
+  plan_mode boolean NOT NULL DEFAULT false,
   default_checkin_schema jsonb,
   status_mode text,
   status_mode_since timestamp with time zone,
@@ -283,7 +285,8 @@ CREATE TABLE public.zane_user_settings (
   water_coffee_sizes jsonb,
   water_reminder_enabled boolean NOT NULL DEFAULT false,
   water_last_push_at timestamp with time zone,
-  tz_offset_minutes integer
+  tz_offset_minutes integer,
+  meal_reminder_enabled boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -2284,6 +2287,10 @@ CREATE TABLE zane_food_logs (
   -- run of this file would need zane_food_recipes created first.
   recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
   logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
+  logged_unit  jsonb,                                     -- {label, grams} the entry was actually logged in, null if logged in grams/kcal (0202)
+  split_batch  jsonb,                                     -- {id, removedEntries} for a split-into-meals result entry, redundant per sibling, null otherwise (0203)
+  planned      boolean     NOT NULL DEFAULT false,        -- Plan Mode (0196): true = in the timeline but not eaten yet, excluded from daily totals until checked off
+  template_slot_id text,                                  -- Plan Mode (0196): soft back-ref to the template slot this planned entry came from (no FK, advisory only)
   created_at   timestamptz DEFAULT now()
 );
 
@@ -2345,6 +2352,95 @@ ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "zane_food_recipes_own"
   ON zane_food_recipes FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+CREATE POLICY "coach can read client recipes"   ON public.zane_food_recipes FOR SELECT TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client recipes"  ON public.zane_food_recipes FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client recipes" ON public.zane_food_recipes FOR UPDATE TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client recipes" ON public.zane_food_recipes FOR DELETE TO public USING (zane_is_coach_of(user_id));
+
+-- ── Plan Mode meal templates (migration 0197) ───────────────────────────────
+-- Recurring fixum slots that auto-fill each day's plan. Denormalized food/
+-- recipe snapshot (same shape as a food log entry) + fixed hour + day_type
+-- filter. Owner-only, like favorites/recipes.
+CREATE TABLE zane_food_template_slots (
+  id           text        PRIMARY KEY,
+  user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id      text,
+  food_name    text        NOT NULL,
+  brand        text,
+  source       text,                                  -- 'off' | 'usda' | 'custom' | 'recipe' | null
+  quantity_g   numeric     NOT NULL,
+  calories     integer     NOT NULL,
+  protein      numeric     NOT NULL,
+  carbs        numeric     NOT NULL,
+  fat          numeric     NOT NULL,
+  fiber        numeric,
+  recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
+  recipe_id    text,                                  -- soft ref to the source recipe (no FK)
+  logged_total_portions integer,                      -- recipe batch total, recipe slots only
+  hour         integer     NOT NULL DEFAULT 12,       -- 0-23
+  day_type     text        NOT NULL DEFAULT 'any',    -- 'any' | 'training' | 'rest'
+  sort_idx     integer     NOT NULL DEFAULT 0,
+  meal_plan_id text,                                  -- Migration 0199: which meal plan this slot belongs to (soft ref, no FK)
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_template_slots_user_idx ON public.zane_food_template_slots USING btree (user_id, sort_idx);
+
+ALTER TABLE zane_food_template_slots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_template_slots_own"
+  ON zane_food_template_slots FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+-- Coach can read/write a client's slots (a push copies a plan + its slots), migration 0199.
+CREATE POLICY "coach can read client meal slots"   ON zane_food_template_slots FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client meal slots"  ON zane_food_template_slots FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client meal slots" ON zane_food_template_slots FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client meal slots" ON zane_food_template_slots FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- Plan Mode meal plans (migration 0199): named containers (Cut/Bulk), one active
+-- per user (zane_user_settings.active_meal_template_id). Mirrors zane_schedules:
+-- is_template = coach My-Plans/Client-Templates bucket; coach_id attributes a
+-- coach-authored/pushed plan. Slots reference this via meal_plan_id.
+CREATE TABLE zane_food_meal_plans (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  archived    boolean     NOT NULL DEFAULT false,
+  is_template boolean     NOT NULL DEFAULT false,
+  coach_id    uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_meal_plans_user_idx ON public.zane_food_meal_plans USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_meal_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own meal plans"                     ON zane_food_meal_plans FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client meal plans"   ON zane_food_meal_plans FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client meal plans"  ON zane_food_meal_plans FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client meal plans" ON zane_food_meal_plans FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client meal plans" ON zane_food_meal_plans FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- Plan Mode auto-fill markers (migration 0198): one row per (user, date) the
+-- meal template was already auto-materialized for, cross-device. id is
+-- deterministic (`<user_id>_<date>`). Derived device/sync state, kept OUT of
+-- the personal-data backup.
+CREATE TABLE zane_food_template_days (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_template_days_user_idx ON public.zane_food_template_days USING btree (user_id, date);
+
+ALTER TABLE zane_food_template_days ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_template_days_own"
+  ON zane_food_template_days FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
@@ -2766,3 +2862,26 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.admin_schema_inventory() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_schema_inventory() TO service_role;
+
+-- All-time top-N exercises by session-entry count (Migration 0195). The client
+-- only ever holds session.entries for the 70-day boot window plus whatever old
+-- sessions happen to be cached from unrelated detail-view visits, so counting
+-- entries locally under-counts for older accounts.
+CREATE OR REPLACE FUNCTION public.get_top_exercises(p_user_id uuid DEFAULT NULL, p_limit int DEFAULT 5)
+ RETURNS TABLE(ex_id text, session_count bigint)
+ LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
+AS $function$
+  WITH uid AS (SELECT COALESCE(p_user_id, auth.uid()) AS id)
+  SELECT e.ex_id, COUNT(*) AS session_count
+  FROM zane_session_entries e
+  JOIN zane_sessions s ON s.id = e.session_id
+  WHERE e.user_id = (SELECT id FROM uid)
+    AND e.ex_id IS NOT NULL
+    AND s.ended IS NOT NULL
+  GROUP BY e.ex_id
+  ORDER BY session_count DESC
+  LIMIT GREATEST(p_limit, 1);
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) TO authenticated;

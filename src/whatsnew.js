@@ -17,6 +17,26 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.659',
+    date: '2026-07-24',
+    title: 'Meal reminders ⏰',
+    items: [
+      "⏰ Plan Mode can nudge you now: if a planned meal is still unchecked an hour after its time, you get a friendly push to log it. Turn it on under Settings → Health → Meal reminders (needs Plan Mode and notifications on).",
+      "🔕 No spam: at most one nudge per meal, and the moment you check it off it goes quiet.",
+    ],
+  },
+  {
+    id: 'v2.657',
+    date: '2026-07-24',
+    title: 'Plan Mode 🍱',
+    items: [
+      "🍱 Eating the same 5 things every day? Zane's got you covered: flip on Plan Mode (Settings → Health) and every food entry now gets a Log it or Plan it choice, so you can pencil in tomorrow's meals today and just check them off as you go.",
+      "🔁 Set your go-to meals once, breakfast at 8, a shake at 3, whatever your routine is, and they'll auto-fill your day from then on, even split differently for training days vs. rest days if that's how you eat.",
+      "📋 Different phase, different plan: build as many meal plans as you want (Cut, Bulk, Maintenance, you name it), only one is ever active, and switching takes one tap, exactly like your training plan.",
+      "🤝 Coaches: push a meal plan straight to a client, either from Setup → Nutrition on their profile, or right from your own meal plans menu, just like a training plan, with the choice to activate it right away or let them look it over first.",
+    ],
+  },
+  {
     id: 'v2.653',
     date: '2026-07-23',
     title: "Log it, drag it, fix it 🍽️",

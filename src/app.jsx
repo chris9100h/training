@@ -23,10 +23,12 @@ function unseenWhatsNew() {
 // screens-food.jsx): stash the token BEFORE anything else runs, so it survives
 // the login (or even signup + approval) roundtrip a logged-out recipient goes
 // through, then scrub it from the URL so a later reload doesn't re-trigger.
-// Consumed by the RecipeShareSheet overlay once the app is ready; cleared from
-// localStorage as soon as it's read into state below (not only on sheet close),
-// so a backgrounded/killed app (common on iOS) can't leave a stale token behind
-// that re-opens the same old share on the next launch or a different account.
+// Consumed by the RecipeShareSheet overlay once the app is ready (store loaded);
+// kept in localStorage until then and cleared only on actual consumption (sheet
+// close), so a reload/kill during the logged-out recipient's sign-up + approval
+// roundtrip re-reads the still-present token instead of losing the recipe. Worst
+// case a share the user never closed re-offers on the next launch, harmless (the
+// same account-agnostic recipe), which is the accepted cost of not losing it.
 const PENDING_SHARE_KEY = 'logbook-pending-share';
 try {
   const _shareToken = new URLSearchParams(window.location.search).get('share');
@@ -309,12 +311,13 @@ function App() {
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
-      const token = localStorage.getItem(PENDING_SHARE_KEY);
-      // Clear right away, now that the token is consumed into state: the sheet
-      // below still opens off `pendingShare`, but a killed/backgrounded app
-      // can no longer strand the key for the next launch to re-read.
-      if (token) localStorage.removeItem(PENDING_SHARE_KEY);
-      return token;
+      // Read but do NOT remove here: the sheet only opens once `store` is ready
+      // (see below), which for a logged-out recipient is after sign-up +
+      // approval. Removing on first mount stranded the token in React state
+      // only, so any reload/kill during that roundtrip (the common relaunch-
+      // after-approval path) lost the recipe. Keeping it in localStorage lets a
+      // fresh mount re-read it; it's cleared on actual consumption (sheet close).
+      return localStorage.getItem(PENDING_SHARE_KEY);
     } catch (_) { return null; }
   });
   const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
@@ -788,6 +791,15 @@ function App() {
             const serverRecipeIds = new Set((fresh.foodRecipes || []).map(r => r.id));
             const baseRecipeIds = base ? new Set((base.foodRecipes || []).map(r => r.id)) : null;
             const localOnlyRecipes = (cur.foodRecipes || []).filter(x => !serverRecipeIds.has(x.id) && !baseRecipeIds?.has(x.id));
+            const serverTemplateSlotIds = new Set((fresh.foodTemplateSlots || []).map(t => t.id));
+            const baseTemplateSlotIds = base ? new Set((base.foodTemplateSlots || []).map(t => t.id)) : null;
+            const localOnlyTemplateSlots = (cur.foodTemplateSlots || []).filter(x => !serverTemplateSlotIds.has(x.id) && !baseTemplateSlotIds?.has(x.id));
+            const serverTemplateDayIds = new Set((fresh.foodTemplateDays || []).map(d => d.id));
+            const baseTemplateDayIds = base ? new Set((base.foodTemplateDays || []).map(d => d.id)) : null;
+            const localOnlyTemplateDays = (cur.foodTemplateDays || []).filter(x => !serverTemplateDayIds.has(x.id) && !baseTemplateDayIds?.has(x.id));
+            const serverMealPlanIds = new Set((fresh.foodMealPlans || []).map(p => p.id));
+            const baseMealPlanIds = base ? new Set((base.foodMealPlans || []).map(p => p.id)) : null;
+            const localOnlyMealPlans = (cur.foodMealPlans || []).filter(x => !serverMealPlanIds.has(x.id) && !baseMealPlanIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -824,6 +836,12 @@ function App() {
             const delFavIds = baseFavIds ? new Set([...baseFavIds].filter(id => !curFavIdSet.has(id))) : null;
             const curRecipeIdSet = new Set((cur.foodRecipes || []).map(r => r.id));
             const delRecipeIds = baseRecipeIds ? new Set([...baseRecipeIds].filter(id => !curRecipeIdSet.has(id))) : null;
+            const curTemplateSlotIdSet = new Set((cur.foodTemplateSlots || []).map(t => t.id));
+            const delTemplateSlotIds = baseTemplateSlotIds ? new Set([...baseTemplateSlotIds].filter(id => !curTemplateSlotIdSet.has(id))) : null;
+            const curTemplateDayIdSet = new Set((cur.foodTemplateDays || []).map(d => d.id));
+            const delTemplateDayIds = baseTemplateDayIds ? new Set([...baseTemplateDayIds].filter(id => !curTemplateDayIdSet.has(id))) : null;
+            const curMealPlanIdSet = new Set((cur.foodMealPlans || []).map(p => p.id));
+            const delMealPlanIds = baseMealPlanIds ? new Set([...baseMealPlanIds].filter(id => !curMealPlanIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -883,6 +901,10 @@ function App() {
             // the server's whole tuple.
             const PLAN_POS_FIELDS = ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate'];
             const planPosSrc = (!base || PLAN_POS_FIELDS.some(f => cur[f] !== base[f])) ? cur : fresh;
+            // Same coupled-pointer treatment for the active meal plan (no cycle
+            // fields, just the scalar), so a coach's push-and-activate on the
+            // server isn't reverted by a stale local value, and vice versa.
+            const mealPlanPosSrc = (!base || cur.activeMealTemplateId !== base.activeMealTemplateId) ? cur : fresh;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -913,6 +935,7 @@ function App() {
               // still holds the old kg/lbs value; and the water config above.
               settings: mergedSettings,
               activeScheduleId: planPosSrc.activeScheduleId,
+              activeMealTemplateId: mealPlanPosSrc.activeMealTemplateId,
               cycleIndex: planPosSrc.cycleIndex,
               cycleStartDate: planPosSrc.cycleStartDate,
               lastAdvancedDate: planPosSrc.lastAdvancedDate,
@@ -928,6 +951,9 @@ function App() {
               foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
+              foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
+              foodTemplateDays: [...localOnlyTemplateDays, ...mergeById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds)],
+              foodMealPlans: [...localOnlyMealPlans, ...mergeById(fresh.foodMealPlans, cur.foodMealPlans, base?.foodMealPlans, delMealPlanIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
