@@ -3936,12 +3936,11 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // untouched.
 function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
   const projectionLine = projected ? (
-    <FdProjectionLine planned={Math.round(projected.calories - dayTotals.calories)} projected={projected.calories} goal={goalCalories}
-      macros={{
-        protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
-        carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
-        fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
-      }} />
+    <FdProjectionLine macros={{
+      protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
+      carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
+      fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
+    }} />
   ) : null;
   return dayTarget ? (
     <>
@@ -3975,37 +3974,26 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
     </div>
   );
 }
-// Plan Mode projection: "+N kcal planned -> M projected (of GOAL)". Sits under
-// the real totals as a lighter, dashed-topped line so it reads as a forecast,
-// not part of the logged truth above it.
-function FdProjectionLine({ planned, projected, goal, macros }) {
+// Plan Mode projection: still-to-eat macros vs. the full logged+planned
+// projection, each in its own centered column. Sits under the real totals as
+// a lighter, dashed-topped table so it reads as a forecast, not part of the
+// logged truth above it. The old standalone "+N kcal projected" line was
+// dropped as redundant once this table shipped.
+function FdProjectionLine({ macros }) {
   return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--accent)', fontFamily: UI.fontUi }}>PLANNED</span>
-        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>
-          +{planned} kcal → <span style={{ color: UI.ink, fontWeight: 600 }}>{projected}</span>{goal ? <span style={{ color: UI.inkFaint }}> / {Math.round(goal)}</span> : ''} projected
-        </span>
-      </div>
-      {/* Bodybuilders track macros, not just kcal: a small two-column table,
-          still-to-eat vs. the full logged+planned projection, each centered
-          under its own header. */}
-      {macros && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-          <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `1px solid ${UI.hairStrong}` }}>
-            <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
-            </div>
-          </div>
-          <div style={{ textAlign: 'center', paddingLeft: 10 }}>
-            <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
-            </div>
-          </div>
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `1px solid ${UI.hairStrong}` }}>
+        <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
         </div>
-      )}
+      </div>
+      <div style={{ textAlign: 'center', paddingLeft: 10 }}>
+        <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+        </div>
+      </div>
     </div>
   );
 }
