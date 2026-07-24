@@ -285,7 +285,8 @@ CREATE TABLE public.zane_user_settings (
   water_coffee_sizes jsonb,
   water_reminder_enabled boolean NOT NULL DEFAULT false,
   water_last_push_at timestamp with time zone,
-  tz_offset_minutes integer
+  tz_offset_minutes integer,
+  meal_reminder_enabled boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (

@@ -1866,6 +1866,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
               Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
             </div>
+            {store.settings?.planMode && (
+              <div style={{ marginTop: 16 }}>
+                <Row label="Meal reminders" first>
+                  <Toggle on={!!store.settings?.mealReminderEnabled} onToggle={() => {
+                    const next = !store.settings?.mealReminderEnabled;
+                    // Push not active, so send them to the push sheet first, same
+                    // as the training reminder toggle does, instead of enabling a
+                    // reminder that can never be delivered.
+                    if (next && !pushEnabled) { setHealthSheet(false); setPushSheet(true); return; }
+                    setStore(s => ({ ...s, settings: { ...s.settings, mealReminderEnabled: next } }));
+                  }} />
+                </Row>
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                  Get a nudge when a planned meal is still unlogged an hour after its time. Needs notifications on.
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: 16 }}>

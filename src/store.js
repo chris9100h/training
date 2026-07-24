@@ -396,6 +396,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     water_bottle_enabled: sett.waterBottleEnabled ?? true,
     water_bottle_ml: sett.waterBottleMl ?? 1500,
     water_reminder_enabled: sett.waterReminderEnabled ?? false,
+    meal_reminder_enabled: sett.mealReminderEnabled ?? false,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -1308,6 +1309,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         waterBottleEnabled: sett.water_bottle_enabled ?? true,
         waterBottleMl: sett.water_bottle_ml ?? 1500,
         waterReminderEnabled: sett.water_reminder_enabled ?? false,
+        mealReminderEnabled: sett.meal_reminder_enabled ?? false,
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
@@ -1895,6 +1897,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.waterBottleEnabled     !== next.settings?.waterBottleEnabled ||
     prev.settings?.waterBottleMl          !== next.settings?.waterBottleMl      ||
     prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
+    prev.settings?.mealReminderEnabled    !== next.settings?.mealReminderEnabled ||
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
@@ -1925,6 +1928,7 @@ async function syncStore(prev, next, userId) {
       custom_day_types: next.customDayTypes ?? [],
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
+      meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,

@@ -468,6 +468,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // is ever planned, so loggedEntries === dayEntries and every total below is
   // exactly what it was before.
   const planMode = !!store.settings?.planMode;
+  // Keep the user's UTC offset fresh while in Plan Mode: the meal-reminder cron
+  // places "now" on the local clock via tzOffsetMinutes, and a Plan Mode user
+  // may never open the Water tab (the other writer of this value). Only writes
+  // when it actually changed (travel / DST). Same one-liner as WaterScreen.
+  useEffectFd(() => {
+    if (!planMode) return;
+    const off = -new Date().getTimezoneOffset();
+    if (store.settings?.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
+  }, [planMode]); // eslint-disable-line
   // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
   // mode. Controls the recurring fixum slots that auto-fill each day's plan.
   const [templateOpen, setTemplateOpen] = useStateFd(false);
