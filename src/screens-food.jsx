@@ -759,6 +759,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour]);
 
+  // Same category/hour grouping for the Manage-entries picker (see the
+  // copyMove* sheet below), but keeps planned entries (this picker acts on
+  // the whole day, not just the logged truth) and is always chronological:
+  // byHour's own per-hour buckets already sort ascending by time, and hours
+  // are walked low to high, unlike dayEntries itself (newest-first, for the
+  // live timeline further down).
+  const copyMoveCategories = useMemoFd(() => {
+    return FD_MEAL_CATEGORIES.map(cat => {
+      const entries = [];
+      for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
+      return { ...cat, entries };
+    }).filter(cat => cat.entries.length > 0);
+  }, [byHour]);
+
   // Flat drag-reorder slot list for the whole timeline, in EXACT render order
   // (category by category, hour by hour): one slot per logged entry, or one
   // placeholder slot for an hour with nothing logged (so an empty hour still
@@ -1073,6 +1087,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   function toggleCopyMoveId(id) {
     setCopyMoveIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  }
+  // Backdrop tap used to drop the whole picker (selection, target date,
+  // mode) silently. Same "Discard picks?" wording/pattern as the staged-
+  // items guard (requestLeaveFood) and FdIngredientPicker's own; phrased
+  // mode-agnostically since closing without submitting leaves every entry
+  // untouched regardless of whether Copy, Move or Delete was selected.
+  async function requestCloseCopyMove() {
+    if (copyMoveIds.length && !await confirm(`${copyMoveIds.length} picked ${copyMoveIds.length === 1 ? 'entry' : 'entries'} will be unselected.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
+    setCopyMoveOpen(false);
   }
   // Duplicates the selected entries onto another date at their original
   // time-of-day (copy), or does the same and also removes them from
@@ -2597,25 +2620,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
-      <Sheet open={copyMoveOpen} onClose={() => setCopyMoveOpen(false)} title="Manage entries" titleColor="var(--accent)">
+      <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
           {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
-          {dayEntries.map(e => {
-            const checked = copyMoveIds.includes(e.id);
-            return (
-              <button key={e.id} onClick={() => toggleCopyMoveId(e.id)} style={fdCopyMoveRow(checked)}>
-                <div style={fdCopyMoveCheck(checked)}>
-                  {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
-                </div>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{e.foodName}</div>
-                  <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
-                </div>
-              </button>
-            );
-          })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
+          {copyMoveCategories.map(cat => (
+            <div key={cat.id}>
+              <Bezel style={{ marginBottom: 6 }}>{cat.label}</Bezel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {cat.entries.map(e => {
+                  const checked = copyMoveIds.includes(e.id);
+                  return (
+                    <button key={e.id} onClick={() => toggleCopyMoveId(e.id)} style={fdCopyMoveRow(checked)}>
+                      <div style={fdCopyMoveCheck(checked)}>
+                        {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                        <div style={fdEntryName}>{e.foodName}</div>
+                        <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         {copyMoveMode !== 'delete' && (
           <Field label="To" style={{ marginBottom: 14 }}>
