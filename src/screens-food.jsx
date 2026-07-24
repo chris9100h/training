@@ -149,9 +149,38 @@ const FD_MEAL_CATEGORIES = [
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
-  const minDate = fdShiftDate(today, -14);
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
+
+  // store.foodLogs only carries FOOD_HISTORY_WINDOW_DAYS from boot; scrolling
+  // further back needs a lazy fetch (mirrors fetchSessionEntries for old
+  // session details), so history stays browsable without limit instead of
+  // silently looking empty. loadedOldDates avoids re-fetching a date already
+  // checked this session, whether or not it actually had entries.
+  const foodHistCutoff = useMemoFd(() => LB.historyWindowCutoffISO(new Date(), LB.FOOD_HISTORY_WINDOW_DAYS), []);
+  const [loadedOldDates, setLoadedOldDates] = useStateFd(() => new Set());
+  useEffectFd(() => {
+    if (curDate >= foodHistCutoff || loadedOldDates.has(curDate)) return;
+    let on = true;
+    LB.fetchFoodLogsForDates(userId, [curDate]).then(byDate => {
+      if (!on) return;
+      setLoadedOldDates(prev => new Set(prev).add(curDate));
+      const entries = byDate[curDate];
+      if (!entries || !entries.length) return;
+      // Merge fetched (authoritative) entries with any not-yet-synced local
+      // entry for the same date, e.g. the user logged something for this old
+      // date while the fetch was in flight: fetched wins on id collision,
+      // anything local-only survives alongside it, nothing is dropped either way.
+      setStore(s => {
+        const list = s.foodLogs || [];
+        const localForDate = list.filter(l => l.date === curDate);
+        const fetchedIds = new Set(entries.map(e => e.id));
+        const extraLocal = localForDate.filter(l => !fetchedIds.has(l.id));
+        return { ...s, foodLogs: [...list.filter(l => l.date !== curDate), ...entries, ...extraLocal] };
+      });
+    }).catch(() => {});
+    return () => { on = false; };
+  }, [curDate, foodHistCutoff, userId]);
 
   // Coach-assigned macros, same source and priority HealthScreen uses (coach
   // macros win over personal targets when both exist, see effectiveMacroTargets):
@@ -470,7 +499,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const shiftDay = (delta) => setCurDate(d => {
     const next = fdShiftDate(d, delta);
-    return (next > today || next < minDate) ? d : next;
+    return next > today ? d : next;
   });
 
   // Writes the day's summed macros into the daily log, same one-call shape
@@ -1527,12 +1556,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
         {tab === 'log' && (
           <>
-            {/* Day nav */}
+            {/* Day nav: unbounded backward, no reason to cap it now that curDate
+                lazy-fetches outside the boot window. Calendar button jumps
+                straight to a date instead of stepping one day at a time (same
+                icon-button + overlaid invisible date input idiom Health uses,
+                for iOS compat: a native picker needs a real <input type="date">
+                under the tap, can't be opened from a plain button). */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <button onClick={() => shiftDay(-1)} disabled={curDate <= minDate} aria-label="Previous day" style={fdNavBtn(curDate <= minDate)}>
+              <button onClick={() => shiftDay(-1)} aria-label="Previous day" style={fdNavBtn(false)}>
                 <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
               </button>
-              <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
+                <div style={{ position: 'relative', width: 26, height: 26, flexShrink: 0 }}>
+                  <button aria-label="Jump to date" style={{
+                    width: '100%', height: '100%', borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+                    background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
+                  </button>
+                  <input type="date" value={curDate} max={today}
+                    onChange={e => e.target.value && setCurDate(e.target.value)}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
               <button onClick={() => shiftDay(1)} disabled={curDate >= today} aria-label="Next day" style={fdNavBtn(curDate >= today)}>
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
               </button>
@@ -2028,7 +2078,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           })}
         </div>
         <Field label="To" style={{ marginBottom: 14 }}>
-          <input type="date" value={copyMoveTarget} min={minDate} max={today} onChange={e => setCopyMoveTarget(e.target.value)}
+          <input type="date" value={copyMoveTarget} max={today} onChange={e => setCopyMoveTarget(e.target.value)}
             style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
         </Field>
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>

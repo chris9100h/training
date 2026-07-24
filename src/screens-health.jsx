@@ -792,10 +792,31 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   // classic scripts sharing one global scope, so a same-named top-level
   // const in both throws "already been declared" and silently kills every
   // other declaration in whichever of the two loads second.
-  const foodOutsideWindow = healthDayDiff(date, LB.todayISO()) > LB.FOOD_HISTORY_WINDOW_DAYS;
-  const foodUnverifiable = foodOutsideWindow && !foodHasTrackerEntries;
+  //
+  // Dates outside FOOD_HISTORY_WINDOW_DAYS never arrive from boot, so
+  // foodHasTrackerEntries above can't see them yet: lazy-fetch date on demand
+  // (mirrors the fetch FoodScreen uses for its own history scrollback) so the
+  // lock reflects the true state instead of guessing. foodChecking holds the
+  // lock back while that fetch is in flight, rather than briefly flashing
+  // "unlocked" for a day that turns out to have entries a moment later.
+  const foodHistCutoff = useMemoH(() => LB.historyWindowCutoffISO(new Date(), LB.FOOD_HISTORY_WINDOW_DAYS), []);
+  const [foodChecking, setFoodChecking] = useStateH(false);
+  useEffectH(() => {
+    if (date >= foodHistCutoff) { setFoodChecking(false); return; }
+    setFoodChecking(true);
+    let on = true;
+    LB.fetchFoodLogsForDates(userId, [date]).then(byDate => {
+      if (!on) return;
+      setFoodChecking(false);
+      const entries = byDate[date];
+      if (entries && entries.length) {
+        setStore(s => (s.foodLogs || []).some(l => l.date === date) ? s : { ...s, foodLogs: [...(s.foodLogs || []), ...entries] });
+      }
+    }).catch(() => { if (on) setFoodChecking(false); });
+    return () => { on = false; };
+  }, [date, foodHistCutoff, userId]);
   const [foodUnlocked, setFoodUnlocked] = useStateH(false);
-  const foodLocked = (foodHasTrackerEntries || foodOutsideWindow) && !foodUnlocked;
+  const foodLocked = (foodHasTrackerEntries || foodChecking) && !foodUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1184,9 +1205,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const requestFoodUnlock = async () => {
     const ok = await confirm(
-      foodUnverifiable
-        ? "This day is more than 30 days old, so the app can't check locally whether the Food Tracker has entries for it. If it does, editing here will be overwritten the next time you log food there."
-        : "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
+      "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
       { title: 'Overwrite food tracker?', ok: 'Continue', cancel: 'Cancel' }
     );
     if (ok) setFoodUnlocked(true);
@@ -1326,10 +1345,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || ''}</div>
             : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : ''} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
         </div>
-        {foodLocked && (
+        {foodChecking ? (
+          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Checking Food Tracker…</span>
+          </div>
+        ) : foodHasTrackerEntries && !foodUnlocked && (
           <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
             <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
-            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>{foodUnverifiable ? "Can't verify locally, over 30 days old, tap to override" : 'Managed by the Food Tracker, tap to override'}</span>
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Food Tracker, tap to override</span>
           </button>
         )}
         <div>

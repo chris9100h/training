@@ -1143,15 +1143,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Food tracker per-entry logs (migration 0186). Denormalized at write
     // time: name/brand/macros are copied, never re-derived from foodId.
     // numeric columns come back as strings from PostgREST, parseFloat them.
-    foodLogs: (foodLogsRes?.data || []).map(l => ({
-      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
-      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
-      quantityG: parseFloat(l.quantity_g), calories: l.calories,
-      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
-      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
-      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
-      createdAt: l.created_at,
-    })),
+    foodLogs: (foodLogsRes?.data || []).map(mapFoodLogRow),
     // Food Tracker quick-add (migration 0187), own store only.
     foodFavorites: (foodFavoritesRes?.data || []).map(f => ({
       id: f.id, foodId: f.food_id ?? null, foodName: f.food_name, brand: f.brand ?? null,
@@ -2611,6 +2603,44 @@ async function fetchSessionEntries(sessionIds) {
   const out = {};
   for (const id of Object.keys(bySession)) out[id] = mapEntryRows(bySession[id]);
   return out;
+}
+
+function mapFoodLogRow(l) {
+  return {
+    id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+    foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+    quantityG: parseFloat(l.quantity_g), calories: l.calories,
+    protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+    fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+    recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
+    createdAt: l.created_at,
+  };
+}
+
+// Lazy-load food log entries for specific dates outside the boot window
+// (FOOD_HISTORY_WINDOW_DAYS), mirroring fetchSessionEntries: caller merges
+// the result into store.foodLogs. userId is explicit here (unlike
+// fetchSessionEntries, which scopes safely via a unique session_id) because
+// a bare date is NOT unique to one user: filtering by date alone would let
+// RLS return a mix of the caller's own rows and a coached client's rows that
+// happen to share a date. Every requested date gets a key in the result, even
+// when empty, so the caller can tell "fetched, genuinely no entries" apart
+// from "never asked" (see requestFoodUnlock in screens-health.jsx).
+async function fetchFoodLogsForDates(userId, dates) {
+  const ds = [...new Set((dates || []).filter(Boolean))];
+  if (!ds.length || !userId) return {};
+  const { data, error } = await _supabase.from('zane_food_logs')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, created_at')
+    .eq('user_id', userId)
+    .in('date', ds);
+  if (error) throw error;
+  const byDate = {};
+  for (const l of (data || [])) {
+    if (!byDate[l.date]) byDate[l.date] = [];
+    byDate[l.date].push(mapFoodLogRow(l));
+  }
+  for (const d of ds) if (!byDate[d]) byDate[d] = [];
+  return byDate;
 }
 
 function isWeekdayPlan(sch) {
@@ -4865,15 +4895,7 @@ async function refreshHealthLogs(userId) {
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
-    foodLogs: (foodRes?.data || []).map(l => ({
-      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
-      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
-      quantityG: parseFloat(l.quantity_g), calories: l.calories,
-      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
-      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
-      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
-      createdAt: l.created_at,
-    })),
+    foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
   };
 }
 
@@ -6907,7 +6929,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
+  refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
