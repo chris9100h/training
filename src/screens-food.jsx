@@ -254,33 +254,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Plan Mode meal templates: on opening today, auto-materialize each matching
   // template slot (by day-type: any / training / rest) as a planned entry at
   // its fixed hour, unless the day already has one from that slot. Runs once
-  // per day per device via a localStorage marker (logbook-food-template-applied),
-  // so deleting an auto-planned entry doesn't make it reappear on reopen. Only
-  // for TODAY: a backdated day is never auto-filled. Cross-device caveat: a
-  // second device opening the same day for the first time re-materializes only
-  // slots whose synced entries were deleted elsewhere (the templateSlotId dedup
-  // below skips the rest), an accepted rarity for an opt-in power feature.
+  // per day, tracked CROSS-DEVICE by a synced marker row (store.foodTemplateDays,
+  // id `<userId>_<date>`), so deleting an auto-planned entry never makes it
+  // reappear on reopen, on any device. Only for TODAY: a backdated day is never
+  // auto-filled. The manual "Apply to today" button (FoodTemplateScreen) is the
+  // escape hatch to pull the fixums back after clearing the day on purpose.
   useEffectFd(() => {
     if (!planMode || curDate !== today) return;
     const slots = store.foodTemplateSlots || [];
     if (!slots.length) return;
-    let applied;
-    try { applied = new Set(JSON.parse(localStorage.getItem('logbook-food-template-applied') || '[]')); }
-    catch (_) { applied = new Set(); }
-    if (applied.has(today)) return;
+    const markerId = `${userId}_${today}`;
+    if ((store.foodTemplateDays || []).some(d => d.id === markerId)) return;
     const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
     const toAdd = slots
       .filter(s => fdSlotMatchesDate(s, store, today) && !existingSlotIds.has(s.id))
       .map(s => fdMaterializeSlotEntry(s, today));
-    // Mark applied even when nothing was added (all slots already present), so
-    // the effect never re-runs for today. Prune old dates to keep the marker
-    // from growing without bound.
-    applied.add(today);
-    const cutoff = fdShiftDate(today, -60);
-    try { localStorage.setItem('logbook-food-template-applied', JSON.stringify([...applied].filter(d => d >= cutoff))); } catch (_) {}
-    // Planned entries never touch the daily log, so no patchDaily here.
-    if (toAdd.length) setStore(s => ({ ...s, foodLogs: [...toAdd, ...(s.foodLogs || [])] }));
-  }, [planMode, curDate, today, store.foodTemplateSlots]);
+    setStore(s => {
+      // Re-check inside the updater against a double-run race (marker may have
+      // landed between read and commit).
+      if ((s.foodTemplateDays || []).some(d => d.id === markerId)) return s;
+      return {
+        ...s,
+        foodTemplateDays: [...(s.foodTemplateDays || []), { id: markerId, date: today }],
+        // Planned entries never touch the daily log, so no patchDaily here.
+        foodLogs: toAdd.length ? [...toAdd, ...(s.foodLogs || [])] : (s.foodLogs || []),
+      };
+    });
+  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays]);
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -1414,6 +1414,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
     setEditingEntry(entry);
+    setQtyEditPlanned(!!entry.planned);
     setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : totalPortions, totalPortions });
   }
   // Live macro preview for the portions prompt, same scaling math
@@ -1484,10 +1485,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // and keeps its original date/time instead of staging a new one, same
     // in-place-update shape confirmLogFood uses for a non-recipe entry.
     if (editingEntry) {
-      // Portions-only edit: keep the entry's existing planned/logged status
-      // (a recipe entry's status is toggled from the timeline's check button,
-      // not this sheet, which only rescales portions).
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: !!editingEntry.planned };
+      // planned/logged comes from the sheet's own switch (qtyEditPlanned,
+      // seeded from the entry in openEditRecipeEntry), same as the non-recipe
+      // edit path.
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
@@ -2352,6 +2353,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </span>
               </div>
             )}
+            {editingEntry && planMode && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
+                {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
+                  <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
+                ))}
+              </div>
+            )}
             {editingEntry ? (
               <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
                 Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
@@ -2605,6 +2613,28 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
     setStore(s => ({ ...s, foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id) }));
   }
 
+  // Manually pull the template back into today's plan: the escape hatch for
+  // when the day's entries were cleared (on purpose or by accident) and the
+  // user changes their mind. Adds every matching slot not already present today
+  // as a planned entry, deduped by templateSlotId, bypassing the once-per-day
+  // auto-fill marker (which is exactly what's stopping auto-fill from redoing
+  // it). Closes back to the log so the result is visible right away.
+  async function applyToToday() {
+    const todayISO = LB.todayISO();
+    const present = new Set((store.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
+    const pending = (store.foodTemplateSlots || []).filter(slot => fdSlotMatchesDate(slot, store, todayISO) && !present.has(slot.id));
+    if (!pending.length) {
+      await confirm('Your template meals are already in today’s plan.', { title: 'Nothing to add', ok: 'OK', cancel: null });
+      return;
+    }
+    setStore(s => {
+      const present2 = new Set((s.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
+      const entries = (s.foodTemplateSlots || []).filter(slot => fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
+      return entries.length ? { ...s, foodLogs: [...entries, ...(s.foodLogs || [])] } : s;
+    });
+    onClose();
+  }
+
   // Live macros for the config sheet. A food slot scales its per-100g base by
   // the typed grams; a recipe slot (add only) scales the recipe by portions,
   // exactly like confirmRecipeLog. A recipe EDIT keeps the slot's stored macros
@@ -2700,6 +2730,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
           Your recurring meals. Each slot auto-fills as a planned entry when you open its day, filtered by day type. Check them off as you eat.
         </div>
+        {slots.length > 0 && (
+          <Btn kind="ghost" onClick={applyToToday} style={{ width: '100%' }}>
+            <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
+          </Btn>
+        )}
         {slots.length === 0 ? (
           <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
             <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal

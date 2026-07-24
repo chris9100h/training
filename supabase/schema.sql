@@ -2384,6 +2384,25 @@ CREATE POLICY "zane_food_template_slots_own"
   ON zane_food_template_slots FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
+-- Plan Mode auto-fill markers (migration 0198): one row per (user, date) the
+-- meal template was already auto-materialized for, cross-device. id is
+-- deterministic (`<user_id>_<date>`). Derived device/sync state, kept OUT of
+-- the personal-data backup.
+CREATE TABLE zane_food_template_days (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_template_days_user_idx ON public.zane_food_template_days USING btree (user_id, date);
+
+ALTER TABLE zane_food_template_days ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_template_days_own"
+  ON zane_food_template_days FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
 -- One row per shared recipe, keyed by an unguessable token that doubles as the
 -- deep link (.../?share=<token>). `recipe` is a jsonb snapshot taken when the

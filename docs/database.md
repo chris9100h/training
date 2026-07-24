@@ -327,6 +327,14 @@ Plan-Mode-Meal-Template (Migration 0197): wiederkehrende „Fixum"-Slots, die de
 - Store field: `store.foodTemplateSlots`. Gleiches Collection-Sync-/Boot-Merge-Muster wie `zane_food_recipes`.
 - RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0197.
 
+### `zane_food_template_days`
+
+Plan-Mode-Auto-Fill-Marker (Migration 0198): eine Zeile je (User, Tag), für den das Meal-Template bereits automatisch materialisiert wurde, **geräteübergreifend** (ersetzt einen früheren Per-Gerät-localStorage-Flag). Verhindert, dass ein gelöschter geplanter Eintrag beim erneuten Öffnen auf irgendeinem Gerät wieder auftaucht. Der „Apply to today"-Button (`FoodTemplateScreen`) ist die manuelle Escape-Hatch, um die Fixums nach bewusstem Leeren zurückzuholen.
+
+- `id` (text, PK, deterministisch `<user_id>_<date>`, damit zwei Geräte denselben Tag idempotent upserten), `user_id` (uuid), `date` (text, YYYY-MM-DD), `created_at` (timestamptz)
+- Store field: `store.foodTemplateDays`. Synchronisiert (Boot-Load auf jüngere Tage gefenstert, syncStore-Diff, Boot-Merge), aber **nicht im Backup** (abgeleiteter Geräte-/Sync-Status, EXCLUDED in `tools/check-backup-coverage.cjs`).
+- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0198.
+
 ### `zane_recipe_shares`
 
 Share-Links für Rezepte (Share-Button im Recipes-Tab des Food Trackers). Eine Zeile pro geteiltem Rezept, gekeyt über einen nicht erratbaren Token, der zugleich der Deep-Link ist (`…/?share=<token>`). `recipe` ist ein jsonb-**Snapshot** zum Zeitpunkt des Teilens (`{ name, portions, items }`, Shape wie bei `zane_food_recipes`): der Link funktioniert weiter, wenn der Sharer das Original später editiert oder löscht, und leakt umgekehrt keine späteren Änderungen. Erneutes Teilen desselben Rezepts refresht den Snapshot und liefert **denselben** Token (Upsert über `user_id`+`recipe_id`), Re-Shares stapeln also keine Zeilen.

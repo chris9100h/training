@@ -955,13 +955,17 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
     isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    // Plan Mode auto-fill markers (migration 0198): which days the template was
+    // already auto-materialized for, cross-device. Only recent days matter (the
+    // fill effect only ever runs for today), so window like the food logs.
+    isCoachLoad ? null : _supabase.from('zane_food_template_days').select('id, date').eq('user_id', userId).gte('date', foodHistCutoff),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1002,6 +1006,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
   if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
+  if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1172,6 +1177,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
     })),
     foodTemplateSlots: (foodTemplateSlotsRes?.data || []).map(mapTemplateSlotRow),
+    foodTemplateDays: (foodTemplateDaysRes?.data || []).map(d => ({ id: d.id, date: d.date })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
@@ -1703,6 +1709,12 @@ async function syncStore(prev, next, userId) {
     const { upsert, removed } = diffCollectionById(prev.foodTemplateSlots, next.foodTemplateSlots);
     if (upsert.length) ops.push(_supabase.from('zane_food_template_slots').upsert(upsert.map(templateSlotRow(userId))));
     if (removed.length) ops.push(_supabase.from('zane_food_template_slots').delete().in('id', removed.map(t => t.id)));
+  }
+
+  if (prev.foodTemplateDays !== next.foodTemplateDays) {
+    const { upsert, removed } = diffCollectionById(prev.foodTemplateDays, next.foodTemplateDays);
+    if (upsert.length) ops.push(_supabase.from('zane_food_template_days').upsert(upsert.map(d => ({ id: d.id, user_id: userId, date: d.date }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_template_days').delete().in('id', removed.map(d => d.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
