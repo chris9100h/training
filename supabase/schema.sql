@@ -2351,6 +2351,11 @@ CREATE POLICY "zane_food_recipes_own"
   ON zane_food_recipes FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
+CREATE POLICY "coach can read client recipes"   ON public.zane_food_recipes FOR SELECT TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client recipes"  ON public.zane_food_recipes FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client recipes" ON public.zane_food_recipes FOR UPDATE TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client recipes" ON public.zane_food_recipes FOR DELETE TO public USING (zane_is_coach_of(user_id));
+
 -- ── Plan Mode meal templates (migration 0197) ───────────────────────────────
 -- Recurring fixum slots that auto-fill each day's plan. Denormalized food/
 -- recipe snapshot (same shape as a food log entry) + fixed hour + day_type

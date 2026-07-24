@@ -1183,6 +1183,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     reAddFromRecent(entry);
   }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
+  // Backdrop tap on this sheet used to discard a typed (or scan-prefilled)
+  // custom item silently. This sheet only ever opens empty or freshly
+  // scan-prefilled (never to re-edit an already-saved entry, see
+  // openEditEntry), so "anything typed" is a safe dirty check with no
+  // false positives.
+  async function requestCloseCustomSheet() {
+    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim();
+    if (dirty && !await confirm("This item won't be saved.", { title: 'Discard item?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeCustomSheet();
+  }
 
   // Build the entry the open sheet describes right now (without logging it), so
   // both the log/ingredient action and the favorite toggle work off the same
@@ -1297,6 +1307,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       ...s,
       foodFavorites: (s.foodFavorites || []).map(f => f.id === id ? { ...f, units } : f),
     }));
+    closeEditFavorite();
+  }
+  // Backdrop tap used to drop a removed/added unit (and any pending new-unit
+  // typing) silently, since edits here only land in the store via the
+  // explicit Save button. Compared against the favorite's own stored units,
+  // not "anything present", so a sheet that was simply opened and looked at
+  // never false-triggers this.
+  async function requestCloseEditFavorite() {
+    const fav = (store.foodFavorites || []).find(f => f.id === editFavId);
+    const dirty = JSON.stringify(editUnits) !== JSON.stringify(fav?.units || []) || editUnitNewLabel.trim() || editUnitNewGrams.trim();
+    if (dirty && !await confirm("Your changes to these units won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     closeEditFavorite();
   }
 
@@ -2189,7 +2210,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={closeCustomSheet} title="Custom item" titleColor="var(--accent)">
+      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)">
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -2268,7 +2289,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
-      <Sheet open={!!editFavId} onClose={closeEditFavorite} title="Units" titleColor="var(--accent)">
+      <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
           Add one or more units and relogging this favorite offers a picker (grams or a count of one of them) instead of always typing grams.
         </div>
@@ -2628,6 +2649,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerQuery, setPickerQuery] = useStateFd('');
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
+  // Snapshot of the draft as it was opened, to detect unsaved edits on
+  // backdrop-close (same pattern as RecipeEditorScreen's initialSnap).
+  const draftInitialSnap = useRefFd(null);
+  const snapDraft = d => JSON.stringify({ gramsStr: d.gramsStr, portions: d.portions, hour: d.hour, dayType: d.dayType });
 
   // Coach mode mirrors the training PlanScreen: a My Plans / Client Templates
   // split (by isTemplate), and a plan can be pushed to a client.
@@ -2646,14 +2671,19 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
   const plans = useMemoFd(() => (store.foodMealPlans || []).filter(p => !p.archived && inBucket(p)), [store.foodMealPlans, isCoach, planSubTab]);
   const activeId = store.activeMealTemplateId;
+  // List/detail split mirroring PlanScreen + PlanViewerScreen: viewedPlanId
+  // null means the list is showing, set means a plan's own content is showing.
   const [viewedPlanId, setViewedPlanId] = useStateFd(null);
-  const [planSheet, setPlanSheet] = useStateFd(null);     // plan actions menu target
+  const [manageOpen, setManageOpen] = useStateFd(false);  // Duplicate/Export/Delete menu
+  const [coachOpen, setCoachOpen] = useStateFd(false);    // Push to client/Mark as client template menu
   const [nameDraft, setNameDraft] = useStateFd(null);     // { id: string|null, name } for create/rename
+  // Always land back on the list on (re)open, and bounce back to it if the
+  // viewed plan disappears from the current bucket (deleted, archived, or
+  // switched out of view by a My Plans <-> Client Templates toggle).
   useEffectFd(() => {
-    if (!open) return;
-    if (viewedPlanId && plans.some(p => p.id === viewedPlanId)) return;
-    setViewedPlanId(activeId && plans.some(p => p.id === activeId) ? activeId : (plans[0]?.id ?? null));
-  }, [open, plans, activeId]);
+    if (!open) { setViewedPlanId(null); return; }
+    if (viewedPlanId && !plans.some(p => p.id === viewedPlanId)) setViewedPlanId(null);
+  }, [open, plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const viewedPlan = plans.find(p => p.id === viewedPlanId) || null;
 
   const slots = useMemoFd(
@@ -2690,12 +2720,50 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const nextActive = s.activeMealTemplateId === plan.id ? (remainingPlans.find(p => !p.archived)?.id ?? null) : s.activeMealTemplateId;
       return { ...s, foodMealPlans: remainingPlans, foodTemplateSlots: remainingSlots, activeMealTemplateId: nextActive };
     });
-    setPlanSheet(null);
+    setManageOpen(false);
+    setViewedPlanId(null);
+  }
+  // Independent copy in the same bucket (mine/templates), inactive until
+  // switched to, mirrors PlanScreen's duplicate(). coachId reset: the copy is
+  // a new plan in its own right, not literally the plan a coach pushed.
+  function duplicatePlan(plan) {
+    const newId = LB.uid();
+    const now = new Date().toISOString();
+    const copy = { ...plan, id: newId, name: plan.name + ' (Copy)', archived: false, coachId: null, createdAt: now, updatedAt: now };
+    const slotCopies = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id).map(s => ({ ...s, id: LB.uid(), mealPlanId: newId, createdAt: now }));
+    setStore(s => ({ ...s, foodMealPlans: [copy, ...(s.foodMealPlans || [])], foodTemplateSlots: [...(s.foodTemplateSlots || []), ...slotCopies] }));
+    setManageOpen(false);
+    setViewedPlanId(newId);
+  }
+  // Self-contained JSON: each slot already carries its own denormalized food/
+  // recipe snapshot (docs/database.md), so there's nothing to look up, unlike
+  // a training plan export that has to inline the exercises it references.
+  function exportPlan(plan) {
+    const slotsOut = (store.foodTemplateSlots || [])
+      .filter(s => s.mealPlanId === plan.id)
+      .sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0)))
+      .map(({ id, mealPlanId, createdAt, ...rest }) => rest);
+    const payload = { type: 'zane-meal-plan', version: 1, name: plan.name, slots: slotsOut };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${plan.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setManageOpen(false);
   }
   function saveName() {
     if (!nameDraft) return;
     if (nameDraft.id) renamePlan(nameDraft.id, nameDraft.name);
     else createPlan(nameDraft.name);
+    setNameDraft(null);
+  }
+  // Backdrop tap used to drop a typed rename (or a new plan's name) silently.
+  // Compared against the name the sheet opened with, so reopening to rename
+  // and closing without touching anything never false-triggers this.
+  async function requestCloseNameDraft() {
+    if (nameDraft && nameDraft.name.trim() !== (nameDraft.initialName || '').trim() && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     setNameDraft(null);
   }
   // Coach bucket flip (My Plans <-> Client Templates), mirrors PlanScreen's
@@ -2707,7 +2775,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       foodMealPlans: (s.foodMealPlans || []).map(p => p.id === plan.id ? { ...p, isTemplate: !p.isTemplate, updatedAt: new Date().toISOString() } : p),
       activeMealTemplateId: (!plan.isTemplate && s.activeMealTemplateId === plan.id) ? null : s.activeMealTemplateId,
     }));
-    setPlanSheet(null);
+    setCoachOpen(false);
   }
   // Thin wrapper over LB.pushMealPlanToClient (shared with the client-detail
   // Nutrition tab): copies the plan + its slots (+ referenced recipes) into the
@@ -2740,19 +2808,32 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   function openAddFood(fav) {
     const q = fav.quantityG || 100;
     setPickerOpen(false);
-    setDraft({ id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: String(q), hour: 8, dayType: 'any' });
+    const d = { id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: String(q), hour: 8, dayType: 'any' };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
   }
   function openAddRecipe(recipe) {
     setPickerOpen(false);
-    setDraft({ id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' });
+    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
   }
   function openEditSlot(slot) {
+    let d;
     if (slot.source === 'recipe') {
-      setDraft({ id: slot.id, kind: 'recipe', recipeId: slot.recipeId ?? null, name: slot.foodName, recipe: null, portions: null, hour: slot.hour, dayType: slot.dayType, slot });
+      d = { id: slot.id, kind: 'recipe', recipeId: slot.recipeId ?? null, name: slot.foodName, recipe: null, portions: null, hour: slot.hour, dayType: slot.dayType, slot };
     } else {
       const q = slot.quantityG || 100;
-      setDraft({ id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: String(q), hour: slot.hour, dayType: slot.dayType });
+      d = { id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: String(q), hour: slot.hour, dayType: slot.dayType };
     }
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
+  // Backdrop tap used to drop an in-progress add (or an edit's unsaved hour/
+  // day-type/amount changes) silently.
+  async function requestCloseDraft() {
+    if (draft && snapDraft(draft) !== draftInitialSnap.current && !await confirm("Your changes won't be added.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setDraft(null);
   }
   async function deleteSlot(slot) {
     if (!await confirm(`${slot.foodName}`, { title: 'Remove from template?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
@@ -2868,61 +2949,89 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   }, [store.foodRecipes, pickerQuery]);
 
   if (!open) return null;
+  // Meal count badge, the closest food analog to a training plan's day pills.
+  const slotCountFor = pid => (store.foodTemplateSlots || []).filter(s => s.mealPlanId === pid).length;
+
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
-      <TopBar title="Meal Plans" onBack={onClose}
-        right={viewedPlan && (
-          <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+      <TopBar title={viewedPlan ? viewedPlan.name : 'Meal Plans'}
+        onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
+        right={viewedPlan ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
+          </div>
+        ) : (
+          <button onClick={() => setNameDraft({ id: null, name: '', initialName: '' })} aria-label="New meal plan" style={fdTopAddBtn}>
             <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
           </button>
         )} />
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {confirmEl}
-        {isCoach && (
+        {!viewedPlan && isCoach && (
           <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} />
         )}
-        {/* Plan selector: one plan active (auto-fills the log), the rest are
-            drafts you can switch to or push (Cut / Bulk / ...). */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-          {plans.map(p => (
-            <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={fdPlanChip(p.id === viewedPlanId, p.id === activeId)}>
-              {p.id === activeId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, marginRight: 5 }} />}
-              {p.name}
-            </button>
-          ))}
-          <button onClick={() => setNameDraft({ id: null, name: '' })} style={fdPlanChip(false, false)}>
-            <i className="fa-solid fa-plus" style={{ fontSize: 10, marginRight: 5 }} />New
-          </button>
-        </div>
 
         {!viewedPlan ? (
-          <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. “Cut” or “Bulk”) to start planning your recurring meals.</div>
+          plans.length === 0 ? (
+            <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. “Cut” or “Bulk”) to start planning your recurring meals.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {plans.filter(p => p.id === activeId).map(p => {
+                const n = slotCountFor(p.id);
+                return (
+                  <BracketFrame key={p.id} gold onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <Pill gold>active</Pill>
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: n > 0 ? 10 : 0 }}>{n} meal{n === 1 ? '' : 's'}</div>
+                    {n > 0 && (
+                      <Btn kind="ghost" onClick={e => { e.stopPropagation(); applyToToday(); }} style={{ width: '100%', marginTop: 4 }}>
+                        <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
+                      </Btn>
+                    )}
+                  </BracketFrame>
+                );
+              })}
+              {plans.filter(p => p.id !== activeId).map(p => {
+                const n = slotCountFor(p.id);
+                return (
+                  <Frame key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer', padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+                      <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      {p.isTemplate && <Pill>template</Pill>}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint }}>{n} meal{n === 1 ? '' : 's'}</div>
+                  </Frame>
+                );
+              })}
+            </div>
+          )
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{viewedPlan.name}</div>
-                <div style={fdEntryMeta}>{planSubTab === 'templates' ? 'Client template' : (viewedPlanId === activeId ? 'Active plan' : 'Not active')}</div>
+            {viewedPlan.isTemplate ? (
+              <div style={fdStatusBox(false)}>
+                <span className="label" style={{ color: UI.inkSoft, marginBottom: 0 }}>Client template</span>
               </div>
-              {planSubTab === 'templates' ? (
-                <Btn kind="ghost" onClick={() => setPushPlan(viewedPlan)} style={{ padding: '7px 14px' }}>Push</Btn>
-              ) : viewedPlanId !== activeId && (
-                <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ padding: '7px 14px' }}>Activate</Btn>
-              )}
-              <button onClick={() => setPlanSheet(viewedPlan)} aria-label="Plan actions" style={fdInlineDeleteBtn}>
-                <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
-              </button>
+            ) : viewedPlanId === activeId ? (
+              <div style={fdStatusBox(true)}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
+                <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
+              </div>
+            ) : (
+              <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ width: '100%' }}>Activate</Btn>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setManageOpen(true)} style={{ flex: 1, fontSize: 12 }}>Manage</Btn>
+              {isCoach && <Btn kind="ghost" onClick={() => setCoachOpen(true)} style={{ flex: 1, fontSize: 12 }}>Coach</Btn>}
             </div>
 
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
               Recurring meals for this plan. The active plan auto-fills each day as planned entries, filtered by day type. Check them off as you eat.
             </div>
-
-            {viewedPlanId === activeId && slots.length > 0 && (
-              <Btn kind="ghost" onClick={applyToToday} style={{ width: '100%' }}>
-                <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
-              </Btn>
-            )}
 
             {slots.length === 0 ? (
               <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
@@ -2999,7 +3108,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       </Sheet>
 
       {/* Slot config: amount + hour + day type */}
-      <Sheet open={!!draft} onClose={() => setDraft(null)} title={draft?.foodName || draft?.name || 'Meal slot'} titleColor="var(--accent)">
+      <Sheet open={!!draft} onClose={requestCloseDraft} title={draft?.foodName || draft?.name || 'Meal slot'} titleColor="var(--accent)">
         {draft && (
           <>
             {draft.kind === 'food' ? (
@@ -3044,30 +3153,32 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         )}
       </Sheet>
 
-      {/* Plan actions (activate / push / template bucket / rename / delete) */}
-      <Sheet open={!!planSheet} onClose={() => setPlanSheet(null)} title={planSheet?.name || 'Plan'} titleColor="var(--accent)">
-        {planSheet && (
+      {/* Manage: duplicate / export / delete */}
+      <Sheet open={manageOpen} onClose={() => setManageOpen(false)} title="Manage Plan" titleColor="var(--accent)">
+        {viewedPlan && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {planSheet.id !== activeId && !planSheet.isTemplate && (
-              <Btn onClick={() => { const id = planSheet.id; setPlanSheet(null); activatePlan(id); }} style={{ width: '100%' }}>
-                <i className="fa-solid fa-circle-check" style={{ marginRight: 8 }} /> Activate for me
-              </Btn>
-            )}
-            {isCoach && (
-              <Btn onClick={() => { const p = planSheet; setPlanSheet(null); setPushPlan(p); }} style={{ width: '100%' }}>
-                <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push to client
-              </Btn>
-            )}
-            {isCoach && (
-              <Btn kind="ghost" onClick={() => toggleTemplate(planSheet)} style={{ width: '100%' }}>
-                <i className="fa-solid fa-user-group" style={{ marginRight: 8 }} /> {planSheet.isTemplate ? 'Move to My Plans' : 'Mark as client template'}
-              </Btn>
-            )}
-            <Btn kind="ghost" onClick={() => { setNameDraft({ id: planSheet.id, name: planSheet.name }); setPlanSheet(null); }} style={{ width: '100%' }}>
-              <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Rename
+            <Btn onClick={() => duplicatePlan(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-copy" style={{ marginRight: 8 }} /> Duplicate
             </Btn>
-            <Btn kind="ghost" onClick={() => deletePlan(planSheet)} style={{ width: '100%', color: UI.danger }}>
+            <Btn kind="ghost" onClick={() => exportPlan(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-file-export" style={{ marginRight: 8 }} /> Export (JSON)
+            </Btn>
+            <Btn kind="ghost" onClick={() => deletePlan(viewedPlan)} style={{ width: '100%', color: UI.danger }}>
               <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
+            </Btn>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Coach: push to client / template bucket */}
+      <Sheet open={coachOpen} onClose={() => setCoachOpen(false)} title="Coaching" titleColor="var(--accent)">
+        {viewedPlan && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { const p = viewedPlan; setCoachOpen(false); setPushPlan(p); }} style={{ width: '100%' }}>
+              <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push to client
+            </Btn>
+            <Btn kind="ghost" onClick={() => toggleTemplate(viewedPlan)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-user-group" style={{ marginRight: 8 }} /> {viewedPlan.isTemplate ? 'Move to My Plans' : 'Mark as client template'}
             </Btn>
           </div>
         )}
@@ -3124,7 +3235,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       </Sheet>
 
       {/* Create / rename a plan */}
-      <Sheet open={!!nameDraft} onClose={() => setNameDraft(null)} title={nameDraft?.id ? 'Rename plan' : 'New meal plan'} titleColor="var(--accent)">
+      <Sheet open={!!nameDraft} onClose={requestCloseNameDraft} title={nameDraft?.id ? 'Rename plan' : 'New meal plan'} titleColor="var(--accent)">
         {nameDraft && (
           <>
             <Field label="Name" style={{ marginBottom: 16 }}>
@@ -4186,15 +4297,21 @@ function fdDayTypeChip(dayType) {
 }
 // A favorite/recipe row in the template food-source picker.
 const fdPickRow = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
-// A meal-plan chip in the FoodTemplateScreen plan selector. selected = the
-// plan currently being viewed/edited; active = the plan that auto-fills.
-function fdPlanChip(selected, active) {
+// FoodTemplateScreen's plan-detail TopBar "Edit" button (rename), same look
+// as PlanViewerScreen's own Edit button in screens-schedule.jsx.
+const fdEditBtn = {
+  background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+  borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+  color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+};
+// The "Active" / "Client template" status box atop a plan's detail view,
+// same shape as PlanViewerScreen's planActions active indicator.
+function fdStatusBox(gold) {
   return {
-    flexShrink: 0, whiteSpace: 'nowrap', padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
-    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
-    border: `1px solid ${selected ? 'var(--accent)' : UI.hairStrong}`,
-    background: selected ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-    color: selected ? 'var(--accent)' : (active ? UI.ink : UI.inkSoft),
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    border: `1px solid ${gold ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
+    background: gold ? UI.goldFaint : UI.bgInset,
+    padding: '10px 14px', minHeight: 44,
   };
 }
 const fdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };

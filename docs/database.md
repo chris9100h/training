@@ -309,7 +309,7 @@ Eine benannte Liste von Zutaten, die der User zusammen loggt (z.B. "Breakfast bo
 
 - `id` (text), `user_id` (uuid), `name` (text), `items` (jsonb, Default `[]`), `portions` (integer, Default `1`), `created_at`/`updated_at` (timestamptz)
 - Store field: `store.foodRecipes`. Gleiches Sync-/Merge-Muster wie `zane_food_favorites`.
-- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187, `portions` Migration 0190, `auth.uid()`-Wrapping (initPlan-Caching) Migration 0192.
+- RLS: eigene Zeilen + Coach-of-Client (SELECT/INSERT/UPDATE/DELETE via `zane_is_coach_of`, Migration 0200, damit `pushMealPlanToClient` beim Push-Kopieren eines Rezepts in den Client-Account schreiben und gegen dessen bestehende Rezepte deduplizieren kann). Migration 0187, `portions` Migration 0190, `auth.uid()`-Wrapping (initPlan-Caching) Migration 0192.
 
 ### `zane_food_template_slots`
 
