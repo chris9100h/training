@@ -3330,15 +3330,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerSearchError, setPickerSearchError] = useStateFd(null);
   const [pickerResults, setPickerResults] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
-  // scanPickerOpen/scanOpen/labelScanning/labelError trio. The AI-provider
-  // toggle (grok/claude) isn't duplicated here: it's a per-device debug
-  // comparison, not a user setting (see logbook-label-scanner-provider in
-  // CLAUDE.md), so this just reads whatever FoodScreen's own Scan sheet last
-  // set, same as any other screen that doesn't expose it.
+  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
+  // quintet (same shared per-device localStorage key, see
+  // logbook-label-scanner-provider in CLAUDE.md).
   const [pickerScanPickerOpen, setPickerScanPickerOpen] = useStateFd(false);
   const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
+  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
   const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
@@ -3573,8 +3572,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setPickerLabelScanning(false); setPickerLabelError('Could not read that image. Try again.'); return; }
-      const provider = localStorage.getItem('logbook-label-scanner-provider') || 'grok';
-      const res = await LB.scanLabel(base64, mimeType, provider);
+      const res = await LB.scanLabel(base64, mimeType, pickerLabelScannerProvider);
       setPickerLabelScanning(false);
       if (!res.ok) { setPickerLabelError(res.error || 'Scan failed. Try again.'); return; }
       openAddFromLabel(res.label);
@@ -3973,6 +3971,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
+            ))}
+          </div>
         </div>
       </Sheet>
 
