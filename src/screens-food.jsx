@@ -35,6 +35,18 @@ function fdEvenSplit(total, n) {
   const rem = Math.round(total) - base * n;
   return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0));
 }
+// Same idea as fdEvenSplit but for display-unit amounts (pieces, which can be
+// fractional, e.g. 3 wraps over 2 meals is 1.5 each), rounded to 2 decimals
+// with any rounding drift folded into the last part so the sum stays exact.
+// Used to live-redistribute a split's OTHER fields when one gets hand-typed.
+function fdEvenSplitFloat(total, n) {
+  if (n <= 0) return [];
+  const base = Math.round((total / n) * 100) / 100;
+  const parts = Array.from({ length: n }, () => base);
+  const drift = Math.round((total - base * n) * 100) / 100;
+  parts[n - 1] = Math.round((parts[n - 1] + drift) * 100) / 100;
+  return parts;
+}
 // Scales a food-log entry's amount/macros/ingredient-snapshot by `scale`, for
 // "split into multiple meals": a fixed-composition food or recipe batch
 // scales every field (and each recipeItems ingredient) linearly by the same
@@ -589,10 +601,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return out;
     });
   }
+  // Typing into one meal's amount fixes that value (clamped to the item's
+  // total, an eaten wrap can't reappear in a later meal) and evenly
+  // redistributes whatever's left across the other meals for that same
+  // item, so the fields always stay aware of both the total and each other
+  // instead of needing to be reconciled by hand.
   function updateSplitQty(entryId, idx, raw) {
+    const filtered = fdDecimalFilter(raw);
     setSplitQtys(prev => {
       const arr = [...(prev[entryId] || [])];
-      arr[idx] = fdDecimalFilter(raw);
+      const n = arr.length;
+      const entries = byHour[splitHour] || [];
+      const e = entries.find(x => x.id === entryId);
+      if (!e || n < 2) { arr[idx] = filtered; return { ...prev, [entryId]: arr }; }
+      const total = splitDisplayFromAmount(e, splitOrigAmount(e));
+      const typed = fdNum(filtered) || 0;
+      const clamped = Math.max(0, Math.min(total, typed));
+      arr[idx] = clamped === typed ? filtered : String(Math.round(clamped * 100) / 100);
+      const remaining = Math.round((total - clamped) * 100) / 100;
+      const others = arr.map((_, i) => i).filter(i => i !== idx);
+      const parts = fdEvenSplitFloat(remaining, others.length);
+      others.forEach((i, k) => { arr[i] = String(parts[k]); });
       return { ...prev, [entryId]: arr };
     });
   }
