@@ -456,7 +456,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editUnitNewLabel, setEditUnitNewLabel] = useStateFd('');
   const [editUnitNewGrams, setEditUnitNewGrams] = useStateFd('');
 
-  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : LB.fmtDayLabel(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : curDate === fdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  // A day that hasn't happened yet can't have anything "already eaten" on it:
+  // Log it is unavailable and an edited entry can't be flipped back to logged.
+  const curDateIsFuture = curDate > today;
 
   // Plan Mode (settings.planMode, off by default): entries carry a `planned`
   // flag. A planned entry sits in the timeline but does NOT count toward the
@@ -854,11 +857,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const ok = await warnIfOverwritingManualMacros(copyMoveTarget);
     if (!ok) return;
     const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
+    // A day that hasn't happened yet can't already have something "eaten" on
+    // it: landing on a future date forces planned, regardless of whether the
+    // source entry was logged or planned itself.
+    const targetIsFuture = targetDate > today;
     setStore(s => {
       const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
       if (!selected.length) return s;
       const now = new Date().toISOString();
-      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now }));
+      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned }));
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = patchDaily(s, targetDate, nextLogs.filter(l => l.date === targetDate));
@@ -1716,12 +1723,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
         {tab === 'log' && (
           <>
-            {/* Day nav: unbounded backward, no reason to cap it now that curDate
-                lazy-fetches outside the boot window. Calendar button jumps
-                straight to a date instead of stepping one day at a time (same
-                icon-button + overlaid invisible date input idiom Health uses,
-                for iOS compat: a native picker needs a real <input type="date">
-                under the tap, can't be opened from a plain button). */}
+            {/* Day nav: unbounded both ways, no reason to cap it now that curDate
+                lazy-fetches outside the boot window. Forward isn't capped at
+                today either: Plan Mode needs to plan ahead, not just log the
+                past. Calendar button jumps straight to a date instead of
+                stepping one day at a time (same icon-button + overlaid
+                invisible date input idiom Health uses, for iOS compat: a
+                native picker needs a real <input type="date"> under the tap,
+                can't be opened from a plain button). */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <button onClick={() => shiftDay(-1)} aria-label="Previous day" style={fdNavBtn(false)}>
                 <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
@@ -1737,13 +1746,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   }}>
                     <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
                   </button>
-                  <input type="date" value={curDate} max={today}
+                  <input type="date" value={curDate}
                     onChange={e => e.target.value && setCurDate(e.target.value)}
                     style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
                   />
                 </div>
               </div>
-              <button onClick={() => shiftDay(1)} disabled={curDate >= today} aria-label="Next day" style={fdNavBtn(curDate >= today)}>
+              <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
               </button>
             </div>
@@ -2181,7 +2190,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
               {favedId ? 'Saved to favorites' : 'Save as favorite'}
             </button>
-            {planMode && editingEntry && (
+            {planMode && editingEntry && !curDateIsFuture && (
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
                 {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
                   <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
@@ -2191,8 +2200,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                <Btn kind="ghost" onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Plan it</Btn>
-                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
@@ -2238,8 +2247,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind="ghost" onClick={() => submitCustomItem(true)} disabled={!customValid} style={{ flex: 1.5 }}>Plan it</Btn>
-            <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 1.5 }}>Log it</Btn>
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => submitCustomItem(true)} disabled={!customValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
@@ -2271,7 +2280,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           })}
         </div>
         <Field label="To" style={{ marginBottom: 14 }}>
-          <input type="date" value={copyMoveTarget} max={today} onChange={e => setCopyMoveTarget(e.target.value)}
+          <input type="date" value={copyMoveTarget} onChange={e => setCopyMoveTarget(e.target.value)}
             style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
         </Field>
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
@@ -2383,7 +2392,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </span>
               </div>
             )}
-            {editingEntry && planMode && (
+            {editingEntry && planMode && !curDateIsFuture && (
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
                 {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
                   <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
@@ -2396,8 +2405,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </Btn>
             ) : planMode ? (
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
-                <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
               </div>
             ) : (
               <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
