@@ -33,8 +33,8 @@
     --ink-soft: rgba(236,228,208,0.66);
     --ink-faint: rgba(236,228,208,0.34);
     --ink-ghost: rgba(236,228,208,0.14);
-    --hair: rgba(236,228,208,0.10);
-    --hair-strong: rgba(236,228,208,0.18);
+    --hair: rgba(236,228,208,0.16);
+    --hair-strong: rgba(236,228,208,0.28);
     /* Width for every hairline border (the huge majority of UI.hair/
        UI.hairStrong borders use this literal). A theme can widen it, e.g.
        paper's 0.5px hairlines were reading as barely-there. */
@@ -732,8 +732,15 @@ window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 // Properties not listed in a mode object fall back to these dark-theme defaults.
 var _DARK_INK          = '#ece4d0';
 var _DARK_INK_SOFT     = 'rgba(236,228,208,0.66)';
-var _DARK_HAIR         = 'rgba(236,228,208,0.10)';
-var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.18)';
+// Hairlines are 0.5px wide, so their alpha is doing the work of half a pixel.
+// At 0.18 a border edge sat right at the visibility threshold and could read as
+// missing depending on panel brightness, display calibration and where the box
+// landed on the pixel grid. Raised to 0.28, with --hair kept at the same 0.56
+// ratio to it, so soft and strong dividers stay as far apart as they were.
+// Dark and black only: light and paper override both with their own, already
+// much stronger values (0.48 to 0.60 dark ink on a light canvas).
+var _DARK_HAIR         = 'rgba(236,228,208,0.16)';
+var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.28)';
 var _DARK_DANGER       = '#c87469';
 var _DARK_DANGER_RGB   = '200,116,105';
 // Grid overlay (Settings -> Appearance -> Grid), togglable independent of
