@@ -1238,9 +1238,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   // the DOM so it paints on top).
   if (!open) return null;
   return (
-    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+    <Screen scroll={false} style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={existing ? 'Edit Day' : 'Log Day'} onBack={requestClose} />
-      <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
+      {/* Only this middle section scrolls, so Delete/Save stay pinned to the
+          bottom edge (see the footer below): this form is long enough that
+          having to scroll all the way down after every single edit was the
+          main friction in logging a day. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 22px 22px' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {LB.fmtDayLabel(date, { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1664,12 +1668,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      </div>
+
+      {/* Pinned action footer, same idiom as the training screen's footer nav */}
+      <div className="knurl" />
+      <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)` }}>
         {existing && (
           <Btn kind="ghost" onClick={del} style={{ flex: 1 }}>Delete</Btn>
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
-      </div>
       </div>
     </Screen>
   );
