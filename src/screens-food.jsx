@@ -2343,7 +2343,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 against. */}
             <BracketFrame gold style={{ padding: 20 }}>
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
-                projected={planMode && plannedEntries.length ? projectedTotals : null} />
+                projected={planMode && plannedEntries.length ? projectedTotals : null}
+                onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
@@ -5009,7 +5010,11 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // "where the day is headed" line below the real numbers. null unless plan
 // mode is on AND the day has planned entries, so the default view is
 // untouched.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
+// onSetTargets (live hero only, never the screenshot poster): with no target
+// resolvable the hero can only show a bare total, which is also the exact
+// moment the question "what should this number be?" comes up. Omitted by the
+// poster, so the button never renders into an exported image.
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
       protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
@@ -5037,6 +5042,15 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
       </div>
       <FdMacroGhosts protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} style={{ marginTop: 12 }} />
+      {onSetTargets && (
+        <button className="micro-gold" onClick={onSetTargets} style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginTop: 14, padding: 0,
+          background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 10 }} />
+          Set macro targets
+        </button>
+      )}
       {projectionLine}
     </div>
   );

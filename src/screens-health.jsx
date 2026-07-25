@@ -1684,6 +1684,196 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
 // ─── Macro target editor ────────────────────────────────────────────────────────
 
+// ─── Macro target estimator ───────────────────────────────────────────────────
+// Every number the adherence system scores against used to have to be guessed:
+// a user without a coach had no way to arrive at a protein/carbs/fat target
+// beyond looking it up somewhere else. This turns what the app already knows
+// (bodyweight from the daily logs, how often they actually train) plus five
+// questions into a starting point. Deliberately a PREFILL, not a save: the
+// result lands in MacroTargetSheet's own fields and the user still confirms it
+// there, so an estimate never silently becomes a target.
+const MACRO_ACTIVITY_OPTIONS = [
+  { id: 'sedentary', label: 'Desk', hint: 'Desk job, little walking outside training' },
+  { id: 'light', label: 'Light', hint: 'On your feet some of the day' },
+  { id: 'moderate', label: 'Active', hint: 'Moving most of the day, or lots of steps' },
+  { id: 'high', label: 'Hard', hint: 'Physical job, or training twice a day' },
+  { id: 'athlete', label: 'Athlete', hint: 'Full-time athlete workload' },
+];
+const MACRO_GOAL_OPTIONS = [
+  { id: 'cut', label: 'Lose' },
+  { id: 'maintain', label: 'Maintain' },
+  { id: 'gain', label: 'Gain' },
+];
+// Weekly rate choices in whichever unit the user thinks in. rateKgPerWeek is
+// always stored and computed in kg (the equation is metric); a lbs user just
+// never sees a kg figure.
+const MACRO_RATE_OPTIONS_KG = [0.25, 0.5, 0.75];
+const MACRO_RATE_OPTIONS_LBS = [0.5, 1, 1.5];
+const LBS_TO_KG = 0.45359237;
+
+function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
+  const calc = store.settings?.macroCalc || {};
+  const isLbs = UI.unit() === 'lbs';
+
+  // Bodyweight is never asked for or stored here: it is whatever was logged
+  // most recently, so reopening the estimator after a few weeks recalculates
+  // against the current weight instead of against a stale answer. lbs users
+  // type lbs straight into the daily log (see UI.unit()), so convert for the
+  // equation, which is metric.
+  const rawWeight = LB.latestBodyweight(store);
+  const weightKg = rawWeight == null ? null : (isLbs ? rawWeight * LBS_TO_KG : rawWeight);
+
+  // How often they actually train, from the last four weeks of real sessions
+  // rather than from what a plan says: plans come in weekday, cycle and flex
+  // shapes, and the number that matters here is the one that happened.
+  const defaultTrainingDays = useMemoH(() => {
+    const cutoff = LB.historyWindowCutoffISO(new Date(), 28);
+    const days = new Set((store.sessions || []).filter(s => s.date >= cutoff && s.ended).map(s => s.date));
+    return days.size ? Math.min(7, Math.max(1, Math.round(days.size / 4))) : 4;
+  }, [store.sessions]);
+
+  const [form, setForm] = useStateH({});
+  useEffectH(() => {
+    if (!open) return;
+    setForm({
+      heightCm: calc.heightCm != null ? String(calc.heightCm) : '',
+      birthYear: calc.birthYear != null ? String(calc.birthYear) : '',
+      sex: calc.sex ?? null,
+      activity: calc.activity ?? 'moderate',
+      goal: calc.goal ?? 'maintain',
+      rateKgPerWeek: calc.rateKgPerWeek || (isLbs ? 1 * LBS_TO_KG : 0.5),
+      trainingDays: calc.trainingDays != null ? calc.trainingDays : defaultTrainingDays,
+    });
+  }, [open]); // eslint-disable-line
+
+  const age = form.birthYear ? (new Date().getFullYear() - healthInt(form.birthYear)) : null;
+  const est = LB.estimateTdee({ weightKg, heightCm: healthInt(form.heightCm), age, sex: form.sex, activity: form.activity });
+  const targets = est && LB.macroTargetsFromGoal({
+    tdee: est.tdee, weightKg, goal: form.goal,
+    rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
+    trainingDays: form.trainingDays,
+  });
+
+  const apply = () => {
+    if (!targets) return;
+    setStore(s => ({
+      ...s,
+      settings: {
+        ...s.settings,
+        macroCalc: {
+          birthYear: healthInt(form.birthYear), heightCm: healthInt(form.heightCm),
+          sex: form.sex ?? null, activity: form.activity, goal: form.goal,
+          rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
+          trainingDays: form.trainingDays,
+        },
+      },
+    }));
+    onApply(targets);
+    onClose();
+  };
+
+  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  const segBtn = (active) => ({
+    flex: 1, padding: '7px 4px', background: active ? 'rgba(var(--accent-rgb),0.16)' : 'transparent',
+    border: 'none', borderRight: `var(--hair-width) solid ${UI.hairStrong}`,
+    color: active ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+  });
+  const seg = (options, value, onPick) => (
+    <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+      {options.map(o => (
+        <button key={String(o.id)} onClick={() => onPick(o.id)} style={segBtn(value === o.id)}>{o.label}</button>
+      ))}
+    </div>
+  );
+  const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
+
+  // zIndex above the default 100: this opens on top of MacroTargetSheet, the
+  // same nesting idiom the food module's own quantity sheet uses.
+  return (
+    <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
+      {weightKg == null ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
+          Log a bodyweight in your daily log first. The estimate is built on it, and reads it fresh every time, so it stays right as your weight moves.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
+            A starting point, not a prescription. Adjust anything after applying it, and revisit it when your weight or training changes.
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <div style={{ flex: 1 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Height cm</div>
+              <input type="text" inputMode="numeric" placeholder="—" value={form.heightCm}
+                onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} style={inputStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Born</div>
+              <input type="text" inputMode="numeric" placeholder="YYYY" value={form.birthYear}
+                onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} style={inputStyle} />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Sex (for the equation)</div>
+            {seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v })))}
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Daily activity outside training</div>
+            {seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v })))}
+            {activityHint && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>{activityHint}</div>}
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Goal</div>
+            {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
+            {form.goal !== 'maintain' && (
+              <div style={{ marginTop: 8 }}>
+                <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
+                {seg(
+                  (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
+                  form.rateKgPerWeek,
+                  v => setForm(f => ({ ...f, rateKgPerWeek: v })),
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 18 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Training days per week</div>
+            {seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v })))}
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+              Training days get more carbs, rest days fewer, so the week still adds up to the same total.
+            </div>
+          </div>
+
+          {targets ? (
+            <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Maintenance about {est.tdee} kcal</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Training day</span>
+                <span className="num" style={{ fontSize: 12, color: UI.ink }}>{targets.caloriesTraining} kcal · {targets.proteinTraining}P {targets.carbsTraining}C {targets.fatTraining}F</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Rest day</span>
+                <span className="num" style={{ fontSize: 12, color: UI.ink }}>{targets.caloriesRest} kcal · {targets.proteinRest}P {targets.carbsRest}C {targets.fatRest}F</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
+              Fill in height and year of birth to see an estimate.
+            </div>
+          )}
+
+          <Btn onClick={apply} disabled={!targets} style={{ width: '100%' }}>Use these numbers</Btn>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
 function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   // This sheet edits the user's PERSONAL targets, so prefill from their own
   // targets first; fall back to the coach macros only as a convenience when they
@@ -1696,6 +1886,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   const [form, setForm] = useStateH(empty);
   const [confirmEl, confirm] = useConfirm();
   const initialSnap = useRefH(null);
+  const [estimatorOpen, setEstimatorOpen] = useStateH(false);
 
   useEffectH(() => {
     if (!open) return;
@@ -1755,9 +1946,27 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
           Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
+      {/* Fills the fields below rather than saving: an estimate is a starting
+          point, and the user confirms it with the same Save button they would
+          use for hand-typed numbers. */}
+      <button onClick={() => setEstimatorOpen(true)} style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginBottom: 18,
+        padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`,
+        borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+        cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+      }}>
+        <i className="fa-solid fa-calculator" style={{ fontSize: 13, color: 'var(--accent)' }} />
+        <span style={{ flex: 1, textAlign: 'left' }}>Estimate targets for me</span>
+        <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+      </button>
       {section('Training', 'TRAINING DAY', calsTraining)}
       {section('Rest', 'REST DAY', calsRest)}
       <Btn onClick={save} style={{ width: '100%' }}>Save Targets</Btn>
+      <MacroEstimatorSheet open={estimatorOpen} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
+        onApply={t => setForm({
+          proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
+          proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
+        })} />
       {confirmEl}
     </Sheet>
   );
@@ -2520,11 +2729,16 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
 
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
-function HealthScreen({ store, setStore, go, userId }) {
+function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const today = LB.todayISO();
   const [selectedDate, setSelectedDate] = useStateH(today);
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
+  // The Food tab sends users here when their day has no macro target to score
+  // against (go({ name: 'health', openMacroTargets: true })): opening the sheet
+  // straight away is the whole point of that trip, arriving on the Health tab
+  // with nothing open would just make them hunt for the card.
+  useEffectH(() => { if (openMacroTargets) setTargetOpen(true); }, [openMacroTargets]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-

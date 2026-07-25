@@ -371,6 +371,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
+    macro_calc: sett.macroCalc ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
@@ -1297,6 +1298,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
         macroTargets: sett.macro_targets ?? null,
+        macroCalc: sett.macro_calc ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
@@ -1886,6 +1888,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
+    JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
@@ -1947,6 +1950,7 @@ async function syncStore(prev, next, userId) {
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
+      macro_calc: next.settings?.macroCalc ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
@@ -4804,6 +4808,89 @@ function macroAdherence(actual, target) {
   return Math.round(weighted * 100);
 }
 
+// ── Macro target estimation (migration 0205) ────────────────────────────────
+// Everything above assumes macro targets already exist. They never did for a
+// user without a coach: the whole adherence system (ring, hero rows, week
+// card, check-in) hangs off numbers the app never helped anyone arrive at.
+// These two pure functions are the arithmetic behind the "Estimate targets"
+// wizard; they persist nothing and decide nothing, the user confirms the
+// result in the normal MacroTargetSheet.
+
+// Activity multipliers applied to BMR. Deliberately coarse: the input is a
+// self-assessment, so more granularity would only imply precision that isn't
+// there. Keys are stored verbatim in zane_user_settings.macro_calc.
+const ACTIVITY_FACTORS = { sedentary: 1.2, light: 1.375, moderate: 1.55, high: 1.725, athlete: 1.9 };
+// One kilogram of body mass is worth roughly this many kcal, the standard
+// figure behind "500 kcal/day is half a kilo a week".
+const KCAL_PER_KG = 7700;
+
+// Mifflin-St Jeor, the usual default for a resting figure: more accurate than
+// Harris-Benedict for the general population and it needs nothing beyond
+// weight, height, age and sex. `sex` is 'male' | 'female' (the equation's own
+// two constants, not an identity question); anything else takes the midpoint
+// so the estimate degrades gracefully instead of refusing to produce one.
+// Returns null when a required input is missing, so callers can just check.
+function estimateTdee({ weightKg, heightCm, age, sex, activity }) {
+  const w = Number(weightKg), h = Number(heightCm), a = Number(age);
+  if (!(w > 0) || !(h > 0) || !(a > 0)) return null;
+  const base = 10 * w + 6.25 * h - 5 * a;
+  const offset = sex === 'male' ? 5 : sex === 'female' ? -161 : -78;
+  const bmr = base + offset;
+  const factor = ACTIVITY_FACTORS[activity] ?? ACTIVITY_FACTORS.moderate;
+  return { bmr: Math.round(bmr), tdee: Math.round(bmr * factor) };
+}
+
+// Turns a TDEE into the eight-field macro-target object the rest of the app
+// speaks, splitting training and rest days.
+//
+// goal: 'cut' | 'maintain' | 'gain'. rateKgPerWeek is the intended weekly body
+// weight change (ignored for 'maintain'), converted to a daily calorie delta.
+//
+// The split is classic carb cycling: protein and fat are identical on both day
+// types (protein defends muscle, fat defends hormones, neither should swing
+// with training), and carbs absorb the entire difference. Training days get
+// TRAINING_SPREAD more than average and rest days take the rest, chosen so the
+// WEEKLY total still equals the daily target times seven, whatever the number
+// of training days. With 0 or 7 training days there is nothing to cycle
+// against and both day types get the plain daily figure.
+//
+// Returns null without a usable weight or TDEE.
+const TRAINING_SPREAD = 0.10;
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg }) {
+  const w = Number(weightKg);
+  const t = Number(tdee);
+  if (!(w > 0) || !(t > 0)) return null;
+  const rate = Number(rateKgPerWeek) || 0;
+  const delta = goal === 'cut' ? -Math.abs(rate) * KCAL_PER_KG / 7
+    : goal === 'gain' ? Math.abs(rate) * KCAL_PER_KG / 7
+      : 0;
+  // Never prescribe a starvation-level intake off a slider: a rate the user
+  // picked as "aggressive" against a low TDEE could otherwise land absurdly
+  // low. 60% of TDEE is a blunt but honest floor.
+  const daily = Math.max(Math.round(t + delta), Math.round(t * 0.6));
+
+  const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  const cycles = days > 0 && days < 7;
+  const trainingCal = cycles ? Math.round(daily * (1 + TRAINING_SPREAD)) : daily;
+  const restCal = cycles ? Math.round((daily * 7 - trainingCal * days) / (7 - days)) : daily;
+
+  const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
+  // 25% of calories from fat, computed off the average day so the gram figure
+  // is the same on both, then floored: dropping fat below 0.5 g/kg to buy
+  // carbs is not a trade this should make on the user's behalf.
+  const fat = Math.max(Math.round(daily * 0.25 / 9), Math.round(w * 0.5));
+  const carbsFor = (cal) => Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4));
+
+  const carbsTraining = carbsFor(trainingCal);
+  const carbsRest = carbsFor(restCal);
+  return {
+    proteinTraining: protein, carbsTraining, fatTraining: fat,
+    caloriesTraining: caloriesFromMacros(protein, carbsTraining, fat),
+    proteinRest: protein, carbsRest, fatRest: fat,
+    caloriesRest: caloriesFromMacros(protein, carbsRest, fat),
+  };
+}
+
 // True when a macro-target object carries at least one macro (protein/carbs/fat,
 // training or rest). Calories alone don't count as "set" (they're derived).
 function hasMacroTargets(m) {
@@ -7171,6 +7258,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
