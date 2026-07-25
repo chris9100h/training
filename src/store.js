@@ -4905,7 +4905,30 @@ const FAT_FLOOR_PER_KG = 0.5;
 // explicit number the user chose, it is used as given even below
 // FAT_FLOOR_PER_KG; warning about that is the UI's job, silently overruling it
 // here would just make the field look broken.
-function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg }) {
+// The automatic rest-to-training calorie ratio for a given number of training
+// days, and the lower bound on what the user may pick: it is the hardest cycle
+// this model will produce, and dialling it up towards 1 evens the week out.
+//
+// The training-day bump has to be paid back by however few rest days remain, so
+// a flat TRAINING_SPREAD collapses them once training days dominate: at 6 of 7
+// it put the single rest day 1800 kcal below average, which for an 80 kg lifter
+// is a 1200 kcal day and no kind of prescription. The bump therefore shrinks so
+// a rest day never falls more than REST_DAY_MAX_DROP under the average intake.
+//
+// The daily intake cancels out of the ratio, so this depends on nothing but the
+// day count. Returns 1 (no cycling possible) at 0 and 7 training days.
+function minRestRatio(trainingDays) {
+  const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  if (!(days > 0 && days < 7)) return 1;
+  const training = 1 + Math.min(TRAINING_SPREAD, REST_DAY_MAX_DROP * (7 - days) / days);
+  const rest = (7 - training * days) / (7 - days);
+  return rest / training;
+}
+
+// restRatio (optional): rest-day calories as a fraction of training-day
+// calories. Clamped into [minRestRatio(trainingDays), 1]; omitted means the
+// automatic split, so it keeps following the day count instead of freezing.
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg, restRatio }) {
   const w = Number(weightKg);
   const t = Number(tdee);
   if (!(w > 0) || !(t > 0)) return null;
@@ -4920,14 +4943,17 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
 
   const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
   const cycles = days > 0 && days < 7;
-  // The bump has to be paid back by however few rest days there are, so a flat
-  // TRAINING_SPREAD collapses them once training days dominate: at 6 of 7 it
-  // put the single rest day 1800 kcal below average, which for an 80 kg lifter
-  // is a 1200 kcal day and no kind of prescription. Shrink the bump so a rest
-  // day never falls more than REST_DAY_MAX_DROP under the average intake.
-  const spread = cycles ? Math.min(TRAINING_SPREAD, REST_DAY_MAX_DROP * (7 - days) / days) : 0;
-  const trainingCal = cycles ? Math.round(daily * (1 + spread)) : daily;
-  const restCal = cycles ? Math.round((daily * 7 - trainingCal * days) / (7 - days)) : daily;
+  // How hard the week cycles, as rest-day calories over training-day calories.
+  // minRestRatio is the automatic split and the most aggressive one offered;
+  // restRatio dials back towards 1, where every day is identical. Solving
+  // trainingCal * days + restCal * (7 - days) = daily * 7 for a given ratio
+  // keeps the weekly total fixed whatever the user picks.
+  const minRatio = minRestRatio(days);
+  const ratio = cycles
+    ? Math.min(1, Math.max(minRatio, Number(restRatio) > 0 ? Number(restRatio) : minRatio))
+    : 1;
+  const trainingCal = cycles ? Math.round((daily * 7) / (days + ratio * (7 - days))) : daily;
+  const restCal = cycles ? Math.round(trainingCal * ratio) : daily;
 
   const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
   // With the low-fat option, exactly what was asked for. Otherwise 25% of
@@ -7379,7 +7405,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

@@ -1763,6 +1763,10 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       trainingDays: calc.trainingDays != null ? calc.trainingDays : defaultTrainingDays,
       lowFat: !!calc.lowFat,
       fatPerStr: String(fatPerToDisplay(calc.fatPerKg > 0 ? calc.fatPerKg : LOW_FAT_DEFAULT_PER_KG)),
+      // null means "follow the automatic split", so the default keeps tracking
+      // the training day count instead of freezing at whatever it was when the
+      // sheet was last saved.
+      restRatioPct: calc.restRatioPct != null ? calc.restRatioPct : null,
     });
     setManual(null);
     setLocks({ training: {}, rest: {} });
@@ -1776,19 +1780,37 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // is allowed but worth saying out loud rather than silently overruling.
   const fatBelowFloor = fatPerKg != null && fatPerKg < LB.FAT_FLOOR_PER_KG;
 
+  const trainingDays = Math.min(7, Math.max(0, Math.round(Number(form.trainingDays) || 0)));
+  // How hard the week is cycled, as rest day calories in percent of a training
+  // day. The automatic split is the hardest one on offer and therefore the
+  // slider's floor; 100 feeds both day types the same. Clamped on read rather
+  // than in an effect, so changing the training days cannot strand the slider
+  // below its own minimum.
+  const cyclesDays = trainingDays > 0 && trainingDays < 7;
+  const minRestPct = Math.round(LB.minRestRatio(trainingDays) * 100);
+  const restPct = form.restRatioPct == null ? minRestPct
+    : Math.max(minRestPct, Math.min(100, Math.round(form.restRatioPct)));
+  // WebKit paints the filled part of the track from this gradient, and the
+  // range starts at the floor rather than at zero, so it is not just restPct.
+  // Firefox draws it natively from min/max and ignores the gradient.
+  const restFillPct = ((restPct - minRestPct) / Math.max(1, 100 - minRestPct)) * 100;
+
   const age = form.birthYear ? (new Date().getFullYear() - healthInt(form.birthYear)) : null;
   const est = LB.estimateTdee({ weightKg, heightCm: healthInt(form.heightCm), age, sex: form.sex, activity: form.activity });
   const targets = est && LB.macroTargetsFromGoal({
     tdee: est.tdee, weightKg, goal: form.goal,
     rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
-    trainingDays: form.trainingDays,
+    trainingDays,
     fatPerKg,
+    // Left at the floor it stays null, so the exact automatic ratio is used
+    // rather than the rounded percentage the slider displays.
+    restRatio: form.restRatioPct == null ? null : restPct / 100,
   });
 
   // Any change to an input produces a different estimate, so hand edits made
   // against the previous one are dropped rather than silently carried over
   // onto numbers they were never balanced against.
-  const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg]);
+  const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg, restPct]);
   useEffectH(() => { setManual(null); setLocks({ training: {}, rest: {} }); }, [estKey]);
 
   const estimateStrings = () => (targets ? {
@@ -1833,7 +1855,6 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // that decides whether weight moves, and hand-editing the macros can walk it
   // anywhere without the per-day figures looking wrong. Derived from what is
   // SHOWN, not from the estimate, so an edit is reflected immediately.
-  const trainingDays = Math.min(7, Math.max(0, Math.round(Number(form.trainingDays) || 0)));
   const weekAvgCalories = shown
     ? LB.weeklyAverageCalories(dayCalories('training'), dayCalories('rest'), trainingDays)
     : null;
@@ -1873,6 +1894,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           weightKg: weightKg != null ? Math.round(weightKg * 10) / 10 : null,
           lowFat: !!form.lowFat,
           fatPerKg: fatPerKg != null ? Math.round(fatPerKg * 1000) / 1000 : null,
+          restRatioPct: form.restRatioPct == null ? null : restPct,
         },
       },
     }));
@@ -2005,9 +2027,46 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
         <div className="micro" style={{ marginBottom: 6 }}>Training days per week</div>
         {seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v })))}
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-          Training days get more carbs, rest days fewer, so the week still adds up to the same total.
+          {cyclesDays
+            ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
+            : 'Every day gets the same target, since there is no second day type to cycle against.'}
         </div>
       </div>
+
+      {/* How far the two day types are pulled apart. The week's total is fixed
+          at every setting, so this only decides where the calories sit inside
+          it. The automatic split is the sharpest one on offer and therefore the
+          slider's floor, which also makes it the default without pinning a
+          value that would then stop following the training day count. */}
+      {cyclesDays && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div className="micro">Rest day calories</div>
+            {form.restRatioPct != null && (
+              <button onClick={() => setForm(f => ({ ...f, restRatioPct: null }))} style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, WebkitTapHighlightColor: 'transparent',
+              }}>Reset</button>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input type="range" min={minRestPct} max="100" step="1" value={restPct}
+              onChange={e => {
+                const v = +e.target.value;
+                // Back at the floor it goes to null, so it follows the training
+                // day count again instead of pinning the rounded percentage.
+                setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
+              }}
+              style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
+            <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
+          </div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.4 }}>
+            {restPct >= 100
+              ? 'Both day types eat the same. No carb cycling at all.'
+              : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`}
+          </div>
+        </div>
+      )}
 
       {/* Low fat: fat lands ON this figure rather than at a share of intake, and
           everything it frees goes to carbs. Off by default, since the normal

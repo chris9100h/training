@@ -255,7 +255,7 @@ CREATE TABLE public.zane_user_settings (
   session_timeout_minutes integer DEFAULT 90,
   auto_close_notify jsonb,
   macro_targets jsonb,
-  macro_calc jsonb,                          -- 0205: last inputs of the target estimator (prefill only)
+  macro_calc jsonb,                          -- 0205: last inputs of the target estimator (prefill only; shape in docs/database.md)
   meal_windows jsonb,                        -- 0206: six ascending start hours for the food tracker meal categories, null = defaults
   show_health_tab boolean NOT NULL DEFAULT false,
   weight_fill_down boolean NOT NULL DEFAULT true,

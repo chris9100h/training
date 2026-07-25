@@ -550,6 +550,52 @@ async function testAsync(name, fn) {
     assert.ok(Math.abs(weekly - 3000 * 7) < 60, `weekly ${weekly} stays within rounding of 21000`);
   });
 
+  test('minRestRatio: the automatic split, and the hardest cycle on offer', () => {
+    // 4 training days: 3300 vs 2600 kcal on a 3000 average, so rest sits at
+    // 78.8% of a training day. Independent of the intake, by construction.
+    assert.strictEqual(Math.round(LB.minRestRatio(4) * 1000), 788);
+    assert.strictEqual(LB.minRestRatio(4), LB.minRestRatio(4), 'depends on nothing but the day count');
+    // With one rest day left the bump has to shrink, so the ratio comes back up.
+    assert.ok(LB.minRestRatio(6) > 0.75 && LB.minRestRatio(6) < 0.79);
+    // Nothing to cycle against at the extremes.
+    assert.strictEqual(LB.minRestRatio(0), 1);
+    assert.strictEqual(LB.minRestRatio(7), 1);
+    assert.strictEqual(LB.minRestRatio(99), 1, 'clamped, not extrapolated');
+    // Every real split leaves training days ahead of rest days.
+    for (const d of [1, 2, 3, 4, 5, 6]) assert.ok(LB.minRestRatio(d) < 1, `${d} days cycles`);
+  });
+
+  test('macroTargetsFromGoal: restRatio evens the week out without changing its total', () => {
+    const base = { tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: 4 };
+    const auto = LB.macroTargetsFromGoal(base);
+    // Omitting it reproduces the automatic split exactly, so the default keeps
+    // following the day count rather than freezing at whatever was picked once.
+    const explicit = LB.macroTargetsFromGoal({ ...base, restRatio: LB.minRestRatio(4) });
+    assert.strictEqual(JSON.stringify(explicit), JSON.stringify(auto));
+    // 1 means every day identical.
+    const flat = LB.macroTargetsFromGoal({ ...base, restRatio: 1 });
+    assert.strictEqual(flat.caloriesTraining, flat.caloriesRest);
+    assert.strictEqual(flat.carbsTraining, flat.carbsRest);
+    // Halfway sits between the two, still ahead on training days.
+    const mid = LB.macroTargetsFromGoal({ ...base, restRatio: 0.9 });
+    assert.ok(mid.caloriesTraining < auto.caloriesTraining && mid.caloriesTraining > flat.caloriesTraining);
+    assert.ok(mid.caloriesRest > auto.caloriesRest && mid.caloriesRest < flat.caloriesRest);
+    // Whatever the ratio, the week still averages out to the same intake.
+    for (const r of [undefined, 0.8, 0.9, 0.95, 1]) {
+      const m = LB.macroTargetsFromGoal({ ...base, restRatio: r });
+      const avg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, 4);
+      assert.ok(Math.abs(avg - 3000) < 20, `ratio ${r} averages ${avg}`);
+    }
+    // Below the automatic split it is clamped: that is the hardest cycle offered.
+    const tooLow = LB.macroTargetsFromGoal({ ...base, restRatio: 0.2 });
+    assert.strictEqual(JSON.stringify(tooLow), JSON.stringify(auto));
+    // Above 1 is clamped too, so rest days can never out-eat training days.
+    assert.strictEqual(JSON.stringify(LB.macroTargetsFromGoal({ ...base, restRatio: 3 })), JSON.stringify(flat));
+    // With nothing to cycle against the ratio is simply irrelevant.
+    const allTraining = LB.macroTargetsFromGoal({ ...base, trainingDays: 7, restRatio: 0.5 });
+    assert.strictEqual(allTraining.caloriesTraining, allTraining.caloriesRest);
+  });
+
   test('macroTargetsFromGoal: a rest day is never squeezed to an absurd figure', () => {
     // With few rest days left to absorb it, the training-day bump has to
     // shrink: at 6 of 7 a flat 10% would leave the single rest day 1800 kcal
