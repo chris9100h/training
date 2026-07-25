@@ -371,6 +371,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
+    macro_calc: sett.macroCalc ?? null,
+    meal_windows: sett.mealWindows ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
@@ -562,7 +564,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         food_id: l.foodId ?? null, food_name: l.foodName, brand: l.brand ?? null,
         source: l.source ?? null, quantity_g: l.quantityG,
         calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
-        fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+        fiber: l.fiber ?? null, sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
+        recipe_items: l.recipeItems ?? null,
         recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
         logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
         planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
@@ -577,7 +580,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
         brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
         calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
-        fiber: f.fiber ?? null, units: f.units ?? [],
+        fiber: f.fiber ?? null, sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
+        units: f.units ?? [],
       }))
     ));
     stepsDone++;
@@ -961,7 +965,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts. Favorites are owner-only RLS; recipes
@@ -969,11 +973,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // skipped on a coach load because the client view doesn't render them,
     // pushMealPlanToClient fetches the client's recipes directly when it needs
     // them for its dedup.
-    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
-    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
     // Plan Mode auto-fill markers (migration 0198): which days the template was
     // already auto-materialized for, cross-device. Only recent days matter (the
     // fill effect only ever runs for today), so window like the food logs.
@@ -1295,6 +1299,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
         macroTargets: sett.macro_targets ?? null,
+        macroCalc: sett.macro_calc ?? null,
+        mealWindows: sett.meal_windows ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
@@ -1679,7 +1685,9 @@ async function syncStore(prev, next, userId) {
       id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
       food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
       quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
-      carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+      carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null,
+      sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
+      recipe_items: l.recipeItems ?? null,
       recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
       logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
       planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
@@ -1722,6 +1730,7 @@ async function syncStore(prev, next, userId) {
       id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
       brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
       calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
+      sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
       units: f.units ?? [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_favorites').delete().in('id', removed.map(f => f.id)));
@@ -1881,6 +1890,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
+    JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
+    JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
@@ -1942,6 +1953,8 @@ async function syncStore(prev, next, userId) {
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
+      macro_calc: next.settings?.macroCalc ?? null,
+      meal_windows: next.settings?.mealWindows ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
@@ -2708,7 +2721,14 @@ function mapFoodLogRow(l) {
     foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
     quantityG: parseFloat(l.quantity_g), calories: l.calories,
     protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
-    fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+    fiber: l.fiber != null ? parseFloat(l.fiber) : null,
+    // Migration 0204. Null on anything logged before the columns existed and on
+    // foods whose source does not report the value: never backfillable, since
+    // the row is a write-time snapshot by design.
+    sugar: l.sugar != null ? parseFloat(l.sugar) : null,
+    satFat: l.sat_fat != null ? parseFloat(l.sat_fat) : null,
+    sodiumMg: l.sodium_mg != null ? parseFloat(l.sodium_mg) : null,
+    recipeItems: l.recipe_items ?? null,
     recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
     // Which unit (e.g. "Pc") the entry was actually logged in, {label, grams},
     // or null when logged in plain grams/kcal. Lets a "count" view (the
@@ -2737,7 +2757,11 @@ function mapTemplateSlotRow(r) {
     id: r.id, foodId: r.food_id ?? null, foodName: r.food_name, brand: r.brand ?? null,
     source: r.source ?? null, quantityG: parseFloat(r.quantity_g), calories: r.calories,
     protein: parseFloat(r.protein), carbs: parseFloat(r.carbs), fat: parseFloat(r.fat),
-    fiber: r.fiber != null ? parseFloat(r.fiber) : null, recipeItems: r.recipe_items ?? null,
+    fiber: r.fiber != null ? parseFloat(r.fiber) : null,
+    sugar: r.sugar != null ? parseFloat(r.sugar) : null,
+    satFat: r.sat_fat != null ? parseFloat(r.sat_fat) : null,
+    sodiumMg: r.sodium_mg != null ? parseFloat(r.sodium_mg) : null,
+    recipeItems: r.recipe_items ?? null,
     recipeId: r.recipe_id ?? null, loggedTotalPortions: r.logged_total_portions ?? null,
     hour: r.hour, dayType: r.day_type ?? 'any', sortIdx: r.sort_idx ?? 0,
     mealPlanId: r.meal_plan_id ?? null,
@@ -2751,7 +2775,8 @@ function templateSlotRow(userId) {
     id: t.id, user_id: userId, food_id: t.foodId ?? null, food_name: t.foodName,
     brand: t.brand ?? null, source: t.source ?? null, quantity_g: t.quantityG,
     calories: t.calories, protein: t.protein, carbs: t.carbs, fat: t.fat,
-    fiber: t.fiber ?? null, recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
+    fiber: t.fiber ?? null, sugar: t.sugar ?? null, sat_fat: t.satFat ?? null, sodium_mg: t.sodiumMg ?? null,
+    recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
     logged_total_portions: t.loggedTotalPortions ?? null, hour: t.hour,
     day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0, meal_plan_id: t.mealPlanId ?? null,
   });
@@ -2770,7 +2795,7 @@ async function fetchFoodLogsForDates(userId, dates) {
   const ds = [...new Set((dates || []).filter(Boolean))];
   if (!ds.length || !userId) return {};
   const { data, error } = await _supabase.from('zane_food_logs')
-    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
     .eq('user_id', userId)
     .in('date', ds);
   if (error) throw error;
@@ -4787,6 +4812,232 @@ function macroAdherence(actual, target) {
   return Math.round(weighted * 100);
 }
 
+// ── Food tracker meal categories (migration 0206) ───────────────────────────
+// Labels and default boundaries of the Food Tracker's meal grouping. The
+// definition lives here rather than in screens-food.jsx because two screens
+// need it now: the timeline that renders the groups and the settings editor
+// that changes them.
+const MEAL_CATEGORY_DEFS = [
+  { id: 'breakfast', label: 'Breakfast', defaultStart: 0 },
+  { id: 'snack1', label: 'Snack 1', defaultStart: 9 },
+  { id: 'lunch', label: 'Lunch', defaultStart: 11 },
+  { id: 'snack2', label: 'Snack 2', defaultStart: 13 },
+  { id: 'dinner', label: 'Dinner', defaultStart: 16 },
+  { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
+];
+// Resolves settings.mealWindows (six ascending start hours, first always 0)
+// into the [startHour, endHour) ranges the timeline groups by. Defensive about
+// the stored value: a short, non-ascending or non-numeric array falls back to
+// the defaults rather than rendering a day with holes or overlaps in it, since
+// this drives which entries appear under which heading.
+function mealCategories(settings) {
+  const raw = settings?.mealWindows;
+  const ok = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
+    && raw.every((h, i) => Number.isInteger(h) && h >= 0 && h <= 23 && (i === 0 ? h === 0 : h > raw[i - 1]));
+  const starts = ok ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
+  return MEAL_CATEGORY_DEFS.map((c, i) => ({
+    id: c.id, label: c.label,
+    startHour: starts[i],
+    endHour: i === MEAL_CATEGORY_DEFS.length - 1 ? 24 : starts[i + 1],
+  }));
+}
+
+// ── Macro target estimation (migration 0205) ────────────────────────────────
+// Everything above assumes macro targets already exist. They never did for a
+// user without a coach: the whole adherence system (ring, hero rows, week
+// card, check-in) hangs off numbers the app never helped anyone arrive at.
+// These two pure functions are the arithmetic behind the "Estimate targets"
+// wizard; they persist nothing and decide nothing, the user confirms the
+// result in the normal MacroTargetSheet.
+
+// Activity multipliers applied to BMR. Deliberately coarse: the input is a
+// self-assessment, so more granularity would only imply precision that isn't
+// there. Keys are stored verbatim in zane_user_settings.macro_calc.
+const ACTIVITY_FACTORS = { sedentary: 1.2, light: 1.375, moderate: 1.55, high: 1.725, athlete: 1.9 };
+// One kilogram of body mass is worth roughly this many kcal, the standard
+// figure behind "500 kcal/day is half a kilo a week".
+const KCAL_PER_KG = 7700;
+
+// Mifflin-St Jeor, the usual default for a resting figure: more accurate than
+// Harris-Benedict for the general population and it needs nothing beyond
+// weight, height, age and sex. `sex` is 'male' | 'female' (the equation's own
+// two constants, not an identity question); anything else takes the midpoint
+// so the estimate degrades gracefully instead of refusing to produce one.
+// Returns null when a required input is missing, so callers can just check.
+function estimateTdee({ weightKg, heightCm, age, sex, activity }) {
+  const w = Number(weightKg), h = Number(heightCm), a = Number(age);
+  if (!(w > 0) || !(h > 0) || !(a > 0)) return null;
+  const base = 10 * w + 6.25 * h - 5 * a;
+  const offset = sex === 'male' ? 5 : sex === 'female' ? -161 : -78;
+  const bmr = base + offset;
+  const factor = ACTIVITY_FACTORS[activity] ?? ACTIVITY_FACTORS.moderate;
+  return { bmr: Math.round(bmr), tdee: Math.round(bmr * factor) };
+}
+
+// Turns a TDEE into the eight-field macro-target object the rest of the app
+// speaks, splitting training and rest days.
+//
+// goal: 'cut' | 'maintain' | 'gain'. rateKgPerWeek is the intended weekly body
+// weight change (ignored for 'maintain'), converted to a daily calorie delta.
+//
+// The split is classic carb cycling: protein and fat are identical on both day
+// types (protein defends muscle, fat defends hormones, neither should swing
+// with training), and carbs absorb the entire difference. Training days get
+// TRAINING_SPREAD more than average and rest days take the rest, chosen so the
+// WEEKLY total still equals the daily target times seven, whatever the number
+// of training days. With 0 or 7 training days there is nothing to cycle
+// against and both day types get the plain daily figure.
+//
+// Returns null without a usable weight or TDEE.
+const TRAINING_SPREAD = 0.10;
+// How far below the week's average intake a rest day may be pushed. Bounds the
+// spread above once there are too few rest days to absorb it (see its use).
+const REST_DAY_MAX_DROP = 0.2;
+// Below this much fat per kg of bodyweight the intake stops being a nutrition
+// choice and starts being a hormonal problem, so the automatic split never
+// goes under it. It is a floor on what this function decides on its own, not a
+// hard limit on what the user may ask for: fatPerKg below it is honoured, and
+// the caller warns (see FAT_FLOOR_PER_KG's use in the estimator sheet).
+const FAT_FLOOR_PER_KG = 0.5;
+// fatPerKg (optional): the "low fat" option. A TARGET, not a ceiling: fat lands
+// on exactly weightKg * fatPerKg and everything that frees goes to carbs, for
+// anyone who would rather eat their calories as carbohydrate. Since it is an
+// explicit number the user chose, it is used as given even below
+// FAT_FLOOR_PER_KG; warning about that is the UI's job, silently overruling it
+// here would just make the field look broken.
+// The automatic rest-to-training calorie ratio for a given number of training
+// days, and the lower bound on what the user may pick: it is the hardest cycle
+// this model will produce, and dialling it up towards 1 evens the week out.
+//
+// The training-day bump has to be paid back by however few rest days remain, so
+// a flat TRAINING_SPREAD collapses them once training days dominate: at 6 of 7
+// it put the single rest day 1800 kcal below average, which for an 80 kg lifter
+// is a 1200 kcal day and no kind of prescription. The bump therefore shrinks so
+// a rest day never falls more than REST_DAY_MAX_DROP under the average intake.
+//
+// The daily intake cancels out of the ratio, so this depends on nothing but the
+// day count. Returns 1 (no cycling possible) at 0 and 7 training days.
+function minRestRatio(trainingDays) {
+  const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  if (!(days > 0 && days < 7)) return 1;
+  const training = 1 + Math.min(TRAINING_SPREAD, REST_DAY_MAX_DROP * (7 - days) / days);
+  const rest = (7 - training * days) / (7 - days);
+  return rest / training;
+}
+
+// restRatio (optional): rest-day calories as a fraction of training-day
+// calories. Clamped into [minRestRatio(trainingDays), 1]; omitted means the
+// automatic split, so it keeps following the day count instead of freezing.
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg, restRatio }) {
+  const w = Number(weightKg);
+  const t = Number(tdee);
+  if (!(w > 0) || !(t > 0)) return null;
+  const rate = Number(rateKgPerWeek) || 0;
+  const delta = goal === 'cut' ? -Math.abs(rate) * KCAL_PER_KG / 7
+    : goal === 'gain' ? Math.abs(rate) * KCAL_PER_KG / 7
+      : 0;
+  // Never prescribe a starvation-level intake off a slider: a rate the user
+  // picked as "aggressive" against a low TDEE could otherwise land absurdly
+  // low. 60% of TDEE is a blunt but honest floor.
+  const daily = Math.max(Math.round(t + delta), Math.round(t * 0.6));
+
+  const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  const cycles = days > 0 && days < 7;
+  // How hard the week cycles, as rest-day calories over training-day calories.
+  // minRestRatio is the automatic split and the most aggressive one offered;
+  // restRatio dials back towards 1, where every day is identical. Solving
+  // trainingCal * days + restCal * (7 - days) = daily * 7 for a given ratio
+  // keeps the weekly total fixed whatever the user picks.
+  const minRatio = minRestRatio(days);
+  const ratio = cycles
+    ? Math.min(1, Math.max(minRatio, Number(restRatio) > 0 ? Number(restRatio) : minRatio))
+    : 1;
+  const trainingCal = cycles ? Math.round((daily * 7) / (days + ratio * (7 - days))) : daily;
+  const restCal = cycles ? Math.round(trainingCal * ratio) : daily;
+
+  const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
+  // With the low-fat option, exactly what was asked for. Otherwise 25% of
+  // calories, computed off the average day so the gram figure is the same on
+  // both, and never under the floor: dropping fat that low to buy carbs is not
+  // a trade to make on the user's behalf, only one they can make themselves.
+  const fat = Number(fatPerKg) > 0
+    ? Math.round(w * Number(fatPerKg))
+    : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
+  const carbsFor = (cal) => Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4));
+
+  const carbsTraining = carbsFor(trainingCal);
+  const carbsRest = carbsFor(restCal);
+  return {
+    proteinTraining: protein, carbsTraining, fatTraining: fat,
+    caloriesTraining: caloriesFromMacros(protein, carbsTraining, fat),
+    proteinRest: protein, carbsRest, fatRest: fat,
+    caloriesRest: caloriesFromMacros(protein, carbsRest, fat),
+  };
+}
+
+// The one number that decides whether bodyweight moves: what a week of the two
+// day types averages out to per day. Splitting intake across training and rest
+// days hides it, and hand-editing the macros can walk it anywhere while each
+// individual day still looks perfectly reasonable, so it is worth stating
+// rather than leaving to be worked out from two figures and a day count.
+function weeklyAverageCalories(trainingCalories, restCalories, trainingDays) {
+  const d = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  const tc = Number(trainingCalories) || 0;
+  const rc = Number(restCalories) || 0;
+  return Math.round((tc * d + rc * (7 - d)) / 7);
+}
+
+// Hand-edit one macro of an estimate and keep the calorie figure it was built
+// around: whatever is still free to move absorbs the difference, split in
+// proportion to the calories those macros already carry, so an edit nudges the
+// existing split instead of replacing it.
+//
+// opts.targetCalories is the figure to hold (the estimate's own kcal for that
+// day type). Without it the edit is applied as-is and nothing rebalances.
+//
+// Three things can hold a macro still:
+//   - it is the one being edited
+//   - opts.locked lists it (the user pinned it by hand)
+//   - it is fat and opts.fatPerKg/weightKg give a low-fat target, which is a
+//     fixed gram figure and so behaves exactly like a lock
+// A fat value the user types or locks themselves wins over the low-fat target:
+// both are explicit choices, and the option is there to be overridden.
+//
+// When nothing is left free, the edit simply stands and the calorie total moves
+// with it. Callers derive the displayed kcal from the macros, so that is
+// visible rather than silently clamped away. Nothing goes negative.
+function rebalanceMacros(current, key, value, opts = {}) {
+  const KCAL = { protein: 4, carbs: 4, fat: 9 };
+  const KEYS = ['protein', 'carbs', 'fat'];
+  const at = (o, k) => Math.max(0, Number(o?.[k]) || 0);
+  const out = (o) => ({ protein: Math.round(o.protein), carbs: Math.round(o.carbs), fat: Math.round(o.fat) });
+  const next = { protein: at(current, 'protein'), carbs: at(current, 'carbs'), fat: at(current, 'fat') };
+  if (!KEYS.includes(key)) return out(next);
+  next[key] = Math.max(0, Number(value) || 0);
+
+  const locked = new Set(Array.isArray(opts.locked) ? opts.locked : []);
+  const fatTarget = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
+    ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
+    : null;
+  const fatPinned = fatTarget != null && key !== 'fat' && !locked.has('fat');
+  if (fatPinned) next.fat = fatTarget;
+
+  const target = Number(opts.targetCalories);
+  if (!(target > 0)) return out(next);
+
+  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned));
+  if (!free.length) return out(next);
+
+  const heldCal = KEYS.filter(k => !free.includes(k)).reduce((a, k) => a + next[k] * KCAL[k], 0);
+  const remaining = Math.max(0, target - heldCal);
+  const baseCal = free.reduce((a, k) => a + at(current, k) * KCAL[k], 0);
+  free.forEach(k => {
+    const share = baseCal > 0 ? (at(current, k) * KCAL[k]) / baseCal : 1 / free.length;
+    next[k] = (remaining * share) / KCAL[k];
+  });
+  return out(next);
+}
+
 // True when a macro-target object carries at least one macro (protein/carbs/fat,
 // training or rest). Calories alone don't count as "set" (they're derived).
 function hasMacroTargets(m) {
@@ -5062,7 +5313,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
@@ -7154,6 +7405,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

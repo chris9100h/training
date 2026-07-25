@@ -20,7 +20,9 @@
 //
 // One action: POST { image: <base64, no data: prefix>, mimeType?: 'image/jpeg' }
 // -> { is_nutrition_label, name, brand, basis, serving_size_g, serving_label,
-//      calories, protein_g, carbs_g, fat_g, fiber_g }.
+//      calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sat_fat_g,
+//      sodium_mg }. The last three arrived with migration 0204; sodium is
+//      returned in MILLIGRAMS whatever unit the label printed.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +37,30 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
+
+const DAILY_SCAN_LIMIT = 60;
+
+// Advisory per-user daily quota (migration 0207). Fails OPEN on purpose: if the
+// RPC errors, times out or the migration has not run yet, the call goes
+// through. A problem with the quota mechanism must never be the reason someone
+// cannot log their food, and the point of it is catching a runaway account, not
+// enforcing a contract.
+async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
+  try {
+    const base = Deno.env.get('SUPABASE_URL') ?? '';
+    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    if (!base || !key) return true;
+    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
+    });
+    if (!r.ok) return true;
+    return (await r.json()) !== false;
+  } catch (_) {
+    return true;
+  }
+}
 
 async function resolveUser(req: Request): Promise<string | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
@@ -65,14 +91,19 @@ Return ONLY a JSON object, no prose and no markdown code fences, with exactly th
   "protein_g": number or null,
   "carbs_g": number or null,
   "fat_g": number or null,
-  "fiber_g": number or null
+  "fiber_g": number or null,
+  "sugar_g": number or null,
+  "sat_fat_g": number or null,
+  "sodium_mg": number or null
 }
 Rules:
 - Set is_nutrition_label to false if the image is not a nutrition table at all; still return the object with the other fields null.
 - ALWAYS prefer the per-100 g (or per-100 ml) column. If the label has a per-100g / per-100ml column, report THOSE values and set basis to "100g" or "100ml", even when a per-serving column is also present. Only if the label has no per-100g / per-100ml column at all, fall back to the per-serving values and set basis to "serving".
 - serving_size_g is the grams in one serving when stated (e.g. "per 30 g"); serving_label is the human text like "1 cup (30 g)".
 - calories must be in kcal. If only kilojoules (kJ) are printed, convert with kcal = kJ / 4.184 and round.
-- carbs_g is total carbohydrate, NOT the "of which sugars" sub-line.
+- carbs_g is total carbohydrate, NOT the "of which sugars" sub-line. Report that sub-line ("of which sugars" / "Total Sugars") separately as sugar_g.
+- sat_fat_g is the "of which saturates" / "Saturated Fat" sub-line of the fat row, not the total fat.
+- sodium_mg must be MILLIGRAMS of sodium. Labels that print salt instead of sodium (common in the EU) state grams of salt: convert with sodium_mg = salt_g / 2.5 * 1000. Labels that print sodium in grams convert with sodium_mg = sodium_g * 1000.
 - Numeric fields must be plain numbers with no units. Use null for anything you cannot read confidently, and do not guess.`;
 
 // Pull the first balanced JSON object out of the model's text, tolerant of an
@@ -122,6 +153,9 @@ Deno.serve(async (req) => {
 
   const userId = await resolveUser(req);
   if (!userId) return json({ error: 'unauthorized' }, 401);
+  if (!await withinQuota(userId, 'scan', DAILY_SCAN_LIMIT)) {
+    return json({ error: `That is ${DAILY_SCAN_LIMIT} label scans today, well past normal use. The limit resets tomorrow; add the food manually until then.` }, 429);
+  }
 
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   if (!apiKey) return json({ error: 'Label scanning is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
@@ -193,5 +227,8 @@ Deno.serve(async (req) => {
     carbs_g: num(parsed.carbs_g),
     fat_g: num(parsed.fat_g),
     fiber_g: num(parsed.fiber_g),
+    sugar_g: num(parsed.sugar_g),
+    sat_fat_g: num(parsed.sat_fat_g),
+    sodium_mg: num(parsed.sodium_mg),
   }, 200);
 });

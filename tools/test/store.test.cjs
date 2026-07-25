@@ -478,6 +478,358 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
   });
 
+  test('mealCategories: defaults, custom windows, and rejection of broken ones', () => {
+    // JSON instead of deepStrictEqual: store.js runs in a vm sandbox, so its
+    // arrays have a different Array prototype than this file's and a deep
+    // strict compare fails on that alone (same reason the rest of this suite
+    // compares by JSON).
+    const starts = s => JSON.stringify(LB.mealCategories(s).map(c => c.startHour));
+    const ends = s => JSON.stringify(LB.mealCategories(s).map(c => c.endHour));
+    const DEFAULTS = JSON.stringify([0, 9, 11, 13, 16, 20]);
+    // Unset, empty and null all mean "the built-in defaults".
+    assert.strictEqual(starts(null), DEFAULTS);
+    assert.strictEqual(starts({}), DEFAULTS);
+    assert.strictEqual(starts({ mealWindows: null }), DEFAULTS);
+    // Each category ends where the next begins, the last covers to midnight.
+    assert.strictEqual(ends({}), JSON.stringify([9, 11, 13, 16, 20, 24]));
+    // A valid custom set is used verbatim, ends following along.
+    const late = [0, 11, 14, 16, 19, 22];
+    assert.strictEqual(starts({ mealWindows: late }), JSON.stringify(late));
+    assert.strictEqual(ends({ mealWindows: late }), JSON.stringify([11, 14, 16, 19, 22, 24]));
+    // Anything that could produce a gap, an overlap or an uncovered morning is
+    // rejected wholesale rather than half-applied: the grouping decides which
+    // entries appear under which heading, so a broken value must not render.
+    assert.strictEqual(starts({ mealWindows: [1, 9, 11, 13, 16, 20] }), DEFAULTS, 'first hour must be 0');
+    assert.strictEqual(starts({ mealWindows: [0, 11, 9, 13, 16, 20] }), DEFAULTS, 'must ascend');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 9, 13, 16, 20] }), DEFAULTS, 'strictly, no empty category');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16] }), DEFAULTS, 'wrong length');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16, 24] }), DEFAULTS, 'a start of 24 is out of range');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16, '20'] }), DEFAULTS, 'strings are not hours');
+    assert.strictEqual(starts({ mealWindows: 'nope' }), DEFAULTS);
+    // Labels stay put whatever the boundaries are.
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealWindows: late }).map(c => c.id)),
+      JSON.stringify(['breakfast', 'snack1', 'lunch', 'snack2', 'dinner', 'snack3']));
+  });
+
+  test('estimateTdee: Mifflin-St Jeor, both sex constants, activity multiplier', () => {
+    // 80 kg, 180 cm, 30 y: base = 10*80 + 6.25*180 - 5*30 = 800 + 1125 - 150 = 1775
+    // male +5 -> 1780; x1.55 (moderate) = 2759
+    assert.strictEqual(JSON.stringify(LB.estimateTdee({ weightKg: 80, heightCm: 180, age: 30, sex: 'male', activity: 'moderate' })),
+      JSON.stringify({ bmr: 1780, tdee: 2759 }));
+    // female -161 -> 1614; x1.2 (sedentary) = 1937
+    assert.strictEqual(JSON.stringify(LB.estimateTdee({ weightKg: 80, heightCm: 180, age: 30, sex: 'female', activity: 'sedentary' })),
+      JSON.stringify({ bmr: 1614, tdee: 1937 }));
+    // Anything other than the equation's two constants takes the midpoint
+    // (-78), so an unset/other answer still yields an estimate.
+    assert.strictEqual(LB.estimateTdee({ weightKg: 80, heightCm: 180, age: 30, sex: null, activity: 'moderate' }).bmr, 1697);
+    // An unknown activity key falls back to moderate rather than NaN.
+    assert.strictEqual(LB.estimateTdee({ weightKg: 80, heightCm: 180, age: 30, sex: 'male', activity: 'nonsense' }).tdee, 2759);
+    // Missing inputs produce no estimate at all, never a partial one.
+    assert.strictEqual(LB.estimateTdee({ weightKg: 0, heightCm: 180, age: 30, sex: 'male', activity: 'moderate' }), null);
+    assert.strictEqual(LB.estimateTdee({ weightKg: 80, heightCm: null, age: 30, sex: 'male', activity: 'moderate' }), null);
+    assert.strictEqual(LB.estimateTdee({ weightKg: 80, heightCm: 180, age: null, sex: 'male', activity: 'moderate' }), null);
+  });
+
+  test('macroTargetsFromGoal: maintain splits nothing, protein/fat hold, carbs cycle', () => {
+    // maintain, 4 training days, 80 kg, TDEE 3000.
+    // protein = 80*2 = 160, fat = round(3000*0.25/9) = 83 (floor 0.5 g/kg = 40, so 83 wins)
+    // training kcal = 3000*1.1 = 3300, rest = (21000 - 4*3300)/3 = 2600
+    // carbsTraining = (3300 - 640 - 747)/4 = 478.25 -> 478
+    // carbsRest = (2600 - 640 - 747)/4 = 303.25 -> 303
+    const m = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: 4 });
+    assert.strictEqual(m.proteinTraining, 160);
+    assert.strictEqual(m.proteinRest, 160, 'protein never swings with the day type');
+    assert.strictEqual(m.fatTraining, 83);
+    assert.strictEqual(m.fatRest, 83, 'fat never swings either, carbs absorb the difference');
+    assert.strictEqual(m.carbsTraining, 478);
+    assert.strictEqual(m.carbsRest, 303);
+    // Calories are derived, not stored independently.
+    assert.strictEqual(m.caloriesTraining, LB.caloriesFromMacros(160, 478, 83));
+    // The weekly total still lands on 7 x the daily figure (rounding aside).
+    const weekly = m.caloriesTraining * 4 + m.caloriesRest * 3;
+    assert.ok(Math.abs(weekly - 3000 * 7) < 60, `weekly ${weekly} stays within rounding of 21000`);
+  });
+
+  test('minRestRatio: the automatic split, and the hardest cycle on offer', () => {
+    // 4 training days: 3300 vs 2600 kcal on a 3000 average, so rest sits at
+    // 78.8% of a training day. Independent of the intake, by construction.
+    assert.strictEqual(Math.round(LB.minRestRatio(4) * 1000), 788);
+    assert.strictEqual(LB.minRestRatio(4), LB.minRestRatio(4), 'depends on nothing but the day count');
+    // With one rest day left the bump has to shrink, so the ratio comes back up.
+    assert.ok(LB.minRestRatio(6) > 0.75 && LB.minRestRatio(6) < 0.79);
+    // Nothing to cycle against at the extremes.
+    assert.strictEqual(LB.minRestRatio(0), 1);
+    assert.strictEqual(LB.minRestRatio(7), 1);
+    assert.strictEqual(LB.minRestRatio(99), 1, 'clamped, not extrapolated');
+    // Every real split leaves training days ahead of rest days.
+    for (const d of [1, 2, 3, 4, 5, 6]) assert.ok(LB.minRestRatio(d) < 1, `${d} days cycles`);
+  });
+
+  test('macroTargetsFromGoal: restRatio evens the week out without changing its total', () => {
+    const base = { tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: 4 };
+    const auto = LB.macroTargetsFromGoal(base);
+    // Omitting it reproduces the automatic split exactly, so the default keeps
+    // following the day count rather than freezing at whatever was picked once.
+    const explicit = LB.macroTargetsFromGoal({ ...base, restRatio: LB.minRestRatio(4) });
+    assert.strictEqual(JSON.stringify(explicit), JSON.stringify(auto));
+    // 1 means every day identical.
+    const flat = LB.macroTargetsFromGoal({ ...base, restRatio: 1 });
+    assert.strictEqual(flat.caloriesTraining, flat.caloriesRest);
+    assert.strictEqual(flat.carbsTraining, flat.carbsRest);
+    // Halfway sits between the two, still ahead on training days.
+    const mid = LB.macroTargetsFromGoal({ ...base, restRatio: 0.9 });
+    assert.ok(mid.caloriesTraining < auto.caloriesTraining && mid.caloriesTraining > flat.caloriesTraining);
+    assert.ok(mid.caloriesRest > auto.caloriesRest && mid.caloriesRest < flat.caloriesRest);
+    // Whatever the ratio, the week still averages out to the same intake.
+    for (const r of [undefined, 0.8, 0.9, 0.95, 1]) {
+      const m = LB.macroTargetsFromGoal({ ...base, restRatio: r });
+      const avg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, 4);
+      assert.ok(Math.abs(avg - 3000) < 20, `ratio ${r} averages ${avg}`);
+    }
+    // Below the automatic split it is clamped: that is the hardest cycle offered.
+    const tooLow = LB.macroTargetsFromGoal({ ...base, restRatio: 0.2 });
+    assert.strictEqual(JSON.stringify(tooLow), JSON.stringify(auto));
+    // Above 1 is clamped too, so rest days can never out-eat training days.
+    assert.strictEqual(JSON.stringify(LB.macroTargetsFromGoal({ ...base, restRatio: 3 })), JSON.stringify(flat));
+    // With nothing to cycle against the ratio is simply irrelevant.
+    const allTraining = LB.macroTargetsFromGoal({ ...base, trainingDays: 7, restRatio: 0.5 });
+    assert.strictEqual(allTraining.caloriesTraining, allTraining.caloriesRest);
+  });
+
+  test('macroTargetsFromGoal: a rest day is never squeezed to an absurd figure', () => {
+    // With few rest days left to absorb it, the training-day bump has to
+    // shrink: at 6 of 7 a flat 10% would leave the single rest day 1800 kcal
+    // under the average, i.e. a 1200 kcal day here.
+    for (const days of [1, 2, 3, 4, 5, 6]) {
+      const m = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: days });
+      assert.ok(m.caloriesRest >= 3000 * 0.75, `${days} training days leaves a ${m.caloriesRest} kcal rest day`);
+      assert.ok(m.caloriesTraining > m.caloriesRest, `${days} training days still eats more on training days`);
+      // Carbs never had to be clamped at zero to make the day fit.
+      assert.ok(m.carbsRest > 0, `${days} training days leaves real carbs on a rest day`);
+    }
+  });
+
+  test('macroTargetsFromGoal: 0 and 7 training days have nothing to cycle against', () => {
+    for (const days of [0, 7]) {
+      const m = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 70, goal: 'maintain', trainingDays: days });
+      assert.strictEqual(m.carbsTraining, m.carbsRest, `${days} training days: both day types are identical`);
+      assert.strictEqual(m.caloriesTraining, m.caloriesRest);
+    }
+  });
+
+  test('macroTargetsFromGoal: cut and gain move the daily figure by the weekly rate', () => {
+    const base = { tdee: 2800, weightKg: 75, trainingDays: 7 };
+    const maintain = LB.macroTargetsFromGoal({ ...base, goal: 'maintain' });
+    // 0.5 kg/week = 0.5*7700/7 = 550 kcal/day off (or onto) the daily figure.
+    const cut = LB.macroTargetsFromGoal({ ...base, goal: 'cut', rateKgPerWeek: 0.5 });
+    const gain = LB.macroTargetsFromGoal({ ...base, goal: 'gain', rateKgPerWeek: 0.5 });
+    // Tolerance covers the few kcal lost to rounding every macro to whole grams.
+    assert.ok(Math.abs((maintain.caloriesTraining - cut.caloriesTraining) - 550) <= 5, 'a cut lands ~550 kcal lower');
+    assert.ok(Math.abs((gain.caloriesTraining - maintain.caloriesTraining) - 550) <= 5, 'a gain lands ~550 kcal higher');
+    // Protein is a function of bodyweight, so it is defended in a deficit;
+    // fat is a share of intake, so it moves with it; carbs take the rest.
+    assert.strictEqual(cut.proteinTraining, maintain.proteinTraining, 'protein is defended in a deficit');
+    assert.ok(cut.fatTraining < maintain.fatTraining, 'fat is a share of intake, so it scales with it');
+    assert.ok(maintain.carbsTraining - cut.carbsTraining > cut.fatTraining, 'carbs still absorb most of the cut');
+    // A sign-flipped rate is read as a magnitude, so "cut" can never add calories.
+    assert.strictEqual(JSON.stringify(LB.macroTargetsFromGoal({ ...base, goal: 'cut', rateKgPerWeek: -0.5 })), JSON.stringify(cut));
+  });
+
+  test('macroTargetsFromGoal: guards against absurd inputs', () => {
+    // An aggressive rate against a low TDEE is floored at 60% of TDEE rather
+    // than prescribing a starvation intake off a slider.
+    const extreme = LB.macroTargetsFromGoal({ tdee: 1600, weightKg: 55, goal: 'cut', rateKgPerWeek: 2, trainingDays: 7 });
+    assert.strictEqual(extreme.caloriesTraining >= Math.round(1600 * 0.6) - 30, true, 'never drops far below the 60% floor');
+    assert.strictEqual(extreme.carbsTraining >= 0, true, 'carbs never go negative');
+    // Fat has its own 0.5 g/kg floor, so a very low intake does not buy carbs
+    // by zeroing fat out.
+    assert.strictEqual(extreme.fatTraining >= Math.round(55 * 0.5), true);
+    // Without a weight or a TDEE there is nothing to compute.
+    assert.strictEqual(LB.macroTargetsFromGoal({ tdee: 2500, weightKg: null, goal: 'maintain', trainingDays: 4 }), null);
+    assert.strictEqual(LB.macroTargetsFromGoal({ tdee: null, weightKg: 80, goal: 'maintain', trainingDays: 4 }), null);
+    // Training days outside 0-7 are clamped instead of producing a divide-by-zero.
+    assert.ok(LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 80, goal: 'maintain', trainingDays: 12 }));
+    assert.ok(LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 80, goal: 'maintain', trainingDays: -3 }));
+  });
+
+  test('macroTargetsFromGoal: fatPerKg is a target, and may go under the floor', () => {
+    const base = { tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: 7 };
+    const normal = LB.macroTargetsFromGoal(base);
+    assert.strictEqual(normal.fatTraining, 83, '25% of intake without the option');
+    // 0.6 g/kg x 80 kg = 48 g exactly, not "at most 48".
+    const low = LB.macroTargetsFromGoal({ ...base, fatPerKg: 0.6 });
+    assert.strictEqual(low.fatTraining, 48);
+    assert.strictEqual(low.proteinTraining, normal.proteinTraining, 'protein is untouched by the fat option');
+    // The 35 g of fat removed is 315 kcal, which is ~79 g of carbs.
+    assert.strictEqual(low.carbsTraining - normal.carbsTraining, 79);
+    assert.ok(Math.abs(low.caloriesTraining - normal.caloriesTraining) <= 3, 'same intake, different split');
+    // A target in both directions: a factor above the normal split RAISES fat.
+    assert.strictEqual(LB.macroTargetsFromGoal({ ...base, fatPerKg: 1.2 }).fatTraining, 96);
+    // Under the floor it is still honoured, because the number came from the
+    // user. Warning about it is the UI's job, not silently overruling them.
+    assert.strictEqual(LB.FAT_FLOOR_PER_KG, 0.5);
+    assert.strictEqual(LB.macroTargetsFromGoal({ ...base, fatPerKg: 0.3 }).fatTraining, 24);
+    // The floor still governs the automatic split, where nobody asked for less.
+    const lean = LB.macroTargetsFromGoal({ tdee: 1600, weightKg: 90, goal: 'cut', rateKgPerWeek: 1, trainingDays: 7 });
+    assert.ok(lean.fatTraining >= Math.round(90 * LB.FAT_FLOOR_PER_KG));
+  });
+
+  test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
+    // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
+    // The extremes are just the one day type, not a blend of both.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 7), 4023);
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 0), 2743);
+    // Day counts outside 0-7 are clamped rather than producing a figure that
+    // silently assumes a longer week.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 12), 4023);
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, -3), 2743);
+    // Missing calories read as zero instead of NaN.
+    assert.strictEqual(LB.weeklyAverageCalories(null, 2743, 0), 2743);
+    assert.strictEqual(LB.weeklyAverageCalories(2100, undefined, 7), 2100);
+
+    // The property that makes the estimate coherent: an untouched estimate
+    // averages back out to the intake it was built from, whatever the split.
+    for (const days of [0, 1, 3, 4, 6, 7]) {
+      const m = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: days });
+      const avg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, days);
+      assert.ok(Math.abs(avg - 3000) < 20, `${days} training days averages ${avg}, near the 3000 it was built on`);
+    }
+    // And a cut lands the whole week below maintenance, not just its rest days.
+    const cut = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'cut', rateKgPerWeek: 0.5, trainingDays: 4 });
+    const cutAvg = LB.weeklyAverageCalories(cut.caloriesTraining, cut.caloriesRest, 4);
+    assert.ok(Math.abs((3000 - cutAvg) - 550) < 20, `averages ${cutAvg}, about 550 under maintenance`);
+  });
+
+  test('rebalanceMacros: holds the calorie figure, others split proportionally', () => {
+    // 160P / 400C / 80F = 640 + 1600 + 720 = 2960 kcal.
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = LB.caloriesFromMacros(160, 400, 80);
+    assert.strictEqual(target, 2960);
+    // Raise protein by 40 g (160 kcal). Carbs and fat give that back in
+    // proportion to what they carry (1600 vs 720 of 2320 kcal).
+    const up = LB.rebalanceMacros(cur, 'protein', 200, { targetCalories: target });
+    assert.strictEqual(up.protein, 200, 'the edited macro is left exactly as typed');
+    assert.ok(up.carbs < 400 && up.fat < 80, 'both of the others move, not just one');
+    // Tolerance covers rounding two macros to whole grams (up to ~6 kcal).
+    assert.ok(Math.abs(LB.caloriesFromMacros(up.protein, up.carbs, up.fat) - target) <= 10, 'total holds');
+    // Editing carbs moves protein and fat instead, same rule.
+    const c = LB.rebalanceMacros(cur, 'carbs', 300, { targetCalories: target });
+    assert.strictEqual(c.carbs, 300);
+    assert.ok(c.protein > 160 && c.fat > 80);
+    assert.ok(Math.abs(LB.caloriesFromMacros(c.protein, c.carbs, c.fat) - target) <= 10);
+    // Without a target nothing rebalances, the edit just lands.
+    const raw = LB.rebalanceMacros(cur, 'fat', 60, {});
+    assert.strictEqual(JSON.stringify(raw), JSON.stringify({ protein: 160, carbs: 400, fat: 60 }));
+  });
+
+  test('rebalanceMacros: the low-fat target holds fat like a lock', () => {
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = LB.caloriesFromMacros(160, 400, 80);
+    const lowFat = { targetCalories: target, weightKg: 80, fatPerKg: 0.6 }; // 48 g
+    // Editing protein puts fat ON the target and hands the whole remainder to
+    // carbs, even though fat started well above it.
+    const out = LB.rebalanceMacros(cur, 'protein', 120, lowFat);
+    assert.strictEqual(out.protein, 120);
+    assert.strictEqual(out.fat, 48, 'derived fat lands on the target, not merely under a cap');
+    assert.ok(Math.abs(LB.caloriesFromMacros(out.protein, out.carbs, out.fat) - target) <= 10);
+    // A target in both directions: fat starting below it is raised to meet it.
+    const upward = LB.rebalanceMacros({ protein: 160, carbs: 500, fat: 20 }, 'protein', 160, lowFat);
+    assert.strictEqual(upward.fat, 48);
+    // Editing carbs sends the rest to protein, the only macro still free.
+    const c = LB.rebalanceMacros(cur, 'carbs', 300, lowFat);
+    assert.strictEqual(c.carbs, 300, 'the edit is never quietly undone');
+    assert.strictEqual(c.fat, 48);
+    assert.ok(c.protein > 160);
+    // Typing a fat value wins over the target: both are explicit choices.
+    assert.strictEqual(LB.rebalanceMacros(cur, 'fat', 90, lowFat).fat, 90);
+    // So does locking fat by hand.
+    assert.strictEqual(LB.rebalanceMacros(cur, 'protein', 120, { ...lowFat, locked: ['fat'] }).fat, 80);
+  });
+
+  test('rebalanceMacros: a locked macro never moves', () => {
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = LB.caloriesFromMacros(160, 400, 80);
+    // Lock protein, edit fat: only carbs may absorb.
+    const a = LB.rebalanceMacros(cur, 'fat', 60, { targetCalories: target, locked: ['protein'] });
+    assert.strictEqual(a.protein, 160, 'locked');
+    assert.strictEqual(a.fat, 60);
+    assert.ok(a.carbs > 400, 'carbs took the whole difference');
+    assert.ok(Math.abs(LB.caloriesFromMacros(a.protein, a.carbs, a.fat) - target) <= 10);
+    // Lock both others and the edit simply stands: the calorie total moves with
+    // it, which the caller shows because it derives kcal from the macros.
+    const b = LB.rebalanceMacros(cur, 'protein', 200, { targetCalories: target, locked: ['carbs', 'fat'] });
+    assert.strictEqual(JSON.stringify(b), JSON.stringify({ protein: 200, carbs: 400, fat: 80 }));
+    // Locking the macro being edited does not block the edit itself.
+    const d = LB.rebalanceMacros(cur, 'protein', 200, { targetCalories: target, locked: ['protein'] });
+    assert.strictEqual(d.protein, 200);
+    assert.ok(d.carbs < 400 && d.fat < 80);
+  });
+
+  test('rebalanceMacros: replaying pins one at a time restores all of them', () => {
+    // The exact move MacroEstimatorSheet makes when an input changes while
+    // macros are pinned: rebuild from the new estimate, then re-apply each pin
+    // in turn holding the others, so every pinned macro lands back on its own
+    // value and only the free ones absorb the difference.
+    const pinnedValues = { protein: 200, fat: 60 };
+    const replay = (estimate, target) => {
+      const pins = Object.keys(pinnedValues);
+      return pins.reduce((day, k) => LB.rebalanceMacros(day, k, pinnedValues[k], {
+        targetCalories: target, locked: pins.filter(o => o !== k),
+      }), estimate);
+    };
+
+    const target = 3000;
+    const out = replay({ protein: 160, carbs: 400, fat: 80 }, target);
+    assert.strictEqual(out.protein, 200, 'first pin survived the second pass');
+    assert.strictEqual(out.fat, 60, 'second pin applied');
+    assert.ok(Math.abs(LB.caloriesFromMacros(out.protein, out.carbs, out.fat) - target) <= 10,
+      'carbs, the only free macro, absorbed the rest');
+
+    // A different starting estimate lands on the same pins with different
+    // carbs, which is the whole point: the pinned numbers do not drift.
+    const other = replay({ protein: 140, carbs: 300, fat: 100 }, 2600);
+    assert.strictEqual(other.protein, 200);
+    assert.strictEqual(other.fat, 60);
+    assert.ok(other.carbs < out.carbs, 'the smaller day gets fewer carbs, not less protein');
+
+    // Pinning everything means the calories cannot be held, and honestly are
+    // not: nothing is left to absorb, so the pins simply stand.
+    const allPinned = ['protein', 'carbs', 'fat'].reduce(
+      (day, k) => LB.rebalanceMacros(day, k, { protein: 200, carbs: 100, fat: 60 }[k], {
+        targetCalories: target, locked: ['protein', 'carbs', 'fat'].filter(o => o !== k),
+      }), { protein: 160, carbs: 400, fat: 80 });
+    assert.strictEqual(JSON.stringify(allPinned), JSON.stringify({ protein: 200, carbs: 100, fat: 60 }));
+  });
+
+  test('rebalanceMacros: guards against negatives and nonsense input', () => {
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = 2960;
+    // A macro big enough to blow the whole budget zeroes the others rather
+    // than going negative. Calories then exceed the target, which the caller
+    // shows honestly because it derives kcal from the macros.
+    const huge = LB.rebalanceMacros(cur, 'protein', 900, { targetCalories: target });
+    assert.strictEqual(huge.protein, 900);
+    assert.strictEqual(huge.carbs, 0);
+    assert.strictEqual(huge.fat, 0);
+    // Negative and non-numeric edits are read as zero.
+    assert.strictEqual(LB.rebalanceMacros(cur, 'protein', -50, { targetCalories: target }).protein, 0);
+    assert.strictEqual(LB.rebalanceMacros(cur, 'protein', 'abc', { targetCalories: target }).protein, 0);
+    // An unknown key is a no-op rather than a crash.
+    assert.strictEqual(JSON.stringify(LB.rebalanceMacros(cur, 'sugar', 10, { targetCalories: target })), JSON.stringify(cur));
+    // Both others at zero: the remainder splits evenly instead of dividing by zero.
+    const even = LB.rebalanceMacros({ protein: 100, carbs: 0, fat: 0 }, 'protein', 50, { targetCalories: 1000 });
+    assert.ok(even.carbs > 0 && even.fat > 0);
+  });
+
+  test('macroTargetsFromGoal: proteinPerKg is overridable, defaults to 2 g/kg', () => {
+    const d = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 90, goal: 'maintain', trainingDays: 4 });
+    assert.strictEqual(d.proteinTraining, 180);
+    const hi = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 90, goal: 'maintain', trainingDays: 4, proteinPerKg: 2.5 });
+    assert.strictEqual(hi.proteinTraining, 225);
+    assert.ok(hi.carbsTraining < d.carbsTraining, 'the extra protein comes out of carbs, not out of thin air');
+  });
+
   test('effectiveMacroTargets: coach macros always win, personal is the fallback', () => {
     const personal = { proteinTraining: 210 };
     // Coach macros take priority whenever present (real coach or self-coaching).

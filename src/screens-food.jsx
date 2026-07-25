@@ -1,8 +1,9 @@
 /* Food Tracker screen: search Open Food Facts + USDA FoodData Central (via the
    search-foods Edge Function), log a quantity, and roll the result into the
-   same daily macro fields the manual Health-tab form already writes. Also
-   supports backdating (up to 14 days, same window DailyLogScreen enforces)
-   and a "Custom Item" fallback for foods not in either database.
+   same daily macro fields the manual Health-tab form already writes. The day
+   navigation is unbounded in both directions (backwards lazy-fetches past the
+   boot window, forwards is what Plan Mode needs), and a "Custom Item" fallback
+   covers foods not in either database.
 
    Food is stored per-entry (store.foodLogs, table zane_food_logs). On every
    add/delete the affected day's summed calories/protein/carbs/fat (and fiber,
@@ -23,7 +24,7 @@ const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef
 function fdShiftDate(dateStr, deltaDays) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + deltaDays);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return LB.fmtISO(d);
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
@@ -58,10 +59,16 @@ function fdScaleEntry(e, scale) {
     quantityG: sc(e.quantityG), calories: sc(e.calories),
     protein: sc1(e.protein), carbs: sc1(e.carbs), fat: sc1(e.fat),
     fiber: e.fiber != null ? sc1(e.fiber) : null,
+    sugar: e.sugar != null ? sc1(e.sugar) : null,
+    satFat: e.satFat != null ? sc1(e.satFat) : null,
+    sodiumMg: e.sodiumMg != null ? sc(e.sodiumMg) : null,
     recipeItems: e.recipeItems ? e.recipeItems.map(ri => ({
       ...ri, quantityG: sc(ri.quantityG), calories: sc(ri.calories),
       protein: sc1(ri.protein), carbs: sc1(ri.carbs), fat: sc1(ri.fat),
       fiber: ri.fiber != null ? sc1(ri.fiber) : null,
+      sugar: ri.sugar != null ? sc1(ri.sugar) : null,
+      satFat: ri.satFat != null ? sc1(ri.satFat) : null,
+      sodiumMg: ri.sodiumMg != null ? sc(ri.sodiumMg) : null,
     })) : null,
   };
 }
@@ -171,18 +178,10 @@ const FD_QUICK_TABS = [
   { id: 'favorites', label: 'Favorites' },
   { id: 'recipes', label: 'Recipes' },
 ];
-// Purely a display grouping for the Log tab's timeline: each range is
-// [startHour, endHour), fixed for now (not a per-user setting). The hourly
-// rows themselves (and their own "+") are unchanged, this just adds a
-// read-only summary card above each cluster, no interaction of its own.
-const FD_MEAL_CATEGORIES = [
-  { id: 'breakfast', label: 'Breakfast', startHour: 0, endHour: 9 },
-  { id: 'snack1', label: 'Snack 1', startHour: 9, endHour: 11 },
-  { id: 'lunch', label: 'Lunch', startHour: 11, endHour: 13 },
-  { id: 'snack2', label: 'Snack 2', startHour: 13, endHour: 16 },
-  { id: 'dinner', label: 'Dinner', startHour: 16, endHour: 20 },
-  { id: 'snack3', label: 'Snack 3', startHour: 20, endHour: 24 },
-];
+// The Log tab's timeline groups its hourly rows under a read-only per-meal
+// summary card. The boundaries are a user setting since migration 0206
+// (settings.mealWindows, edited in Settings > Health > Food), resolved through
+// LB.mealCategories, which also owns the labels and the defaults.
 
 // Build the planned food-log entry a template slot materializes into on a
 // given date. Shared by the auto-fill effect (opening a day) and the immediate
@@ -198,7 +197,8 @@ function fdMaterializeSlotEntry(slot, dateISO) {
     id: `pl_${dateISO}_${slot.id}`, date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
     foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null,
     quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
-    fiber: slot.fiber ?? null, recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
+    fiber: slot.fiber ?? null, sugar: slot.sugar ?? null, satFat: slot.satFat ?? null, sodiumMg: slot.sodiumMg ?? null,
+    recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
     loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
     createdAt: new Date().toISOString(),
   };
@@ -351,6 +351,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
+  // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
+  const [extrasOpen, setExtrasOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -400,6 +402,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
+  // The barcode whose lookup came back empty, so the results block can offer
+  // the label scan as the way out. Null whenever the last search was a normal
+  // text search or did find something.
+  const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
   // Which AI reads the nutrition label photo: 'grok' (scan-label, the
   // long-standing default) or 'claude' (scan-label-claude), same request/
@@ -455,6 +461,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [customC, setCustomC] = useStateFd('');
   const [customF, setCustomF] = useStateFd('');
   const [customFib, setCustomFib] = useStateFd('');
+  // Migration 0204 extras, all optional and collapsed behind fdExtrasOpen: they
+  // never enter the calorie math, so an empty field means 'unknown', not zero.
+  const [customSugar, setCustomSugar] = useStateFd('');
+  const [customSatFat, setCustomSatFat] = useStateFd('');
+  const [customSodium, setCustomSodium] = useStateFd('');
+  const [customExtrasOpen, setCustomExtrasOpen] = useStateFd(false);
   // Calories, same "derive from macros unless overridden" rule as
   // kcal100Str above: auto-follows protein/carbs/fat (matching how the
   // rest of the app derives calories, e.g. MacroTargetSheet) until the
@@ -484,6 +496,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // original time-of-day. copyMoveIds are foodLogs ids picked from
   // dayEntries (below); copyMoveMode decides whether the originals stay put
   // (copy) or get removed from curDate (move) once submitted.
+  // "Repeat yesterday": which meal is being carried over and which of its
+  // entries are still ticked. Everything starts ticked, because carrying the
+  // whole meal over is the normal case and unticking the one thing that
+  // changed beats picking the three that didn't.
+  const [repeat, setRepeat] = useStateFd(null); // { catId, label, ids }
   const [copyMoveOpen, setCopyMoveOpen] = useStateFd(false);
   const [copyMoveIds, setCopyMoveIds] = useStateFd([]);
   const [copyMoveTarget, setCopyMoveTarget] = useStateFd('');
@@ -797,6 +814,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const recipeItems = entries.map(e => ({
       foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
       protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
+      sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
     }));
     const merged = {
       id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
@@ -805,6 +823,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
       protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
       fiber: hasFiber ? fdRound1(sum('fiber')) : null,
+      sugar: entries.some(e => e.sugar != null) ? fdRound1(sum('sugar')) : null,
+      satFat: entries.some(e => e.satFat != null) ? fdRound1(sum('satFat')) : null,
+      sodiumMg: entries.some(e => e.sodiumMg != null) ? Math.round(sum('sodiumMg')) : null,
       recipeItems, loggedUnit: null,
       // A block mixing planned and logged items is an edge case; conservative
       // default (same bias warnIfOverwritingManualMacros uses elsewhere):
@@ -823,7 +844,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             items: entries.map(e => ({
               foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
               quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
-              fiber: e.fiber ?? null,
+              fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
             })),
             portions: 1, createdAt: now, updatedAt: now,
           }, ...(s.foodRecipes || [])]
@@ -849,8 +870,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     protein: entries.reduce((a, e) => a + (e.protein || 0), 0),
     carbs: entries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: entries.reduce((a, e) => a + (e.fat || 0), 0),
+    // Migration 0204 extras. Summed only over the entries that actually carry
+    // a value, and null when none of them does: a day mixing foods that report
+    // sodium with foods that do not must read as a partial figure, never as a
+    // confident total, and a day made entirely of pre-0204 entries must show
+    // nothing at all instead of a row of zeros.
+    ...fdSumExtras(entries),
   });
   const dayTotals = useMemoFd(() => sumTotals(loggedEntries), [loggedEntries]);
+  const dayHasExtras = dayTotals.sugar != null || dayTotals.satFat != null || dayTotals.sodiumMg != null;
   // Planning aid: where the day is headed if every planned entry gets eaten
   // (logged + planned). Only shown when plan mode is on and the day actually
   // has planned entries, kept strictly separate from dayTotals above so the
@@ -890,20 +918,89 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [dayEntries]);
 
   // Read-only per-category totals shown above each cluster of hours in the
-  // timeline (see FD_MEAL_CATEGORIES), summed straight off byHour's buckets.
+  // timeline (see LB.mealCategories), summed straight off byHour's buckets.
   // Category summary cards reflect the logged truth only: a planned entry
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
-  const categoryTotals = useMemoFd(() => FD_MEAL_CATEGORIES.map(cat => {
+  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
+    // The totals count logged entries only (a planned meal isn't eaten yet),
+    // but `count` counts every entry including planned ones: it gates the
+    // "Repeat yesterday" offer, and a slot that already holds planned meals is
+    // not an empty slot, even though its totals still read zero.
+    let count = 0;
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
+        count++;
         if (e.planned) continue;
         calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
       }
     }
-    return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
-  }), [byHour]);
+    return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
+  }), [byHour, mealCats]);
+
+  // Yesterday's entries grouped by meal category, so an empty category can
+  // offer to repeat it in one tap. Reads the store only: nothing is fetched
+  // for this, so on a day whose predecessor sits outside the boot window the
+  // offer simply doesn't appear rather than firing a request nobody asked for.
+  const prevDayByCategory = useMemoFd(() => {
+    const prev = fdShiftDate(curDate, -1);
+    const out = {};
+    (store.foodLogs || []).forEach(l => {
+      if (l.date !== prev || l.planned) return;
+      const hour = parseInt((l.time || '').slice(0, 2), 10);
+      if (!Number.isFinite(hour)) return;
+      const cat = mealCats.find(c => hour >= c.startHour && hour < c.endHour);
+      if (!cat) return;
+      (out[cat.id] = out[cat.id] || []).push(l);
+    });
+    return out;
+  }, [store.foodLogs, curDate, mealCats]);
+
+  // Repeat yesterday's meal into the same (still empty) slot today. Opens a
+  // picker rather than copying straight away: the near-identical meal is the
+  // common case ("same rice and sauce, different meat"), so the useful shape
+  // is the whole meal pre-ticked with one thing to untick, not a yes/no on a
+  // bare item count.
+  function openRepeatYesterday(cat) {
+    const src = prevDayByCategory[cat.id] || [];
+    if (!src.length) return;
+    setRepeat({ catId: cat.id, label: cat.label, ids: src.map(e => e.id) });
+  }
+  function toggleRepeatId(id) {
+    setRepeat(r => (r ? { ...r, ids: r.ids.includes(id) ? r.ids.filter(x => x !== id) : [...r.ids, id] } : r));
+  }
+  // Derived from prevDayByCategory rather than snapshotted into the state, so
+  // the list can't go stale against the store while the sheet is open.
+  const repeatEntries = repeat ? (prevDayByCategory[repeat.catId] || []) : [];
+  const repeatSelected = repeat ? repeatEntries.filter(e => repeat.ids.includes(e.id)) : [];
+  const repeatTotals = sumTotals(repeatSelected);
+
+  async function submitRepeatYesterday() {
+    if (!repeat || !repeatSelected.length) return;
+    // In Plan Mode this is planning today, not recording it: the copies land
+    // as planned entries to be checked off as they're actually eaten, the same
+    // way the meal template's own auto-fill behaves. Without Plan Mode there
+    // is no planned state to land in, so they're logged outright.
+    const planned = planMode;
+    // Only a LOGGED copy reaches the daily log, so only that case can trample
+    // macros typed into the Health tab (same rule commitEntries follows).
+    if (!planned && !await warnIfOverwritingManualMacros(curDate)) return;
+    const copies = repeatSelected.map(e => ({
+      ...e, id: LB.uid(), date: curDate, planned,
+      // A copy is its own entry: it must not inherit a split/merge batch (that
+      // would offer to "undo" a split on a different day) or a template slot
+      // marker (which would make the auto-fill think the slot is already done).
+      splitBatch: null, templateSlotId: null,
+      createdAt: new Date().toISOString(),
+    }));
+    setStore(s => {
+      const nextLogs = [...copies, ...(s.foodLogs || [])];
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+    });
+    setRepeat(null);
+  }
 
   // Same category/hour grouping for the Manage-entries picker (see the
   // copyMove* sheet below), but keeps planned entries (this picker acts on
@@ -912,12 +1009,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // are walked low to high, unlike dayEntries itself (newest-first, for the
   // live timeline further down).
   const copyMoveCategories = useMemoFd(() => {
-    return FD_MEAL_CATEGORIES.map(cat => {
+    return mealCats.map(cat => {
       const entries = [];
       for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
       return { ...cat, entries };
     }).filter(cat => cat.entries.length > 0);
-  }, [byHour]);
+  }, [byHour, mealCats]);
 
   // Flat drag-reorder slot list for the whole timeline, in EXACT render order
   // (category by category, hour by hour): one slot per logged entry, or one
@@ -926,7 +1023,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // indices back to an actual hour; see handleTimelineReorder.
   const timelineSlots = useMemoFd(() => {
     const out = [];
-    for (const cat of FD_MEAL_CATEGORIES) {
+    for (const cat of mealCats) {
       for (let h = cat.startHour; h < cat.endHour; h++) {
         const es = byHour[h] || [];
         if (es.length) es.forEach(e => out.push({ entry: e, hour: h }));
@@ -934,7 +1031,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }
     }
     return out;
-  }, [byHour]);
+  }, [byHour, mealCats]);
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
@@ -987,8 +1084,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
-  // patchDaily/doAdd use in screens-water.jsx. Calories come straight from the
-  // source's own energy value (summed), never derived from the macros.
+  // patchDaily/doAdd use in screens-water.jsx. Calories are summed from each
+  // entry's own stored kcal, which for a database food was itself derived as
+  // 4P + 4C + 9F when the food was cached (the search-foods Edge Function
+  // deliberately never trusts a source's printed energy value, see its own
+  // comment), and for a custom item is whatever the user entered.
   function patchDaily(s, dateStr, entries) {
     const existing = (s.dailyLogs || []).find(l => l.date === dateStr);
     const netCarbs = !!s.settings?.netCarbs;
@@ -1304,7 +1404,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // by the input's onChange and the field's clear ("x") button.
   function setQueryAndReset(v) {
     setQuery(v);
-    if (!v.trim() && results != null) { setResults(null); setSearchError(null); }
+    if (!v.trim() && results != null) { setResults(null); setSearchError(null); setBarcodeMiss(null); }
   }
 
   // Source the last dispatched search actually ran against, so the effect
@@ -1319,8 +1419,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setSearching(true); setSearchError(null);
     const res = await LB.searchFoods(q, src);
     setSearching(false);
-    if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
+    if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); setBarcodeMiss(null); return; }
     setResults(res.results);
+    // A barcode that finds nothing is a dead end the user is uniquely well
+    // placed to get out of: the product is in their hand and the camera was
+    // open a second ago. Barcode lookup only exists for Open Food Facts, so a
+    // miss is routine for local products. Offer the label scan right there
+    // instead of leaving them on "No matches" with a manual-entry button.
+    setBarcodeMiss(res.isBarcode && !res.results.length ? q : null);
   }
   // Switching the source filter re-runs the last submitted query automatically
   // (a query is already an explicit user action, not the "hammer the API on
@@ -1373,6 +1479,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return;
     }
     const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    // Migration 0204 extras, read off the same panel (sugar and saturated fat
+    // as their own sub-lines, sodium already converted to mg by the scanner).
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
     if (cal == null && p == null && c == null && f == null) {
       setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
       return;
@@ -1386,9 +1495,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // instead, same rule the search-foods edge function applies to every DB
     // result, so a scanned label reports calories the same consistent way.
     const per100 = (label.basis === '100g' || label.basis === '100ml')
-      ? { p, c, f, fib }
+      ? { p, c, f, fib, sug, sat, sod }
       : (label.serving_size_g > 0)
-        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
         : null;
 
     if (per100) {
@@ -1398,6 +1511,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         name, brand: label.brand || null,
         proteinPer100g: per100.p, carbsPer100g: per100.c,
         fatPer100g: per100.f, fiberPer100g: per100.fib,
+        sugarPer100g: per100.sug, satFatPer100g: per100.sat, sodiumMgPer100g: per100.sod,
         servingSizeG: label.serving_size_g > 0 ? label.serving_size_g : null,
         servingLabel: label.serving_label || null,
       });
@@ -1425,6 +1539,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setCustomC(c != null ? String(Math.round(c)) : '');
     setCustomF(f != null ? String(Math.round(f)) : '');
     setCustomFib(fib != null ? String(Math.round(fib)) : '');
+    setCustomSugar(sug != null ? String(fdRound1(sug)) : '');
+    setCustomSatFat(sat != null ? String(fdRound1(sat)) : '');
+    setCustomSodium(sod != null ? String(Math.round(sod)) : '');
+    setCustomExtrasOpen(sug != null || sat != null || sod != null);
     setCustomOpen(true);
   }
 
@@ -1457,6 +1575,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       proteinPer100g: item.protein * per100,
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
+      sugarPer100g: item.sugar != null ? item.sugar * per100 : null,
+      satFatPer100g: item.satFat != null ? item.satFat * per100 : null,
+      sodiumMgPer100g: item.sodiumMg != null ? item.sodiumMg * per100 : null,
       servingSizeG: null, servingLabel: null,
       // zane_food_logs never stores the full units picker list (see
       // matchingFavorite); a favorite matching this same name still offers
@@ -1512,6 +1633,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         proteinPer100g: l.protein * per100,
         carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
         fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
+        // Migration 0204 extras, reconstructed the same way. Absent on
+        // anything logged before those columns existed, which stays null
+        // rather than becoming a fabricated zero.
+        sugarPer100g: l.sugar != null ? l.sugar * per100 : null,
+        satFatPer100g: l.satFat != null ? l.satFat * per100 : null,
+        sodiumMgPer100g: l.sodiumMg != null ? l.sodiumMg * per100 : null,
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
@@ -1557,7 +1684,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const calories = custom
       ? Math.round((fdNum(kcal100Str) || 0) * factor)
       : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0);
-    return { calories, protein, carbs, fat, fiber };
+    // Migration 0204 extras. Scaled by the same factor, straight off the food
+    // (never user-editable like P/C/F: they play no part in the calorie math,
+    // so there is nothing to correct here). null stays null, since "the source
+    // does not report it" must not collapse into a confident zero.
+    const sc1 = (v) => (v == null ? null : fdRound1(v * factor));
+    const sugar = sc1(pendingFood.sugarPer100g);
+    const satFat = sc1(pendingFood.satFatPer100g);
+    const sodiumMg = pendingFood.sodiumMgPer100g == null ? null : Math.round(pendingFood.sodiumMgPer100g * factor);
+    return { calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg };
   }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
@@ -1613,7 +1748,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // openEditEntry), so "anything typed" is a safe dirty check with no
   // false positives.
   async function requestCloseCustomSheet() {
-    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim();
+    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim()
+      || customSugar.trim() || customSatFat.trim() || customSodium.trim();
     if (dirty && !await confirm("This item won't be saved.", { title: 'Discard item?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     closeCustomSheet();
   }
@@ -1636,6 +1772,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       source: custom ? 'custom' : pendingFood.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
       // The exact unit this entry was logged in (e.g. "Pc"), so a later
       // "count" view (the split sheet) reads back what was actually used
       // instead of guessing via a matching favorite's first unit.
@@ -1654,6 +1791,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodId: null, foodName: name, brand: null, source: 'custom',
       quantityG: g != null ? g : 100, calories: Math.round(cal), protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdNum(customFib) : null,
+      sugar: customSugar !== '' ? fdNum(customSugar) : null,
+      satFat: customSatFat !== '' ? fdNum(customSatFat) : null,
+      sodiumMg: customSodium !== '' ? fdNum(customSodium) : null,
       createdAt: new Date().toISOString(),
     };
   }
@@ -1688,6 +1828,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         id: LB.uid(), foodId: entry.foodId, foodName: entry.foodName, brand: entry.brand,
         source: entry.source, quantityG: entry.quantityG, calories: entry.calories,
         protein: entry.protein, carbs: entry.carbs, fat: entry.fat, fiber: entry.fiber,
+        sugar: entry.sugar ?? null, satFat: entry.satFat ?? null, sodiumMg: entry.sodiumMg ?? null,
         createdAt: new Date().toISOString(),
       };
       // foodFavorites.food_id is a real FK into zane_foods, but that row is
@@ -1795,6 +1936,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   function resetCustomForm() {
     setCustomName(''); setCustomG(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
+    setCustomSugar(''); setCustomSatFat(''); setCustomSodium(''); setCustomExtrasOpen(false);
     setCustomCal(''); setCustomCalTouched(false);
     setFavedId(null);
   }
@@ -1827,7 +1969,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setRecipeEditorOpen(false);
     setTab('quickadd'); setQuickTab('recipes');
   }
-  function deleteRecipe(recipe) {
+  // Confirmed like every other destructive action in this module (deleteEntry,
+  // deletePlan, deleteSlot, even removing a single ingredient): a recipe is the
+  // most expensive artifact here, it's fired from a small trash icon in a
+  // scrolling list, and dropping it silently breaks "Edit portions" on every
+  // already-logged entry that resolves back to it (recipeEntryLiveRecipe).
+  async function deleteRecipe(recipe) {
+    const n = (recipe.items || []).length;
+    if (!await confirm(`${recipe.name} · ${n} ingredient${n === 1 ? '' : 's'}`, { title: 'Delete recipe?', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
   // ── Recipe sharing (sender side) ──
@@ -1919,6 +2068,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         carbs: (i.carbs || 0) * perTotal,
         fat: (i.fat || 0) * perTotal,
         fiber: i.fiber != null ? i.fiber * perTotal : null,
+        sugar: i.sugar != null ? i.sugar * perTotal : null,
+        satFat: i.satFat != null ? i.satFat * perTotal : null,
+        sodiumMg: i.sodiumMg != null ? i.sodiumMg * perTotal : null,
       })) };
     })() : recipe;
     setEditingEntry(entry);
@@ -1962,6 +2114,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
       protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
       fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
     }));
     const built = {
       foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
@@ -1987,6 +2142,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+      // Migration 0204 extras: summed only over the ingredients that report
+      // them, and left null when none does, so a recipe built from foods
+      // without these values does not log a fabricated zero.
+      sugar: items.some(i => i.sugar != null) ? fdRound1(sum('sugar') * scale) : null,
+      satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
+      sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
       recipeItems,
     };
     // editingEntry (see openEditRecipeEntry) updates the existing row by id
@@ -2017,7 +2178,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
   // hour is pending, so the target time is always visible and cancelable.
   const pendingHourBanner = pendingHour != null ? (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
       <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
       <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
       <button onClick={() => setPendingHour(null)} style={{ background: 'none', border: 'none', padding: '2px 4px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Now instead</button>
@@ -2056,7 +2217,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
     // glow uses), since this bar sits on the normal theme-reactive Screen
     // background and should mute along with everything else on Paper.
-    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
           {staged.map(e => (
@@ -2153,8 +2314,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: 1.1 }}>Food Log</div>
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>{dayLabel}</div>
+                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Food Log</div>
+                <div className="micro" style={{ marginTop: 4 }}>{dayLabel}</div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
             </div>
@@ -2236,12 +2397,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
                 <div style={{ position: 'relative', width: 26, height: 26, flexShrink: 0 }}>
-                  <button aria-label="Jump to date" style={{
-                    width: '100%', height: '100%', borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
-                    background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
+                  <button aria-label="Jump to date" style={fdIconBtn(26)}>
                     <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
                   </button>
                   <input type="date" value={curDate}
@@ -2263,8 +2419,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 against. */}
             <BracketFrame gold style={{ padding: 20 }}>
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
-                projected={planMode && plannedEntries.length ? projectedTotals : null} />
+                projected={planMode && plannedEntries.length ? projectedTotals : null}
+                onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
+
+            {/* Sugar / saturated fat / sodium for the day (migration 0204).
+                Deliberately OUTSIDE the hero frame and folded away: they are
+                not scored, have no target, and the hero's job is the four
+                numbers that do drive adherence. Hidden entirely on a day where
+                nothing reports them (everything logged before 0204). */}
+            {dayHasExtras && (
+              <div>
+                <FdExtrasToggle open={extrasOpen} onToggle={() => setExtrasOpen(o => !o)} style={{ marginBottom: extrasOpen ? 8 : 0 }} />
+                {extrasOpen && (
+                  <>
+                    <FdExtrasRow sugar={dayTotals.sugar} satFat={dayTotals.satFat} sodiumMg={dayTotals.sodiumMg} />
+                    {dayTotals.extrasPartial && (
+                      <div className="micro" style={{ marginTop: 6, lineHeight: '14px' }}>
+                        Partial: some of today's entries carry no value for these.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {planMode && (
               <button onClick={() => setTemplateOpen(true)} style={fdTemplateBtn}>
@@ -2279,7 +2457,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
-                read-only per-meal summary card (FD_MEAL_CATEGORIES). Adding
+                read-only per-meal summary card (LB.mealCategories). Adding
                 still only ever happens through an hour's own "+", the
                 category card itself has no tap target. The category card
                 sits full-width; only its hour rows are indented, with a
@@ -2305,10 +2483,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                         <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                        <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
-                      </div>
+                      {/* Only offered where it can't be a mistake: this meal
+                          slot is empty today and yesterday's is not. Once
+                          anything is logged here the button is gone, so the
+                          card goes back to being a pure read-only summary. */}
+                      {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
+                        <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
+                          display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
+                          padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+                          Repeat yesterday
+                        </button>
+                      ) : (
+                        <div style={{ textAlign: 'right' }}>
+                          <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                          <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                        </div>
+                      )}
                     </div>
                     <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <FdHourTrunk />
@@ -2456,7 +2648,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {pendingHourBanner}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
                 {FD_SOURCE_FILTERS.map(f => (
                   <button key={f.label} onClick={() => setSourceFilter(f.id)} style={fdSegBtn(sourceFilter === f.id)}>{f.label}</button>
                 ))}
@@ -2483,7 +2675,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
-              {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.4 }}>{labelError}</div>}
+              {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{labelError}</div>}
             </div>
 
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi }}>{searchError}</div>}
@@ -2495,24 +2687,54 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div>
                 <Bezel style={{ marginBottom: 10 }}>Results{results.length ? ` (${results.length})` : ''}</Bezel>
                 {results.length === 0 ? (
-                  <div style={fdEmptyStyle}>No matches. Try a different search.</div>
+                  barcodeMiss ? (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ ...fdEmptyHint, paddingBottom: 10 }}>
+                        Barcode {barcodeMiss} is not in the database yet. Photograph the nutrition label instead and the values get read off it.
+                      </div>
+                      <button onClick={() => { setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={{ ...fdActionCard, width: '100%' }}>
+                        <i className="fa-solid fa-camera" style={{ fontSize: 14 }} />
+                        <span>Scan the nutrition label</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={fdEmptyHint}>No matches. Try a different search.</div>
+                  )
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                    {results.map(r => (
-                      <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} style={fdResultRow}>
-                        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                            {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
-                            <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
+                    {results.map(r => {
+                      // kcalPer100g is DERIVED from the macros (4/4/9, see the
+                      // search-foods Edge Function), so null there means the
+                      // source carries no usable nutrition at all, not just a
+                      // missing energy value. Such a hit used to be tappable
+                      // and quietly logged a 0 kcal / 0 macro entry into the
+                      // day's totals and its adherence. The row stays visible
+                      // (it still confirms the product exists) but is inert.
+                      const noData = r.kcalPer100g == null;
+                      return (
+                        <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={noData}
+                          style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
+                          <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
+                              <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
+                            </div>
+                            {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                            {!noData && (
+                              <div style={{ ...fdEntryMeta, marginTop: 3 }}>
+                                <FdMacroBits protein={r.proteinPer100g || 0} carbs={r.carbsPer100g || 0} fat={r.fatPer100g || 0} />
+                              </div>
+                            )}
                           </div>
-                          {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
-                          <div style={fdEntryMeta}>/100g · {r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
-                        </div>
-                      </button>
-                    ))}
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            {noData
+                              ? <div style={fdEntryMeta}>No nutrition data</div>
+                              : <div className="num" style={{ fontSize: 12, color: UI.warn }}>{Math.round(r.kcalPer100g)} kcal</div>}
+                            <div style={fdEntryMeta}>{noData ? '' : '/100g · '}{r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <button onClick={() => { setLabelError(null); resetCustomForm(); setCustomOpen(true); }} style={{ ...fdActionCard, width: '100%' }}>
@@ -2527,7 +2749,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'quickadd' && (
           <>
             {pendingHourBanner}
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
                 <button key={t.id} onClick={() => onQuickTabChange(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
               ))}
@@ -2546,9 +2768,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
             {quickTab === 'recent' && (
               recentFoodsAll.length === 0 ? (
-                <div style={fdEmptyStyle}>Nothing logged yet. Foods you add show up here.</div>
+                <div style={fdEmptyHint}>Nothing logged yet. Foods you add show up here.</div>
               ) : recentFoods.length === 0 ? (
-                <div style={fdEmptyStyle}>No matches for "{quickQuery}".</div>
+                <div style={fdEmptyHint}>No matches for "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {recentFoods.map(l => (
@@ -2558,7 +2780,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{l.calories} kcal</div>
+                        <div className="num" style={{ fontSize: 12, color: UI.warn }}>{l.calories} kcal</div>
                         <div style={fdEntryMeta}>{l.quantityG}g</div>
                       </div>
                     </button>
@@ -2569,9 +2791,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
             {quickTab === 'favorites' && (
               (store.foodFavorites || []).length === 0 ? (
-                <div style={fdEmptyStyle}>No favorites yet. Star a food while adding it to save it here.</div>
+                <div style={fdEmptyHint}>No favorites yet. Star a food while adding it to save it here.</div>
               ) : favoritesFiltered.length === 0 ? (
-                <div style={fdEmptyStyle}>No favorites match "{quickQuery}".</div>
+                <div style={fdEmptyHint}>No favorites match "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {favoritesFiltered.map(f => (
@@ -2582,7 +2804,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
+                          <div className="num" style={{ fontSize: 12, color: UI.warn }}>{f.calories} kcal</div>
                           <div style={fdEntryMeta}>{f.quantityG}g</div>
                         </div>
                       </button>
@@ -2601,13 +2823,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {quickTab === 'recipes' && (
               (store.foodRecipes || []).length === 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
-                  <div style={fdEmptyStyle}>No recipes yet. Build one from a few ingredients you log together often.</div>
+                  <div style={fdEmptyHint}>No recipes yet. Build one from a few ingredients you log together often.</div>
                   <Btn onClick={openNewRecipe} style={{ width: '100%' }}>
                     <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New recipe
                   </Btn>
                 </div>
               ) : recipesFiltered.length === 0 ? (
-                <div style={fdEmptyStyle}>No recipes match "{quickQuery}".</div>
+                <div style={fdEmptyHint}>No recipes match "{quickQuery}".</div>
               ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {recipesFiltered.map(r => {
@@ -2618,9 +2840,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
-                              <div style={fdEntryMeta}>{items.length} ingredient{items.length === 1 ? '' : 's'} · P{Math.round(items.reduce((a, i) => a + (i.protein || 0), 0))} C{Math.round(items.reduce((a, i) => a + (i.carbs || 0), 0))} F{Math.round(items.reduce((a, i) => a + (i.fat || 0), 0))}</div>
+                              <div style={fdEntryMeta}>
+                                {items.length} ingredient{items.length === 1 ? '' : 's'}
+                                <span style={fdMetaDivider} />
+                                <FdMacroBits
+                                  protein={items.reduce((a, i) => a + (i.protein || 0), 0)}
+                                  carbs={items.reduce((a, i) => a + (i.carbs || 0), 0)}
+                                  fat={items.reduce((a, i) => a + (i.fat || 0), 0)} />
+                              </div>
                             </div>
-                            <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
+                            <div className="num" style={{ fontSize: 12, color: UI.warn, flexShrink: 0 }}>{kcal} kcal</div>
                           </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
@@ -2648,7 +2877,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <Field label="Name" style={{ marginBottom: 14 }}>
                   <TextInput value={pendingFood.name || ''} onChange={(v) => setPendingFood(pf => pf ? { ...pf, name: v } : pf)} placeholder="e.g. Protein bar" />
                 </Field>
-                <Bezel style={{ marginBottom: 6 }}>Per 100 g</Bezel>
+                <Bezel style={{ marginBottom: 6 }}>Per 100g</Bezel>
                 <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>Edit if the scan misread.</div>
                 <Field label="Calories (kcal, from macros)" style={{ marginBottom: 10 }}>
                   <input value={kcal100Str} onChange={e => onKcal100Change(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
@@ -2667,7 +2896,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </>
             )}
             {pendingFood.units?.length > 0 && (
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
                 <button onClick={() => selectQtyUnit(null)} style={fdSegBtn(qtyUnitIdx == null)}>Grams</button>
                 {pendingFood.units.map((u, i) => (
                   <button key={i} onClick={() => selectQtyUnit(i)} style={fdSegBtn(qtyUnitIdx === i)}>{u.label}</button>
@@ -2697,21 +2926,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {qtyPreview && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{qtyPreview.calories} kcal</span>
-                <span style={{ display: 'flex', gap: 10 }}>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
-                </span>
-              </div>
+              <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat}
+                sugar={qtyPreview.sugar} satFat={qtyPreview.satFat} sodiumMg={qtyPreview.sodiumMg} />
             )}
             <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
               {favedId ? 'Saved to favorites' : 'Save as favorite'}
             </button>
             {planMode && editingEntry && !curDateIsFuture && (
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 8 }}>
                 {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
                   <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
                 ))}
@@ -2757,9 +2980,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <input value={customF} onChange={e => setCustomF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
         </div>
-        <Field label="Fiber (g, optional)" style={{ marginBottom: 16 }}>
+        <Field label="Fiber (g, optional)" style={{ marginBottom: 12 }}>
           <input value={customFib} onChange={e => setCustomFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
+        {/* Sugar/saturated fat/sodium (migration 0204). Collapsed by default:
+            they are optional, play no part in the calorie math, and the form
+            already asks for six numbers. A label scan that read them opens
+            this block prefilled, so the values are visible rather than
+            hidden behind a chevron the user never taps. */}
+        <FdExtrasToggle open={customExtrasOpen} onToggle={() => setCustomExtrasOpen(o => !o)} />
+        {customExtrasOpen && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <Field label="Sugar (g)" style={{ flex: 1 }}>
+              <input value={customSugar} onChange={e => setCustomSugar(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+            </Field>
+            <Field label="Sat. fat (g)" style={{ flex: 1 }}>
+              <input value={customSatFat} onChange={e => setCustomSatFat(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+            </Field>
+            <Field label="Sodium (mg)" style={{ flex: 1 }}>
+              <input value={customSodium} onChange={e => setCustomSodium(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="mg" style={fdInputStyle} />
+            </Field>
+          </div>
+        )}
         <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
           <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
           {favedId ? 'Saved to favorites' : 'Save as favorite'}
@@ -2778,9 +3020,54 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
+      {/* ── Repeat yesterday's meal, minus whatever changed ────────────────
+          Same tick-list idiom as the Manage-entries sheet below, but pointed
+          at YESTERDAY's entries and pre-ticked: the reason to open this is
+          that today's meal is nearly the same, so the work is unticking the
+          one item that isn't. ── */}
+      <Sheet open={!!repeat} onClose={() => setRepeat(null)} title={repeat ? `Repeat ${repeat.label.toLowerCase()}` : 'Repeat yesterday'} titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          {planMode
+            ? "From yesterday, landing on today at the same times as planned meals you check off as you eat them."
+            : 'From yesterday, landing on today at the same times.'}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 300, overflowY: 'auto' }}>
+          {repeatEntries.map(e => {
+            const checked = !!repeat && repeat.ids.includes(e.id);
+            return (
+              <button key={e.id} onClick={() => toggleRepeatId(e.id)} style={fdCopyMoveRow(checked)}>
+                <div style={fdCopyMoveCheck(checked)}>
+                  {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{e.foodName}</div>
+                  <span style={fdEntryMeta}>
+                    {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {repeatSelected.length > 0 && (
+          <FdMacroPreview calories={repeatTotals.calories} protein={repeatTotals.protein} carbs={repeatTotals.carbs} fat={repeatTotals.fat}
+            sugar={repeatTotals.sugar} satFat={repeatTotals.satFat} sodiumMg={repeatTotals.sodiumMg} />
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={() => setRepeat(null)} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={submitRepeatYesterday} disabled={!repeatSelected.length} style={{ flex: 2 }}>
+            {repeatSelected.length
+              ? `${planMode ? 'Plan' : 'Add'} ${repeatSelected.length} ${repeatSelected.length === 1 ? 'item' : 'items'}`
+              : 'Nothing picked'}
+          </Btn>
+        </div>
+      </Sheet>
+
       {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
       <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)">
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
@@ -2797,7 +3084,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </div>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                         <div style={fdEntryName}>{e.foodName}</div>
-                        <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
+                        <span style={fdEntryMeta}>{e.time} · <span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
                       </div>
                     </button>
                   );
@@ -2812,7 +3099,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
           </Field>
         )}
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
           <button onClick={() => setCopyMoveMode('copy')} style={fdSegBtn(copyMoveMode === 'copy')}>Copy</button>
           <button onClick={() => setCopyMoveMode('move')} style={fdSegBtn(copyMoveMode === 'move')}>Move</button>
           <button onClick={() => setCopyMoveMode('delete')} style={fdSegBtn(copyMoveMode === 'delete', true)}>Delete</button>
@@ -2845,30 +3132,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   it's part of can always be undone from here, not just the
                   6s toast right after applying it. */}
               {batch && (
-                <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `1px solid ${UI.hairStrong}` : 'none' }}>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+                <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `var(--hair-width) solid ${UI.hairStrong}` : 'none' }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
                     {batch.kind === 'merge'
                       ? 'This entry was combined from a block of items. Undo it to delete the combined recipe and put the original entries back exactly as they were.'
                       : 'This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.'}
                   </div>
                   <Btn kind="ghost" onClick={() => undoSplitBatch(batch.id, batch.kind)} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>
-                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> {batch.kind === 'merge' ? 'Undo Combine' : 'Undo Split'}
+                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> {batch.kind === 'merge' ? 'Undo combine' : 'Undo split'}
                   </Btn>
                 </div>
               )}
               {canConfigure && (
                 <>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
                     Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
                   </div>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Meals</div>
+                  <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Meals</div>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
                     <Stepper value={splitCount} step={1} min={2} suffix={splitCount === 1 ? ' meal' : ' meals'} onChange={setSplitCountTo} />
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                     {[splitHour, ...splitHours].map((h, i) => (
                       <div key={i} style={{ flex: '1 1 100px' }}>
-                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
+                        <div className="micro" style={{ marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
                         {i === 0 ? (
                           <div style={{ ...fdInputStyle, textAlign: 'center', color: UI.inkSoft }}>{String(h).padStart(2, '0')}:00</div>
                         ) : (
@@ -2885,7 +3172,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div key={e.id}>
                           <div style={fdEntryName}>
                             {e.foodName}
-                            {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>&middot; in {unit.label}</span>}
+                            {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>· in {unit.label}</span>}
                           </div>
                           <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                             {[splitHour, ...splitHours].map((h, i) => (
@@ -2916,7 +3203,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={recipeBlockHour != null} onClose={requestCloseBlockRecipe} title="Create recipe" titleColor="var(--accent)">
         {recipeBlockHour != null && (
           <>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
               Combines these items into one recipe entry. Off by default: it only replaces this log entry, on saves it to Quick Add, Recipes too.
             </div>
             <Field label="Recipe name" style={{ marginBottom: 16 }}>
@@ -2931,7 +3218,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
-                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal</span>
+                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
                   </div>
                 </div>
               ))}
@@ -2946,7 +3233,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
       <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)">
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
           Add one or more units and relogging this favorite offers a picker (grams or a count of one of them) instead of always typing grams.
         </div>
         {editUnits.length > 0 && (
@@ -2993,8 +3280,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
               <button key={id} onClick={() => { setLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
             ))}
@@ -3015,18 +3302,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           can go above the recipe's own portion count too. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
-          <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={{
-            width: 30, height: 30, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 4,
-            color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
-          }}>
+          <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
           </button>
         )}
       >
         {recipeLogPrompt && (
           <>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
               How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
@@ -3035,17 +3318,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
             </div>
             {recipeLogPreview && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{recipeLogPreview.calories} kcal</span>
-                <span style={{ display: 'flex', gap: 10 }}>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {recipeLogPreview.protein}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {recipeLogPreview.carbs}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {recipeLogPreview.fat}</span>
-                </span>
-              </div>
+              <FdMacroPreview calories={recipeLogPreview.calories} protein={recipeLogPreview.protein} carbs={recipeLogPreview.carbs} fat={recipeLogPreview.fat} />
             )}
             {editingEntry && planMode && !curDateIsFuture && (
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 8 }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 8 }}>
                 {[[false, 'Logged'], [true, 'Planned']].map(([val, label]) => (
                   <button key={label} onClick={() => setQtyEditPlanned(val)} style={fdSegBtn(qtyEditPlanned === val)}>{label}</button>
                 ))}
@@ -3076,16 +3352,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
         {shareSheet?.status === 'error' && (
           <>
-            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{shareSheet.error}</div>
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>{shareSheet.error}</div>
             <Btn onClick={() => openShareRecipe(shareSheet.recipe)} style={{ width: '100%' }}>Try again</Btn>
           </>
         )}
         {shareSheet?.status === 'ready' && (
           <>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>
               Anyone with this link can open the recipe in Zane and add a copy to their own recipes. The link carries a snapshot: edits you make later are not sent along.
             </div>
-            <div className="num" style={{ fontSize: 11, color: UI.inkFaint, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, wordBreak: 'break-all', userSelect: 'all', WebkitUserSelect: 'all', marginBottom: 14, textShadow: 'none' }}>
+            <div className="num" style={{ fontSize: 11, color: UI.inkFaint, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, wordBreak: 'break-all', userSelect: 'all', WebkitUserSelect: 'all', marginBottom: 14, textShadow: 'none' }}>
               {shareSheet.url}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -3146,7 +3422,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         Sits above stagedPanel: it's the momentary one of the two, stagedPanel
         is the one meant to persist until dealt with. */}
     {splitUndo && (
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
         <i className={`fa-solid ${splitUndo.kind === 'merge' ? 'fa-bowl-food' : 'fa-arrows-split-up-and-left'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
         <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, flex: 1, minWidth: 0 }}>
           {splitUndo.kind === 'merge' ? `Combined ${splitUndo.count} items into a recipe` : `Split into ${splitUndo.count} meals`}
@@ -3172,6 +3448,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 // preview). netCarbs (settings.netCarbs, passed by each caller) decides
 // whether fiber is subtracted from carbs, same rule every other
 // caloriesFromMacros call in this file follows.
+// Sums sugar/satFat/sodiumMg across entries, keeping "unknown" distinct from
+// zero: a key is null unless at least one entry reports it, and `partial` says
+// whether some entries in the day were missing the value, so the UI can label
+// the figure as incomplete rather than quietly understating it.
+function fdSumExtras(entries) {
+  const out = { sugar: null, satFat: null, sodiumMg: null, extrasPartial: false };
+  ['sugar', 'satFat', 'sodiumMg'].forEach(k => {
+    const known = entries.filter(e => e[k] != null);
+    if (!known.length) return;
+    out[k] = fdRound1(known.reduce((a, e) => a + e[k], 0));
+    if (known.length < entries.length) out.extrasPartial = true;
+  });
+  return out;
+}
 function fdRecipeItemsCalories(items, netCarbs) {
   return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0), 0));
 }
@@ -3217,6 +3507,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
   function adopt() {
     const now = new Date().toISOString();
     const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const numOrNull = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
     setStore(s => {
       if (!s) return s;
       const names = new Set((s.foodRecipes || []).map(r => r.name));
@@ -3236,6 +3527,10 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           calories: Math.round(num(i.calories)),
           protein: num(i.protein), carbs: num(i.carbs), fat: num(i.fat),
           fiber: i.fiber != null && Number.isFinite(Number(i.fiber)) ? Number(i.fiber) : null,
+          // Migration 0204 extras, whitelisted like everything else here: the
+          // snapshot is another user's jsonb, so nothing is spread blindly.
+          // Absent on anything shared before 0204, which stays null.
+          sugar: numOrNull(i.sugar), satFat: numOrNull(i.satFat), sodiumMg: numOrNull(i.sodiumMg),
         })),
         createdAt: now, updatedAt: now,
       };
@@ -3251,7 +3546,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
       )}
       {state.status === 'error' && (
         <>
-          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{state.error}</div>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>{state.error}</div>
           <Btn onClick={onClose} style={{ width: '100%' }}>Close</Btn>
         </>
       )}
@@ -3266,26 +3561,19 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
             {items.map((i, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
-                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)} g</div>
+                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
                 </div>
-                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal</span>
+                <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-            <span className="num" style={{ fontSize: 15, color: UI.ink }}>{totals.calories} kcal</span>
-            <span style={{ display: 'flex', gap: 10 }}>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {totals.protein}</span>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {totals.carbs}</span>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {totals.fat}</span>
-            </span>
-          </div>
+          <FdMacroPreview calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
           {added ? (
             <>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '17px' }}>
                 <i className="fa-solid fa-check" style={{ marginRight: 6, color: 'var(--accent)' }} />
                 Added. You'll find it under Food log, Quick Add, Recipes.
               </div>
@@ -3329,6 +3617,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerSearching, setPickerSearching] = useStateFd(false);
   const [pickerSearchError, setPickerSearchError] = useStateFd(null);
   const [pickerResults, setPickerResults] = useStateFd(null);
+  // Same All/Zane/OFF/USDA filter the main Search tab has. It only appears once
+  // a search has actually run: this sheet is already two rows of chrome deep,
+  // and the filter has nothing to act on before there are results.
+  const [pickerSource, setPickerSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
   // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
   // quintet (same shared per-device localStorage key, see
@@ -3508,6 +3800,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     cal: q ? (m.calories || 0) / q * 100 : 0, p: q ? (m.protein || 0) / q * 100 : 0,
     c: q ? (m.carbs || 0) / q * 100 : 0, f: q ? (m.fat || 0) / q * 100 : 0,
     fib: (m.fiber != null && q) ? m.fiber / q * 100 : null,
+    sug: (m.sugar != null && q) ? m.sugar / q * 100 : null,
+    sat: (m.satFat != null && q) ? m.satFat / q * 100 : null,
+    sod: (m.sodiumMg != null && q) ? m.sodiumMg / q * 100 : null,
   });
   function openAddFood(fav) {
     const q = fav.quantityG || 100;
@@ -3524,11 +3819,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   }
   // override lets a scanned barcode search immediately (handlePickerScan),
   // without waiting a tick for setPickerSearchQuery to land first.
-  async function runPickerFoodSearch(override) {
+  // srcOverride is passed by the source-filter buttons: setPickerSource has not
+  // committed yet at the moment they fire, so reading pickerSource off the
+  // closure here would search with the PREVIOUS filter.
+  async function runPickerFoodSearch(override, srcOverride) {
     const q = (typeof override === 'string' ? override : pickerSearchQuery).trim();
     if (!q || pickerSearching) return;
     setPickerSearching(true); setPickerSearchError(null);
-    const res = await LB.searchFoods(q, null);
+    const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickerSource);
     setPickerSearching(false);
     if (!res.ok) { setPickerSearchError(res.error || 'Search failed. Try again.'); setPickerResults([]); return; }
     setPickerResults(res.results);
@@ -3544,7 +3842,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     const d = {
       id: null, kind: 'food', foodId: r.sourceId ? `${r.source}:${r.sourceId}` : null,
       foodName: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId, fromCache: !!r.cached,
-      per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null },
+      per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null,
+        sug: r.sugarPer100g ?? null, sat: r.satFatPer100g ?? null, sod: r.sodiumMgPer100g ?? null },
       gramsStr: r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100',
       hour: 8, dayType: 'any',
     };
@@ -3596,14 +3895,19 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       return;
     }
     const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
     if (cal == null && p == null && c == null && f == null) {
       setPickerLabelError('Could not read the values. Try a clearer photo.');
       return;
     }
     const per100 = (label.basis === '100g' || label.basis === '100ml')
-      ? { p, c, f, fib }
+      ? { p, c, f, fib, sug, sat, sod }
       : (label.serving_size_g > 0)
-        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
         : null;
     if (!per100) {
       setPickerLabelError('Could not tell the portion size from this label. Try a photo that shows the serving size, or use Search instead.');
@@ -3613,7 +3917,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     const d = {
       id: null, kind: 'food', foodId: null,
       foodName: label.name || '', brand: label.brand || null, source: 'custom',
-      per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null },
+      per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null,
+        sug: per100.sug ?? null, sat: per100.sat ?? null, sod: per100.sod ?? null },
       gramsStr: label.serving_size_g > 0 ? String(Math.round(label.serving_size_g)) : '100',
       hour: 8, dayType: 'any',
     };
@@ -3638,7 +3943,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setDraft(null);
   }
   async function deleteSlot(slot) {
-    if (!await confirm(`${slot.foodName}`, { title: 'Remove from template?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm(`${slot.foodName}`, { title: 'Remove meal?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id) }));
   }
 
@@ -3656,7 +3961,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     const present = new Set((store.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
     const pending = (store.foodTemplateSlots || []).filter(slot => inActive(slot) && fdSlotMatchesDate(slot, store, todayISO) && !present.has(slot.id));
     if (!pending.length) {
-      await confirm('Your active plan’s meals are already in today’s plan.', { title: 'Nothing to add', ok: 'OK', cancel: null });
+      await confirm("Your active plan's meals are already in today's plan.", { title: 'Nothing to add', ok: 'OK', cancel: null });
       return;
     }
     setStore(s => {
@@ -3682,6 +3987,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         quantityG: g, calories: Math.round(draft.per100.cal * sc), protein: fdRound1(draft.per100.p * sc),
         carbs: fdRound1(draft.per100.c * sc), fat: fdRound1(draft.per100.f * sc),
         fiber: draft.per100.fib != null ? fdRound1(draft.per100.fib * sc) : null,
+        sugar: draft.per100.sug != null ? fdRound1(draft.per100.sug * sc) : null,
+        satFat: draft.per100.sat != null ? fdRound1(draft.per100.sat * sc) : null,
+        sodiumMg: draft.per100.sod != null ? Math.round(draft.per100.sod * sc) : null,
         recipeItems: null, recipeId: null, loggedTotalPortions: null,
       };
     }
@@ -3696,6 +4004,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
         protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
         fat: fdRound1((i.fat || 0) * scale), fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+        sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
+        satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
+        sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
       }));
       return {
         foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
@@ -3703,6 +4014,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
         carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
         fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+        sugar: items.some(i => i.sugar != null) ? fdRound1(sum('sugar') * scale) : null,
+        satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
+        sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
         recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
       };
     }
@@ -3761,14 +4075,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
-      <TopBar title={viewedPlan ? viewedPlan.name : 'Meal Plans'}
+      <TopBar title={viewedPlan ? viewedPlan.name : 'Meal plans'}
         onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
         right={viewedPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} aria-label="Add a meal" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
-            <button onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
+            <button className="label" onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
           </div>
         ) : (
           <button onClick={() => setNameDraft({ id: null, name: '', initialName: '' })} aria-label="New meal plan" style={fdTopAddBtn}>
@@ -3783,7 +4097,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 
         {!viewedPlan ? (
           plans.length === 0 ? (
-            <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. “Cut” or “Bulk”) to start planning your recurring meals.</div>
+            <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. "Cut" or "Bulk") to start planning your recurring meals.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {plans.filter(p => p.id === activeId).map(p => {
@@ -3791,13 +4105,13 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                 return (
                   <BracketFrame key={p.id} gold onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: '24px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                       <Pill gold>active</Pill>
                     </div>
-                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: n > 0 ? 10 : 0 }}>{n} meal{n === 1 ? '' : 's'}</div>
+                    <div className="micro" style={{ marginBottom: n > 0 ? 10 : 0 }}>{n} meal{n === 1 ? '' : 's'}</div>
                     {n > 0 && (
                       <Btn kind="ghost" onClick={e => { e.stopPropagation(); applyToToday(); }} style={{ width: '100%', marginTop: 4 }}>
-                        <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
+                        <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today's plan
                       </Btn>
                     )}
                   </BracketFrame>
@@ -3811,7 +4125,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                       <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                       {p.isTemplate && <Pill>template</Pill>}
                     </div>
-                    <div className="micro" style={{ color: UI.inkFaint }}>{n} meal{n === 1 ? '' : 's'}</div>
+                    <div className="micro">{n} meal{n === 1 ? '' : 's'}</div>
                   </Frame>
                 );
               })}
@@ -3855,7 +4169,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                       </div>
                       <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
                         <span style={fdEntryName}>
-                          <span style={fdDayTypeChip(slot.dayType)}>{slot.dayType === 'training' ? 'TRAIN' : slot.dayType === 'rest' ? 'REST' : 'DAILY'}</span>
+                          <Pill gold={slot.dayType !== 'any'} style={{ marginRight: 6, verticalAlign: 'middle' }}>
+                            {slot.dayType === 'training' ? 'train' : slot.dayType === 'rest' ? 'rest' : 'daily'}
+                          </Pill>
                           {slot.foodName}
                         </span>
                         <span style={fdEntryMeta}>
@@ -3880,8 +4196,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       </div>
 
       {/* Food source picker: the user's Favorites and Recipes, or a fresh database search */}
-      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add to template" titleColor="var(--accent)">
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add a meal" titleColor="var(--accent)">
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
           {[['search', 'Search'], ['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
             <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
           ))}
@@ -3905,23 +4221,41 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                 {pickerSearching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {pickerResults != null && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+                {FD_SOURCE_FILTERS.map(f => (
+                  <button key={f.label} onClick={() => { setPickerSource(f.id); runPickerFoodSearch(undefined, f.id); }} style={fdSegBtn(pickerSource === f.id)}>{f.label}</button>
+                ))}
+              </div>
+            )}
             {pickerSearchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{pickerSearchError}</div>}
-            {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>{pickerLabelError}</div>}
+            {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>{pickerLabelError}</div>}
             {pickerResults != null && (
               pickerResults.length === 0 ? <div style={fdEmptyHint}>No matches. Try a different search.</div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
-                  {pickerResults.map(r => (
-                    <button key={`${r.source}:${r.sourceId}`} onClick={() => openAddSearchResult(r)} style={fdPickRow}>
-                      <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                        <div style={fdEntryName}>{r.name}</div>
-                        {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
-                        <div style={fdEntryMeta}>/100g</div>
-                      </div>
-                    </button>
-                  ))}
+                  {pickerResults.map(r => {
+                    // Same guard the main Search tab applies: no macros means
+                    // no usable nutrition, so the hit stays visible but inert
+                    // rather than seeding a 0 kcal slot.
+                    const noData = r.kcalPer100g == null;
+                    return (
+                      <button key={`${r.source}:${r.sourceId}`} onClick={() => openAddSearchResult(r)} disabled={noData}
+                        style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
+                        <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                          <div style={fdEntryName}>{r.name}</div>
+                          {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          {noData
+                            ? <div style={fdEntryMeta}>No nutrition data</div>
+                            : <>
+                                <div className="num" style={{ fontSize: 12, color: UI.warn }}>{Math.round(r.kcalPer100g)} kcal</div>
+                                <div style={fdEntryMeta}>/100g</div>
+                              </>}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )
             )}
@@ -3931,9 +4265,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
               {pickerTab === 'favorites' ? (
-                favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food to reuse it here.</div>
+                favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food while adding it to save it here.</div>
                 : favs.map(f => (
-                  <button key={f.id} onClick={() => openAddFood(f)} style={fdPickRow}>
+                  <button key={f.id} onClick={() => openAddFood(f)} style={fdResultRow}>
                     <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <div style={fdEntryName}>{f.foodName}</div>
                       <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
@@ -3942,9 +4276,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                   </button>
                 ))
               ) : (
-                recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet.</div>
+                recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet. Build one from a few ingredients you log together often.</div>
                 : recipes.map(r => (
-                  <button key={r.id} onClick={() => openAddRecipe(r)} style={fdPickRow}>
+                  <button key={r.id} onClick={() => openAddRecipe(r)} style={fdResultRow}>
                     <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <div style={fdEntryName}>{r.name}</div>
                       <div style={fdEntryMeta}>{r.portions} portion{r.portions === 1 ? '' : 's'}</div>
@@ -3973,8 +4307,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           </button>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
               <button key={id} onClick={() => { setPickerLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
             ))}
@@ -3998,7 +4332,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               </Field>
             ) : draft.recipe ? (
               <div style={{ marginBottom: 14 }}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Portions</div>
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
                     onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
@@ -4006,29 +4340,22 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               </div>
             ) : null}
             {draftBuilt && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 14, textShadow: 'none' }}>
-                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{draftBuilt.calories} kcal</span>
-                <span style={{ display: 'flex', gap: 10 }}>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {draftBuilt.protein}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {draftBuilt.carbs}</span>
-                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {draftBuilt.fat}</span>
-                </span>
-              </div>
+              <FdMacroPreview calories={draftBuilt.calories} protein={draftBuilt.protein} carbs={draftBuilt.carbs} fat={draftBuilt.fat} marginBottom={14} />
             )}
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Time</div>
+            <div className="micro" style={{ marginBottom: 6 }}>Time</div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
               <Stepper value={draft.hour} step={1} min={0} max={23} suffix=":00"
                 onChange={v => setDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
             </div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Day type</div>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: draft.dayType !== 'any' && activeFlexPlan ? 10 : 16 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Day type</div>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: draft.dayType !== 'any' && activeFlexPlan ? 10 : 16 }}>
               {[['any', 'Every day'], ['training', 'Training'], ['rest', 'Rest']].map(([id, label]) => (
                 <button key={id} onClick={() => setDraft(d => ({ ...d, dayType: id }))} style={fdSegBtn(draft.dayType === id)}>{label}</button>
               ))}
             </div>
             {draft.dayType !== 'any' && activeFlexPlan && (
-              <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset }}>
-                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+              <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px' }}>
                   <i className="fa-solid fa-circle-info" style={{ marginRight: 5, color: UI.inkFaint }} />
                   Your active plan is flexible, so there's no fixed schedule to check ahead of time. A day only counts as Training once you've actually trained or set it manually in the Health tab, until then it's assumed to be Rest.
                 </span>
@@ -4036,14 +4363,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => setDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add to template'}</Btn>
+              <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add meal'}</Btn>
             </div>
           </>
         )}
       </Sheet>
 
       {/* Manage: duplicate / export / delete */}
-      <Sheet open={manageOpen} onClose={() => setManageOpen(false)} title="Manage Plan" titleColor="var(--accent)">
+      <Sheet open={manageOpen} onClose={() => setManageOpen(false)} title="Manage plan" titleColor="var(--accent)">
         {viewedPlan && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => duplicatePlan(viewedPlan)} style={{ width: '100%' }}>
@@ -4078,12 +4405,12 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         {pushPlan && (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
-              Copies “{pushPlan.name}” (and any recipes it uses) into a client’s account. You’ll pick whether it activates right away.
+              Copies "{pushPlan.name}" (and any recipes it uses) into a client's account. You'll pick whether it activates right away.
             </div>
             {coachClients.length === 0 ? <div style={fdEmptyHint}>No active clients.</div> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {coachClients.map(c => (
-                  <button key={c.id} onClick={() => setPushTarget(c)} style={fdPickRow}>
+                  <button key={c.id} onClick={() => setPushTarget(c)} style={fdResultRow}>
                     <span style={{ flex: 1, textAlign: 'left', ...fdEntryName }}>{c.clientName || 'Client'}</span>
                     <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
                   </button>
@@ -4099,7 +4426,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         {pushTarget && pushPlan && (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-              Activate “{pushPlan.name}” for them right away, or just add it to their meal plans and talk it through first?
+              Activate "{pushPlan.name}" for them right away, or just add it to their meal plans and talk it through first?
             </div>
             <Btn onClick={() => pushMealPlanToClient(pushPlan, pushTarget, true)} disabled={pushBusy} style={{ width: '100%', marginBottom: 8 }}>
               {pushBusy ? 'Pushing…' : 'Push & activate now'}
@@ -4115,8 +4442,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       <Sheet open={!!pushDone} onClose={() => setPushDone(null)} title="Pushed" titleColor="var(--accent)">
         {pushDone && (
           <>
-            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-              “{pushDone.planName}” is in {pushDone.clientName}’s account{pushDone.activated ? ' and active now' : ', not activated yet'}.
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '20px' }}>
+              "{pushDone.planName}" is in {pushDone.clientName}'s account{pushDone.activated ? ' and active now' : ', not activated yet'}.
             </div>
             <Btn onClick={() => setPushDone(null)} style={{ width: '100%' }}>Done</Btn>
           </>
@@ -4165,12 +4492,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   // portions is purely metadata for how a batch splits up when logging it
   // later (see FoodScreen's addRecipeToLog/confirmRecipeLog), not a divisor
   // applied here.
+  const netCarbs = !!store.settings?.netCarbs;
   const totals = useMemoFd(() => ({
-    calories: fdRecipeItemsCalories(items, !!store.settings?.netCarbs),
+    calories: fdRecipeItemsCalories(items, netCarbs),
     protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
     carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
-  }), [items, store.settings?.netCarbs]);
+  }), [items, netCarbs]);
 
   const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
   const requestClose = async () => {
@@ -4185,6 +4513,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
+  }
+  // The row's own trash icon goes through the same confirm removeEditItem
+  // already shows: one action, one level of safety, no matter which of the two
+  // affordances the user reaches for.
+  async function requestRemoveItem(item) {
+    if (!await confirm(`${item.foodName} · ${item.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    removeItem(item.id);
   }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); }
@@ -4202,6 +4537,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
       carbs: fdRound1((i.carbs || 0) * factor),
       fat: fdRound1((i.fat || 0) * factor),
       fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
     }));
     closeEditItem();
   }
@@ -4226,7 +4564,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
-      <TopBar title={recipe ? 'Edit Recipe' : 'New Recipe'} onBack={requestClose}
+      <TopBar title={recipe ? 'Edit recipe' : 'New recipe'} onBack={requestClose}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
             {items.length > 0 && (
@@ -4246,20 +4584,16 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         </Field>
 
         <BracketFrame gold style={{ padding: 20 }}>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Whole batch</div>
+          <div className="micro" style={{ marginBottom: 4 }}>Whole batch</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{totals.calories}</span>
             <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
           </div>
-          <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}g</span>
-            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}g</span>
-            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}g</span>
-          </div>
+          <FdMacroGhosts protein={totals.protein} carbs={totals.carbs} fat={totals.fat} style={{ marginTop: 12 }} />
         </BracketFrame>
 
         <div>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, textAlign: 'center' }}>Portions</div>
+          <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
           </div>
@@ -4277,9 +4611,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · <span style={{ fontWeight: 600 }}>P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span></span>
+                    <span style={fdEntryMeta}>
+                      {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                    </span>
                   </button>
-                  <button onClick={() => removeItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <button onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                   </button>
                 </div>
@@ -4317,10 +4655,8 @@ function RecipeSaveRecap({ name, portions, totals }) {
       <div style={{ fontSize: 14, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 4 }}>{name}</div>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
       <div style={{ display: 'flex', gap: 14 }}>
-        <span className="num" style={{ fontSize: 16, color: UI.ink }}>{totals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}</span>
+        <span className="num" style={{ fontSize: 16, color: UI.warn }}>{totals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+        <FdMacroGhosts protein={totals.protein} carbs={totals.carbs} fat={totals.fat} size={13} />
       </div>
     </div>
   );
@@ -4365,21 +4701,27 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   const [qtyG, setQtyG] = useStateFd('');
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
+  // Same All/Zane/OFF/USDA filter the main Search tab has, shown only once a
+  // search has run (see the template picker for the same reasoning).
+  const [pickSource, setPickSource] = useStateFd(null);
 
   useEffectFd(() => {
     if (!open) return;
-    setPickTab('search'); setQuery(''); setResults(null); setSearchError(null);
+    setPickTab('search'); setQuery(''); setResults(null); setSearchError(null); setPickSource(null);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
   }, [open]);
 
-  async function runPickerSearch() {
+  // srcOverride: the filter buttons call this in the same tick they set
+  // pickSource, so the state has not committed yet and reading it here would
+  // search with the previous filter.
+  async function runPickerSearch(srcOverride) {
     const q = query.trim();
     if (!q || searching) return;
     setSearching(true); setSearchError(null);
-    const res = await LB.searchFoods(q, null);
+    const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickSource);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
     setResults(res.results);
@@ -4393,7 +4735,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setQtyItem({
       name: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId,
       kcalPer100g: r.kcalPer100g, proteinPer100g: r.proteinPer100g, carbsPer100g: r.carbsPer100g,
-      fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g, fromCache: !!r.cached, units: null,
+      fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g,
+      sugarPer100g: r.sugarPer100g ?? null, satFatPer100g: r.satFatPer100g ?? null, sodiumMgPer100g: r.sodiumMgPer100g ?? null,
+      fromCache: !!r.cached, units: null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
     setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
@@ -4410,6 +4754,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       kcalPer100g: (LB.caloriesFromMacros(l.protein, l.carbs, l.fat, netCarbs ? l.fiber : null) || 0) * per100,
       proteinPer100g: l.protein * per100, carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
       fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
+      sugarPer100g: l.sugar != null ? l.sugar * per100 : null,
+      satFatPer100g: l.satFat != null ? l.satFat * per100 : null,
+      sodiumMgPer100g: l.sodiumMg != null ? l.sodiumMg * per100 : null,
       fromCache: true, units: l.units || null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
@@ -4442,9 +4789,14 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     const carbs = fdRound1((qtyItem.carbsPer100g || 0) * factor);
     const fat = fdRound1((qtyItem.fatPer100g || 0) * factor);
     const fiber = qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null;
+    // Migration 0204 extras, scaled like the rest so an ingredient carries them
+    // into the recipe it joins. null stays null ("source does not report it").
+    const sugar = qtyItem.sugarPer100g != null ? fdRound1(qtyItem.sugarPer100g * factor) : null;
+    const satFat = qtyItem.satFatPer100g != null ? fdRound1(qtyItem.satFatPer100g * factor) : null;
+    const sodiumMg = qtyItem.sodiumMgPer100g != null ? Math.round(qtyItem.sodiumMgPer100g * factor) : null;
     return {
       calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
-      protein, carbs, fat, fiber,
+      protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
   }, [qtyItem, qtyG, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
@@ -4459,6 +4811,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
     }]);
     ensureFoodCached(qtyItem);
     closeQtySheet();
@@ -4495,6 +4848,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
       quantityG: g != null ? g : 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
       fiber: mFib !== '' ? fdNum(mFib) : null,
+      sugar: null, satFat: null, sodiumMg: null,
     }]);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
@@ -4528,7 +4882,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     <>
       <Sheet open={open} onClose={requestClosePicker} title="Add ingredients" titleColor="var(--accent)">
         {confirmEl}
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 12 }}>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 12 }}>
           {FD_PICKER_TABS.map(t => (
             <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
           ))}
@@ -4546,28 +4900,44 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                   </button>
                 )}
               </div>
-              <button onClick={runPickerSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
+              <button onClick={() => runPickerSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                 {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {results != null && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+                {FD_SOURCE_FILTERS.map(f => (
+                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
+                ))}
+              </div>
+            )}
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{searchError}</div>}
             {results != null && (
               results.length === 0 ? (
-                <div style={fdEmptyStyle}>No matches. Try a different search.</div>
+                <div style={fdEmptyHint}>No matches. Try a different search.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10, maxHeight: 280, overflowY: 'auto' }}>
-                  {results.map(r => (
-                    <button key={`${r.source}:${r.sourceId}`} onClick={() => openQtyForResult(r)} style={fdResultRow}>
-                      <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <div style={fdEntryName}>{r.name}</div>
-                        {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
-                        <div style={fdEntryMeta}>/100g</div>
-                      </div>
-                    </button>
-                  ))}
+                  {results.map(r => {
+                    // Same guard the main Search tab applies, see there.
+                    const noData = r.kcalPer100g == null;
+                    return (
+                      <button key={`${r.source}:${r.sourceId}`} onClick={() => openQtyForResult(r)} disabled={noData}
+                        style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                          <div style={fdEntryName}>{r.name}</div>
+                          {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          {noData
+                            ? <div style={fdEntryMeta}>No nutrition data</div>
+                            : <>
+                                <div className="num" style={{ fontSize: 12, color: UI.warn }}>{Math.round(r.kcalPer100g)} kcal</div>
+                                <div style={fdEntryMeta}>/100g</div>
+                              </>}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )
             )}
@@ -4577,7 +4947,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                 <span>Add manually</span>
               </button>
             ) : (
-              <div style={{ borderTop: `1px solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
                 <Field label="Name" style={{ marginBottom: 10 }}>
                   <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" />
                 </Field>
@@ -4614,7 +4984,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
 
         {pickTab === 'favorites' && (
           favoritesSorted.length === 0 ? (
-            <div style={fdEmptyStyle}>No favorites yet.</div>
+            <div style={fdEmptyHint}>No favorites yet. Star a food while adding it to save it here.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
               {favoritesSorted.map(f => (
@@ -4624,7 +4994,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                     {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
+                    <div className="num" style={{ fontSize: 12, color: UI.warn }}>{f.calories} kcal</div>
                     <div style={fdEntryMeta}>{f.quantityG}g</div>
                   </div>
                 </button>
@@ -4635,7 +5005,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
 
         {pickTab === 'recent' && (
           recentPicks.length === 0 ? (
-            <div style={fdEmptyStyle}>Nothing logged yet.</div>
+            <div style={fdEmptyHint}>Nothing logged yet. Foods you add show up here.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
               {recentPicks.map(l => (
@@ -4645,7 +5015,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                     {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{l.calories} kcal</div>
+                    <div className="num" style={{ fontSize: 12, color: UI.warn }}>{l.calories} kcal</div>
                     <div style={fdEntryMeta}>{l.quantityG}g</div>
                   </div>
                 </button>
@@ -4655,20 +5025,18 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
         )}
 
         {staged.length > 0 && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${UI.hair}` }}>
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             <Bezel style={{ marginBottom: 10 }}>Picked ({staged.length})</Bezel>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
               <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
-              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
+              <FdMacroGhosts protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
               {staged.map(i => (
                 <div key={i.tempId} style={fdDraftRow}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>{i.quantityG}g · {i.calories} kcal</span>
+                    <span style={fdEntryMeta}>{i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{i.calories} kcal</span></span>
                   </div>
                   <button onClick={() => removeStaged(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
@@ -4696,7 +5064,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
           <>
             {qtyItem.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{qtyItem.brand}</div>}
             {qtyItem.units?.length > 0 && (
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
                 <button onClick={() => selectQtyUnit(null)} style={fdSegBtn(qtyUnitIdx == null)}>Grams</button>
                 {qtyItem.units.map((u, i) => (
                   <button key={i} onClick={() => selectQtyUnit(i)} style={fdSegBtn(qtyUnitIdx === i)}>{u.label}</button>
@@ -4713,9 +5081,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             {qtyPreview && (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
                 <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{qtyPreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
-                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
-                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
+                <FdMacroGhosts protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat} />
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -4737,9 +5103,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
 // helper isn't worth introducing.
 function fdAdherenceColor(a) {
   if (a == null) return UI.inkFaint;
-  if (a >= 90) return 'var(--ok)';
+  if (a >= 90) return UI.ok;
   if (a >= 75) return UI.warn;
-  return 'var(--danger)';
+  return UI.danger;
 }
 
 // Adherence-progress ring for the Log-tab hero, same shape as WaterRing
@@ -4748,7 +5114,7 @@ function fdAdherenceColor(a) {
 // fixed var(--accent) stroke) and an optional small label under the number,
 // so the ring itself carries the same "PERFECT/STRONG/..." semantic tone the
 // hero's rows do instead of always reading as a flat accent-colored dial.
-function FdRing({ percent, size = 128, color = 'var(--accent)', label }) {
+function FdRing({ percent, size = 128, color = UI.gold, label }) {
   const r = 50, circ = 2 * Math.PI * r;
   const offset = circ * (1 - Math.min(percent, 100) / 100);
   return (
@@ -4779,7 +5145,7 @@ function FdRing({ percent, size = 128, color = 'var(--accent)', label }) {
 // (fixed here after exactly that: red accent made protein and fat read as
 // the same color). Applies generally, not just for a red accent, hence a
 // fixed token instead of a per-accent special case.
-const FD_MACRO_COLORS = { protein: 'var(--info)', carbs: 'var(--ok)', fat: 'var(--danger)' };
+const FD_MACRO_COLORS = { protein: UI.info, carbs: UI.ok, fat: UI.danger };
 
 // One metric row in the dense hero (KCAL/PROTEIN/CARBS/FAT): label, a thin
 // fill bar showing actual vs target, the actual/target pair, and the delta
@@ -4797,7 +5163,7 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 4, borderRadius: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: 4, borderRadius: 999, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color }} />
       </div>
       <span className="num" style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0, textAlign: 'right' }}>
@@ -4818,7 +5184,11 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // "where the day is headed" line below the real numbers. null unless plan
 // mode is on AND the day has planned entries, so the default view is
 // untouched.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
+// onSetTargets (live hero only, never the screenshot poster): with no target
+// resolvable the hero can only show a bare total, which is also the exact
+// moment the question "what should this number be?" comes up. Omitted by the
+// poster, so the button never renders into an exported image.
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
       protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
@@ -4845,11 +5215,16 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{dayTotals.calories}</span>
         <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
       </div>
-      <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
-      </div>
+      <FdMacroGhosts protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} style={{ marginTop: 12 }} />
+      {onSetTargets && (
+        <button className="micro-gold" onClick={onSetTargets} style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginTop: 14, padding: 0,
+          background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 10 }} />
+          Set macro targets
+        </button>
+      )}
       {projectionLine}
     </div>
   );
@@ -4862,7 +5237,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 function FdProjectionLine({ macros }) {
   return (
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `1px solid ${UI.hairStrong}` }}>
+      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
         <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
@@ -4991,10 +5366,10 @@ function FdScanner({ onClose, onDetect }) {
         {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
-            <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5, maxWidth: 300 }}>
+            <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: '20px', maxWidth: 300 }}>
               Could not start the scanner. Check the camera permission, or type the barcode number into search (it looks it up the same way).
             </div>
-            <button onClick={onClose} style={{ marginTop: 4, background: 'var(--accent)', color: 'var(--accent-ink)', border: 'none', borderRadius: 6, padding: '11px 22px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>Got it</button>
+            <Btn onClick={onClose} style={{ marginTop: 4, textShadow: 'none' }}>Got it</Btn>
           </div>
         ) : (
           <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.85)', fontFamily: UI.fontUi, fontSize: 12 }}>
@@ -5009,7 +5384,7 @@ function FdScanner({ onClose, onDetect }) {
 // ─── Local style constants ──────────────────────────────────────────
 function fdNavBtn(disabled) {
   return {
-    width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+    width: 32, height: 32, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
     background: 'transparent', color: disabled ? UI.inkGhost : UI.inkSoft,
     cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent',
@@ -5029,20 +5404,20 @@ function fdCopyMoveRow(checked) {
   return {
     display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px',
     background: checked ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
-    border: `1px solid ${checked ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    border: `var(--hair-width) solid ${checked ? 'var(--hair-accent)' : UI.hair}`,
     borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
   };
 }
 function fdCopyMoveCheck(checked) {
   return {
     flexShrink: 0, width: 18, height: 18, borderRadius: 4,
-    border: `1px solid ${checked ? 'var(--accent)' : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${checked ? 'var(--accent)' : UI.hairStrong}`,
     background: checked ? 'var(--accent)' : 'transparent',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   };
 }
 const fdInputStyle = {
-  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
   color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, padding: '10px 12px', width: '100%',
   WebkitAppearance: 'none', boxSizing: 'border-box', textShadow: 'none',
 };
@@ -5053,26 +5428,26 @@ const fdClearBtn = {
 };
 const fdBigInput = { ...fdInputStyle, fontFamily: UI.fontNum, fontSize: 22, padding: '12px 14px' };
 const fdSearchBtn = {
-  width: 42, height: 42, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+  width: 42, height: 42, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: UI.bgInset, color: UI.inkSoft, cursor: 'pointer', flexShrink: 0,
   display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
   textShadow: 'none',
 };
 const fdActionCard = {
   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-  padding: '11px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+  padding: '11px 10px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: UI.bgInset, color: UI.inkSoft, textShadow: 'none',
   fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };
 const fdScanChoice = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-  padding: '22px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+  padding: '22px 10px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: UI.bgInset, textShadow: 'none', textAlign: 'center', cursor: 'pointer',
   fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent',
 };
 const fdTopAddBtn = {
-  width: 34, height: 34, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+  width: 34, height: 34, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
 };
@@ -5080,7 +5455,7 @@ function fdFavBtn(active, disabled) {
   return {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%',
     padding: '11px 0', marginBottom: 12, borderRadius: 6,
-    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${active ? UI.gold : UI.hairStrong}`,
     background: active ? UI.bgInset : 'transparent',
     color: disabled ? UI.inkGhost : (active ? UI.ink : UI.inkSoft),
     fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textShadow: 'none',
@@ -5094,9 +5469,8 @@ const fdDraftMain = {
   background: 'none', border: 'none', padding: '3px 0', cursor: 'pointer', textAlign: 'left',
   WebkitTapHighlightColor: 'transparent',
 };
-const fdEmptyStyle = { textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi };
 // Read-only meal-category header above a cluster of timeline hours (see
-// FD_MEAL_CATEGORIES): no border accent/interaction of its own, a plain
+// LB.mealCategories): no border accent/interaction of its own, a plain
 // neutral gray instead of an accent tint, since it's a summary, not a
 // control. Layers a flat black wash OVER the same UI.bgInset the hour rows
 // below it use (via a two-stop same-color gradient as the top background
@@ -5108,7 +5482,7 @@ const fdCategoryCard = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
   padding: '10px 12px', borderRadius: 6,
   background: `linear-gradient(rgba(0,0,0,0.16),rgba(0,0,0,0.16)), ${UI.bgInset}`,
-  border: `1px solid ${UI.hairStrong}`,
+  border: `var(--hair-width) solid ${UI.hairStrong}`,
   // Solid fill of its own (opaque UI.bgInset under the darkening layer, not
   // a translucent tint the page's own paper grid would still show through,
   // unlike ui.jsx's Card): the inherited grid-lift (paper theme only)
@@ -5140,44 +5514,63 @@ function FdHourTick() {
 function fdHourRow(filled, isNow) {
   return {
     display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6,
-    border: `1px solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
     background: isNow ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
     padding: filled ? '10px 10px' : '8px 10px',
   };
 }
 const fdHourLabelCol = { width: 24, flexShrink: 0, textAlign: 'right' };
+// Square icon button. `inset` fills it against a sheet's own background (the
+// hairline goes soft and the paper-grid lift is dropped, same reasoning as
+// fdListRow); without it the button is transparent chrome on the page. Two
+// call sites used to hand-roll these exact declarations inline.
+function fdIconBtn(size, inset) {
+  return {
+    flexShrink: 0, width: size, height: size, borderRadius: 4,
+    border: `var(--hair-width) solid ${inset ? UI.hair : UI.hairStrong}`,
+    background: inset ? UI.bgInset : 'transparent',
+    color: inset ? UI.inkFaint : UI.inkSoft,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    WebkitTapHighlightColor: 'transparent', ...(inset ? { textShadow: 'none' } : null),
+  };
+}
 function fdHourAddBtn(isNow) {
   return {
     flexShrink: 0, width: 30, height: 30, borderRadius: 4,
-    border: `1px solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
     background: 'transparent', color: isNow ? 'var(--accent)' : UI.inkSoft,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent',
   };
 }
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-// Plan Mode: the "Meal template" entry-point button in the Log tab.
-const fdTemplateBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
-// Day-type badge on a template slot row (DAILY / TRAIN / REST).
-function fdDayTypeChip(dayType) {
-  const accent = dayType !== 'any';
-  return { display: 'inline-block', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', color: accent ? 'var(--accent)' : UI.inkFaint, border: `1px solid ${accent ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 4, padding: '1px 4px', marginRight: 6, verticalAlign: 'middle', fontFamily: UI.fontUi };
-}
+// Plan Mode: the "Meal plans" entry-point button in the Log tab.
+const fdTemplateBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 // A favorite/recipe row in the template food-source picker.
-const fdPickRow = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+// One tappable list row: every food/favorite/recipe/search-result list in the
+// module renders through this. There used to be three copies of it, identical
+// apart from one missing textShadow reset and whether the row stretches
+// (width) or flexes next to side buttons (fdQuickRowInner).
+const fdListRow = {
+  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none',
+  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+};
 // FoodTemplateScreen's plan-detail TopBar "Edit" button (rename), same look
 // as PlanViewerScreen's own Edit button in screens-schedule.jsx.
+// Chrome only: the type comes from the shared .label class on the element
+// itself (10px uppercase, 0.14em tracking), which this used to clone by hand
+// with the tracking off by 0.02em.
 const fdEditBtn = {
-  background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-  borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
-  color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+  background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+  borderRadius: 4, padding: '5px 12px', cursor: 'pointer', color: UI.inkSoft,
 };
 // The "Active" / "Client template" status box atop a plan's detail view,
 // same shape as PlanViewerScreen's planActions active indicator.
 function fdStatusBox(gold) {
   return {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-    border: `1px solid ${gold ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${gold ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
     background: gold ? UI.goldFaint : UI.bgInset,
     padding: '10px 14px', minHeight: 44,
   };
@@ -5206,6 +5599,83 @@ function FdMacroBits({ protein, carbs, fat, strong }) {
     </span>
   );
 }
+// Disclosure toggle for the sugar/saturated-fat/sodium block (migration 0204).
+// Those three are captured everywhere P/C/F are, but they stay folded away by
+// default: they take no part in calories, targets or adherence, and unfolding
+// them into the hero would push the four numbers that do matter off the fold.
+function FdExtrasToggle({ open, onToggle, style }) {
+  return (
+    <button className="micro" onClick={onToggle} style={{
+      display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+      padding: '4px 0', marginBottom: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', ...style,
+    }}>
+      <i className={`fa-solid fa-chevron-${open ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
+      More nutrients
+    </button>
+  );
+}
+// Read-only counterpart: renders only the values that are actually known. A
+// null means the source never reported the value, which is NOT the same as
+// zero, so it is left out instead of printed as "0g" (and the whole row
+// disappears when nothing is known, e.g. for anything logged before 0204).
+function FdExtrasRow({ sugar, satFat, sodiumMg, style }) {
+  const cells = [
+    sugar != null ? ['Sugar', `${Math.round(sugar)}g`] : null,
+    satFat != null ? ['Sat. fat', `${Math.round(satFat)}g`] : null,
+    sodiumMg != null ? ['Sodium', `${Math.round(sodiumMg)}mg`] : null,
+  ].filter(Boolean);
+  if (!cells.length) return null;
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', ...style }}>
+      {cells.map(([label, value]) => (
+        <span key={label} style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+          {label} <span className="num" style={{ fontWeight: 600, color: UI.inkSoft }}>{value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+// The "big total" macro row: ghost letter + whole grams, sitting under (or
+// beside) a large kcal numeral. Four hand-tuned copies before this existed:
+// the recipe batch hero, the save recap, the staged-picks bar and the day hero
+// with no target set. They had drifted on the gram suffix (two of four printed
+// bare numbers) and on rounding (two printed one-decimal values while every
+// row they summarize prints whole grams). Rounds for display like the rest of
+// this file, fdRound1 stays purely a storage concern.
+function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
+  const cell = (letter, v) => (
+    <span className="num" style={{ fontSize: size, fontWeight: 600, color: UI.inkSoft }}>
+      <span style={{ color: UI.inkGhost, fontSize: 10 }}>{letter}</span> {Math.round(v || 0)}g
+    </span>
+  );
+  return (
+    <div style={{ display: 'flex', gap: 14, ...style }}>
+      {cell('P', protein)}
+      {cell('C', carbs)}
+      {cell('F', fat)}
+    </div>
+  );
+}
+// The "what you're about to log" readout: kcal on the left, macros on the
+// right, in an inset box. Shared by the quantity sheet, the recipe-portions
+// sheet, the share preview and the template-slot editor, which carried four
+// byte-identical copies of it before this existed.
+// Formatted exactly like the rows the confirmed entry then produces (kcal in
+// UI.warn, macros through FdMacroBits): the copies used to print macros at one
+// decimal in their own grey style, so the same food read "P 20.4" while you
+// confirmed it and "P20" a second later in the timeline.
+function FdMacroPreview({ calories, protein, carbs, fat, sugar, satFat, sodiumMg, marginBottom = 16 }) {
+  return (
+    <div style={{ padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom, textShadow: 'none' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="num" style={{ fontSize: 15, color: UI.warn }}>{calories} kcal</span>
+        <span style={{ fontSize: 12 }}><FdMacroBits protein={protein} carbs={carbs} fat={fat} strong /></span>
+      </div>
+      <FdExtrasRow sugar={sugar} satFat={satFat} sodiumMg={sodiumMg}
+        style={{ marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }} />
+    </div>
+  );
+}
 // Thin vertical rule separating "quantity · kcal" from the macro bits, a
 // deliberate element instead of another " · " so the macros read as their
 // own group, not a fourth clause in the same list.
@@ -5215,7 +5685,7 @@ const fdMetaDivider = { display: 'inline-block', width: 1, height: 9, background
 // through it and so keeps the inherited lift): the grid-lift text-shadow
 // Screen gives every descendant (paper theme only) would otherwise put a
 // halo behind plain text sitting on an already-opaque background.
-const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' };
+const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' };
 const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' };
 // A recipe entry's own card chrome (background/border/radius/padding, same
 // values as fdEntryRow), but as a plain vertical stack instead of a single
@@ -5225,7 +5695,7 @@ const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI
 // loose list underneath. fdEntryRow itself stays a plain row (used
 // elsewhere for entries that never grow), this is only for the one entry
 // type that does.
-const fdEntryCard = { display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', textShadow: 'none' };
+const fdEntryCard = { display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', textShadow: 'none' };
 const FD_INGREDIENT_GUTTER = 14;
 function FdIngredientTrunk() {
   return <div style={{ position: 'absolute', left: 4, top: 0, bottom: 0, width: 2, background: UI.hairStrong, pointerEvents: 'none' }} />;
@@ -5237,24 +5707,19 @@ function FdIngredientTick() {
     </div>
   );
 }
-const fdResultRow = {
-  display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
-  background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none',
-  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-};
+const fdResultRow = { ...fdListRow, width: '100%' };
 const fdQuickRowWrap = { display: 'flex', alignItems: 'stretch', gap: 6 };
-const fdQuickRowInner = {
-  flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-  background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none',
-  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-};
+const fdQuickRowInner = { ...fdListRow, flex: 1, minWidth: 0 };
+// Full-height action button beside a quick-add row. Radius 6 rather than the 4
+// the small square icon buttons use (fdIconBtn): it stands shoulder to shoulder
+// with fdQuickRowInner and has to match that row's corners, not theirs.
 const fdSideBtn = {
-  flexShrink: 0, width: 38, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
+  flexShrink: 0, width: 38, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6,
   color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
   display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
 };
 const fdPreset = {
-  padding: '8px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
+  padding: '8px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset,
   color: UI.ink, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };

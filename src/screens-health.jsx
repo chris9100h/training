@@ -482,7 +482,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
             {p.rows.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: '16px' }}>
                 {r.label != null && <span style={{ fontSize: 9, color: r.color || UI.inkFaint, fontFamily: UI.fontUi, minWidth: 12 }}>{r.label}</span>}
                 <span style={{ color: r.color || UI.ink }}>{r.value}</span>
               </div>
@@ -1238,9 +1238,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   // the DOM so it paints on top).
   if (!open) return null;
   return (
-    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+    <Screen scroll={false} style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={existing ? 'Edit Day' : 'Log Day'} onBack={requestClose} />
-      <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
+      {/* Only this middle section scrolls, so Delete/Save stay pinned to the
+          bottom edge (see the footer below): this form is long enough that
+          having to scroll all the way down after every single edit was the
+          main friction in logging a day. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 22px 22px' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {LB.fmtDayLabel(date, { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1460,7 +1464,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 {['fasted', 'fed', 'other'].map(c => (
                   <button key={c} onClick={() => setGl('context', c)} style={{
                     flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
-                    border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
+                    border: `var(--hair-width) solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
                     color: glForm.context === c ? 'var(--accent-ink)' : UI.inkFaint,
                     textShadow: 'none',
@@ -1664,18 +1668,609 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      </div>
+
+      {/* Pinned action footer, same idiom as the training screen's footer nav */}
+      <div className="knurl" />
+      <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)` }}>
         {existing && (
           <Btn kind="ghost" onClick={del} style={{ flex: 1 }}>Delete</Btn>
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
-      </div>
       </div>
     </Screen>
   );
 }
 
 // ─── Macro target editor ────────────────────────────────────────────────────────
+
+// ─── Macro target estimator ───────────────────────────────────────────────────
+// Every number the adherence system scores against used to have to be guessed:
+// a user without a coach had no way to arrive at a protein/carbs/fat target
+// beyond looking it up somewhere else. This turns what the app already knows
+// (bodyweight from the daily logs, how often they actually train) plus five
+// questions into a starting point. Deliberately a PREFILL, not a save: the
+// result lands in MacroTargetSheet's own fields and the user still confirms it
+// there, so an estimate never silently becomes a target.
+const MACRO_ACTIVITY_OPTIONS = [
+  { id: 'sedentary', label: 'Desk', hint: 'Desk job, little walking outside training' },
+  { id: 'light', label: 'Light', hint: 'On your feet some of the day' },
+  { id: 'moderate', label: 'Active', hint: 'Moving most of the day, or lots of steps' },
+  { id: 'high', label: 'Hard', hint: 'Physical job, or training twice a day' },
+  { id: 'athlete', label: 'Athlete', hint: 'Full-time athlete workload' },
+];
+const MACRO_GOAL_OPTIONS = [
+  { id: 'cut', label: 'Lose' },
+  { id: 'maintain', label: 'Maintain' },
+  { id: 'gain', label: 'Gain' },
+];
+// Weekly rate choices in whichever unit the user thinks in. rateKgPerWeek is
+// always stored and computed in kg (the equation is metric); a lbs user just
+// never sees a kg figure.
+const MACRO_RATE_OPTIONS_KG = [0.25, 0.5, 0.75];
+const MACRO_RATE_OPTIONS_LBS = [0.5, 1, 1.5];
+const LBS_TO_KG = 0.45359237;
+// Default cap for the low-fat option, in g of fat per kg of bodyweight. Shown
+// converted for lbs users (about 0.27 g per lb) and adjustable either way.
+const LOW_FAT_DEFAULT_PER_KG = 0.6;
+
+// Boxed numeric input for the estimator. Two behaviours the plain <input>s here
+// were missing, both already the norm elsewhere: the accent-on-focus edge that
+// UI.TextInput uses, and select-on-focus so a prefilled number can be typed
+// straight over instead of backspaced away (screens-lib, screens-train and
+// UI.NumInput all do this). `pinned` paints the same edge in a held state, for
+// a macro the user has padlocked.
+function EstimatorInput({ pinned, style = {}, ...rest }) {
+  const [focus, setFocus] = useStateH(false);
+  const edge = focus ? 'var(--accent)' : pinned ? 'var(--hair-accent)' : UI.hairStrong;
+  return (
+    <input
+      type="text" autoComplete="off" spellCheck={false}
+      onFocus={e => { setFocus(true); e.target.select(); }}
+      onBlur={() => setFocus(false)}
+      {...rest}
+      style={{
+        width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+        border: `var(--hair-width) solid ${edge}`, borderRadius: 4,
+        padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15,
+        color: UI.ink, outline: 'none', transition: 'border-color 0.2s',
+        ...style,
+      }}
+    />
+  );
+}
+
+function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
+  const calc = store.settings?.macroCalc || {};
+  const isLbs = UI.unit() === 'lbs';
+  // "g of fat per kg" reads as an odd fraction in pounds, so the field is shown
+  // in whichever unit the user thinks in and converted on the way in and out.
+  // The stored and computed value is always per kg.
+  const fatPerToDisplay = (perKg) => Math.round((isLbs ? perKg * LBS_TO_KG : perKg) * 100) / 100;
+  const fatPerFromDisplay = (v) => (isLbs ? v / LBS_TO_KG : v);
+
+  // Bodyweight prefers the latest daily log, so for anyone who logs weight the
+  // estimate keeps tracking it instead of a number typed once and forgotten.
+  // It stays editable regardless, because someone can want targets before they
+  // have ever logged a weight, and that used to block the whole sheet.
+  const loggedWeight = LB.latestBodyweight(store);
+
+  // How often they actually train, from the last four weeks of real sessions
+  // rather than from what a plan says: plans come in weekday, cycle and flex
+  // shapes, and the number that matters here is the one that happened.
+  const defaultTrainingDays = useMemoH(() => {
+    const cutoff = LB.historyWindowCutoffISO(new Date(), 28);
+    const days = new Set((store.sessions || []).filter(s => s.date >= cutoff && s.ended).map(s => s.date));
+    return days.size ? Math.min(7, Math.max(1, Math.round(days.size / 4))) : 4;
+  }, [store.sessions]);
+
+  const [form, setForm] = useStateH({});
+  // Hand-edited macros, as strings so typing works, or null while the estimate
+  // is untouched. See editMacro.
+  const [manual, setManual] = useStateH(null);
+  // Macros the user pinned, per day type. A locked macro is left alone when
+  // another one is edited, which is the only way to keep a number you typed
+  // from being rebalanced away by the next edit.
+  const [locks, setLocks] = useStateH({ training: {}, rest: {} });
+
+  useEffectH(() => {
+    if (!open) return;
+    const storedWeight = calc.weightKg != null
+      ? String(Math.round((isLbs ? calc.weightKg / LBS_TO_KG : calc.weightKg) * 10) / 10)
+      : '';
+    setForm({
+      weight: loggedWeight != null ? String(loggedWeight) : storedWeight,
+      heightCm: calc.heightCm != null ? String(calc.heightCm) : '',
+      birthYear: calc.birthYear != null ? String(calc.birthYear) : '',
+      sex: calc.sex ?? null,
+      activity: calc.activity ?? 'moderate',
+      goal: calc.goal ?? 'maintain',
+      rateKgPerWeek: calc.rateKgPerWeek || (isLbs ? 1 * LBS_TO_KG : 0.5),
+      trainingDays: calc.trainingDays != null ? calc.trainingDays : defaultTrainingDays,
+      lowFat: !!calc.lowFat,
+      fatPerStr: String(fatPerToDisplay(calc.fatPerKg > 0 ? calc.fatPerKg : LOW_FAT_DEFAULT_PER_KG)),
+      // null means "follow the automatic split", so the default keeps tracking
+      // the training day count instead of freezing at whatever it was when the
+      // sheet was last saved.
+      restRatioPct: calc.restRatioPct != null ? calc.restRatioPct : null,
+    });
+    setManual(null);
+    setLocks({ training: {}, rest: {} });
+  }, [open]); // eslint-disable-line
+
+  const weightInput = healthNum(form.weight);
+  const weightKg = weightInput > 0 ? (isLbs ? weightInput * LBS_TO_KG : weightInput) : null;
+  const fatPerInput = healthNum(form.fatPerStr);
+  const fatPerKg = (form.lowFat && fatPerInput > 0) ? fatPerFromDisplay(fatPerInput) : null;
+  // The automatic split never goes under this much fat per kg; asking for less
+  // is allowed but worth saying out loud rather than silently overruling.
+  const fatBelowFloor = fatPerKg != null && fatPerKg < LB.FAT_FLOOR_PER_KG;
+
+  const trainingDays = Math.min(7, Math.max(0, Math.round(Number(form.trainingDays) || 0)));
+  // How hard the week is cycled, as rest day calories in percent of a training
+  // day. The automatic split is the hardest one on offer and therefore the
+  // slider's floor; 100 feeds both day types the same. Clamped on read rather
+  // than in an effect, so changing the training days cannot strand the slider
+  // below its own minimum.
+  const cyclesDays = trainingDays > 0 && trainingDays < 7;
+  const minRestPct = Math.round(LB.minRestRatio(trainingDays) * 100);
+  const restPct = form.restRatioPct == null ? minRestPct
+    : Math.max(minRestPct, Math.min(100, Math.round(form.restRatioPct)));
+  // WebKit paints the filled part of the track from this gradient, and the
+  // range starts at the floor rather than at zero, so it is not just restPct.
+  // Firefox draws it natively from min/max and ignores the gradient.
+  const restFillPct = ((restPct - minRestPct) / Math.max(1, 100 - minRestPct)) * 100;
+
+  const age = form.birthYear ? (new Date().getFullYear() - healthInt(form.birthYear)) : null;
+  const est = LB.estimateTdee({ weightKg, heightCm: healthInt(form.heightCm), age, sex: form.sex, activity: form.activity });
+  const targets = est && LB.macroTargetsFromGoal({
+    tdee: est.tdee, weightKg, goal: form.goal,
+    rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
+    trainingDays,
+    fatPerKg,
+    // Left at the floor it stays null, so the exact automatic ratio is used
+    // rather than the rounded percentage the slider displays.
+    restRatio: form.restRatioPct == null ? null : restPct / 100,
+  });
+
+  // Any change to an input produces a different estimate, so hand edits made
+  // against the previous one are dropped rather than silently carried over
+  // onto numbers they were never balanced against.
+  //
+  // A padlock is the exception. It is a decision about a number, not a scratch
+  // value, so a pinned macro keeps what it was set to and the free ones
+  // rebalance around it to the new day's calories. Clearing the padlocks here
+  // would mean every nudge of the ratio slider quietly undid the pinning, which
+  // is backwards: the slider exists precisely to ask "with protein settled,
+  // what do the other two do".
+  const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg, restPct]);
+
+  // Which macros are actually pinned for a day. With low fat on, fat is held by
+  // that target and its padlock is hidden, so a pin left over from before the
+  // option was switched on must not go on holding the old number and quietly
+  // defeat it.
+  const pinsFor = (dayType) => Object.keys(locks[dayType] || {})
+    .filter(k => locks[dayType][k] && !(k === 'fat' && fatPerKg != null));
+
+  useEffectH(() => {
+    setManual(prev => {
+      // No estimate to rebuild against (a half-typed input). Hold everything
+      // rather than destroying the numbers mid-keystroke.
+      if (!targets) return prev;
+      const fresh = estimateStrings();
+      if (!prev || !fresh) return null;
+      let anyPin = false;
+      const out = { ...fresh };
+      ['training', 'rest'].forEach(d => {
+        const pinned = pinsFor(d);
+        if (!pinned.length) return;
+        anyPin = true;
+        let day = {
+          protein: healthInt(fresh[d].protein) || 0,
+          carbs: healthInt(fresh[d].carbs) || 0,
+          fat: healthInt(fresh[d].fat) || 0,
+        };
+        // One pin at a time, each holding the others, so every pinned macro
+        // lands back on its own value and only the free ones absorb the
+        // difference. Order does not matter: the last pass restores whatever
+        // an earlier one moved.
+        pinned.forEach(k => {
+          day = LB.rebalanceMacros(day, k, healthInt(prev[d]?.[k]) || 0, {
+            targetCalories: d === 'training' ? targets.caloriesTraining : targets.caloriesRest,
+            weightKg, fatPerKg,
+            locked: pinned.filter(o => o !== k),
+          });
+        });
+        out[d] = { protein: String(day.protein), carbs: String(day.carbs), fat: String(day.fat) };
+      });
+      return anyPin ? out : null;
+    });
+  }, [estKey]); // eslint-disable-line
+
+  const estimateStrings = () => (targets ? {
+    training: { protein: String(targets.proteinTraining), carbs: String(targets.carbsTraining), fat: String(targets.fatTraining) },
+    rest: { protein: String(targets.proteinRest), carbs: String(targets.carbsRest), fat: String(targets.fatRest) },
+  } : null);
+  const shown = manual || estimateStrings();
+
+  // Editing one macro holds that day's calorie figure and lets the other two
+  // absorb the difference (LB.rebalanceMacros). The edited field keeps the raw
+  // string the user typed, so a half-finished number is never overwritten
+  // mid-keystroke; the other two are rewritten from the result.
+  function editMacro(dayType, key, raw) {
+    if (!targets) return;
+    const clean = raw.replace(/[^\d]/g, '');
+    setManual(prev => {
+      const base = prev || estimateStrings();
+      if (!base) return prev;
+      const cur = {
+        protein: healthInt(base[dayType].protein) || 0,
+        carbs: healthInt(base[dayType].carbs) || 0,
+        fat: healthInt(base[dayType].fat) || 0,
+      };
+      const next = LB.rebalanceMacros(cur, key, clean === '' ? 0 : parseInt(clean, 10), {
+        targetCalories: dayType === 'training' ? targets.caloriesTraining : targets.caloriesRest,
+        weightKg, fatPerKg,
+        locked: pinsFor(dayType),
+      });
+      return {
+        ...base,
+        [dayType]: { protein: String(next.protein), carbs: String(next.carbs), fat: String(next.fat), [key]: clean },
+      };
+    });
+  }
+
+  const dayCalories = (dayType) => caloriesFromMacros(
+    healthInt(shown?.[dayType]?.protein), healthInt(shown?.[dayType]?.carbs), healthInt(shown?.[dayType]?.fat),
+  );
+
+  // What the week actually averages out to, and how that sits against
+  // maintenance. Two day types with different calories hide the only number
+  // that decides whether weight moves, and hand-editing the macros can walk it
+  // anywhere without the per-day figures looking wrong. Derived from what is
+  // SHOWN, not from the estimate, so an edit is reflected immediately.
+  const weekAvgCalories = shown
+    ? LB.weeklyAverageCalories(dayCalories('training'), dayCalories('rest'), trainingDays)
+    : null;
+  const maintenanceDelta = (weekAvgCalories != null && est) ? weekAvgCalories - est.tdee : null;
+  // Close enough to call it maintenance, rather than showing "+3 kcal over".
+  const MAINTENANCE_TOLERANCE = 40;
+  const deltaLabel = maintenanceDelta == null ? ''
+    : Math.abs(maintenanceDelta) <= MAINTENANCE_TOLERANCE ? 'right on maintenance'
+      : maintenanceDelta > 0 ? `${maintenanceDelta} over maintenance`
+        : `${Math.abs(maintenanceDelta)} under maintenance`;
+  // Flagged only when the average contradicts the goal that was picked, which
+  // is the case an edit can walk into without anything else looking wrong.
+  const deltaContradictsGoal = maintenanceDelta != null && (
+    (form.goal === 'cut' && maintenanceDelta > MAINTENANCE_TOLERANCE)
+    || (form.goal === 'gain' && maintenanceDelta < -MAINTENANCE_TOLERANCE)
+    || (form.goal === 'maintain' && Math.abs(maintenanceDelta) > 150)
+  );
+
+  const apply = () => {
+    if (!shown) return;
+    const build = (d) => {
+      const p = healthInt(shown[d].protein), c = healthInt(shown[d].carbs), f = healthInt(shown[d].fat);
+      return { p, c, f, cal: caloriesFromMacros(p, c, f) };
+    };
+    const t = build('training'), r = build('rest');
+    setStore(s => ({
+      ...s,
+      settings: {
+        ...s.settings,
+        macroCalc: {
+          birthYear: healthInt(form.birthYear), heightCm: healthInt(form.heightCm),
+          sex: form.sex ?? null, activity: form.activity, goal: form.goal,
+          rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
+          trainingDays: form.trainingDays,
+          // Kept as a fallback for anyone who never logs a bodyweight; a logged
+          // one always wins on reopen.
+          weightKg: weightKg != null ? Math.round(weightKg * 10) / 10 : null,
+          lowFat: !!form.lowFat,
+          fatPerKg: fatPerKg != null ? Math.round(fatPerKg * 1000) / 1000 : null,
+          restRatioPct: form.restRatioPct == null ? null : restPct,
+        },
+      },
+    }));
+    onApply({
+      proteinTraining: t.p, carbsTraining: t.c, fatTraining: t.f, caloriesTraining: t.cal,
+      proteinRest: r.p, carbsRest: r.c, fatRest: r.f, caloriesRest: r.cal,
+    });
+    onClose();
+  };
+
+  // The app's segmented control: solid accent fill and accent-ink text on the
+  // active segment, no divider between them, text-lift on the inactive ones so
+  // they stay readable on the paper theme. Same shape as the food module's
+  // fdSegBtn and the Health chart timeframe picker.
+  const segBtn = (active) => ({
+    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+    textShadow: active ? 'none' : 'var(--text-lift)',
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+    WebkitTapHighlightColor: 'transparent',
+  });
+  const seg = (options, value, onPick) => (
+    <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+      {options.map(o => (
+        <button key={String(o.id)} onClick={() => onPick(o.id)} style={segBtn(value === o.id)}>{o.label}</button>
+      ))}
+    </div>
+  );
+  const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
+
+  // One shape for every explanatory line in the sheet, so they cannot drift
+  // apart in size, colour or spacing. See the whole-pixel line height note at
+  // the render below.
+  const hint = (children, style) => (
+    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', ...style }}>{children}</div>
+  );
+  // Label, control, optional explanation. `right` takes a trailing action on
+  // the label line (currently the ratio slider's Reset).
+  const group = (label, control, below, right) => (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+        <span className="micro">{label}</span>
+        {right}
+      </div>
+      {control}
+      {below ? hint(below, { marginTop: 6 }) : null}
+    </div>
+  );
+  // Matches the Reset beside the watermark slider in Settings.
+  const resetBtn = (onClick) => (
+    <button onClick={onClick} style={{
+      background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
+      color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+      letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
+    }}>Reset</button>
+  );
+
+  const toggleLock = (dayType, key) => {
+    // Locking pins the number that is on screen right now, so the estimate is
+    // committed to the editable state first. Without that, a padlock set on an
+    // untouched estimate would have no value to hold the next time an input
+    // changes, and would behave differently from one set on a typed number.
+    if (!locks[dayType]?.[key]) setManual(prev => prev || estimateStrings());
+    setLocks(l => ({ ...l, [dayType]: { ...l[dayType], [key]: !l[dayType]?.[key] } }));
+  };
+
+  // The label doubles as the lock toggle: a padlock beside each macro, so
+  // pinning one is where you already are when you decide to.
+  const macroField = (dayType, key, label) => {
+    // With the low-fat option on, fat is held by that target anyway, so its
+    // padlock would be a second switch for the same thing.
+    const lockable = !(key === 'fat' && fatPerKg != null);
+    const locked = lockable && !!locks[dayType]?.[key];
+    return (
+      <div style={{ flex: 1 }}>
+        <button className="micro" disabled={!lockable}
+          onClick={() => lockable && toggleLock(dayType, key)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4,
+            background: 'none', border: 'none', padding: 0,
+            cursor: lockable ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
+            ...(locked ? { color: 'var(--accent)' } : null),
+          }}>
+          {label}
+          {lockable && <i className={`fa-solid fa-lock${locked ? '' : '-open'}`} style={{ fontSize: 8 }} />}
+        </button>
+        <EstimatorInput inputMode="numeric" pinned={locked}
+          value={shown?.[dayType]?.[key] ?? ''}
+          onChange={e => editMacro(dayType, key, e.target.value)}
+          style={{ fontSize: 14, padding: '7px 8px' }} />
+      </div>
+    );
+  };
+  // Day type on the left, its calories right-aligned on the same baseline, the
+  // way the rest of the app pairs a label with its number. kcal in UI.warn is
+  // the food module's rule for the same pairing.
+  const daySection = (dayType, label) => (
+    <div style={{ marginBottom: dayType === 'training' ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+        <span className="micro">
+          {label}
+          {/* How many of these a week makes, right where the numbers are: it is
+              what turns two day targets into the weekly average above. */}
+          <span className="num" style={{ color: UI.inkFaint, marginLeft: 6, letterSpacing: 0 }}>
+            &times;{dayType === 'training' ? trainingDays : 7 - trainingDays}
+          </span>
+        </span>
+        <span className="num" style={{ fontSize: 13, color: UI.warn }}>{dayCalories(dayType)} kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {macroField(dayType, 'protein', 'Protein g')}
+        {macroField(dayType, 'carbs', 'Carbs g')}
+        {macroField(dayType, 'fat', 'Fat g')}
+      </div>
+    </div>
+  );
+  // The two figures the whole sheet exists to produce, as a headline pair.
+  const headlineStat = (label, value, sub, subColor) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="micro" style={{ marginBottom: 3 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, fontWeight: 300, color: UI.ink, lineHeight: '24px' }}>
+        {value}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 4 }}>kcal</span>
+      </div>
+      {hint(sub, { marginTop: 2, color: subColor || UI.inkFaint })}
+    </div>
+  );
+
+  // zIndex above the default 100: this opens on top of MacroTargetSheet, the
+  // same nesting idiom the food module's own quantity sheet uses.
+  //
+  // Every 11px block below sets its line height in whole pixels rather than as
+  // a ratio, and that is load-bearing, not a style preference. 11 x 1.4 is
+  // 15.39px and 11 x 1.45 is 15.94px, so each line of body copy pushed
+  // everything under it onto a fractional offset. Hairlines are 0.5px, and a
+  // 0.5px border at a fractional offset gets smeared across two device rows
+  // instead of landing on one, which reads as a missing edge. It moved while
+  // typing because the line under "Maintenance about" rewraps as the numbers
+  // change width, so every edit reshuffled the sub-pixel phase of the macro
+  // inputs right below it. Whole-pixel line heights keep those offsets integral
+  // and a rewrap shifts by exactly one line. Keep it that way: 12px copy may
+  // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
+  return (
+    <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
+      {hint('A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
+        { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Weight {UI.unit()}</div>
+          <EstimatorInput inputMode="decimal" value={form.weight ?? ''}
+            onChange={e => setForm(f => ({ ...f, weight: e.target.value }))} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Height cm</div>
+          <EstimatorInput inputMode="numeric" value={form.heightCm ?? ''}
+            onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Born</div>
+          <EstimatorInput inputMode="numeric" placeholder="YYYY" value={form.birthYear ?? ''}
+            onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} />
+        </div>
+      </div>
+      {hint(loggedWeight != null
+        ? 'Weight comes from your latest daily log, so this stays current on its own. Change it here to try a different number.'
+        : 'No bodyweight logged yet, so type one here. Once you log weight in your daily log, this fills itself in.',
+      { marginBottom: 16 })}
+
+      {group('Sex (for the equation)',
+        seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v }))))}
+
+      {group('Daily activity outside training',
+        seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v }))),
+        activityHint)}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
+
+      {group('Goal', (
+        <>
+          {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
+          {form.goal !== 'maintain' && (
+            <div style={{ marginTop: 10 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
+              {seg(
+                (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
+                form.rateKgPerWeek,
+                v => setForm(f => ({ ...f, rateKgPerWeek: v })),
+              )}
+            </div>
+          )}
+        </>
+      ))}
+
+      {group('Training days per week',
+        seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v }))),
+        cyclesDays
+          ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
+          : 'Every day gets the same target, since there is no second day type to cycle against.')}
+
+      {/* How far the two day types are pulled apart. The week's total is fixed
+          at every setting, so this only decides where the calories sit inside
+          it. The automatic split is the sharpest one on offer and therefore the
+          slider's floor, which also makes it the default without pinning a
+          value that would then stop following the training day count. */}
+      {cyclesDays && group('Rest day calories', (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
+            onChange={e => {
+              const v = +e.target.value;
+              // Back at the floor it goes to null, so it follows the training
+              // day count again instead of pinning the rounded percentage.
+              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
+            }}
+            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
+          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
+        </div>
+      ),
+      restPct >= 100
+        ? 'Both day types eat the same. No carb cycling at all.'
+        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
+      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
+
+      {/* Low fat: fat lands ON this figure rather than at a share of intake, and
+          everything it frees goes to carbs. Off by default, since the normal
+          split is the safer one for anyone not deliberately choosing this.
+          Below FAT_FLOOR_PER_KG it still applies, with a warning: the automatic
+          split will not go that low on its own, but the user may ask for it. */}
+      {group('Low fat', (
+        <>
+          {hint(`Set fat to a fixed amount per ${UI.unit()} of bodyweight and put everything that frees into carbs.`)}
+          {form.lowFat && (
+            <div style={{ marginTop: 12 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Fat g per {UI.unit()}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 88, flexShrink: 0 }}>
+                  <EstimatorInput inputMode="decimal" value={form.fatPerStr ?? ''}
+                    onChange={e => setForm(f => ({ ...f, fatPerStr: e.target.value }))} />
+                </div>
+                {hint(weightKg != null && fatPerKg != null
+                  ? `About ${Math.round(weightKg * fatPerKg)} g of fat a day at your weight.`
+                  : 'Enter a weight above to see what this comes to.', { flex: 1 })}
+              </div>
+            </div>
+          )}
+          {fatBelowFloor && (
+            <div style={{
+              display: 'flex', gap: 8, marginTop: 10, padding: '8px 10px', borderRadius: 6,
+              background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`,
+              fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px', textShadow: 'none',
+            }}>
+              <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.warn, marginTop: 1 }} />
+              <span>
+                Under {fatPerToDisplay(LB.FAT_FLOOR_PER_KG)} g per {UI.unit()} the automatic split would never go, since fat that low is where hormones start to suffer. Your call, but go in knowing it.
+              </span>
+            </div>
+          )}
+        </>
+      ), null, <Toggle on={!!form.lowFat} onToggle={() => setForm(f => ({ ...f, lowFat: !f.lowFat }))} />)}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
+
+      {shown ? (
+        <Card style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
+            {headlineStat('Maintenance', est.tdee, 'what you burn')}
+            <Hairline vertical style={{ alignSelf: 'stretch' }} />
+            {headlineStat('Your week', weekAvgCalories, deltaLabel,
+              deltaContradictsGoal ? UI.warn : UI.inkSoft)}
+          </div>
+          <Hairline style={{ marginBottom: 12 }} />
+          {daySection('training', 'Training day')}
+          {daySection('rest', 'Rest day')}
+          {hint(
+            <>
+              {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one: later edits leave it alone, and it holds its value when you change the inputs above."}
+              {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
+            </>, { marginTop: 12 })}
+          {manual && (
+            // The one full reset: drops the hand edits and the padlocks
+            // together, since a pin that outlived the numbers it was pinning
+            // would only surprise the next edit.
+            <button onClick={() => { setManual(null); setLocks({ training: {}, rest: {} }); }} style={{
+              marginTop: 10, background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
+              color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
+            }}>Back to the estimate</button>
+          )}
+        </Card>
+      ) : (
+        <Card style={{ padding: 14, marginBottom: 16, textAlign: 'center' }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 16, color: UI.inkGhost }} />
+          {hint('Fill in weight, height and year of birth to see an estimate.', { marginTop: 8 })}
+        </Card>
+      )}
+
+      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>Use these numbers</Btn>
+    </Sheet>
+  );
+}
 
 function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   // This sheet edits the user's PERSONAL targets, so prefill from their own
@@ -1689,6 +2284,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   const [form, setForm] = useStateH(empty);
   const [confirmEl, confirm] = useConfirm();
   const initialSnap = useRefH(null);
+  const [estimatorOpen, setEstimatorOpen] = useStateH(false);
 
   useEffectH(() => {
     if (!open) return;
@@ -1723,16 +2319,22 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
     onClose();
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  // Same fields, same look and same behaviour as the estimator these numbers
+  // usually arrive from: the two sheets sit one tap apart, so a different input
+  // treatment in each would read as two different screens.
   const num = (k, lbl) => (
     <div style={{ flex: 1 }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{lbl}</div>
-      <input type="text" inputMode="numeric" placeholder="—" value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} />
+      <div className="micro" style={{ marginBottom: 6 }}>{lbl}</div>
+      <EstimatorInput inputMode="numeric" value={form[k]}
+        onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
     </div>
   );
   const section = (suffix, label, cals) => (
     <div style={{ marginBottom: 18 }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}{cals != null ? ` · ${cals} kcal` : ''}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <span className="micro">{label}</span>
+        {cals != null && <span className="num" style={{ fontSize: 13, color: UI.warn }}>{cals} kcal</span>}
+      </div>
       <div style={{ display: 'flex', gap: 8 }}>
         {num(`protein${suffix}`, 'Protein g')}
         {num(`carbs${suffix}`, 'Carbs g')}
@@ -1742,15 +2344,33 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   );
 
   return (
-    <Sheet open={open} onClose={requestClose} title="Macro Targets">
+    <Sheet open={open} onClose={requestClose} title="Macro targets">
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
           Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
-      {section('Training', 'TRAINING DAY', calsTraining)}
-      {section('Rest', 'REST DAY', calsRest)}
-      <Btn onClick={save} style={{ width: '100%' }}>Save Targets</Btn>
+      {/* Fills the fields below rather than saving: an estimate is a starting
+          point, and the user confirms it with the same Save button they would
+          use for hand-typed numbers. */}
+      <button onClick={() => setEstimatorOpen(true)} style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginBottom: 18,
+        padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`,
+        borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+        cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+      }}>
+        <i className="fa-solid fa-calculator" style={{ fontSize: 13, color: 'var(--accent)' }} />
+        <span style={{ flex: 1, textAlign: 'left' }}>Estimate targets for me</span>
+        <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+      </button>
+      {section('Training', 'Training day', calsTraining)}
+      {section('Rest', 'Rest day', calsRest)}
+      <Btn onClick={save} style={{ width: '100%' }}>Save targets</Btn>
+      <MacroEstimatorSheet open={estimatorOpen} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
+        onApply={t => setForm({
+          proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
+          proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
+        })} />
       {confirmEl}
     </Sheet>
   );
@@ -1837,13 +2457,13 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       {log?.offPlanNote && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
         </div>
       )}
       {log?.note && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>NOTE</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.note}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{log.note}</div>
         </div>
       )}
     </Card>
@@ -2233,7 +2853,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
                   </div>
@@ -2313,7 +2933,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
                   </div>
@@ -2382,7 +3002,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
                   </div>
@@ -2494,7 +3114,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
-                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.name}</div>}
+                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.name}</div>}
                       </div>
                       <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
                     </div>
@@ -2513,11 +3133,16 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
 
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
-function HealthScreen({ store, setStore, go, userId }) {
+function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const today = LB.todayISO();
   const [selectedDate, setSelectedDate] = useStateH(today);
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
+  // The Food tab sends users here when their day has no macro target to score
+  // against (go({ name: 'health', openMacroTargets: true })): opening the sheet
+  // straight away is the whole point of that trip, arriving on the Health tab
+  // with nothing open would just make them hunt for the card.
+  useEffectH(() => { if (openMacroTargets) setTargetOpen(true); }, [openMacroTargets]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-
@@ -2925,7 +3550,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       )}
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {selfCoachedMacros
             ? 'These come from your active plan and take priority. Personal targets you set apply only without them.'
             : 'These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.'}
@@ -3096,7 +3721,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           {cardOrder.every(id => !isCardVisible(id)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
-              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>All Health cards are hidden.</div>
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>All Health cards are hidden.</div>
               <button onClick={() => go({ name: 'settings' })} style={{
                 background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
                 borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
@@ -3125,7 +3750,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );
 }
@@ -3362,7 +3987,7 @@ function HealthClientLogs({ clientStore }) {
         {cardOrder.every(id => !isCardVisible(id)) ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
             <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
-            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>Your client has hidden all their Health cards.</div>
           </div>
         ) : (
           // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
@@ -3387,11 +4012,11 @@ function HealthClientLogs({ clientStore }) {
 
 // ─── Export sheet ─────────────────────────────────────────────────────────────
 
-function ExportSheet({ open, onClose, store }) {
+function ExportSheet({ open, onClose, store, userId }) {
   const today = LB.todayISO();
   const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
   const [to, setTo] = useStateH(today);
-  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | null
+  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
 
   const applyPreset = (days) => {
     setFrom(healthShiftISO(today, -(days - 1)));
@@ -3419,6 +4044,55 @@ function ExportSheet({ open, onClose, store }) {
       m[d].push(s);
     });
     return m;
+  };
+
+  // Per-ENTRY food export, next to the two day-level exports above. Those roll
+  // a day up into one row of totals, which answers "how much" but never "of
+  // what": the actual foods are the first thing anyone reviewing a week wants
+  // to see, and until now they could not leave the app at all.
+  // store.foodLogs only holds the boot window, so anything older in the chosen
+  // range is fetched on demand (same helper the Food screen uses to browse back
+  // past that window) rather than silently exporting a short range.
+  const doExportFoodCSV = async () => {
+    setExporting('food');
+    try {
+      const dates = [];
+      for (let d = from; d <= to; d = healthShiftISO(d, 1)) dates.push(d);
+      const have = new Set((store.foodLogs || []).map(l => l.date));
+      const missing = dates.filter(d => !have.has(d));
+      let extra = [];
+      if (missing.length) {
+        const byDate = await LB.fetchFoodLogsForDates(userId, missing).catch(() => ({}));
+        extra = Object.values(byDate || {}).flat();
+      }
+      const rows = [...(store.foodLogs || []), ...extra]
+        .filter(l => l.date >= from && l.date <= to)
+        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+      const esc = v => {
+        if (v == null || v === '') return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['Date', 'Time', 'Food', 'Brand', 'Source', 'Amount (g)', 'Unit', 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)', 'Fiber (g)', 'Sugar (g)', 'Sat. fat (g)', 'Sodium (mg)', 'Planned'];
+      const body = rows.map(l => [
+        l.date, l.time, l.foodName, l.brand, l.source, l.quantityG,
+        l.loggedUnit ? `${l.loggedUnit.label} (${l.loggedUnit.grams}g)` : '',
+        l.calories, l.protein, l.carbs, l.fat, l.fiber, l.sugar, l.satFat, l.sodiumMg,
+        l.planned ? 'yes' : 'no',
+      ].map(esc).join(','));
+
+      const csv = [header.map(esc).join(','), ...body].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `food-log-${from}-${to}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onClose();
+    } finally {
+      setExporting(null);
+    }
   };
 
   const doExportCSV = () => {
@@ -3638,6 +4312,22 @@ function ExportSheet({ open, onClose, store }) {
             <i className="fa-solid fa-file-csv" style={{ fontSize: 13 }} />
             {exporting === 'csv' ? 'Exporting…' : 'Export as CSV'}
           </button>
+          {/* Only offered once there is a food log to export: for a user who
+              only ever types macros into the daily log this button would be a
+              permanently empty file. */}
+          {(store.foodLogs || []).length > 0 && (
+            <button onClick={doExportFoodCSV} disabled={!!exporting} style={{
+              width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
+              background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+              textShadow: 'none',
+              fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-utensils" style={{ fontSize: 13 }} />
+              {exporting === 'food' ? 'Exporting…' : 'Export food log as CSV'}
+            </button>
+          )}
           <button onClick={doExportPDF} disabled={!!exporting} style={{
             width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',

@@ -60,7 +60,7 @@ function wtHexToRgba(hex, alpha) {
 function wtDateStr(offset = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return LB.fmtISO(d);
 }
 function wtHhmmToDecimal(t) {
   const [h, m] = (t || '0:0').split(':').map(Number);
@@ -556,7 +556,7 @@ function WaterScreen({ store, setStore, go, userId }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[...todayEntries].sort((a, b) => wtHhmmToDecimal(b.time) - wtHhmmToDecimal(a.time)).map(e => (
-                <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 }}>
+                <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                     <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
@@ -613,7 +613,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         {coffeeStep === 'size' ? (
           coffeeSizes.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '4px 0' }}>
-              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>No coffee sizes yet. Add your own in the water settings.</div>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '20px' }}>No coffee sizes yet. Add your own in the water settings.</div>
               <Btn onClick={() => { setCoffeeOpen(false); setSettingsOpen(true); }} style={{ width: '100%' }}>Open settings</Btn>
             </div>
           ) : (
@@ -728,13 +728,13 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
           Notifications are off. Turn them on in Settings to receive these.
         </button>
       )}
-      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: '16px' }}>
         Uses your existing notification channel (Web Push or Pushover). Sent during your daily window.
       </div>
 
       {/* Other drinks & coffee live in their own sub-sheet to keep this one tidy */}
       <Bezel style={{ marginBottom: 12 }}>Drinks</Bezel>
-      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
+      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Other drinks & coffee</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{drinkCount > 0 ? `${drinkCount} set` : 'Configure'}</span>
@@ -755,7 +755,7 @@ function wtSwatchBtnStyle(sel) {
   return {
     display: 'grid', placeItems: 'center', borderRadius: 6, cursor: 'pointer',
     background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
-    border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    border: `var(--hair-width) solid ${sel ? 'var(--hair-accent)' : UI.hair}`,
     WebkitTapHighlightColor: 'transparent',
   };
 }
@@ -886,7 +886,7 @@ function WaterConfigRow({ left, right, onRemove, onEdit, icon, color, active }) 
     <div onClick={onEdit} style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px',
       background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
-      border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
+      border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
       cursor: onEdit ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
     }}>
       <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
@@ -945,7 +945,7 @@ function WaterStatsBody({ store, goalMl }) {
     }}>{label}</button>
   );
   const statCard = (label, value, sub) => (
-    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '11px 12px', minWidth: 0 }}>
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '11px 12px', minWidth: 0 }}>
       <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 5 }}>{label}</div>
       <div className="num" style={{ fontSize: 19, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {value}{sub && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 4, fontFamily: UI.fontUi }}>{sub}</span>}
@@ -955,7 +955,7 @@ function WaterStatsBody({ store, goalMl }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 14 }}>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 14 }}>
         {segBtn(7, '7D')}{segBtn(30, '30D')}{segBtn(90, '90D')}{segBtn('custom', 'Custom')}
       </div>
       {period === 'custom' && (
@@ -992,19 +992,19 @@ function WaterStatsBody({ store, goalMl }) {
 
 // ─── Local style constants ──────────────────────────────────────────
 const wtIconBtn = {
-  width: 34, height: 34, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+  width: 34, height: 34, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   WebkitTapHighlightColor: 'transparent',
 };
 const wtTile = {
   display: 'flex', flexDirection: 'column', alignItems: 'center',
-  padding: '14px 6px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+  padding: '14px 6px 10px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: UI.bgInset, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const wtDrinkTile = {
   display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 6,
-  border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, textShadow: 'none', cursor: 'pointer',
+  border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, textShadow: 'none', cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
 const wtDrinkIcon = {
@@ -1013,23 +1013,23 @@ const wtDrinkIcon = {
 // Same faint/soft alpha steps WT_BLUE_FAINT/WT_BLUE_SOFT used, just built from
 // whatever color this particular drink (or coffee) was assigned.
 function wtDrinkIconStyle(color) {
-  return { ...wtDrinkIcon, background: wtHexToRgba(color, 0.12), border: `1px solid ${wtHexToRgba(color, 0.35)}`, color };
+  return { ...wtDrinkIcon, background: wtHexToRgba(color, 0.12), border: `var(--hair-width) solid ${wtHexToRgba(color, 0.35)}`, color };
 }
 const wtDrinkName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const wtDrinkMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 };
 const wtInput = {
-  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
   color: UI.ink, fontFamily: UI.fontNum, fontSize: 16, padding: '10px 12px', width: '100%',
   WebkitAppearance: 'none',
 };
 const wtBigInput = { ...wtInput, fontSize: 22, padding: '12px 14px' };
 const wtPreset = {
-  padding: '10px 0', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
+  padding: '10px 0', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset,
   color: UI.ink, textShadow: 'none', fontFamily: UI.fontNum, fontSize: 14, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };
 const wtPillOpt = {
-  padding: '13px 8px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
+  padding: '13px 8px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset,
   color: UI.ink, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
   WebkitTapHighlightColor: 'transparent',
 };

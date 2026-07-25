@@ -255,6 +255,8 @@ CREATE TABLE public.zane_user_settings (
   session_timeout_minutes integer DEFAULT 90,
   auto_close_notify jsonb,
   macro_targets jsonb,
+  macro_calc jsonb,                          -- 0205: last inputs of the target estimator (prefill only; shape in docs/database.md)
+  meal_windows jsonb,                        -- 0206: six ascending start hours for the food tracker meal categories, null = defaults
   show_health_tab boolean NOT NULL DEFAULT false,
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
@@ -2250,6 +2252,9 @@ CREATE TABLE zane_foods (
   carbs_per_100g    numeric,
   fat_per_100g      numeric,
   fiber_per_100g    numeric,
+  sugar_per_100g     numeric,                             -- 0204
+  sat_fat_per_100g   numeric,                             -- 0204
+  sodium_mg_per_100g numeric,                             -- 0204, milligrams (OFF reports grams, the Edge Function converts)
   serving_size_g    numeric,
   serving_label     text,
   raw               jsonb,
@@ -2279,6 +2284,9 @@ CREATE TABLE zane_food_logs (
   carbs        numeric     NOT NULL,
   fat          numeric     NOT NULL,
   fiber        numeric,
+  sugar        numeric,                                  -- 0204
+  sat_fat      numeric,                                  -- 0204
+  sodium_mg    numeric,                                  -- 0204, milligrams
   recipe_items jsonb,                                    -- ingredient snapshot for a source:'recipe' entry, null otherwise
   -- Migration 0194: forward reference to zane_food_recipes, which is defined
   -- further below (this table predates it, migration 0186 vs. 0187). Harmless
@@ -2324,6 +2332,9 @@ CREATE TABLE zane_food_favorites (
   carbs       numeric     NOT NULL,
   fat         numeric     NOT NULL,
   fiber       numeric,
+  sugar       numeric,                                -- 0204
+  sat_fat     numeric,                                -- 0204
+  sodium_mg   numeric,                                -- 0204, milligrams
   created_at  timestamptz NOT NULL DEFAULT now(),
   units       jsonb       NOT NULL DEFAULT '[]'       -- [{ label, grams }, ...], optional package/unit sizes
 );
@@ -2376,6 +2387,9 @@ CREATE TABLE zane_food_template_slots (
   carbs        numeric     NOT NULL,
   fat          numeric     NOT NULL,
   fiber        numeric,
+  sugar        numeric,                               -- 0204
+  sat_fat      numeric,                               -- 0204
+  sodium_mg    numeric,                               -- 0204, milligrams
   recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
   recipe_id    text,                                  -- soft ref to the source recipe (no FK)
   logged_total_portions integer,                      -- recipe batch total, recipe slots only
@@ -2885,3 +2899,48 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) TO authenticated;
+
+-- ── Edge Function usage quota (migration 0207) ──────────────────────────────
+-- Per-user, per-day call counter for the food Edge Functions (search-foods,
+-- scan-label, scan-label-claude), which otherwise had auth as their only gate
+-- while fanning out to third-party APIs and a vision model. RLS on with NO
+-- policies (same shape as zane_recipe_shares): reachable only through
+-- bump_api_usage below, which is granted to service_role alone. Advisory: the
+-- Edge Functions fail open if the RPC errors, so the quota can never block
+-- someone from logging food.
+
+CREATE TABLE zane_api_usage (
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  day        date        NOT NULL DEFAULT current_date,
+  kind       text        NOT NULL,              -- 'search' | 'scan'
+  count      integer     NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, day, kind)
+);
+
+ALTER TABLE zane_api_usage ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.bump_api_usage(p_user_id uuid, p_kind text, p_limit integer)
+ RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_count integer;
+BEGIN
+  INSERT INTO public.zane_api_usage (user_id, day, kind, count, updated_at)
+  VALUES (p_user_id, current_date, p_kind, 1, now())
+  ON CONFLICT (user_id, day, kind)
+    DO UPDATE SET count = public.zane_api_usage.count + 1, updated_at = now()
+  RETURNING count INTO v_count;
+  RETURN v_count <= p_limit;
+END;
+$function$;
+
+-- Migration 0208: REVOKE FROM PUBLIC is not enough on its own here. An ALTER
+-- DEFAULT PRIVILEGES rule owned by postgres grants EXECUTE on every new
+-- function to authenticated (0132 removed the equivalent anon rule, not this
+-- one), and this function takes p_user_id as a plain argument with no auth
+-- check of its own, so any signed-in user could otherwise run another user's
+-- counter over the limit and lock them out for the day.
+REVOKE EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) FROM PUBLIC, authenticated;
+GRANT  EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) TO service_role;

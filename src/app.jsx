@@ -1489,7 +1489,7 @@ function App() {
     case 'cardio-plans':  screen = <window.Screens.CardioPlanScreen {...props} />; break;
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
-    case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;
+    case 'health':        screen = <window.Screens.HealthScreen {...props} openMacroTargets={route.openMacroTargets} />; break;
     case 'water':         screen = <window.Screens.WaterScreen {...props} />; break;
     case 'food':          screen = <window.Screens.FoodScreen {...props} date={route.date} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;

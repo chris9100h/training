@@ -2779,7 +2779,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
                 borderRadius: 4, textShadow: 'none', padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
               }}>
-                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `0.5px solid ${isFlex ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `var(--hair-width) solid ${isFlex ? 'var(--hair-accent)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                   <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
                 <div style={{ flex: 1 }}>
@@ -2808,7 +2808,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   borderRadius: 4, padding: '10px 12px',
                 }}>
                   <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasGoal ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, border: `var(--hair-width) solid ${hasGoal ? 'var(--hair-accent)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                       <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                     </div>
                   </button>
@@ -2858,7 +2858,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               : { ...d, mesocycle_weeks: 6, mesocycle_autoregulate: false });
             const toggleUI = (on, onClick) => (
               <button onClick={onClick} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                   <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
               </button>
@@ -4352,13 +4352,13 @@ function PlanWizard({ store, setStore, go }) {
       <span style={{
         width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
-        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+        border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
       }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
         {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
       </span>
-      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
       {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
     </button>
   );
@@ -4573,7 +4573,7 @@ function PlanWizard({ store, setStore, go }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="micro" style={{ color: mesoRirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
             <button onClick={() => setMesoRirOn(o => !o)} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-              <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: mesoRirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${mesoRirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+              <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: mesoRirOn ? UI.gold : UI.hairStrong, border: `var(--hair-width) solid ${mesoRirOn ? 'var(--hair-accent)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                 <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
               </div>
             </button>
