@@ -766,6 +766,42 @@ async function testAsync(name, fn) {
     assert.ok(d.carbs < 400 && d.fat < 80);
   });
 
+  test('rebalanceMacros: replaying pins one at a time restores all of them', () => {
+    // The exact move MacroEstimatorSheet makes when an input changes while
+    // macros are pinned: rebuild from the new estimate, then re-apply each pin
+    // in turn holding the others, so every pinned macro lands back on its own
+    // value and only the free ones absorb the difference.
+    const pinnedValues = { protein: 200, fat: 60 };
+    const replay = (estimate, target) => {
+      const pins = Object.keys(pinnedValues);
+      return pins.reduce((day, k) => LB.rebalanceMacros(day, k, pinnedValues[k], {
+        targetCalories: target, locked: pins.filter(o => o !== k),
+      }), estimate);
+    };
+
+    const target = 3000;
+    const out = replay({ protein: 160, carbs: 400, fat: 80 }, target);
+    assert.strictEqual(out.protein, 200, 'first pin survived the second pass');
+    assert.strictEqual(out.fat, 60, 'second pin applied');
+    assert.ok(Math.abs(LB.caloriesFromMacros(out.protein, out.carbs, out.fat) - target) <= 10,
+      'carbs, the only free macro, absorbed the rest');
+
+    // A different starting estimate lands on the same pins with different
+    // carbs, which is the whole point: the pinned numbers do not drift.
+    const other = replay({ protein: 140, carbs: 300, fat: 100 }, 2600);
+    assert.strictEqual(other.protein, 200);
+    assert.strictEqual(other.fat, 60);
+    assert.ok(other.carbs < out.carbs, 'the smaller day gets fewer carbs, not less protein');
+
+    // Pinning everything means the calories cannot be held, and honestly are
+    // not: nothing is left to absorb, so the pins simply stand.
+    const allPinned = ['protein', 'carbs', 'fat'].reduce(
+      (day, k) => LB.rebalanceMacros(day, k, { protein: 200, carbs: 100, fat: 60 }[k], {
+        targetCalories: target, locked: ['protein', 'carbs', 'fat'].filter(o => o !== k),
+      }), { protein: 160, carbs: 400, fat: 80 });
+    assert.strictEqual(JSON.stringify(allPinned), JSON.stringify({ protein: 200, carbs: 100, fat: 60 }));
+  });
+
   test('rebalanceMacros: guards against negatives and nonsense input', () => {
     const cur = { protein: 160, carbs: 400, fat: 80 };
     const target = 2960;

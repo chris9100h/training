@@ -1810,8 +1810,56 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // Any change to an input produces a different estimate, so hand edits made
   // against the previous one are dropped rather than silently carried over
   // onto numbers they were never balanced against.
+  //
+  // A padlock is the exception. It is a decision about a number, not a scratch
+  // value, so a pinned macro keeps what it was set to and the free ones
+  // rebalance around it to the new day's calories. Clearing the padlocks here
+  // would mean every nudge of the ratio slider quietly undid the pinning, which
+  // is backwards: the slider exists precisely to ask "with protein settled,
+  // what do the other two do".
   const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg, restPct]);
-  useEffectH(() => { setManual(null); setLocks({ training: {}, rest: {} }); }, [estKey]);
+
+  // Which macros are actually pinned for a day. With low fat on, fat is held by
+  // that target and its padlock is hidden, so a pin left over from before the
+  // option was switched on must not go on holding the old number and quietly
+  // defeat it.
+  const pinsFor = (dayType) => Object.keys(locks[dayType] || {})
+    .filter(k => locks[dayType][k] && !(k === 'fat' && fatPerKg != null));
+
+  useEffectH(() => {
+    setManual(prev => {
+      // No estimate to rebuild against (a half-typed input). Hold everything
+      // rather than destroying the numbers mid-keystroke.
+      if (!targets) return prev;
+      const fresh = estimateStrings();
+      if (!prev || !fresh) return null;
+      let anyPin = false;
+      const out = { ...fresh };
+      ['training', 'rest'].forEach(d => {
+        const pinned = pinsFor(d);
+        if (!pinned.length) return;
+        anyPin = true;
+        let day = {
+          protein: healthInt(fresh[d].protein) || 0,
+          carbs: healthInt(fresh[d].carbs) || 0,
+          fat: healthInt(fresh[d].fat) || 0,
+        };
+        // One pin at a time, each holding the others, so every pinned macro
+        // lands back on its own value and only the free ones absorb the
+        // difference. Order does not matter: the last pass restores whatever
+        // an earlier one moved.
+        pinned.forEach(k => {
+          day = LB.rebalanceMacros(day, k, healthInt(prev[d]?.[k]) || 0, {
+            targetCalories: d === 'training' ? targets.caloriesTraining : targets.caloriesRest,
+            weightKg, fatPerKg,
+            locked: pinned.filter(o => o !== k),
+          });
+        });
+        out[d] = { protein: String(day.protein), carbs: String(day.carbs), fat: String(day.fat) };
+      });
+      return anyPin ? out : null;
+    });
+  }, [estKey]); // eslint-disable-line
 
   const estimateStrings = () => (targets ? {
     training: { protein: String(targets.proteinTraining), carbs: String(targets.carbsTraining), fat: String(targets.fatTraining) },
@@ -1837,7 +1885,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       const next = LB.rebalanceMacros(cur, key, clean === '' ? 0 : parseInt(clean, 10), {
         targetCalories: dayType === 'training' ? targets.caloriesTraining : targets.caloriesRest,
         weightKg, fatPerKg,
-        locked: Object.keys(locks[dayType] || {}).filter(k => locks[dayType][k]),
+        locked: pinsFor(dayType),
       });
       return {
         ...base,
@@ -1921,16 +1969,22 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   );
   const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
 
-  const toggleLock = (dayType, key) =>
+  const toggleLock = (dayType, key) => {
+    // Locking pins the number that is on screen right now, so the estimate is
+    // committed to the editable state first. Without that, a padlock set on an
+    // untouched estimate would have no value to hold the next time an input
+    // changes, and would behave differently from one set on a typed number.
+    if (!locks[dayType]?.[key]) setManual(prev => prev || estimateStrings());
     setLocks(l => ({ ...l, [dayType]: { ...l[dayType], [key]: !l[dayType]?.[key] } }));
+  };
 
   // The label doubles as the lock toggle: a padlock beside each macro, so
   // pinning one is where you already are when you decide to.
   const macroField = (dayType, key, label) => {
-    const locked = !!locks[dayType]?.[key];
     // With the low-fat option on, fat is held by that target anyway, so its
     // padlock would be a second switch for the same thing.
     const lockable = !(key === 'fat' && fatPerKg != null);
+    const locked = lockable && !!locks[dayType]?.[key];
     return (
       <div style={{ flex: 1 }}>
         <button className="micro" disabled={!lockable}
@@ -2122,11 +2176,14 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           {daySection('training', 'TRAINING DAY')}
           {daySection('rest', 'REST DAY')}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: 1.4 }}>
-            {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one so later edits leave it alone."}
+            {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one: later edits leave it alone, and it holds its value when you change the inputs above."}
             {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
           </div>
           {manual && (
-            <button onClick={() => setManual(null)} style={{
+            // The one full reset: drops the hand edits and the padlocks
+            // together, since a pin that outlived the numbers it was pinning
+            // would only surprise the next edit.
+            <button onClick={() => { setManual(null); setLocks({ training: {}, rest: {} }); }} style={{
               marginTop: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
               color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
             }}>Back to the estimate</button>
