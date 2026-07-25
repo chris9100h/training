@@ -539,6 +539,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
         off_plan_note: l.offPlanNote ?? null,
+        meal_of_choice: !!l.mealOfChoice,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
       }))
@@ -937,7 +938,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods — used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1172,6 +1173,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       offPlanNote: l.off_plan_note ?? null,
+      mealOfChoice: !!l.meal_of_choice,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       updatedAt: l.updated_at ?? null,
@@ -1840,6 +1842,7 @@ async function syncStore(prev, next, userId) {
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
       off_plan_note: l.offPlanNote ?? null,
+      meal_of_choice: !!l.mealOfChoice,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
       updated_at: l.updatedAt ?? new Date().toISOString(),
@@ -5066,10 +5069,115 @@ function effectiveMacroTargets(personal, coachingMacros) {
 function dailyLogAdherence(log, targets, isTraining) {
   const dayTarget = dayTargetFromMacros(targets, isTraining);
   if (!dayTarget) return { adherence: null, targetsSnap: null };
+  // A meal-of-choice day is deliberately unscored: it is planned around one
+  // off-plan meal that absorbs whatever is left, so a percentage against the
+  // macro target measures nothing. null drops the day out of every average
+  // (they all filter nulls) instead of dragging it down, same as a sick day.
+  //
+  // Unlike a sick day it KEEPS the target snapshot. A status day gets away
+  // with nulling it because the Training|Rest slider is hidden there; a
+  // meal-of-choice day is an ordinary training or rest day and keeps its
+  // slider, and a flex plan reads that choice back out of targetsSnap.dayType
+  // (flexDayTypeOverride). Dropping it would silently flip the day to rest and
+  // change which target every other screen measures it against.
+  //
+  // The flag is intrinsic to the row, so the function that receives the row
+  // owns the rule. Status is NOT on the row, which is why it stays a caller
+  // concern: see the callers in screens-health.jsx.
+  if (log?.mealOfChoice) {
+    return { adherence: null, targetsSnap: { ...dayTarget, dayType: isTraining ? 'training' : 'rest' } };
+  }
   const adherence = macroAdherence(
     { protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget);
   if (adherence == null) return { adherence: null, targetsSnap: null };
   return { adherence, targetsSnap: { ...dayTarget, dayType: isTraining ? 'training' : 'rest' } };
+}
+
+// Which sick/vacation/deload mode covers a date, or null. Today answers from
+// the live statusMode cache (an optimistic period row may not have landed
+// yet), any other date scans the intervals; an open period runs to now.
+// Extracted from four inline copies in screens-health.jsx so the adherence
+// writers can share one predicate. Other copies (home, lib, coaching) answer
+// different questions and are deliberately left alone.
+function statusModeForDate(state, dateStr) {
+  if (!dateStr) return null;
+  if (dateStr === todayISO()) return state?.statusMode ?? null;
+  const t = new Date(dateStr + 'T12:00:00').getTime();
+  const hit = (state?.statusPeriods || []).find(p => {
+    const from = new Date(p.startedAt).getTime();
+    const to = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+    return t >= from && t <= to;
+  });
+  return hit ? hit.mode : null;
+}
+
+// The budget a meal of choice inherits: the day's target minus everything else
+// already on the day, floored at zero per macro. Pass PROJECTED totals (logged
+// plus still-planned), not just logged: a shake planned for 21:00 is spoken
+// for, and subtracting it here is what stops it being spent twice.
+// Calories are derived from the clamped macros rather than clamped on their
+// own, so the kcal figure can never contradict the P/C/F it is written with.
+// null when the day has no macro target to spend.
+function mealOfChoiceRemainder(dayTarget, totals) {
+  if (!dayTarget) return null;
+  const left = (t, a) => Math.max(0, Math.round((Number(t) || 0) - (Number(a) || 0)));
+  const protein = left(dayTarget.protein, totals?.protein);
+  const carbs = left(dayTarget.carbs, totals?.carbs);
+  const fat = left(dayTarget.fat, totals?.fat);
+  return { protein, carbs, fat, calories: caloriesFromMacros(protein, carbs, fat) };
+}
+
+// How many meal-of-choice days the Monday-anchored week around dateStr holds,
+// and which one the given date is (1-based, in date order; null when that date
+// is not marked). Counting only: one a week is the coach's rule, the app's job
+// is to make the number visible, not to police it.
+function mealOfChoiceWeekCount(dailyLogs, dateStr) {
+  if (!dateStr) return { count: 0, ordinal: null, weekStart: null };
+  const d = new Date(dateStr + 'T12:00:00');
+  // getDay() is 0 for Sunday, which belongs to the week that started six days
+  // earlier, not to the one starting the next day.
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const weekStart = fmtISO(d);
+  const end = new Date(d); end.setDate(end.getDate() + 7);
+  const weekEnd = fmtISO(end);
+  const marked = (dailyLogs || [])
+    .filter(l => l.mealOfChoice && l.date >= weekStart && l.date < weekEnd)
+    .map(l => l.date)
+    .sort();
+  const idx = marked.indexOf(dateStr);
+  return { count: marked.length, ordinal: idx === -1 ? null : idx + 1, weekStart };
+}
+
+// The single line this feature owns inside a day's off-plan note. Everything
+// else in that field is the user's own text and survives both setting and
+// clearing, which matters because the note is the ONLY channel the coach sees
+// this on (dailyLogsWeekPrefill folds it into the check-in).
+const MOC_NOTE_PREFIX = 'Meal of choice';
+function withMealOfChoiceNote(note, mealName) {
+  const name = (mealName || '').trim();
+  const line = name ? `${MOC_NOTE_PREFIX}: ${name}` : MOC_NOTE_PREFIX;
+  const isOurs = l => l.trimStart().toLowerCase().startsWith(MOC_NOTE_PREFIX.toLowerCase());
+  const lines = (note || '').split('\n');
+  const at = lines.findIndex(isOurs);
+  let out;
+  if (mealName === null) {
+    out = lines.filter(l => !isOurs(l));
+  } else if (at === -1) {
+    // Append rather than prepend, so the user's existing text never moves.
+    out = (note || '').trim() ? [...lines, line] : [line];
+  } else {
+    out = lines.map((l, i) => (i === at ? line : l));
+  }
+  const joined = out.join('\n').trim();
+  return joined || null;
+}
+// Reads the name back for display. A user who hand-edits the line away keeps a
+// marked day; the UI just falls back to the bare label.
+function mealOfChoiceNoteName(note) {
+  const line = (note || '').split('\n').find(l => l.trimStart().toLowerCase().startsWith(MOC_NOTE_PREFIX.toLowerCase()));
+  if (!line) return null;
+  const rest = line.trim().slice(MOC_NOTE_PREFIX.length).replace(/^\s*:\s*/, '').trim();
+  return rest || null;
 }
 
 // Aggregate a week of daily logs into check-in prefill values, keyed by the
@@ -5307,7 +5415,7 @@ async function endDeload(userId, store, setStore) {
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -5324,6 +5432,7 @@ async function refreshHealthLogs(userId) {
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       offPlanNote: l.off_plan_note ?? null,
+      mealOfChoice: !!l.meal_of_choice,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       updatedAt: l.updated_at ?? null,
@@ -7404,7 +7513,8 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
