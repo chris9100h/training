@@ -591,7 +591,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -1290,7 +1290,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const handleSignOut = async () => { await flushBeforeSignOut(userId); await LB.signOut(); };
+  const handleSignOut = async () => { markIntentionalSignOut(); await flushBeforeSignOut(userId); await LB.signOut(); };
 
   const attachSupportImageFile = (file) => {
     if (!file) return;
@@ -1611,6 +1611,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       { title: 'Delete all data?', ok: 'Delete all', danger: true, requireText: 'Delete my data' }
     );
     if (!ok) return;
+    markIntentionalSignOut();
     await LB.deleteAllData(userId); await LB.signOut();
   };
 

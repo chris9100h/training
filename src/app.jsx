@@ -324,6 +324,7 @@ function App() {
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
+  const intentionalSignOut        = useRefA(false); // set right before a user-initiated LB.signOut() call
   const swReg                     = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
@@ -729,6 +730,12 @@ function App() {
     }
   }, []);
 
+  // Arms the SIGNED_OUT handler below to actually wipe local storage. Must be
+  // called synchronously right before every deliberate LB.signOut() — without
+  // it, SIGNED_OUT is treated as involuntary (failed refresh, revoked/expired
+  // session, dead network) and the local cache/pending diff is preserved.
+  const markIntentionalSignOut = useCallbackA(() => { intentionalSignOut.current = true; }, []);
+
   const loadData = async (uid) => {
     localDirty.current = false;
     const cached = LB.loadFromLocal(uid);
@@ -1042,9 +1049,17 @@ function App() {
         onboardingChecked.current = false;
         unitPicked.current = false;
         recoveryInProgress.current = false;
-        // An offline SIGNED_OUT is almost always a failed token refresh, not a
-        // real sign-out — never wipe the cache or drop to the login screen.
-        if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
+        // Only a deliberate LB.signOut() (Settings → Sign out / Delete all
+        // data / pending-approval sign-out, each of which calls
+        // markIntentionalSignOut() first) may wipe the local pending diff.
+        // Any other SIGNED_OUT — offline, a flaky refresh, a revoked or
+        // expired session — is involuntary: wiping here would delete
+        // unsynced edits with no way to retry them once the next login pulls
+        // a clean server state back down. (Confirmed: a workout logged
+        // during a broken refresh cycle was lost exactly this way when the
+        // user was told to just log back in.)
+        if (!intentionalSignOut.current) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
+        intentionalSignOut.current = false;
         LB.clearLocal(userIdRef.current);
         clearTimeout(retryTimer.current);
         setStore(null);
@@ -1462,7 +1477,7 @@ function App() {
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
-  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => LB.signOut()} />;
+  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => { intentionalSignOut.current = true; LB.signOut(); }} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
@@ -1471,7 +1486,7 @@ function App() {
   window.__goHome = () => go({ name: 'home' });
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
-  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut };
+  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water and
