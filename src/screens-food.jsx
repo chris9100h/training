@@ -353,6 +353,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
   const [extrasOpen, setExtrasOpen] = useStateFd(false);
+  // { name } while the meal-of-choice sheet is open, null otherwise.
+  const [mocSheet, setMocSheet] = useStateFd(null);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -901,10 +903,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // effect living in HealthScreen, which isn't mounted while viewing this
   // screen, so it would show a stale number right after logging something
   // here. null (hidden) when there's no macro target to score against.
+  // A meal-of-choice day is deliberately unscored (see LB.dailyLogAdherence),
+  // and this is the one adherence figure in the app that is recomputed live
+  // rather than read from the store, so it needs the rule applied a second
+  // time or the Food hero would show a percentage while the Health tab shows
+  // none for the same day.
+  const dayLog = useMemoFd(
+    () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
+    [store.dailyLogs, curDate]);
+  const isMealOfChoice = !!dayLog?.mealOfChoice;
   const dayAdherence = useMemoFd(
-    () => dayTarget ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
-    [dayTarget, dayTotals],
+    () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
+    [dayTarget, dayTotals, isMealOfChoice],
   );
+  // The budget the meal inherits. Computed against PROJECTED totals, not just
+  // logged: a shake still planned for 21:00 is already spoken for, and not
+  // subtracting it here would let it be spent twice. This is also why the
+  // meal itself stays a derived row until it is confirmed. A real planned
+  // entry would sit inside projectedTotals and make the sum circular.
+  const mocRemainder = useMemoFd(
+    () => LB.mealOfChoiceRemainder(dayTarget, projectedTotals),
+    [dayTarget, projectedTotals]);
+  // Deterministic id, the same idiom the template slots use: two devices
+  // confirming the same meal collide into one row instead of duplicating.
+  const mocEntryId = `moc_${curDate}`;
+  const mocEntry = useMemoFd(
+    () => (store.foodLogs || []).find(l => l.id === mocEntryId) || null,
+    [store.foodLogs, mocEntryId]);
+  const mocWeek = useMemoFd(
+    () => LB.mealOfChoiceWeekCount(store.dailyLogs, curDate),
+    [store.dailyLogs, curDate]);
+  const mocName = LB.mealOfChoiceNoteName(dayLog?.offPlanNote);
 
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
@@ -1239,6 +1268,57 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, planned } : l);
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
+  }
+
+  // Declare (or undeclare) the viewed day a meal-of-choice day.
+  //
+  // Nulling adherence here is not optional. This screen never writes adherence,
+  // and the effect that would (HealthScreen's food reconciler) only runs while
+  // HealthScreen is mounted, so without this the day keeps a stale score until
+  // the user happens to open Health, and that stale number is exactly what
+  // feeds the coach's weekly check-in. Bumping updatedAt is not optional
+  // either: sync_daily_logs_batch drops any write that reuses the old stamp.
+  //
+  // targetsSnap is deliberately left alone. A meal-of-choice day is an ordinary
+  // training or rest day and a flex plan reads that choice back out of it.
+  async function setMealOfChoice(on, name) {
+    if (!on && mocEntry) {
+      const ok = await confirm(
+        'The day goes back to being scored, including the meal you already logged for it.',
+        { title: 'Remove the marker?', ok: 'Remove', cancel: 'Keep' });
+      if (!ok) return;
+    }
+    const now = new Date().toISOString();
+    setStore(s => {
+      const existing = (s.dailyLogs || []).find(l => l.date === curDate);
+      const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
+      const adherence = on
+        ? null
+        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: false }, macroTargets, LB.isTrainingDayForDate(s, curDate)).adherence;
+      const log = existing
+        ? { ...existing, mealOfChoice: on, offPlanNote, adherence, updatedAt: now }
+        : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
+            fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
+            mealOfChoice: on, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+      return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
+    });
+  }
+
+  // Confirming the meal freezes whatever was still open at that instant into a
+  // real logged entry, then hands it to the ordinary commit path so it gets the
+  // manual-macro warning and the daily-log mirror like anything else. From here
+  // on it is a normal row: editable, movable, deletable.
+  async function confirmMealOfChoice() {
+    if (!mocRemainder) return;
+    await commitEntries([{
+      id: mocEntryId, date: curDate, time: entryTime(),
+      foodId: null, foodName: mocName || 'Meal of choice', brand: null, source: 'custom',
+      quantityG: null,
+      calories: mocRemainder.calories, protein: mocRemainder.protein,
+      carbs: mocRemainder.carbs, fat: mocRemainder.fat,
+      fiber: null, sugar: null, satFat: null, sodiumMg: null,
+      planned: false, createdAt: new Date().toISOString(),
+    }]);
   }
 
   // Re-hours a dragged entry, keeping its own minute (":MM") and every other
@@ -2274,6 +2354,50 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // TabBar, never overlapping it) regardless of scroll position.
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <Screen>
+      {/* Naming is optional but it is the ONLY thing the coach sees: the name
+          goes into the day's off-plan note, which dailyLogsWeekPrefill folds
+          into the weekly check-in. The field is prefilled with whatever is
+          already in that note so nothing the user wrote can be overwritten
+          without them seeing it. */}
+      <Sheet open={!!mocSheet} onClose={() => setMocSheet(null)} title="Meal of choice">
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px', marginBottom: 16 }}>
+          One meal takes whatever macros are left, and the day stops being scored. Eat the rest of the day light and protein heavy, then spend what is open on this.
+        </div>
+        <div className="micro" style={{ marginBottom: 6 }}>What is it?</div>
+        <input type="text" value={mocSheet?.name ?? ''} placeholder="Pizza with the team"
+          onChange={e => setMocSheet(m => ({ ...m, name: e.target.value }))}
+          style={{ width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }} />
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 6, marginBottom: 16 }}>
+          Optional, and it goes in your off-plan note for the day, so your coach sees it in the weekly check-in.
+        </div>
+        {mocRemainder && (
+          <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
+            <div className="micro" style={{ marginBottom: 4 }}>Open right now</div>
+            <div className="num" style={{ fontSize: 22, fontWeight: 300, color: UI.ink, lineHeight: '24px' }}>
+              {mocRemainder.calories}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 4 }}>kcal</span>
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <FdMacroBits protein={mocRemainder.protein} carbs={mocRemainder.carbs} fat={mocRemainder.fat} />
+            </div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 6 }}>
+              This keeps updating as you log the rest of the day. It is frozen when you tick the meal off.
+            </div>
+          </div>
+        )}
+        {mocWeek.count > 0 && !isMealOfChoice && (
+          <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 16 }}>
+            That would be your {mocWeek.count + 1}. this week. Your call, the app only counts.
+          </div>
+        )}
+        <Btn onClick={() => { setMealOfChoice(true, mocSheet?.name); setMocSheet(null); }} style={{ width: '100%' }}>
+          {isMealOfChoice ? 'Save' : 'Mark this day'}
+        </Btn>
+        {isMealOfChoice && (
+          <Btn kind="ghost" onClick={() => { setMealOfChoice(false); setMocSheet(null); }} style={{ width: '100%', marginTop: 10 }}>
+            Remove the marker
+          </Btn>
+        )}
+      </Sheet>
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
         right={
@@ -2420,8 +2544,74 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <BracketFrame gold style={{ padding: 20 }}>
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
+                unscored={isMealOfChoice ? 'Meal of choice' : null}
                 onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
+
+            {/* Meal of choice: one declared meal absorbs whatever macros are
+                left, while the rest of the day is eaten light and protein
+                heavy. The day is marked on the daily log, which is what makes
+                it unscored everywhere (LB.dailyLogAdherence).
+
+                The unconfirmed meal is a DERIVED row, never a stored planned
+                entry. A stored one would sit inside projectedTotals and make
+                its own budget circular, would freeze at creation instead of
+                tracking the rest of the day, and could not be ticked off at
+                all with plan mode off, since FdCheckbox only renders there. */}
+            {dayTarget && (
+              mocEntry ? (
+                <div style={{ ...fdListRow, cursor: 'default' }}>
+                  <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={fdEntryName}>{mocEntry.foodName}</div>
+                    <span style={fdEntryMeta}>
+                      <span className="num" style={{ color: UI.warn }}>{Math.round(mocEntry.calories)} kcal</span>
+                      {' · '}<FdMacroBits protein={mocEntry.protein} carbs={mocEntry.carbs} fat={mocEntry.fat} />
+                    </span>
+                  </div>
+                  <span className="micro-gold">Eaten</span>
+                </div>
+              ) : isMealOfChoice ? (
+                <div style={{ ...fdCategoryCard, alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="micro-gold" style={{ marginBottom: 4 }}>
+                      Meal of choice{mocWeek.ordinal > 1 ? ` #${mocWeek.ordinal} this week` : ''}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>
+                      {mocName || 'Not named yet'}
+                    </div>
+                    <span style={fdEntryMeta}>
+                      {mocRemainder.calories > 0
+                        ? <><span className="num" style={{ color: UI.warn }}>{mocRemainder.calories} kcal</span>{' · '}
+                            <FdMacroBits protein={mocRemainder.protein} carbs={mocRemainder.carbs} fat={mocRemainder.fat} />
+                            {' left for it'}</>
+                        : 'Budget spent, log it normally'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => setMocSheet({ name: mocName || '' })} aria-label="Edit meal of choice" style={fdIconBtn(30)}>
+                      <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                    </button>
+                    {/* Own tick rather than FdCheckbox: that one only renders
+                        with plan mode on, and this has to work either way. */}
+                    <button onClick={confirmMealOfChoice} disabled={!(mocRemainder.calories > 0)}
+                      aria-label="Log the meal of choice" style={{
+                        ...fdIconBtn(30),
+                        borderColor: mocRemainder.calories > 0 ? 'var(--hair-accent)' : UI.hairStrong,
+                        color: mocRemainder.calories > 0 ? 'var(--accent)' : UI.inkGhost,
+                      }}>
+                      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setMocSheet({ name: '' })} style={fdTemplateBtn}>
+                  <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
+                  <span style={{ flex: 1, textAlign: 'left' }}>Meal of choice</span>
+                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+                </button>
+              )
+            )}
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
                 Deliberately OUTSIDE the hero frame and folded away: they are
@@ -5188,7 +5378,7 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // resolvable the hero can only show a bare total, which is also the exact
 // moment the question "what should this number be?" comes up. Omitted by the
 // poster, so the button never renders into an exported image.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets }) {
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets, unscored }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
       protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
@@ -5199,7 +5389,21 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
   return dayTarget ? (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-        <FdRing percent={dayAdherence ?? 0} size={104} color={fdAdherenceColor(dayAdherence)} label="ADHERENCE" />
+        {/* A day that is deliberately unscored gets the reason in place of
+            the dial. Rendering FdRing at 0% would read as "you scored zero",
+            which is the opposite of what a declared day means, and it is what
+            makes this hero disagree with the Health tab today. The four bars
+            below stay: actual against target is exactly what the user needs
+            while deciding how much budget to spend. */}
+        {unscored ? (
+          <div style={{ width: 104, flexShrink: 0, textAlign: 'center' }}>
+            <i className="fa-solid fa-utensils" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <div className="micro" style={{ marginTop: 8, lineHeight: '12px' }}>Not scored</div>
+            <div className="micro-gold" style={{ marginTop: 3, lineHeight: '12px' }}>{unscored}</div>
+          </div>
+        ) : (
+          <FdRing percent={dayAdherence ?? 0} size={104} color={fdAdherenceColor(dayAdherence)} label="ADHERENCE" />
+        )}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
           <FdHeroRow label="KCAL" color={UI.warn} actual={dayTotals.calories} target={goalCalories} />
           <FdHeroRow label="PROTEIN" color={FD_MACRO_COLORS.protein} actual={dayTotals.protein} target={dayTarget.protein} unit="g" />
