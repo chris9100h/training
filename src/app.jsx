@@ -375,6 +375,24 @@ function App() {
     setStore(s => s ? { ...s, exercises: s.exercises.filter(e => !toDelete.includes(e.id)) } : s);
   }, [phase, userId]); // runs once on ready; store is captured from that render
 
+  // One-time repair for a meal-of-choice entry confirmed before
+  // confirmMealOfChoice (screens-food.jsx) gave it a real quantityG:
+  // quantity_g is NOT NULL on zane_food_logs, so a local row still carrying
+  // quantityG: null has been failing its sync on every retry since, forever,
+  // wedging syncBase so every OTHER pending change behind it in the same
+  // batch fails too — the standing "not synced" state this fixes. No row
+  // shaped like this was ever valid server-side (the constraint would have
+  // rejected it), so patching it locally to the same 100 fallback the fix
+  // now uses is always safe. Runs at the app level, not inside the Food
+  // screen, since the wedge blocks sync app-wide and must clear whether or
+  // not the user ever opens Food again. Self-limiting without a localStorage
+  // marker: once patched, the filter below no longer matches it.
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || !store) return;
+    if ((store.foodLogs || []).every(l => l.quantityG != null)) return;
+    setStore(s => (s ? { ...s, foodLogs: (s.foodLogs || []).map(l => l.quantityG == null ? { ...l, quantityG: 100 } : l) } : s));
+  }, [phase, userId, store]);
+
   useEffectA(() => {
     const color = store?.settings?.accentColor;
     if (color) {
