@@ -2426,14 +2426,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
-          ) : tab === 'log' && dayEntries.length > 0 ? (
+          ) : tab === 'log' ? (
+            // Day-level actions. Screenshot and multi-select need something to
+            // act on, but the overflow must not: declaring a meal-of-choice day
+            // is a morning decision, made before anything is logged.
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
-                {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+              {dayEntries.length > 0 && (
+                <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
+                  {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+                </button>
+              )}
+              <button onClick={() => setDayMenu(true)} aria-label="Day options" style={fdTopAddBtn}>
+                <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
               </button>
-              <button onClick={openCopyMove} aria-label="Select entries" style={fdTopAddBtn}>
-                <i className="fa-solid fa-list-check" style={{ fontSize: 13 }} />
-              </button>
+              {dayEntries.length > 0 && (
+                <button onClick={openCopyMove} aria-label="Select entries" style={fdTopAddBtn}>
+                  <i className="fa-solid fa-list-check" style={{ fontSize: 13 }} />
+                </button>
+              )}
             </div>
           ) : undefined
         } />
@@ -2551,19 +2561,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   />
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
-                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
-                </button>
-                {/* Day-level overflow. Meal of choice lives in here rather
-                    than on the timeline on purpose: it is a once-a-week
-                    decision you steer toward, and a permanent button made it
-                    a one-tap everyday option. Anything else that acts on the
-                    whole day belongs here too. */}
-                <button onClick={() => setDayMenu(true)} aria-label="Day options" style={fdNavBtn(false)}>
-                  <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
-                </button>
-              </div>
+              <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
+              </button>
             </div>
 
             {/* Totals hero: same BracketFrame-gold hero Water uses for its own
