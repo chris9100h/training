@@ -4890,6 +4890,9 @@ function estimateTdee({ weightKg, heightCm, age, sex, activity }) {
 //
 // Returns null without a usable weight or TDEE.
 const TRAINING_SPREAD = 0.10;
+// How far below the week's average intake a rest day may be pushed. Bounds the
+// spread above once there are too few rest days to absorb it (see its use).
+const REST_DAY_MAX_DROP = 0.2;
 // Below this much fat per kg of bodyweight the intake stops being a nutrition
 // choice and starts being a hormonal problem, so the automatic split never
 // goes under it. It is a floor on what this function decides on its own, not a
@@ -4917,7 +4920,13 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
 
   const days = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
   const cycles = days > 0 && days < 7;
-  const trainingCal = cycles ? Math.round(daily * (1 + TRAINING_SPREAD)) : daily;
+  // The bump has to be paid back by however few rest days there are, so a flat
+  // TRAINING_SPREAD collapses them once training days dominate: at 6 of 7 it
+  // put the single rest day 1800 kcal below average, which for an 80 kg lifter
+  // is a 1200 kcal day and no kind of prescription. Shrink the bump so a rest
+  // day never falls more than REST_DAY_MAX_DROP under the average intake.
+  const spread = cycles ? Math.min(TRAINING_SPREAD, REST_DAY_MAX_DROP * (7 - days) / days) : 0;
+  const trainingCal = cycles ? Math.round(daily * (1 + spread)) : daily;
   const restCal = cycles ? Math.round((daily * 7 - trainingCal * days) / (7 - days)) : daily;
 
   const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
@@ -4938,6 +4947,18 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
     proteinRest: protein, carbsRest, fatRest: fat,
     caloriesRest: caloriesFromMacros(protein, carbsRest, fat),
   };
+}
+
+// The one number that decides whether bodyweight moves: what a week of the two
+// day types averages out to per day. Splitting intake across training and rest
+// days hides it, and hand-editing the macros can walk it anywhere while each
+// individual day still looks perfectly reasonable, so it is worth stating
+// rather than leaving to be worked out from two figures and a day count.
+function weeklyAverageCalories(trainingCalories, restCalories, trainingDays) {
+  const d = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  const tc = Number(trainingCalories) || 0;
+  const rc = Number(restCalories) || 0;
+  return Math.round((tc * d + rc * (7 - d)) / 7);
 }
 
 // Hand-edit one macro of an estimate and keep the calorie figure it was built
@@ -7358,7 +7379,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, macroTargetsFromGoal, rebalanceMacros, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

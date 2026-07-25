@@ -1828,6 +1828,30 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
     healthInt(shown?.[dayType]?.protein), healthInt(shown?.[dayType]?.carbs), healthInt(shown?.[dayType]?.fat),
   );
 
+  // What the week actually averages out to, and how that sits against
+  // maintenance. Two day types with different calories hide the only number
+  // that decides whether weight moves, and hand-editing the macros can walk it
+  // anywhere without the per-day figures looking wrong. Derived from what is
+  // SHOWN, not from the estimate, so an edit is reflected immediately.
+  const trainingDays = Math.min(7, Math.max(0, Math.round(Number(form.trainingDays) || 0)));
+  const weekAvgCalories = shown
+    ? LB.weeklyAverageCalories(dayCalories('training'), dayCalories('rest'), trainingDays)
+    : null;
+  const maintenanceDelta = (weekAvgCalories != null && est) ? weekAvgCalories - est.tdee : null;
+  // Close enough to call it maintenance, rather than showing "+3 kcal over".
+  const MAINTENANCE_TOLERANCE = 40;
+  const deltaLabel = maintenanceDelta == null ? ''
+    : Math.abs(maintenanceDelta) <= MAINTENANCE_TOLERANCE ? 'right on maintenance'
+      : maintenanceDelta > 0 ? `${maintenanceDelta} over maintenance`
+        : `${Math.abs(maintenanceDelta)} under maintenance`;
+  // Flagged only when the average contradicts the goal that was picked, which
+  // is the case an edit can walk into without anything else looking wrong.
+  const deltaContradictsGoal = maintenanceDelta != null && (
+    (form.goal === 'cut' && maintenanceDelta > MAINTENANCE_TOLERANCE)
+    || (form.goal === 'gain' && maintenanceDelta < -MAINTENANCE_TOLERANCE)
+    || (form.goal === 'maintain' && Math.abs(maintenanceDelta) > 150)
+  );
+
   const apply = () => {
     if (!shown) return;
     const build = (d) => {
@@ -2030,7 +2054,12 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
 
       {shown ? (
         <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-          <div className="micro" style={{ marginBottom: 10 }}>Maintenance about {est.tdee} kcal</div>
+          <div className="micro" style={{ marginBottom: 4 }}>Maintenance about {est.tdee} kcal</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.45 }}>
+            {trainingDays} training + {7 - trainingDays} rest averages{' '}
+            <span className="num" style={{ color: UI.ink }}>{weekAvgCalories}</span> kcal a day,{' '}
+            <span className="num" style={{ color: deltaContradictsGoal ? UI.warn : UI.inkSoft }}>{deltaLabel}</span>
+          </div>
           {daySection('training', 'TRAINING DAY')}
           {daySection('rest', 'REST DAY')}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: 1.4 }}>

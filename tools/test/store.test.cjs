@@ -550,6 +550,19 @@ async function testAsync(name, fn) {
     assert.ok(Math.abs(weekly - 3000 * 7) < 60, `weekly ${weekly} stays within rounding of 21000`);
   });
 
+  test('macroTargetsFromGoal: a rest day is never squeezed to an absurd figure', () => {
+    // With few rest days left to absorb it, the training-day bump has to
+    // shrink: at 6 of 7 a flat 10% would leave the single rest day 1800 kcal
+    // under the average, i.e. a 1200 kcal day here.
+    for (const days of [1, 2, 3, 4, 5, 6]) {
+      const m = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: days });
+      assert.ok(m.caloriesRest >= 3000 * 0.75, `${days} training days leaves a ${m.caloriesRest} kcal rest day`);
+      assert.ok(m.caloriesTraining > m.caloriesRest, `${days} training days still eats more on training days`);
+      // Carbs never had to be clamped at zero to make the day fit.
+      assert.ok(m.carbsRest > 0, `${days} training days leaves real carbs on a rest day`);
+    }
+  });
+
   test('macroTargetsFromGoal: 0 and 7 training days have nothing to cycle against', () => {
     for (const days of [0, 7]) {
       const m = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 70, goal: 'maintain', trainingDays: days });
@@ -613,6 +626,33 @@ async function testAsync(name, fn) {
     // The floor still governs the automatic split, where nobody asked for less.
     const lean = LB.macroTargetsFromGoal({ tdee: 1600, weightKg: 90, goal: 'cut', rateKgPerWeek: 1, trainingDays: 7 });
     assert.ok(lean.fatTraining >= Math.round(90 * LB.FAT_FLOOR_PER_KG));
+  });
+
+  test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
+    // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
+    // The extremes are just the one day type, not a blend of both.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 7), 4023);
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 0), 2743);
+    // Day counts outside 0-7 are clamped rather than producing a figure that
+    // silently assumes a longer week.
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 12), 4023);
+    assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, -3), 2743);
+    // Missing calories read as zero instead of NaN.
+    assert.strictEqual(LB.weeklyAverageCalories(null, 2743, 0), 2743);
+    assert.strictEqual(LB.weeklyAverageCalories(2100, undefined, 7), 2100);
+
+    // The property that makes the estimate coherent: an untouched estimate
+    // averages back out to the intake it was built from, whatever the split.
+    for (const days of [0, 1, 3, 4, 6, 7]) {
+      const m = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: days });
+      const avg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, days);
+      assert.ok(Math.abs(avg - 3000) < 20, `${days} training days averages ${avg}, near the 3000 it was built on`);
+    }
+    // And a cut lands the whole week below maintenance, not just its rest days.
+    const cut = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'cut', rateKgPerWeek: 0.5, trainingDays: 4 });
+    const cutAvg = LB.weeklyAverageCalories(cut.caloriesTraining, cut.caloriesRest, 4);
+    assert.ok(Math.abs((3000 - cutAvg) - 550) < 20, `averages ${cutAvg}, about 550 under maintenance`);
   });
 
   test('rebalanceMacros: holds the calorie figure, others split proportionally', () => {
