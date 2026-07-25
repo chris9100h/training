@@ -609,6 +609,34 @@ async function testAsync(name, fn) {
     }
   });
 
+  test('macroTargetsFromGoal: protein/fat crowding out a cycled rest day does not overshoot the week', () => {
+    // High protein+fat settings on an aggressively cycled single-training-day
+    // week: protein*4 + fat*9 alone (2295 kcal) lands right at the rest day's
+    // own calorie figure, clamping its carbs to 0. Before the fix, that made
+    // the rest day's real calories 2295 instead of its intended lower figure
+    // with nothing compensating trainingCal for the difference, so the week
+    // quietly averaged above the 2325 kcal target instead of hitting it.
+    const params = { tdee: 2600, weightKg: 90, goal: 'cut', rateKgPerWeek: 0.25, trainingDays: 1, proteinPerKg: 3, fatPerKg: 1.5 };
+    const m = LB.macroTargetsFromGoal(params);
+    assert.strictEqual(m.carbsRest, 0, 'the rest day is the one that gets crowded out');
+    assert.ok(m.carbsTraining > 0, 'training day still has room, so only the rest day should clamp');
+    const daily = Math.max(Math.round(2600 - 0.25 * 7700 / 7), Math.round(2600 * 0.6));
+    const weeklyAvg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, params.trainingDays);
+    assert.ok(Math.abs(weeklyAvg - daily) <= 2, `week averages ${weeklyAvg} against a ${daily} kcal target`);
+  });
+
+  test('macroTargetsFromGoal: a target too low for protein+fat alone still degrades cleanly', () => {
+    // protein*4 + fat*9 (2550 kcal) here exceeds even the flat daily target
+    // (1200 kcal), so no split can hit it: both day types should bottom out
+    // at the same protein+fat floor, carbs at 0, rather than crash, go
+    // negative, or leave the two day types inexplicably different.
+    const m = LB.macroTargetsFromGoal({ tdee: 2000, weightKg: 100, goal: 'cut', rateKgPerWeek: 1.5, trainingDays: 1, proteinPerKg: 3, fatPerKg: 1.5 });
+    assert.strictEqual(m.carbsTraining, 0);
+    assert.strictEqual(m.carbsRest, 0);
+    assert.strictEqual(m.caloriesTraining, m.caloriesRest);
+    assert.ok(Number.isFinite(m.caloriesTraining) && m.caloriesTraining > 0);
+  });
+
   test('macroTargetsFromGoal: 0 and 7 training days have nothing to cycle against', () => {
     for (const days of [0, 7]) {
       const m = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 70, goal: 'maintain', trainingDays: days });

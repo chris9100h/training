@@ -1177,8 +1177,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       offPlanNote: form.offPlanNote.trim() || null,
       // Rebuilt from scratch rather than spread from existing, so anything
       // not listed here is dropped: without this line, saving the form on a
-      // marked day unmarks it and the day starts being scored again.
+      // marked day unmarks it and the day starts being scored again. The hour
+      // rides along the same way, or a save from this form would silently
+      // reset the food module's timeline slot for the day back to default.
       mealOfChoice: !!existing?.mealOfChoice,
+      mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -2244,7 +2247,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       {shown ? (
         <Card style={{ padding: 14, marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
-            {headlineStat('Maintenance', est.tdee, 'what you burn')}
+            {headlineStat('Maintenance', est ? est.tdee : null, 'what you burn')}
             <Hairline vertical style={{ alignSelf: 'stretch' }} />
             {headlineStat('Your week', weekAvgCalories, deltaLabel,
               deltaContradictsGoal ? UI.warn : UI.inkSoft)}
@@ -3613,17 +3616,11 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const dayIsTraining = LB.isTrainingDayForDate(store, selectedDate);
   const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   // Whether the selected day fell inside a sick/vacation status period (drives
-  // adherence suppression). parseDate returns a Date; compare on getTime().
-  const selectedIsStatusDay = (() => {
-    const sd = LB.parseDate(selectedDate);
-    const t = sd ? sd.getTime() : null;
-    if (t == null) return false;
-    return (store.statusPeriods || []).some(p => {
-      const start = new Date(p.startedAt).getTime();
-      const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
-      return t >= start && t <= end;
-    });
-  })();
+  // adherence suppression). Shared predicate, not an inline scan: selectedDate
+  // can be today (see dayLabel above), and today has to answer from the live
+  // statusMode cache rather than scanning statusPeriods, since a just-started
+  // period may not have landed there yet.
+  const selectedIsStatusDay = !!LB.statusModeForDate(store, selectedDate);
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see the onExpand wiring per card and
   // expandableCards further down, which the sheet renders from by this id).
@@ -3947,7 +3944,7 @@ function HealthClientLogs({ clientStore }) {
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
-        mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />
+        mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(logs, selectedDate).ordinal} />
     ),
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
@@ -4118,7 +4115,17 @@ function ExportSheet({ open, onClose, store, userId }) {
       const missing = dates.filter(d => !have.has(d));
       let extra = [];
       if (missing.length) {
-        const byDate = await LB.fetchFoodLogsForDates(userId, missing).catch(() => ({}));
+        // A failed fetch here used to be swallowed into {}, so a spotty
+        // connection produced a CSV that looked complete but silently
+        // dropped whatever was outside the boot window. Abort instead: no
+        // file is a more honest outcome than a wrong one for an export.
+        let byDate;
+        try {
+          byDate = await LB.fetchFoodLogsForDates(userId, missing);
+        } catch (e) {
+          alert('Could not load the full date range. Please try again.');
+          return;
+        }
         extra = Object.values(byDate || {}).flat();
       }
       const rows = [...(store.foodLogs || []), ...extra]

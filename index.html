@@ -38,10 +38,10 @@
     /* Accent-toned hairline: the border a row, chip or toggle wears when it is
        the selected/current one. Same threshold problem --hair-strong had, and
        worse here because it usually sits on an accent-tinted fill, so border
-       and background are the same hue. Only for 0.5px/--hair-width borders:
-       accent borders drawn at 1px or more stay at their own lower alpha, since
-       a full pixel of line already carries the same visual mass. Follows the
-       chosen accent automatically via --accent-rgb, in every theme. */
+       and background are the same hue. Only for --hair-width borders: accent
+       borders drawn thicker stay at their own lower alpha, since more line
+       already carries the same visual mass. Follows the chosen accent
+       automatically via --accent-rgb, in every theme. */
     --hair-accent: rgba(var(--accent-rgb),0.45);
     /* Width for every hairline border (the huge majority of UI.hair/
        UI.hairStrong borders use this literal). A theme can widen it.
@@ -749,13 +749,11 @@ window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 // Properties not listed in a mode object fall back to these dark-theme defaults.
 var _DARK_INK          = '#ece4d0';
 var _DARK_INK_SOFT     = 'rgba(236,228,208,0.66)';
-// Hairlines are 0.5px wide, so their alpha is doing the work of half a pixel.
-// At 0.18 a border edge sat right at the visibility threshold and could read as
-// missing depending on panel brightness, display calibration and where the box
-// landed on the pixel grid. Raised to 0.28, with --hair kept at the same 0.56
-// ratio to it, so soft and strong dividers stay as far apart as they were.
+// Hairlines are 1px wide (--hair-width, defined with the rest of the CSS
+// tokens above), so unlike the old 0.5px line, alpha here is styling a whole
+// device pixel rather than compensating for one the engine had to round away.
 // Dark and black only: light and paper override both with their own, already
-// much stronger values (0.48 to 0.60 dark ink on a light canvas).
+// much stronger values (0.28 to 0.34 dark ink on a light canvas).
 var _DARK_HAIR         = 'rgba(236,228,208,0.09)';
 var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.16)';
 var _DARK_DANGER       = '#c87469';

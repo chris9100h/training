@@ -150,9 +150,10 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 
 **Bei Tabellen-Umbenennung zusätzlich:** `supabase/functions/` durchsuchen. Edge Functions greifen per REST direkt auf Tabellennamen zu (z.B. `dbFetch('zane_pushover_active?...')`), kein Compiler warnt bei falschen Namen. Alle Treffer fixen und neu deployen.
 
-**Grant-Fallen bei neuen SECURITY-DEFINER-Funktionen** (beide real passiert, Volltext in `docs/database.md`):
+**Grant-Fallen bei neuen SECURITY-DEFINER-Funktionen** (real passiert, Volltext in `docs/database.md`):
 - Postgres vergibt bei `CREATE FUNCTION` automatisch `EXECUTE` an `PUBLIC`, davon erbt `anon` (unabhängig von einem gezielten `REVOKE ... FROM anon`). Jede neue Funktion braucht explizit `REVOKE EXECUTE ... FROM PUBLIC` + `GRANT EXECUTE ... TO authenticated` (rein interne Funktionen: kein Grant für `authenticated`).
-- Nach jeder neuen Funktion prüfen (gilt für SECURITY DEFINER **und** INVOKER, siehe Migration 0141): `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` sein. (Eine `ALTER DEFAULT PRIVILEGES`-Regel gab `anon` früher zusätzlich direkte Grants; Root Cause in Migration 0132 entfernt.)
+- Nach jeder neuen Funktion prüfen (gilt für SECURITY DEFINER **und** INVOKER, siehe Migration 0141): `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` sein. Bei einer service-role-only Funktion (siehe nächster Punkt) zusätzlich dieselbe Abfrage für `authenticated`. (Eine `ALTER DEFAULT PRIVILEGES`-Regel gab `anon` früher zusätzlich direkte Grants; Root Cause in Migration 0132 entfernt.)
+- Soll eine Funktion **nicht einmal** `authenticated` aufrufen dürfen, nur die Edge Function über den service-role-Key (z.B. `bump_api_usage`), reicht `REVOKE ... FROM PUBLIC` allein nicht: eine separate `ALTER DEFAULT PRIVILEGES`-Regel (Owner `postgres`) vergibt `EXECUTE` auf jede neue Funktion zusätzlich direkt an `authenticated`, unabhängig vom PUBLIC-Pfad. Migration 0132 hat die äquivalente Regel nur für `anon` entfernt, die für `authenticated` besteht weiter. Für so eine Funktion also zusätzlich explizit `REVOKE EXECUTE ... FROM authenticated` (Migration 0208, das Root Cause selbst ist noch nicht global behoben, nur der Einzelfall).
 
 **Tabellen-Kurzüberblick** (Details je Tabelle in `docs/database.md`):
 - `zane_exercises`: Übungs-Library (u.a. `log_mode`, `pull_bodyweight`, Legacy-Flags)
@@ -169,6 +170,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_user_settings`: eine Zeile je User, alle Settings
 - `zane_profiles`, `zane_app_config`, `zane_feature_grants`, `zane_push_subscriptions`, `zane_pushover_active`: Accounts, Admin-Config, Grants, Push
 - `zane_feature_map`: Admin-Override-Ebene der Feature-Map (`FeatureMapScreen`); Master-Inhalt liegt versioniert in `src/feature-map-db.js` (`window.FEATURE_MAP`), diese Tabelle hält nur Admin-Kuratierung (hide/edit/add/sort), admin-only RLS; nicht im Backup
+- `zane_api_usage`: Tages-Quota-Zähler (User+Tag+Art) für die Food-Edge-Functions (search/scan), hochgezählt über `bump_api_usage` (SECURITY DEFINER, nur `service_role`, siehe Grant-Fallen oben), RLS ohne Policies wie `zane_recipe_shares`, kein Store-Field, nicht im Backup. Migration 0207/0208
 
 **Wichtige RPCs/Functions** (alle Signaturen in `docs/database.md`):
 - `sync_sets_batch` / `sync_daily_logs_batch` / `sync_meso_states_batch`: Batch-Upserts mit `updated_at`-Staleness-Guard (Multi-Device-Schutz)

@@ -2800,13 +2800,22 @@ function templateSlotRow(userId) {
 async function fetchFoodLogsForDates(userId, dates) {
   const ds = [...new Set((dates || []).filter(Boolean))];
   if (!ds.length || !userId) return {};
-  const { data, error } = await _supabase.from('zane_food_logs')
-    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
-    .eq('user_id', userId)
-    .in('date', ds);
-  if (error) throw error;
+  // Chunked: a wide CSV export range (ExportSheet, screens-health.jsx, can ask
+  // for months at once) can turn into hundreds of dates missing from the boot
+  // window, and one .in() list that long risks the request itself failing
+  // (URL length) instead of just being slow.
+  const CHUNK = 200;
+  const rows = [];
+  for (let i = 0; i < ds.length; i += CHUNK) {
+    const { data, error } = await _supabase.from('zane_food_logs')
+      .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+      .eq('user_id', userId)
+      .in('date', ds.slice(i, i + CHUNK));
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
   const byDate = {};
-  for (const l of (data || [])) {
+  for (const l of rows) {
     if (!byDate[l.date]) byDate[l.date] = [];
     byDate[l.date].push(mapFoodLogRow(l));
   }
@@ -4969,10 +4978,23 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
   const fat = Number(fatPerKg) > 0
     ? Math.round(w * Number(fatPerKg))
     : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
-  const carbsFor = (cal) => Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4));
+  const pf = protein * 4 + fat * 9;
+  const carbsFor = (cal) => Math.max(0, Math.round((cal - pf) / 4));
 
-  const carbsTraining = carbsFor(trainingCal);
-  const carbsRest = carbsFor(restCal);
+  // Protein and fat are fixed on both day types, only carbs cycle, and restCal
+  // is never above trainingCal (ratio <= 1 above), so if either day's carbs
+  // would clamp to 0 it is always this one. Left alone, that clamp makes the
+  // rest day's real calories pf instead of its own restCal, silently breaking
+  // the weekly-total identity the ratio math above exists to hold: the week
+  // would average out above `daily` with nothing feeding that back into
+  // trainingCal to compensate. Re-solving the same identity for trainingCal
+  // holding rest at its true floor keeps the week as close to `daily` as
+  // protein and fat allow, instead of quietly overshooting it.
+  const finalRestCal = (cycles && pf > restCal) ? pf : restCal;
+  const finalTrainingCal = finalRestCal === restCal ? trainingCal : (daily * 7 - finalRestCal * (7 - days)) / days;
+
+  const carbsTraining = carbsFor(finalTrainingCal);
+  const carbsRest = carbsFor(finalRestCal);
   return {
     proteinTraining: protein, carbsTraining, fatTraining: fat,
     caloriesTraining: caloriesFromMacros(protein, carbsTraining, fat),

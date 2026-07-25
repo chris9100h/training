@@ -81,9 +81,32 @@ function fdScaleEntry(e, scale) {
 // and FdIngredientPicker's confirmStageItem. Expects an object with source/
 // sourceId/fromCache (pendingFood and FdIngredientPicker's qtyItem both have
 // this shape already).
+//
+// Returns whether the food is actually cached now. confirmLogFood and
+// confirmStageItem fire this without awaiting the result and rely on the
+// self-heal cacheFood itself documents (a dropped call gets retried on the
+// next log of the same food), so they can ignore it. toggleFavorite cannot:
+// it awaits this specifically so the favorite it is about to write never
+// races ahead of the cache row its food_id points at, and cacheFood's
+// underlying fetch resolves even on a failed request rather than rejecting,
+// so without checking the result here that guarantee was never enforced.
 async function ensureFoodCached(pendingFoodOrItem) {
   if (pendingFoodOrItem?.sourceId && !pendingFoodOrItem.fromCache) {
-    await LB.cacheFood(pendingFoodOrItem.source, pendingFoodOrItem.sourceId);
+    const res = await LB.cacheFood(pendingFoodOrItem.source, pendingFoodOrItem.sourceId);
+    return !!(res && res.ok);
+  }
+  return true;
+}
+// English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
+// "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
+function fdOrdinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
   }
 }
 // Input filter for decimal numeric fields (grams, macros): keeps digits and a
@@ -925,9 +948,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const mocRemainder = useMemoFd(
     () => LB.mealOfChoiceRemainder(dayTarget, projectedTotals),
     [dayTarget, projectedTotals]);
-  // Deterministic id, the same idiom the template slots use: two devices
-  // confirming the same meal collide into one row instead of duplicating.
-  const mocEntryId = `moc_${curDate}`;
+  // Deterministic id so two devices confirming the same meal collide into one
+  // row instead of duplicating, the same reason foodTemplateDays' marker id is
+  // `${userId}_${today}` (this file, above). id is the PRIMARY KEY on
+  // zane_food_logs, a table shared by every user, so date alone is not
+  // enough: two different users marking a meal of choice on the same
+  // calendar day would otherwise both compute the exact same id and collide
+  // with each other's row, not just their own past confirmation.
+  const mocEntryId = `moc_${userId}_${curDate}`;
   const mocEntry = useMemoFd(
     () => (store.foodLogs || []).find(l => l.id === mocEntryId) || null,
     [store.foodLogs, mocEntryId]);
@@ -1032,7 +1060,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     setStore(s => {
       const nextLogs = [...copies, ...(s.foodLogs || [])];
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+      // Same rule commitEntries follows: a planned-only batch must never reach
+      // patchDaily, which (seeing no logged entries at all when this is the
+      // day's first foodLogs row) would null the day's macros/adherence and
+      // silently wipe manually-entered Health-tab macros, the exact case the
+      // guard above skips the warning for because planning is supposed to
+      // leave the day untouched.
+      const dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setRepeat(null);
   }
@@ -1299,8 +1334,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // feeds the coach's weekly check-in. Bumping updatedAt is not optional
   // either: sync_daily_logs_batch drops any write that reuses the old stamp.
   //
-  // targetsSnap is deliberately left alone. A meal-of-choice day is an ordinary
-  // training or rest day and a flex plan reads that choice back out of it.
+  // Routed through dailyLogAdherence rather than hand-rolled, same reason
+  // setFlexDayType and the retroactive day-type heal in screens-health.jsx
+  // are: it owns the meal-of-choice rule AND now also builds targetsSnap
+  // (previously left null on a fresh day until something else happened to
+  // write it). Status is not on the row, so undeclaring still has to ask
+  // statusModeForDate itself, or un-marking on a sick/vacation day would hand
+  // it a real score, the same hole those two call sites had before Phase 2.4.
+  // Marking on needs no such check: mealOfChoice alone already forces
+  // dailyLogAdherence's result to null.
   async function setMealOfChoice(on, name, hour) {
     if (!on && mocEntry) {
       const ok = await confirm(
@@ -1312,15 +1354,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
-      const adherence = on
-        ? null
-        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: false }, macroTargets, LB.isTrainingDayForDate(s, curDate)).adherence;
+      const isTraining = LB.isTrainingDayForDate(s, curDate);
+      const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      const { adherence, targetsSnap } = unscored
+        ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
+        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining);
       const log = existing
-        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, updatedAt: now }
+        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
             fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
             mealOfChoice: on, mealOfChoiceHour: on ? hour : null,
-            adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+            adherence, targetsSnap, updatedAt: now, createdAt: now };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
   }
@@ -1330,11 +1374,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // manual-macro warning and the daily-log mirror like anything else. From here
   // on it is a normal row: editable, movable, deletable.
   async function confirmMealOfChoice() {
-    if (!mocRemainder) return;
+    // mealOfChoiceRemainder only returns null with no macro target at all; a
+    // fully-spent budget still comes back as a real {calories:0,...} object,
+    // which is truthy. Same threshold the row's own "Budget spent, log it
+    // normally" copy already uses, or tapping the checkbox there would still
+    // log a real zero-macro entry instead of the no-op that copy promises.
+    if (!mocRemainder || mocRemainder.calories <= 0) return;
     await commitEntries([{
       id: mocEntryId, date: curDate, time: `${String(mocHour).padStart(2, '0')}:00`,
       foodId: null, foodName: mocName || 'Meal of choice', brand: null, source: 'custom',
-      quantityG: null,
+      // zane_food_logs.quantity_g is NOT NULL. There is no real weight here
+      // (the remainder is macro-only), so this follows buildCustomEntry's own
+      // fallback for the same situation, above.
+      quantityG: 100,
       calories: mocRemainder.calories, protein: mocRemainder.protein,
       carbs: mocRemainder.carbs, fat: mocRemainder.fat,
       fiber: null, sugar: null, satFat: null, sodiumMg: null,
@@ -1952,7 +2004,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // every retry forever. Await the cache write BEFORE writing the
       // favorite into the store, so the sync batch never races ahead of it.
       if (fav.foodId) {
-        await ensureFoodCached(pendingFood);
+        const cached = await ensureFoodCached(pendingFood);
+        // The whole point of awaiting above was to guarantee food_id exists
+        // before the favorite does. If the cache call itself failed, writing
+        // the favorite anyway just moves the FK failure into the sync queue,
+        // permanently this time. Bail instead: the star silently doesn't
+        // take, same as any other failed write in this screen with no retry
+        // surface, rather than syncing a favorite that can never land.
+        if (!cached) return;
         // Marks the still-open pendingFood cached, so confirmLogFood
         // (tapping Add right after starring, same sheet visit) sees
         // fromCache: true and skips its own redundant ensureFoodCached call
@@ -2406,10 +2465,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             only once you are already over. */}
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
           {isMealOfChoice
-            ? `Your ${mocWeek.ordinal}. this week.`
+            ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
             : mocWeek.count === 0
               ? 'None yet this week.'
-              : `${mocWeek.count} so far this week, this would be your ${mocWeek.count + 1}.`}
+              : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
         </div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
           {dayTarget
@@ -2830,7 +2889,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   );
                                 }) : (showMoc ? null : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />)}
                                 {showMoc && (
-                                  <div data-reorder-ignore="true" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  // Only this row's own hour still needs a reorder
+                                  // slot when there's nothing else logged here (see
+                                  // the empty-hour placeholder above, whose slot this
+                                  // row takes over in that case): timelineSlots pushes
+                                  // exactly one {entry:null} for an hour with no real
+                                  // entries, and the DOM has to carry exactly one
+                                  // matching data-reorder-item or every later hour's
+                                  // drag index drifts by one. When es is non-empty the
+                                  // real entries already supply that hour's slot(s), so
+                                  // this row must NOT add a second one on top.
+                                  <div data-reorder-ignore="true" data-reorder-item={es.length === 0 ? 'true' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     {/* The shared checkbox, not a lookalike: its
                                         plan-mode gate lives at the entry call site,
                                         not inside it, so this row can render it
