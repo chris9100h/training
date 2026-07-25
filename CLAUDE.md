@@ -93,6 +93,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-paper-accent-enabled`: Opt-out aus Papers Grau-Muting der Akzentfarbe (`applyAccentColor`, `index.html`), Default aus, Toggle in Settings → Appearance (nur sichtbar wenn Paper aktiv), per Gerät
   - `logbook-pending-share`: gestashter Token eines geöffneten Rezept-Share-Links (`?share=<token>`, `app.jsx`), überlebt so den Login-/Signup-Roundtrip; gelöscht sobald das `RecipeShareSheet` geschlossen wird
   - `logbook-label-scanner-provider`: `'grok'` (Default) oder `'claude'`, welche Edge Function (`scan-label` bzw. `scan-label-claude`) den Nährwert-Label-Scan liest. Toggle im Scan-Sheet (`FoodScreen`), Vergleichs-/Debug-Feature, kein User-Setting, per Gerät
+  - `logbook-food-fav-cache-repaired`: JSON-Array von `foodId`s, deren `zane_foods`-Cache-Zeile die einmalige Reparatur in `FoodScreen` bereits nachgezogen hat (Favoriten aus der Zeit vor dem `food_id`-Caching schlugen sonst bei jedem Sync am FK fehl). Ohne diesen Merker würde der Effekt bei jedem Mount des Screens erneut je Favorit einen Request feuern, per Gerät
 
 ## What's New / Changelog
 

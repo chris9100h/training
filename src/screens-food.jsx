@@ -1,8 +1,9 @@
 /* Food Tracker screen: search Open Food Facts + USDA FoodData Central (via the
    search-foods Edge Function), log a quantity, and roll the result into the
-   same daily macro fields the manual Health-tab form already writes. Also
-   supports backdating (up to 14 days, same window DailyLogScreen enforces)
-   and a "Custom Item" fallback for foods not in either database.
+   same daily macro fields the manual Health-tab form already writes. The day
+   navigation is unbounded in both directions (backwards lazy-fetches past the
+   boot window, forwards is what Plan Mode needs), and a "Custom Item" fallback
+   covers foods not in either database.
 
    Food is stored per-entry (store.foodLogs, table zane_food_logs). On every
    add/delete the affected day's summed calories/protein/carbs/fat (and fiber,
@@ -987,8 +988,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
-  // patchDaily/doAdd use in screens-water.jsx. Calories come straight from the
-  // source's own energy value (summed), never derived from the macros.
+  // patchDaily/doAdd use in screens-water.jsx. Calories are summed from each
+  // entry's own stored kcal, which for a database food was itself derived as
+  // 4P + 4C + 9F when the food was cached (the search-foods Edge Function
+  // deliberately never trusts a source's printed energy value, see its own
+  // comment), and for a custom item is whatever the user entered.
   function patchDaily(s, dateStr, entries) {
     const existing = (s.dailyLogs || []).find(l => l.date === dateStr);
     const netCarbs = !!s.settings?.netCarbs;
@@ -1827,7 +1831,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setRecipeEditorOpen(false);
     setTab('quickadd'); setQuickTab('recipes');
   }
-  function deleteRecipe(recipe) {
+  // Confirmed like every other destructive action in this module (deleteEntry,
+  // deletePlan, deleteSlot, even removing a single ingredient): a recipe is the
+  // most expensive artifact here, it's fired from a small trash icon in a
+  // scrolling list, and dropping it silently breaks "Edit portions" on every
+  // already-logged entry that resolves back to it (recipeEntryLiveRecipe).
+  async function deleteRecipe(recipe) {
+    const n = (recipe.items || []).length;
+    if (!await confirm(`${recipe.name} · ${n} ingredient${n === 1 ? '' : 's'}`, { title: 'Delete recipe?', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
   // ── Recipe sharing (sender side) ──
@@ -2498,21 +2509,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div style={fdEmptyStyle}>No matches. Try a different search.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                    {results.map(r => (
-                      <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} style={fdResultRow}>
-                        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                            {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
-                            <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
+                    {results.map(r => {
+                      // kcalPer100g is DERIVED from the macros (4/4/9, see the
+                      // search-foods Edge Function), so null there means the
+                      // source carries no usable nutrition at all, not just a
+                      // missing energy value. Such a hit used to be tappable
+                      // and quietly logged a 0 kcal / 0 macro entry into the
+                      // day's totals and its adherence. The row stays visible
+                      // (it still confirms the product exists) but is inert.
+                      const noData = r.kcalPer100g == null;
+                      return (
+                        <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={noData}
+                          style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
+                          <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
+                              <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
+                            </div>
+                            {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                            {!noData && (
+                              <div style={{ ...fdEntryMeta, marginTop: 3 }}>
+                                <FdMacroBits protein={r.proteinPer100g || 0} carbs={r.carbsPer100g || 0} fat={r.fatPer100g || 0} />
+                              </div>
+                            )}
                           </div>
-                          {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
-                          <div style={fdEntryMeta}>/100g · {r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
-                        </div>
-                      </button>
-                    ))}
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            {noData
+                              ? <div style={fdEntryMeta}>No nutrition data</div>
+                              : <div className="num" style={{ fontSize: 12, color: UI.warn }}>{Math.round(r.kcalPer100g)} kcal</div>}
+                            <div style={fdEntryMeta}>{noData ? '' : '/100g · '}{r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <button onClick={() => { setLabelError(null); resetCustomForm(); setCustomOpen(true); }} style={{ ...fdActionCard, width: '100%' }}>
@@ -3271,7 +3300,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                   <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
                   <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)} g</div>
                 </div>
-                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal</span>
+                <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
               </div>
             ))}
           </div>
@@ -4165,12 +4194,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   // portions is purely metadata for how a batch splits up when logging it
   // later (see FoodScreen's addRecipeToLog/confirmRecipeLog), not a divisor
   // applied here.
+  const netCarbs = !!store.settings?.netCarbs;
   const totals = useMemoFd(() => ({
-    calories: fdRecipeItemsCalories(items, !!store.settings?.netCarbs),
+    calories: fdRecipeItemsCalories(items, netCarbs),
     protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
     carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
-  }), [items, store.settings?.netCarbs]);
+  }), [items, netCarbs]);
 
   const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
   const requestClose = async () => {
@@ -4185,6 +4215,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
+  }
+  // The row's own trash icon goes through the same confirm removeEditItem
+  // already shows: one action, one level of safety, no matter which of the two
+  // affordances the user reaches for.
+  async function requestRemoveItem(item) {
+    if (!await confirm(`${item.foodName} · ${item.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    removeItem(item.id);
   }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); }
@@ -4277,9 +4314,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · <span style={{ fontWeight: 600 }}>P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span></span>
+                    <span style={fdEntryMeta}>
+                      {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                    </span>
                   </button>
-                  <button onClick={() => removeItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <button onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                   </button>
                 </div>
