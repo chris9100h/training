@@ -2314,7 +2314,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: 1.1 }}>Food Log</div>
+                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Food Log</div>
                 <div className="micro" style={{ marginTop: 4 }}>{dayLabel}</div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
@@ -2435,7 +2435,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <>
                     <FdExtrasRow sugar={dayTotals.sugar} satFat={dayTotals.satFat} sodiumMg={dayTotals.sodiumMg} />
                     {dayTotals.extrasPartial && (
-                      <div className="micro" style={{ marginTop: 6, lineHeight: 1.5 }}>
+                      <div className="micro" style={{ marginTop: 6, lineHeight: '14px' }}>
                         Partial: some of today's entries carry no value for these.
                       </div>
                     )}
@@ -2675,7 +2675,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
-              {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.4 }}>{labelError}</div>}
+              {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{labelError}</div>}
             </div>
 
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi }}>{searchError}</div>}
@@ -3026,7 +3026,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           that today's meal is nearly the same, so the work is unticking the
           one item that isn't. ── */}
       <Sheet open={!!repeat} onClose={() => setRepeat(null)} title={repeat ? `Repeat ${repeat.label.toLowerCase()}` : 'Repeat yesterday'} titleColor="var(--accent)">
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           {planMode
             ? "From yesterday, landing on today at the same times as planned meals you check off as you eat them."
             : 'From yesterday, landing on today at the same times.'}
@@ -3067,7 +3067,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
       <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)">
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
@@ -3133,7 +3133,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   6s toast right after applying it. */}
               {batch && (
                 <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `var(--hair-width) solid ${UI.hairStrong}` : 'none' }}>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
                     {batch.kind === 'merge'
                       ? 'This entry was combined from a block of items. Undo it to delete the combined recipe and put the original entries back exactly as they were.'
                       : 'This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.'}
@@ -3145,7 +3145,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               )}
               {canConfigure && (
                 <>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
                     Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
                   </div>
                   <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Meals</div>
@@ -3203,7 +3203,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={recipeBlockHour != null} onClose={requestCloseBlockRecipe} title="Create recipe" titleColor="var(--accent)">
         {recipeBlockHour != null && (
           <>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
               Combines these items into one recipe entry. Off by default: it only replaces this log entry, on saves it to Quick Add, Recipes too.
             </div>
             <Field label="Recipe name" style={{ marginBottom: 16 }}>
@@ -3233,7 +3233,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
       <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)">
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
           Add one or more units and relogging this favorite offers a picker (grams or a count of one of them) instead of always typing grams.
         </div>
         {editUnits.length > 0 && (
@@ -3309,7 +3309,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       >
         {recipeLogPrompt && (
           <>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
               How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
@@ -3352,13 +3352,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
         {shareSheet?.status === 'error' && (
           <>
-            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{shareSheet.error}</div>
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>{shareSheet.error}</div>
             <Btn onClick={() => openShareRecipe(shareSheet.recipe)} style={{ width: '100%' }}>Try again</Btn>
           </>
         )}
         {shareSheet?.status === 'ready' && (
           <>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>
               Anyone with this link can open the recipe in Zane and add a copy to their own recipes. The link carries a snapshot: edits you make later are not sent along.
             </div>
             <div className="num" style={{ fontSize: 11, color: UI.inkFaint, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, wordBreak: 'break-all', userSelect: 'all', WebkitUserSelect: 'all', marginBottom: 14, textShadow: 'none' }}>
@@ -3546,7 +3546,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
       )}
       {state.status === 'error' && (
         <>
-          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{state.error}</div>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '17px' }}>{state.error}</div>
           <Btn onClick={onClose} style={{ width: '100%' }}>Close</Btn>
         </>
       )}
@@ -3573,7 +3573,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           <FdMacroPreview calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
           {added ? (
             <>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '17px' }}>
                 <i className="fa-solid fa-check" style={{ marginRight: 6, color: 'var(--accent)' }} />
                 Added. You'll find it under Food log, Quick Add, Recipes.
               </div>
@@ -4105,7 +4105,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                 return (
                   <BracketFrame key={p.id} gold onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: '24px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                       <Pill gold>active</Pill>
                     </div>
                     <div className="micro" style={{ marginBottom: n > 0 ? 10 : 0 }}>{n} meal{n === 1 ? '' : 's'}</div>
@@ -4229,7 +4229,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               </div>
             )}
             {pickerSearchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{pickerSearchError}</div>}
-            {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>{pickerLabelError}</div>}
+            {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>{pickerLabelError}</div>}
             {pickerResults != null && (
               pickerResults.length === 0 ? <div style={fdEmptyHint}>No matches. Try a different search.</div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
@@ -4355,7 +4355,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             </div>
             {draft.dayType !== 'any' && activeFlexPlan && (
               <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset }}>
-                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px' }}>
                   <i className="fa-solid fa-circle-info" style={{ marginRight: 5, color: UI.inkFaint }} />
                   Your active plan is flexible, so there's no fixed schedule to check ahead of time. A day only counts as Training once you've actually trained or set it manually in the Health tab, until then it's assumed to be Rest.
                 </span>
@@ -4442,7 +4442,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       <Sheet open={!!pushDone} onClose={() => setPushDone(null)} title="Pushed" titleColor="var(--accent)">
         {pushDone && (
           <>
-            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '20px' }}>
               "{pushDone.planName}" is in {pushDone.clientName}'s account{pushDone.activated ? ' and active now' : ', not activated yet'}.
             </div>
             <Btn onClick={() => setPushDone(null)} style={{ width: '100%' }}>Done</Btn>
@@ -5366,7 +5366,7 @@ function FdScanner({ onClose, onDetect }) {
         {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
-            <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5, maxWidth: 300 }}>
+            <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: '20px', maxWidth: 300 }}>
               Could not start the scanner. Check the camera permission, or type the barcode number into search (it looks it up the same way).
             </div>
             <Btn onClick={onClose} style={{ marginTop: 4, textShadow: 'none' }}>Got it</Btn>

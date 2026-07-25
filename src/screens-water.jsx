@@ -613,7 +613,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         {coffeeStep === 'size' ? (
           coffeeSizes.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '4px 0' }}>
-              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>No coffee sizes yet. Add your own in the water settings.</div>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '20px' }}>No coffee sizes yet. Add your own in the water settings.</div>
               <Btn onClick={() => { setCoffeeOpen(false); setSettingsOpen(true); }} style={{ width: '100%' }}>Open settings</Btn>
             </div>
           ) : (
@@ -728,7 +728,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
           Notifications are off. Turn them on in Settings to receive these.
         </button>
       )}
-      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: '16px' }}>
         Uses your existing notification channel (Web Push or Pushover). Sent during your daily window.
       </div>
 

@@ -482,7 +482,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
             {p.rows.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: '16px' }}>
                 {r.label != null && <span style={{ fontSize: 9, color: r.color || UI.inkFaint, fontFamily: UI.fontUi, minWidth: 12 }}>{r.label}</span>}
                 <span style={{ color: r.color || UI.ink }}>{r.value}</span>
               </div>
@@ -2457,13 +2457,13 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       {log?.offPlanNote && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
         </div>
       )}
       {log?.note && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>NOTE</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.note}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{log.note}</div>
         </div>
       )}
     </Card>
@@ -2853,7 +2853,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
                   </div>
@@ -2933,7 +2933,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
                   </div>
@@ -3002,7 +3002,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
                   </div>
@@ -3114,7 +3114,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
-                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.name}</div>}
+                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.name}</div>}
                       </div>
                       <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
                     </div>
@@ -3550,7 +3550,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         </div>
       )}
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {selfCoachedMacros
             ? 'These come from your active plan and take priority. Personal targets you set apply only without them.'
             : 'These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.'}
@@ -3721,7 +3721,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           {cardOrder.every(id => !isCardVisible(id)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
-              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>All Health cards are hidden.</div>
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>All Health cards are hidden.</div>
               <button onClick={() => go({ name: 'settings' })} style={{
                 background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
                 borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
@@ -3987,7 +3987,7 @@ function HealthClientLogs({ clientStore }) {
         {cardOrder.every(id => !isCardVisible(id)) ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
             <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
-            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>Your client has hidden all their Health cards.</div>
           </div>
         ) : (
           // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
