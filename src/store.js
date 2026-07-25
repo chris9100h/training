@@ -4890,7 +4890,13 @@ function estimateTdee({ weightKg, heightCm, age, sex, activity }) {
 //
 // Returns null without a usable weight or TDEE.
 const TRAINING_SPREAD = 0.10;
-function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg }) {
+// fatPerKg (optional): the "low fat" option. Caps fat at weightKg * fatPerKg
+// instead of letting it sit at a share of intake, for anyone who would rather
+// spend those calories on carbs. A cap, not a target: if the normal split
+// already lands below it, the lower figure stays. It also overrides the 0.5
+// g/kg floor below, since asking for low fat is an explicit choice, not an
+// accident the floor should protect against.
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg }) {
   const w = Number(weightKg);
   const t = Number(tdee);
   if (!(w > 0) || !(t > 0)) return null;
@@ -4912,7 +4918,8 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
   // 25% of calories from fat, computed off the average day so the gram figure
   // is the same on both, then floored: dropping fat below 0.5 g/kg to buy
   // carbs is not a trade this should make on the user's behalf.
-  const fat = Math.max(Math.round(daily * 0.25 / 9), Math.round(w * 0.5));
+  let fat = Math.max(Math.round(daily * 0.25 / 9), Math.round(w * 0.5));
+  if (Number(fatPerKg) > 0) fat = Math.min(fat, Math.round(w * Number(fatPerKg)));
   const carbsFor = (cal) => Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4));
 
   const carbsTraining = carbsFor(trainingCal);
@@ -4923,6 +4930,54 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
     proteinRest: protein, carbsRest, fatRest: fat,
     caloriesRest: caloriesFromMacros(protein, carbsRest, fat),
   };
+}
+
+// Hand-edit one macro of an estimate and keep the calorie figure it was built
+// around: the other two absorb the difference, split in proportion to the
+// calories they already carry, so an edit nudges the existing split instead of
+// replacing it with an arbitrary one.
+//
+// opts.targetCalories is the figure to hold (the estimate's own kcal for that
+// day type). Without it the edit is applied as-is and nothing rebalances.
+//
+// opts.fatPerKg + opts.weightKg re-apply the low-fat cap, but ONLY to a fat
+// figure this function derived. A fat value the user typed themselves wins over
+// the option: an explicit edit is a decision, not an oversight.
+//
+// Nothing goes negative, and no attempt is made to force the total when the
+// edited macro alone already exceeds it. Callers show calories derived from the
+// macros, so that case is visible rather than silently clamped away.
+function rebalanceMacros(current, key, value, opts = {}) {
+  const KCAL = { protein: 4, carbs: 4, fat: 9 };
+  const KEYS = ['protein', 'carbs', 'fat'];
+  const at = (o, k) => Math.max(0, Number(o?.[k]) || 0);
+  const next = { protein: at(current, 'protein'), carbs: at(current, 'carbs'), fat: at(current, 'fat') };
+  if (!KEYS.includes(key)) return next;
+  next[key] = Math.max(0, Number(value) || 0);
+
+  const target = Number(opts.targetCalories);
+  const others = KEYS.filter(k => k !== key);
+  if (target > 0) {
+    const remaining = Math.max(0, target - next[key] * KCAL[key]);
+    const otherCal = others.reduce((a, k) => a + at(current, k) * KCAL[k], 0);
+    others.forEach(k => {
+      const share = otherCal > 0 ? (at(current, k) * KCAL[k]) / otherCal : 0.5;
+      next[k] = (remaining * share) / KCAL[k];
+    });
+  }
+
+  const cap = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
+    ? Number(opts.weightKg) * Number(opts.fatPerKg)
+    : null;
+  if (cap != null && key !== 'fat' && next.fat > cap) {
+    // Whatever the cap frees goes to the one macro that is neither capped nor
+    // the one being edited, so the edit itself is never quietly undone.
+    const freed = (next.fat - cap) * KCAL.fat;
+    next.fat = cap;
+    const sink = key === 'carbs' ? 'protein' : 'carbs';
+    next[sink] += freed / KCAL[sink];
+  }
+  return { protein: Math.round(next.protein), carbs: Math.round(next.carbs), fat: Math.round(next.fat) };
 }
 
 // True when a macro-target object carries at least one macro (protein/carbs/fat,
@@ -7292,7 +7347,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal, rebalanceMacros, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

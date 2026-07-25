@@ -593,6 +593,88 @@ async function testAsync(name, fn) {
     assert.ok(LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 80, goal: 'maintain', trainingDays: -3 }));
   });
 
+  test('macroTargetsFromGoal: fatPerKg caps fat and hands the calories to carbs', () => {
+    const base = { tdee: 3000, weightKg: 80, goal: 'maintain', trainingDays: 7 };
+    const normal = LB.macroTargetsFromGoal(base);
+    assert.strictEqual(normal.fatTraining, 83, '25% of intake without the option');
+    // 0.6 g/kg x 80 kg = 48 g, well under the 83 g the normal split gives.
+    const low = LB.macroTargetsFromGoal({ ...base, fatPerKg: 0.6 });
+    assert.strictEqual(low.fatTraining, 48);
+    assert.strictEqual(low.proteinTraining, normal.proteinTraining, 'protein is untouched by the fat option');
+    // The 35 g of fat removed is 315 kcal, which is ~79 g of carbs.
+    assert.strictEqual(low.carbsTraining - normal.carbsTraining, 79);
+    // Same total intake, just split differently.
+    assert.ok(Math.abs(low.caloriesTraining - normal.caloriesTraining) <= 3);
+    // It is a CAP, not a target: a factor above what the normal split already
+    // produces changes nothing.
+    assert.strictEqual(LB.macroTargetsFromGoal({ ...base, fatPerKg: 2 }).fatTraining, normal.fatTraining);
+    // And it overrides the 0.5 g/kg floor, since asking for it is deliberate.
+    assert.strictEqual(LB.macroTargetsFromGoal({ ...base, fatPerKg: 0.3 }).fatTraining, 24);
+  });
+
+  test('rebalanceMacros: holds the calorie figure, others split proportionally', () => {
+    // 160P / 400C / 80F = 640 + 1600 + 720 = 2960 kcal.
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = LB.caloriesFromMacros(160, 400, 80);
+    assert.strictEqual(target, 2960);
+    // Raise protein by 40 g (160 kcal). Carbs and fat give that back in
+    // proportion to what they carry (1600 vs 720 of 2320 kcal).
+    const up = LB.rebalanceMacros(cur, 'protein', 200, { targetCalories: target });
+    assert.strictEqual(up.protein, 200, 'the edited macro is left exactly as typed');
+    assert.ok(up.carbs < 400 && up.fat < 80, 'both of the others move, not just one');
+    // Tolerance covers rounding two macros to whole grams (up to ~6 kcal).
+    assert.ok(Math.abs(LB.caloriesFromMacros(up.protein, up.carbs, up.fat) - target) <= 10, 'total holds');
+    // Editing carbs moves protein and fat instead, same rule.
+    const c = LB.rebalanceMacros(cur, 'carbs', 300, { targetCalories: target });
+    assert.strictEqual(c.carbs, 300);
+    assert.ok(c.protein > 160 && c.fat > 80);
+    assert.ok(Math.abs(LB.caloriesFromMacros(c.protein, c.carbs, c.fat) - target) <= 10);
+    // Without a target nothing rebalances, the edit just lands.
+    const raw = LB.rebalanceMacros(cur, 'fat', 60, {});
+    assert.strictEqual(JSON.stringify(raw), JSON.stringify({ protein: 160, carbs: 400, fat: 60 }));
+  });
+
+  test('rebalanceMacros: low-fat cap binds derived fat, never a typed one', () => {
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = LB.caloriesFromMacros(160, 400, 80);
+    const capOpts = { targetCalories: target, weightKg: 80, fatPerKg: 0.6 }; // cap = 48 g
+    // Lowering protein would normally push calories into both others; fat is
+    // held at the cap and carbs take the whole remainder instead.
+    const out = LB.rebalanceMacros(cur, 'protein', 120, capOpts);
+    assert.strictEqual(out.protein, 120);
+    assert.strictEqual(out.fat, 48, 'derived fat is pinned to the cap');
+    assert.ok(Math.abs(LB.caloriesFromMacros(out.protein, out.carbs, out.fat) - target) <= 10);
+    // Editing carbs under the cap sends the freed calories to protein, the
+    // only macro left that is neither capped nor the one being edited.
+    const c = LB.rebalanceMacros(cur, 'carbs', 300, capOpts);
+    assert.strictEqual(c.carbs, 300, 'the edit is never quietly undone');
+    assert.strictEqual(c.fat, 48);
+    assert.ok(c.protein > 160);
+    // Typing a fat value above the cap wins: an explicit edit is a decision.
+    const f = LB.rebalanceMacros(cur, 'fat', 90, capOpts);
+    assert.strictEqual(f.fat, 90);
+  });
+
+  test('rebalanceMacros: guards against negatives and nonsense input', () => {
+    const cur = { protein: 160, carbs: 400, fat: 80 };
+    const target = 2960;
+    // A macro big enough to blow the whole budget zeroes the others rather
+    // than going negative. Calories then exceed the target, which the caller
+    // shows honestly because it derives kcal from the macros.
+    const huge = LB.rebalanceMacros(cur, 'protein', 900, { targetCalories: target });
+    assert.strictEqual(huge.protein, 900);
+    assert.strictEqual(huge.carbs, 0);
+    assert.strictEqual(huge.fat, 0);
+    // Negative and non-numeric edits are read as zero.
+    assert.strictEqual(LB.rebalanceMacros(cur, 'protein', -50, { targetCalories: target }).protein, 0);
+    assert.strictEqual(LB.rebalanceMacros(cur, 'protein', 'abc', { targetCalories: target }).protein, 0);
+    // An unknown key is a no-op rather than a crash.
+    assert.strictEqual(JSON.stringify(LB.rebalanceMacros(cur, 'sugar', 10, { targetCalories: target })), JSON.stringify(cur));
+    // Both others at zero: the remainder splits evenly instead of dividing by zero.
+    const even = LB.rebalanceMacros({ protein: 100, carbs: 0, fat: 0 }, 'protein', 50, { targetCalories: 1000 });
+    assert.ok(even.carbs > 0 && even.fat > 0);
+  });
+
   test('macroTargetsFromGoal: proteinPerKg is overridable, defaults to 2 g/kg', () => {
     const d = LB.macroTargetsFromGoal({ tdee: 2500, weightKg: 90, goal: 'maintain', trainingDays: 4 });
     assert.strictEqual(d.proteinTraining, 180);

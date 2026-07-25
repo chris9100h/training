@@ -1710,18 +1710,24 @@ const MACRO_GOAL_OPTIONS = [
 const MACRO_RATE_OPTIONS_KG = [0.25, 0.5, 0.75];
 const MACRO_RATE_OPTIONS_LBS = [0.5, 1, 1.5];
 const LBS_TO_KG = 0.45359237;
+// Default cap for the low-fat option, in g of fat per kg of bodyweight. Shown
+// converted for lbs users (about 0.27 g per lb) and adjustable either way.
+const LOW_FAT_DEFAULT_PER_KG = 0.6;
 
 function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
+  // "g of fat per kg" reads as an odd fraction in pounds, so the field is shown
+  // in whichever unit the user thinks in and converted on the way in and out.
+  // The stored and computed value is always per kg.
+  const fatPerToDisplay = (perKg) => Math.round((isLbs ? perKg * LBS_TO_KG : perKg) * 100) / 100;
+  const fatPerFromDisplay = (v) => (isLbs ? v / LBS_TO_KG : v);
 
-  // Bodyweight is never asked for or stored here: it is whatever was logged
-  // most recently, so reopening the estimator after a few weeks recalculates
-  // against the current weight instead of against a stale answer. lbs users
-  // type lbs straight into the daily log (see UI.unit()), so convert for the
-  // equation, which is metric.
-  const rawWeight = LB.latestBodyweight(store);
-  const weightKg = rawWeight == null ? null : (isLbs ? rawWeight * LBS_TO_KG : rawWeight);
+  // Bodyweight prefers the latest daily log, so for anyone who logs weight the
+  // estimate keeps tracking it instead of a number typed once and forgotten.
+  // It stays editable regardless, because someone can want targets before they
+  // have ever logged a weight, and that used to block the whole sheet.
+  const loggedWeight = LB.latestBodyweight(store);
 
   // How often they actually train, from the last four weeks of real sessions
   // rather than from what a plan says: plans come in weekday, cycle and flex
@@ -1733,9 +1739,17 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   }, [store.sessions]);
 
   const [form, setForm] = useStateH({});
+  // Hand-edited macros, as strings so typing works, or null while the estimate
+  // is untouched. See editMacro.
+  const [manual, setManual] = useStateH(null);
+
   useEffectH(() => {
     if (!open) return;
+    const storedWeight = calc.weightKg != null
+      ? String(Math.round((isLbs ? calc.weightKg / LBS_TO_KG : calc.weightKg) * 10) / 10)
+      : '';
     setForm({
+      weight: loggedWeight != null ? String(loggedWeight) : storedWeight,
       heightCm: calc.heightCm != null ? String(calc.heightCm) : '',
       birthYear: calc.birthYear != null ? String(calc.birthYear) : '',
       sex: calc.sex ?? null,
@@ -1743,8 +1757,16 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       goal: calc.goal ?? 'maintain',
       rateKgPerWeek: calc.rateKgPerWeek || (isLbs ? 1 * LBS_TO_KG : 0.5),
       trainingDays: calc.trainingDays != null ? calc.trainingDays : defaultTrainingDays,
+      lowFat: !!calc.lowFat,
+      fatPerStr: String(fatPerToDisplay(calc.fatPerKg > 0 ? calc.fatPerKg : LOW_FAT_DEFAULT_PER_KG)),
     });
+    setManual(null);
   }, [open]); // eslint-disable-line
+
+  const weightInput = healthNum(form.weight);
+  const weightKg = weightInput > 0 ? (isLbs ? weightInput * LBS_TO_KG : weightInput) : null;
+  const fatPerInput = healthNum(form.fatPerStr);
+  const fatPerKg = (form.lowFat && fatPerInput > 0) ? fatPerFromDisplay(fatPerInput) : null;
 
   const age = form.birthYear ? (new Date().getFullYear() - healthInt(form.birthYear)) : null;
   const est = LB.estimateTdee({ weightKg, heightCm: healthInt(form.heightCm), age, sex: form.sex, activity: form.activity });
@@ -1752,10 +1774,58 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
     tdee: est.tdee, weightKg, goal: form.goal,
     rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
     trainingDays: form.trainingDays,
+    fatPerKg,
   });
 
-  const apply = () => {
+  // Any change to an input produces a different estimate, so hand edits made
+  // against the previous one are dropped rather than silently carried over
+  // onto numbers they were never balanced against.
+  const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg]);
+  useEffectH(() => { setManual(null); }, [estKey]);
+
+  const estimateStrings = () => (targets ? {
+    training: { protein: String(targets.proteinTraining), carbs: String(targets.carbsTraining), fat: String(targets.fatTraining) },
+    rest: { protein: String(targets.proteinRest), carbs: String(targets.carbsRest), fat: String(targets.fatRest) },
+  } : null);
+  const shown = manual || estimateStrings();
+
+  // Editing one macro holds that day's calorie figure and lets the other two
+  // absorb the difference (LB.rebalanceMacros). The edited field keeps the raw
+  // string the user typed, so a half-finished number is never overwritten
+  // mid-keystroke; the other two are rewritten from the result.
+  function editMacro(dayType, key, raw) {
     if (!targets) return;
+    const clean = raw.replace(/[^\d]/g, '');
+    setManual(prev => {
+      const base = prev || estimateStrings();
+      if (!base) return prev;
+      const cur = {
+        protein: healthInt(base[dayType].protein) || 0,
+        carbs: healthInt(base[dayType].carbs) || 0,
+        fat: healthInt(base[dayType].fat) || 0,
+      };
+      const next = LB.rebalanceMacros(cur, key, clean === '' ? 0 : parseInt(clean, 10), {
+        targetCalories: dayType === 'training' ? targets.caloriesTraining : targets.caloriesRest,
+        weightKg, fatPerKg,
+      });
+      return {
+        ...base,
+        [dayType]: { protein: String(next.protein), carbs: String(next.carbs), fat: String(next.fat), [key]: clean },
+      };
+    });
+  }
+
+  const dayCalories = (dayType) => caloriesFromMacros(
+    healthInt(shown?.[dayType]?.protein), healthInt(shown?.[dayType]?.carbs), healthInt(shown?.[dayType]?.fat),
+  );
+
+  const apply = () => {
+    if (!shown) return;
+    const build = (d) => {
+      const p = healthInt(shown[d].protein), c = healthInt(shown[d].carbs), f = healthInt(shown[d].fat);
+      return { p, c, f, cal: caloriesFromMacros(p, c, f) };
+    };
+    const t = build('training'), r = build('rest');
     setStore(s => ({
       ...s,
       settings: {
@@ -1765,10 +1835,18 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           sex: form.sex ?? null, activity: form.activity, goal: form.goal,
           rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
           trainingDays: form.trainingDays,
+          // Kept as a fallback for anyone who never logs a bodyweight; a logged
+          // one always wins on reopen.
+          weightKg: weightKg != null ? Math.round(weightKg * 10) / 10 : null,
+          lowFat: !!form.lowFat,
+          fatPerKg: fatPerKg != null ? Math.round(fatPerKg * 1000) / 1000 : null,
         },
       },
     }));
-    onApply(targets);
+    onApply({
+      proteinTraining: t.p, carbsTraining: t.c, fatTraining: t.f, caloriesTraining: t.cal,
+      proteinRest: r.p, carbsRest: r.c, fatRest: r.f, caloriesRest: r.cal,
+    });
     onClose();
   };
 
@@ -1788,88 +1866,145 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   );
   const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
 
+  const macroField = (dayType, key, label) => (
+    <div style={{ flex: 1 }}>
+      <div className="micro" style={{ marginBottom: 4 }}>{label}</div>
+      <input type="text" inputMode="numeric" value={shown?.[dayType]?.[key] ?? ''}
+        onChange={e => editMacro(dayType, key, e.target.value)}
+        style={{ ...inputStyle, fontSize: 14, padding: '7px 8px' }} />
+    </div>
+  );
+  const daySection = (dayType, label) => (
+    <div style={{ marginBottom: dayType === 'training' ? 12 : 0 }}>
+      <div className="micro" style={{ marginBottom: 6 }}>
+        {label} · <span className="num" style={{ color: UI.warn }}>{dayCalories(dayType)} kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {macroField(dayType, 'protein', 'Protein g')}
+        {macroField(dayType, 'carbs', 'Carbs g')}
+        {macroField(dayType, 'fat', 'Fat g')}
+      </div>
+    </div>
+  );
+
   // zIndex above the default 100: this opens on top of MacroTargetSheet, the
   // same nesting idiom the food module's own quantity sheet uses.
   return (
     <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
-      {weightKg == null ? (
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
-          Log a bodyweight in your daily log first. The estimate is built on it, and reads it fresh every time, so it stays right as your weight moves.
+      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
+        A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 4 }}>Weight {UI.unit()}</div>
+          <input type="text" inputMode="decimal" placeholder="—" value={form.weight ?? ''}
+            onChange={e => setForm(f => ({ ...f, weight: e.target.value }))} style={inputStyle} />
         </div>
-      ) : (
-        <>
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
-            A starting point, not a prescription. Adjust anything after applying it, and revisit it when your weight or training changes.
-          </div>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 4 }}>Height cm</div>
+          <input type="text" inputMode="numeric" placeholder="—" value={form.heightCm ?? ''}
+            onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} style={inputStyle} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 4 }}>Born</div>
+          <input type="text" inputMode="numeric" placeholder="YYYY" value={form.birthYear ?? ''}
+            onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+        {loggedWeight != null
+          ? 'Weight comes from your latest daily log, so this stays current on its own. Change it here to try a different number.'
+          : 'No bodyweight logged yet, so type one here. Once you log weight in your daily log, this fills itself in.'}
+      </div>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <div style={{ flex: 1 }}>
-              <div className="micro" style={{ marginBottom: 4 }}>Height cm</div>
-              <input type="text" inputMode="numeric" placeholder="—" value={form.heightCm}
-                onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} style={inputStyle} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div className="micro" style={{ marginBottom: 4 }}>Born</div>
-              <input type="text" inputMode="numeric" placeholder="YYYY" value={form.birthYear}
-                onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} style={inputStyle} />
-            </div>
-          </div>
+      <div style={{ marginBottom: 16 }}>
+        <div className="micro" style={{ marginBottom: 6 }}>Sex (for the equation)</div>
+        {seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v })))}
+      </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>Sex (for the equation)</div>
-            {seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v })))}
-          </div>
+      <div style={{ marginBottom: 16 }}>
+        <div className="micro" style={{ marginBottom: 6 }}>Daily activity outside training</div>
+        {seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v })))}
+        {activityHint && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>{activityHint}</div>}
+      </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>Daily activity outside training</div>
-            {seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v })))}
-            {activityHint && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>{activityHint}</div>}
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>Goal</div>
-            {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
-            {form.goal !== 'maintain' && (
-              <div style={{ marginTop: 8 }}>
-                <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
-                {seg(
-                  (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
-                  form.rateKgPerWeek,
-                  v => setForm(f => ({ ...f, rateKgPerWeek: v })),
-                )}
-              </div>
+      <div style={{ marginBottom: 16 }}>
+        <div className="micro" style={{ marginBottom: 6 }}>Goal</div>
+        {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
+        {form.goal !== 'maintain' && (
+          <div style={{ marginTop: 8 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
+            {seg(
+              (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
+              form.rateKgPerWeek,
+              v => setForm(f => ({ ...f, rateKgPerWeek: v })),
             )}
           </div>
+        )}
+      </div>
 
-          <div style={{ marginBottom: 18 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>Training days per week</div>
-            {seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v })))}
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-              Training days get more carbs, rest days fewer, so the week still adds up to the same total.
+      <div style={{ marginBottom: 16 }}>
+        <div className="micro" style={{ marginBottom: 6 }}>Training days per week</div>
+        {seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v })))}
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+          Training days get more carbs, rest days fewer, so the week still adds up to the same total.
+        </div>
+      </div>
+
+      {/* Low fat: a cap on fat rather than a target, so the calories it frees
+          go to carbs. Off by default, since the normal split is the safer
+          default for anyone not deliberately choosing this. */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div className="micro">Low fat</div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3, lineHeight: 1.4 }}>
+              Hold fat to a set amount per {UI.unit()} of bodyweight and put what that frees into carbs.
             </div>
           </div>
+          <Toggle on={!!form.lowFat} onToggle={() => setForm(f => ({ ...f, lowFat: !f.lowFat }))} />
+        </div>
+        {form.lowFat && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 10 }}>
+            <div style={{ width: 110 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Fat g per {UI.unit()}</div>
+              <input type="text" inputMode="decimal" value={form.fatPerStr ?? ''}
+                onChange={e => setForm(f => ({ ...f, fatPerStr: e.target.value }))} style={inputStyle} />
+            </div>
+            <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, paddingBottom: 10, lineHeight: 1.4 }}>
+              {weightKg != null && fatPerKg != null
+                ? `Caps fat at about ${Math.round(weightKg * fatPerKg)} g a day.`
+                : 'Enter a weight and a factor to see the cap.'}
+            </div>
+          </div>
+        )}
+      </div>
 
-          {targets ? (
-            <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-              <div className="micro" style={{ marginBottom: 8 }}>Maintenance about {est.tdee} kcal</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Training day</span>
-                <span className="num" style={{ fontSize: 12, color: UI.ink }}>{targets.caloriesTraining} kcal · {targets.proteinTraining}P {targets.carbsTraining}C {targets.fatTraining}F</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Rest day</span>
-                <span className="num" style={{ fontSize: 12, color: UI.ink }}>{targets.caloriesRest} kcal · {targets.proteinRest}P {targets.carbsRest}C {targets.fatRest}F</span>
-              </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
-              Fill in height and year of birth to see an estimate.
-            </div>
+      {shown ? (
+        <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
+          <div className="micro" style={{ marginBottom: 10 }}>Maintenance about {est.tdee} kcal</div>
+          {daySection('training', 'TRAINING DAY')}
+          {daySection('rest', 'REST DAY')}
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: 1.4 }}>
+            {manual
+              ? "Edited. Changing one macro moves the other two to keep the day's calories."
+              : "Change any number and the other two follow to keep the day's calories."}
+          </div>
+          {manual && (
+            <button onClick={() => setManual(null)} style={{
+              marginTop: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+            }}>Back to the estimate</button>
           )}
-
-          <Btn onClick={apply} disabled={!targets} style={{ width: '100%' }}>Use these numbers</Btn>
-        </>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
+          Fill in weight, height and year of birth to see an estimate.
+        </div>
       )}
+
+      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>Use these numbers</Btn>
     </Sheet>
   );
 }
