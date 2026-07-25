@@ -35,6 +35,14 @@
     --ink-ghost: rgba(236,228,208,0.14);
     --hair: rgba(236,228,208,0.16);
     --hair-strong: rgba(236,228,208,0.28);
+    /* Accent-toned hairline: the border a row, chip or toggle wears when it is
+       the selected/current one. Same threshold problem --hair-strong had, and
+       worse here because it usually sits on an accent-tinted fill, so border
+       and background are the same hue. Only for 0.5px/--hair-width borders:
+       accent borders drawn at 1px or more stay at their own lower alpha, since
+       a full pixel of line already carries the same visual mass. Follows the
+       chosen accent automatically via --accent-rgb, in every theme. */
+    --hair-accent: rgba(var(--accent-rgb),0.8);
     /* Width for every hairline border (the huge majority of UI.hair/
        UI.hairStrong borders use this literal). A theme can widen it, e.g.
        paper's 0.5px hairlines were reading as barely-there. */

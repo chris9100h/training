@@ -938,7 +938,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   const sel = fieldDraft.icon === icon;
                   return (
                     <div key={icon} onClick={() => { setFieldDraft(f => ({ ...f, icon })); setView('edit-field'); }}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '12px 4px 8px', borderRadius: 6, cursor: 'pointer', background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '12px 4px 8px', borderRadius: 6, cursor: 'pointer', background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${sel ? 'var(--hair-accent)' : UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
                       <i className={`fa-solid ${icon}`} style={{ fontSize: 22, color: sel ? 'var(--accent)' : UI.inkSoft }} />
                       <span style={{ fontSize: 9, color: sel ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.2, wordBreak: 'break-word' }}>{icon.replace('fa-', '')}</span>
                     </div>

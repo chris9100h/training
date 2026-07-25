@@ -5404,7 +5404,7 @@ function fdCopyMoveRow(checked) {
   return {
     display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px',
     background: checked ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
-    border: `var(--hair-width) solid ${checked ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    border: `var(--hair-width) solid ${checked ? 'var(--hair-accent)' : UI.hair}`,
     borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
   };
 }
@@ -5514,7 +5514,7 @@ function FdHourTick() {
 function fdHourRow(filled, isNow) {
   return {
     display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6,
-    border: `var(--hair-width) solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
     background: isNow ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
     padding: filled ? '10px 10px' : '8px 10px',
   };
@@ -5537,7 +5537,7 @@ function fdIconBtn(size, inset) {
 function fdHourAddBtn(isNow) {
   return {
     flexShrink: 0, width: 30, height: 30, borderRadius: 4,
-    border: `var(--hair-width) solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
     background: 'transparent', color: isNow ? 'var(--accent)' : UI.inkSoft,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent',

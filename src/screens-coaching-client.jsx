@@ -1389,7 +1389,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {sch.id !== active && (
-                <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
+                <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `0.5px solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
                   ACTIVATE
                 </button>
               )}
@@ -1418,7 +1418,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
               </div>
               <button
                 onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
-                style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                style={{ background: 'transparent', border: `0.5px solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
               >
                 RESUME
               </button>

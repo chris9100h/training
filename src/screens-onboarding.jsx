@@ -712,7 +712,7 @@ function tourToggleRow(label, sub, on) {
         <div style={{ fontSize: 12.5, fontFamily: UI.fontUi, color: UI.ink, fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
       </div>
-      <div style={{ width: 40, height: 23, borderRadius: 13, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', flexShrink: 0 }}>
+      <div style={{ width: 40, height: 23, borderRadius: 13, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', flexShrink: 0 }}>
         <div style={{ position: 'absolute', top: 2.5, [on ? 'right' : 'left']: 2.5, width: 16, height: 16, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint }} />
       </div>
     </div>
@@ -899,7 +899,7 @@ function TourVisualTrainKeyboard() {
           <div key={lbl} style={{
             flex: 1, textAlign: 'center', padding: '5px 4px',
             background: UI.bgCard, borderRadius: 4,
-            border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+            border: `0.5px solid ${active ? 'var(--hair-accent)' : UI.hairStrong}`,
             borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
           }}>
             <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 1, letterSpacing: '0.06em' }}>{lbl}</div>

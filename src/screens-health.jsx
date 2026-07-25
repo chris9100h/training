@@ -1722,7 +1722,7 @@ const LOW_FAT_DEFAULT_PER_KG = 0.6;
 // a macro the user has padlocked.
 function EstimatorInput({ pinned, style = {}, ...rest }) {
   const [focus, setFocus] = useStateH(false);
-  const edge = focus ? 'var(--accent)' : pinned ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
+  const edge = focus ? 'var(--accent)' : pinned ? 'var(--hair-accent)' : UI.hairStrong;
   return (
     <input
       type="text" autoComplete="off" spellCheck={false}

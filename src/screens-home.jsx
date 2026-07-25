@@ -3723,7 +3723,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <button key={d.id} onClick={() => applyRealign(i)} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset,
-                border: `0.5px solid ${isCurrent ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                border: `0.5px solid ${isCurrent ? 'var(--hair-accent)' : UI.hair}`,
                 borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>

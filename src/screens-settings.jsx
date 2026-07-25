@@ -2938,7 +2938,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       {CATS.map(c => (
                         <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
                           flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
-                          border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+                          border: `0.5px solid ${supportCategoryDraft === c.key ? 'var(--hair-accent)' : UI.hairStrong}`,
                           background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
@@ -3243,7 +3243,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 {filterDefs.map(f => (
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
                     padding: '5px 14px', borderRadius: 999, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                    border: `0.5px solid ${supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+                    border: `0.5px solid ${supportCatFilter === f.key ? 'var(--hair-accent)' : UI.hairStrong}`,
                     background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                     color: supportCatFilter === f.key ? 'var(--accent)' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
