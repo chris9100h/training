@@ -2022,6 +2022,18 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
 
   // zIndex above the default 100: this opens on top of MacroTargetSheet, the
   // same nesting idiom the food module's own quantity sheet uses.
+  //
+  // Every 11px block below sets its line height in whole pixels rather than as
+  // a ratio, and that is load-bearing, not a style preference. 11 x 1.4 is
+  // 15.39px and 11 x 1.45 is 15.94px, so each line of body copy pushed
+  // everything under it onto a fractional offset. Hairlines are 0.5px, and a
+  // 0.5px border at a fractional offset gets smeared across two device rows
+  // instead of landing on one, which reads as a missing edge. It moved while
+  // typing because the line under "Maintenance about" rewraps as the numbers
+  // change width, so every edit reshuffled the sub-pixel phase of the macro
+  // inputs right below it. Whole-pixel line heights keep those offsets integral
+  // and a rewrap shifts by exactly one line. Keep it that way: 12px copy may
+  // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
     <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
       <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
@@ -2045,7 +2057,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
             onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} style={inputStyle} />
         </div>
       </div>
-      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
         {loggedWeight != null
           ? 'Weight comes from your latest daily log, so this stays current on its own. Change it here to try a different number.'
           : 'No bodyweight logged yet, so type one here. Once you log weight in your daily log, this fills itself in.'}
@@ -2114,7 +2126,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
               style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
             <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
           </div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
             {restPct >= 100
               ? 'Both day types eat the same. No carb cycling at all.'
               : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`}
@@ -2131,7 +2143,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div className="micro">Low fat</div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3, lineHeight: '16px' }}>
               Set fat to a fixed amount per {UI.unit()} of bodyweight and put everything that frees into carbs.
             </div>
           </div>
@@ -2144,7 +2156,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
               <input type="text" inputMode="decimal" value={form.fatPerStr ?? ''}
                 onChange={e => setForm(f => ({ ...f, fatPerStr: e.target.value }))} style={inputStyle} />
             </div>
-            <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, paddingBottom: 10, lineHeight: 1.4 }}>
+            <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, paddingBottom: 10, lineHeight: '16px' }}>
               {weightKg != null && fatPerKg != null
                 ? `Puts fat at about ${Math.round(weightKg * fatPerKg)} g a day.`
                 : 'Enter a weight and a factor to see the result.'}
@@ -2155,7 +2167,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           <div style={{
             display: 'flex', gap: 8, marginTop: 10, padding: '8px 10px', borderRadius: 6,
             background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`,
-            fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.45, textShadow: 'none',
+            fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px', textShadow: 'none',
           }}>
             <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.warn, marginTop: 1 }} />
             <span>
@@ -2168,14 +2180,14 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       {shown ? (
         <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
           <div className="micro" style={{ marginBottom: 4 }}>Maintenance about {est.tdee} kcal</div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
             {trainingDays} training + {7 - trainingDays} rest averages{' '}
             <span className="num" style={{ color: UI.ink }}>{weekAvgCalories}</span> kcal a day,{' '}
             <span className="num" style={{ color: deltaContradictsGoal ? UI.warn : UI.inkSoft }}>{deltaLabel}</span>
           </div>
           {daySection('training', 'TRAINING DAY')}
           {daySection('rest', 'REST DAY')}
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
             {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one: later edits leave it alone, and it holds its value when you change the inputs above."}
             {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
           </div>
