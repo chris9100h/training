@@ -935,11 +935,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => LB.mealOfChoiceWeekCount(store.dailyLogs, curDate),
     [store.dailyLogs, curDate]);
   const mocName = LB.mealOfChoiceNoteName(dayLog?.offPlanNote);
-  // Where the derived row sits in the timeline. Defaults to the dinner window
-  // (that is what a meal of choice usually is) and is changed in the sheet.
-  const mocDefaultHour = (mealCats.find(c => c.id === 'dinner') || mealCats[mealCats.length - 1] || {}).startHour ?? 18;
-  const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
-
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
     const m = {};
@@ -957,6 +952,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
   const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  // Where the derived meal-of-choice row sits in the timeline. Defaults to the
+  // dinner window (that is what a meal of choice usually is), changed in the
+  // sheet. Must stay BELOW mealCats: these are const, so reading mealCats from
+  // above it is a temporal dead zone and throws on every render of this screen.
+  const mocDefaultHour = (mealCats.find(c => c.id === 'dinner') || mealCats[mealCats.length - 1] || {}).startHour ?? 18;
+  const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
   const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
     // The totals count logged entries only (a planned meal isn't eaten yet),
