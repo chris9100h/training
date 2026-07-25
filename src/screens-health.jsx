@@ -1714,6 +1714,32 @@ const LBS_TO_KG = 0.45359237;
 // converted for lbs users (about 0.27 g per lb) and adjustable either way.
 const LOW_FAT_DEFAULT_PER_KG = 0.6;
 
+// Boxed numeric input for the estimator. Two behaviours the plain <input>s here
+// were missing, both already the norm elsewhere: the accent-on-focus edge that
+// UI.TextInput uses, and select-on-focus so a prefilled number can be typed
+// straight over instead of backspaced away (screens-lib, screens-train and
+// UI.NumInput all do this). `pinned` paints the same edge in a held state, for
+// a macro the user has padlocked.
+function EstimatorInput({ pinned, style = {}, ...rest }) {
+  const [focus, setFocus] = useStateH(false);
+  const edge = focus ? 'var(--accent)' : pinned ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
+  return (
+    <input
+      type="text" autoComplete="off" spellCheck={false}
+      onFocus={e => { setFocus(true); e.target.select(); }}
+      onBlur={() => setFocus(false)}
+      {...rest}
+      style={{
+        width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+        border: `var(--hair-width) solid ${edge}`, borderRadius: 4,
+        padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15,
+        color: UI.ink, outline: 'none', transition: 'border-color 0.2s',
+        ...style,
+      }}
+    />
+  );
+}
+
 function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
@@ -1953,12 +1979,17 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
     onClose();
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  // The app's segmented control: solid accent fill and accent-ink text on the
+  // active segment, no divider between them, text-lift on the inactive ones so
+  // they stay readable on the paper theme. Same shape as the food module's
+  // fdSegBtn and the Health chart timeframe picker.
   const segBtn = (active) => ({
-    flex: 1, padding: '7px 4px', background: active ? 'rgba(var(--accent-rgb),0.16)' : 'transparent',
-    border: 'none', borderRight: `var(--hair-width) solid ${UI.hairStrong}`,
-    color: active ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
-    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+    textShadow: active ? 'none' : 'var(--text-lift)',
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+    WebkitTapHighlightColor: 'transparent',
   });
   const seg = (options, value, onPick) => (
     <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
@@ -1968,6 +1999,33 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
     </div>
   );
   const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
+
+  // One shape for every explanatory line in the sheet, so they cannot drift
+  // apart in size, colour or spacing. See the whole-pixel line height note at
+  // the render below.
+  const hint = (children, style) => (
+    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', ...style }}>{children}</div>
+  );
+  // Label, control, optional explanation. `right` takes a trailing action on
+  // the label line (currently the ratio slider's Reset).
+  const group = (label, control, below, right) => (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+        <span className="micro">{label}</span>
+        {right}
+      </div>
+      {control}
+      {below ? hint(below, { marginTop: 6 }) : null}
+    </div>
+  );
+  // Matches the Reset beside the watermark slider in Settings.
+  const resetBtn = (onClick) => (
+    <button onClick={onClick} style={{
+      background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
+      color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+      letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
+    }}>Reset</button>
+  );
 
   const toggleLock = (dayType, key) => {
     // Locking pins the number that is on screen right now, so the estimate is
@@ -1998,25 +2056,44 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           {label}
           {lockable && <i className={`fa-solid fa-lock${locked ? '' : '-open'}`} style={{ fontSize: 8 }} />}
         </button>
-        <input type="text" inputMode="numeric" value={shown?.[dayType]?.[key] ?? ''}
+        <EstimatorInput inputMode="numeric" pinned={locked}
+          value={shown?.[dayType]?.[key] ?? ''}
           onChange={e => editMacro(dayType, key, e.target.value)}
-          style={{
-            ...inputStyle, fontSize: 14, padding: '7px 8px',
-            border: `var(--hair-width) solid ${locked ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-          }} />
+          style={{ fontSize: 14, padding: '7px 8px' }} />
       </div>
     );
   };
+  // Day type on the left, its calories right-aligned on the same baseline, the
+  // way the rest of the app pairs a label with its number. kcal in UI.warn is
+  // the food module's rule for the same pairing.
   const daySection = (dayType, label) => (
-    <div style={{ marginBottom: dayType === 'training' ? 12 : 0 }}>
-      <div className="micro" style={{ marginBottom: 6 }}>
-        {label} · <span className="num" style={{ color: UI.warn }}>{dayCalories(dayType)} kcal</span>
+    <div style={{ marginBottom: dayType === 'training' ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+        <span className="micro">
+          {label}
+          {/* How many of these a week makes, right where the numbers are: it is
+              what turns two day targets into the weekly average above. */}
+          <span className="num" style={{ color: UI.inkFaint, marginLeft: 6, letterSpacing: 0 }}>
+            &times;{dayType === 'training' ? trainingDays : 7 - trainingDays}
+          </span>
+        </span>
+        <span className="num" style={{ fontSize: 13, color: UI.warn }}>{dayCalories(dayType)} kcal</span>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {macroField(dayType, 'protein', 'Protein g')}
         {macroField(dayType, 'carbs', 'Carbs g')}
         {macroField(dayType, 'fat', 'Fat g')}
       </div>
+    </div>
+  );
+  // The two figures the whole sheet exists to produce, as a headline pair.
+  const headlineStat = (label, value, sub, subColor) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="micro" style={{ marginBottom: 3 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, fontWeight: 300, color: UI.ink, lineHeight: '24px' }}>
+        {value}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 4 }}>kcal</span>
+      </div>
+      {hint(sub, { marginTop: 2, color: subColor || UI.inkFaint })}
     </div>
   );
 
@@ -2036,175 +2113,158 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
     <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
-      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
-        A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.
-      </div>
+      {hint('A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
+        { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
         <div style={{ flex: 1 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Weight {UI.unit()}</div>
-          <input type="text" inputMode="decimal" placeholder="—" value={form.weight ?? ''}
-            onChange={e => setForm(f => ({ ...f, weight: e.target.value }))} style={inputStyle} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Height cm</div>
-          <input type="text" inputMode="numeric" placeholder="—" value={form.heightCm ?? ''}
-            onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} style={inputStyle} />
+          <div className="micro" style={{ marginBottom: 6 }}>Weight {UI.unit()}</div>
+          <EstimatorInput inputMode="decimal" value={form.weight ?? ''}
+            onChange={e => setForm(f => ({ ...f, weight: e.target.value }))} />
         </div>
         <div style={{ flex: 1 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Born</div>
-          <input type="text" inputMode="numeric" placeholder="YYYY" value={form.birthYear ?? ''}
-            onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} style={inputStyle} />
+          <div className="micro" style={{ marginBottom: 6 }}>Height cm</div>
+          <EstimatorInput inputMode="numeric" value={form.heightCm ?? ''}
+            onChange={e => setForm(f => ({ ...f, heightCm: e.target.value }))} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Born</div>
+          <EstimatorInput inputMode="numeric" placeholder="YYYY" value={form.birthYear ?? ''}
+            onChange={e => setForm(f => ({ ...f, birthYear: e.target.value }))} />
         </div>
       </div>
-      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
-        {loggedWeight != null
-          ? 'Weight comes from your latest daily log, so this stays current on its own. Change it here to try a different number.'
-          : 'No bodyweight logged yet, so type one here. Once you log weight in your daily log, this fills itself in.'}
-      </div>
+      {hint(loggedWeight != null
+        ? 'Weight comes from your latest daily log, so this stays current on its own. Change it here to try a different number.'
+        : 'No bodyweight logged yet, so type one here. Once you log weight in your daily log, this fills itself in.',
+      { marginBottom: 16 })}
 
-      <div style={{ marginBottom: 16 }}>
-        <div className="micro" style={{ marginBottom: 6 }}>Sex (for the equation)</div>
-        {seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v })))}
-      </div>
+      {group('Sex (for the equation)',
+        seg([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex, v => setForm(f => ({ ...f, sex: v }))))}
 
-      <div style={{ marginBottom: 16 }}>
-        <div className="micro" style={{ marginBottom: 6 }}>Daily activity outside training</div>
-        {seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v })))}
-        {activityHint && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>{activityHint}</div>}
-      </div>
+      {group('Daily activity outside training',
+        seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v }))),
+        activityHint)}
 
-      <div style={{ marginBottom: 16 }}>
-        <div className="micro" style={{ marginBottom: 6 }}>Goal</div>
-        {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
-        {form.goal !== 'maintain' && (
-          <div style={{ marginTop: 8 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
-            {seg(
-              (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
-              form.rateKgPerWeek,
-              v => setForm(f => ({ ...f, rateKgPerWeek: v })),
-            )}
-          </div>
-        )}
-      </div>
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
 
-      <div style={{ marginBottom: 16 }}>
-        <div className="micro" style={{ marginBottom: 6 }}>Training days per week</div>
-        {seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v })))}
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-          {cyclesDays
-            ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
-            : 'Every day gets the same target, since there is no second day type to cycle against.'}
-        </div>
-      </div>
+      {group('Goal', (
+        <>
+          {seg(MACRO_GOAL_OPTIONS, form.goal, v => setForm(f => ({ ...f, goal: v })))}
+          {form.goal !== 'maintain' && (
+            <div style={{ marginTop: 10 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Per week</div>
+              {seg(
+                (isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => ({ id: isLbs ? r * LBS_TO_KG : r, label: `${r} ${UI.unit()}` })),
+                form.rateKgPerWeek,
+                v => setForm(f => ({ ...f, rateKgPerWeek: v })),
+              )}
+            </div>
+          )}
+        </>
+      ))}
+
+      {group('Training days per week',
+        seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v }))),
+        cyclesDays
+          ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
+          : 'Every day gets the same target, since there is no second day type to cycle against.')}
 
       {/* How far the two day types are pulled apart. The week's total is fixed
           at every setting, so this only decides where the calories sit inside
           it. The automatic split is the sharpest one on offer and therefore the
           slider's floor, which also makes it the default without pinning a
           value that would then stop following the training day count. */}
-      {cyclesDays && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
-            <div className="micro">Rest day calories</div>
-            {form.restRatioPct != null && (
-              <button onClick={() => setForm(f => ({ ...f, restRatioPct: null }))} style={{
-                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, WebkitTapHighlightColor: 'transparent',
-              }}>Reset</button>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input type="range" min={minRestPct} max="100" step="1" value={restPct}
-              onChange={e => {
-                const v = +e.target.value;
-                // Back at the floor it goes to null, so it follows the training
-                // day count again instead of pinning the rounded percentage.
-                setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
-              }}
-              style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
-            <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
-          </div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
-            {restPct >= 100
-              ? 'Both day types eat the same. No carb cycling at all.'
-              : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`}
-          </div>
+      {cyclesDays && group('Rest day calories', (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
+            onChange={e => {
+              const v = +e.target.value;
+              // Back at the floor it goes to null, so it follows the training
+              // day count again instead of pinning the rounded percentage.
+              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
+            }}
+            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
+          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
         </div>
-      )}
+      ),
+      restPct >= 100
+        ? 'Both day types eat the same. No carb cycling at all.'
+        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
+      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
 
       {/* Low fat: fat lands ON this figure rather than at a share of intake, and
           everything it frees goes to carbs. Off by default, since the normal
           split is the safer one for anyone not deliberately choosing this.
           Below FAT_FLOOR_PER_KG it still applies, with a warning: the automatic
           split will not go that low on its own, but the user may ask for it. */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div className="micro">Low fat</div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3, lineHeight: '16px' }}>
-              Set fat to a fixed amount per {UI.unit()} of bodyweight and put everything that frees into carbs.
+      {group('Low fat', (
+        <>
+          {hint(`Set fat to a fixed amount per ${UI.unit()} of bodyweight and put everything that frees into carbs.`)}
+          {form.lowFat && (
+            <div style={{ marginTop: 12 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Fat g per {UI.unit()}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 88, flexShrink: 0 }}>
+                  <EstimatorInput inputMode="decimal" value={form.fatPerStr ?? ''}
+                    onChange={e => setForm(f => ({ ...f, fatPerStr: e.target.value }))} />
+                </div>
+                {hint(weightKg != null && fatPerKg != null
+                  ? `About ${Math.round(weightKg * fatPerKg)} g of fat a day at your weight.`
+                  : 'Enter a weight above to see what this comes to.', { flex: 1 })}
+              </div>
             </div>
-          </div>
-          <Toggle on={!!form.lowFat} onToggle={() => setForm(f => ({ ...f, lowFat: !f.lowFat }))} />
-        </div>
-        {form.lowFat && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 10 }}>
-            <div style={{ width: 110 }}>
-              <div className="micro" style={{ marginBottom: 4 }}>Fat g per {UI.unit()}</div>
-              <input type="text" inputMode="decimal" value={form.fatPerStr ?? ''}
-                onChange={e => setForm(f => ({ ...f, fatPerStr: e.target.value }))} style={inputStyle} />
+          )}
+          {fatBelowFloor && (
+            <div style={{
+              display: 'flex', gap: 8, marginTop: 10, padding: '8px 10px', borderRadius: 6,
+              background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`,
+              fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px', textShadow: 'none',
+            }}>
+              <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.warn, marginTop: 1 }} />
+              <span>
+                Under {fatPerToDisplay(LB.FAT_FLOOR_PER_KG)} g per {UI.unit()} the automatic split would never go, since fat that low is where hormones start to suffer. Your call, but go in knowing it.
+              </span>
             </div>
-            <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, paddingBottom: 10, lineHeight: '16px' }}>
-              {weightKg != null && fatPerKg != null
-                ? `Puts fat at about ${Math.round(weightKg * fatPerKg)} g a day.`
-                : 'Enter a weight and a factor to see the result.'}
-            </div>
-          </div>
-        )}
-        {fatBelowFloor && (
-          <div style={{
-            display: 'flex', gap: 8, marginTop: 10, padding: '8px 10px', borderRadius: 6,
-            background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`,
-            fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px', textShadow: 'none',
-          }}>
-            <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.warn, marginTop: 1 }} />
-            <span>
-              Under {fatPerToDisplay(LB.FAT_FLOOR_PER_KG)} g per {UI.unit()} the automatic split would never go, since fat that low is where hormones start to suffer. Your call, but go in knowing it.
-            </span>
-          </div>
-        )}
-      </div>
+          )}
+        </>
+      ), null, <Toggle on={!!form.lowFat} onToggle={() => setForm(f => ({ ...f, lowFat: !f.lowFat }))} />)}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
 
       {shown ? (
-        <div style={{ padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Maintenance about {est.tdee} kcal</div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-            {trainingDays} training + {7 - trainingDays} rest averages{' '}
-            <span className="num" style={{ color: UI.ink }}>{weekAvgCalories}</span> kcal a day,{' '}
-            <span className="num" style={{ color: deltaContradictsGoal ? UI.warn : UI.inkSoft }}>{deltaLabel}</span>
+        <Card style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
+            {headlineStat('Maintenance', est.tdee, 'what you burn')}
+            <Hairline vertical style={{ alignSelf: 'stretch' }} />
+            {headlineStat('Your week', weekAvgCalories, deltaLabel,
+              deltaContradictsGoal ? UI.warn : UI.inkSoft)}
           </div>
-          {daySection('training', 'TRAINING DAY')}
-          {daySection('rest', 'REST DAY')}
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
-            {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one: later edits leave it alone, and it holds its value when you change the inputs above."}
-            {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
-          </div>
+          <Hairline style={{ marginBottom: 12 }} />
+          {daySection('training', 'Training day')}
+          {daySection('rest', 'Rest day')}
+          {hint(
+            <>
+              {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one: later edits leave it alone, and it holds its value when you change the inputs above."}
+              {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
+            </>, { marginTop: 12 })}
           {manual && (
             // The one full reset: drops the hand edits and the padlocks
             // together, since a pin that outlived the numbers it was pinning
             // would only surprise the next edit.
             <button onClick={() => { setManual(null); setLocks({ training: {}, rest: {} }); }} style={{
-              marginTop: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+              marginTop: 10, background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
+              color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
             }}>Back to the estimate</button>
           )}
-        </div>
+        </Card>
       ) : (
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
-          Fill in weight, height and year of birth to see an estimate.
-        </div>
+        <Card style={{ padding: 14, marginBottom: 16, textAlign: 'center' }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 16, color: UI.inkGhost }} />
+          {hint('Fill in weight, height and year of birth to see an estimate.', { marginTop: 8 })}
+        </Card>
       )}
 
       <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>Use these numbers</Btn>
@@ -2259,16 +2319,22 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
     onClose();
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  // Same fields, same look and same behaviour as the estimator these numbers
+  // usually arrive from: the two sheets sit one tap apart, so a different input
+  // treatment in each would read as two different screens.
   const num = (k, lbl) => (
     <div style={{ flex: 1 }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{lbl}</div>
-      <input type="text" inputMode="numeric" placeholder="—" value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} />
+      <div className="micro" style={{ marginBottom: 6 }}>{lbl}</div>
+      <EstimatorInput inputMode="numeric" value={form[k]}
+        onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
     </div>
   );
   const section = (suffix, label, cals) => (
     <div style={{ marginBottom: 18 }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}{cals != null ? ` · ${cals} kcal` : ''}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <span className="micro">{label}</span>
+        {cals != null && <span className="num" style={{ fontSize: 13, color: UI.warn }}>{cals} kcal</span>}
+      </div>
       <div style={{ display: 'flex', gap: 8 }}>
         {num(`protein${suffix}`, 'Protein g')}
         {num(`carbs${suffix}`, 'Carbs g')}
@@ -2278,9 +2344,9 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   );
 
   return (
-    <Sheet open={open} onClose={requestClose} title="Macro Targets">
+    <Sheet open={open} onClose={requestClose} title="Macro targets">
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
           Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
@@ -2297,9 +2363,9 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
         <span style={{ flex: 1, textAlign: 'left' }}>Estimate targets for me</span>
         <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
       </button>
-      {section('Training', 'TRAINING DAY', calsTraining)}
-      {section('Rest', 'REST DAY', calsRest)}
-      <Btn onClick={save} style={{ width: '100%' }}>Save Targets</Btn>
+      {section('Training', 'Training day', calsTraining)}
+      {section('Rest', 'Rest day', calsRest)}
+      <Btn onClick={save} style={{ width: '100%' }}>Save targets</Btn>
       <MacroEstimatorSheet open={estimatorOpen} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
         onApply={t => setForm({
           proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
