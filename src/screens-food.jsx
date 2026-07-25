@@ -1262,6 +1262,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // planned cards; patchDaily then folds its macros into the day, since a
   // logged entry counts and a planned one doesn't.
   async function setEntryPlanned(entry, planned) {
+    // Unticking the meal of choice means "not eaten after all", and its
+    // honest inverse is going back to a live budget, not a frozen row. Left as
+    // an ordinary planned entry it would keep claiming the macros it happened
+    // to be worth at the moment it was ticked, while the derived row that
+    // tracks the rest of the day stayed hidden behind it, and it would then
+    // spend that stale budget again through projectedTotals. Dropping the row
+    // brings the live one straight back.
+    if (planned && entry.id === mocEntryId) {
+      setStore(s => {
+        const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
+        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+      });
+      return;
+    }
     // Flipping TO logged claims the day for the tracker. If this is the first
     // logged entry on a day that carries manual Health-tab macros, warn before
     // patchDaily overwrites them, same as a fresh logged add (commitEntries).
@@ -2806,7 +2820,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   );
                                 }) : (showMoc ? null : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />)}
                                 {showMoc && (
-                                  <div data-reorder-ignore="true" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div data-reorder-ignore="true" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    {/* The shared checkbox, not a lookalike: its
+                                        plan-mode gate lives at the entry call site,
+                                        not inside it, so this row can render it
+                                        unconditionally and still look like every
+                                        other tickable row. */}
+                                    <FdCheckbox checked={false} onToggle={confirmMealOfChoice} />
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                       <div className="micro-gold">
                                         Meal of choice{mocWeek.ordinal > 1 ? ` #${mocWeek.ordinal} this week` : ''}
@@ -2822,17 +2842,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                     </div>
                                     <button onClick={() => setMocSheet({ name: mocName || '', hour: mocHour })} aria-label="Edit meal of choice" style={fdIconBtn(30)}>
                                       <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                                    </button>
-                                    {/* Own tick rather than FdCheckbox: that one
-                                        only renders with plan mode on, and this
-                                        has to work either way. */}
-                                    <button onClick={confirmMealOfChoice} disabled={!(mocRemainder && mocRemainder.calories > 0)}
-                                      aria-label="Log the meal of choice" style={{
-                                        ...fdIconBtn(30),
-                                        borderColor: (mocRemainder && mocRemainder.calories > 0) ? 'var(--hair-accent)' : UI.hairStrong,
-                                        color: (mocRemainder && mocRemainder.calories > 0) ? 'var(--accent)' : UI.inkGhost,
-                                      }}>
-                                      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
                                     </button>
                                   </div>
                                 )}
