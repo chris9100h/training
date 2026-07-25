@@ -2899,3 +2899,42 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) TO authenticated;
+
+-- ── Edge Function usage quota (migration 0207) ──────────────────────────────
+-- Per-user, per-day call counter for the food Edge Functions (search-foods,
+-- scan-label, scan-label-claude), which otherwise had auth as their only gate
+-- while fanning out to third-party APIs and a vision model. RLS on with NO
+-- policies (same shape as zane_recipe_shares): reachable only through
+-- bump_api_usage below, which is granted to service_role alone. Advisory: the
+-- Edge Functions fail open if the RPC errors, so the quota can never block
+-- someone from logging food.
+
+CREATE TABLE zane_api_usage (
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  day        date        NOT NULL DEFAULT current_date,
+  kind       text        NOT NULL,              -- 'search' | 'scan'
+  count      integer     NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, day, kind)
+);
+
+ALTER TABLE zane_api_usage ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.bump_api_usage(p_user_id uuid, p_kind text, p_limit integer)
+ RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_count integer;
+BEGIN
+  INSERT INTO public.zane_api_usage (user_id, day, kind, count, updated_at)
+  VALUES (p_user_id, current_date, p_kind, 1, now())
+  ON CONFLICT (user_id, day, kind)
+    DO UPDATE SET count = public.zane_api_usage.count + 1, updated_at = now()
+  RETURNING count INTO v_count;
+  RETURN v_count <= p_limit;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) FROM PUBLIC;
+GRANT  EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) TO service_role;

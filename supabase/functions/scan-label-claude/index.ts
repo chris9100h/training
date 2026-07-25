@@ -36,6 +36,30 @@ const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
 
+const DAILY_SCAN_LIMIT = 60;
+
+// Advisory per-user daily quota (migration 0207). Fails OPEN on purpose: if the
+// RPC errors, times out or the migration has not run yet, the call goes
+// through. A problem with the quota mechanism must never be the reason someone
+// cannot log their food, and the point of it is catching a runaway account, not
+// enforcing a contract.
+async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
+  try {
+    const base = Deno.env.get('SUPABASE_URL') ?? '';
+    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    if (!base || !key) return true;
+    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
+    });
+    if (!r.ok) return true;
+    return (await r.json()) !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 async function resolveUser(req: Request): Promise<string | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
@@ -127,6 +151,9 @@ Deno.serve(async (req) => {
 
   const userId = await resolveUser(req);
   if (!userId) return json({ error: 'unauthorized' }, 401);
+  if (!await withinQuota(userId, 'scan', DAILY_SCAN_LIMIT)) {
+    return json({ error: `That is ${DAILY_SCAN_LIMIT} label scans today, well past normal use. The limit resets tomorrow; add the food manually until then.` }, 429);
+  }
 
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   if (!apiKey) return json({ error: 'Label scanning is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);

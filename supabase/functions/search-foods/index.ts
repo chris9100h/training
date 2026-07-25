@@ -42,6 +42,30 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
+const DAILY_SEARCH_LIMIT = 400;
+
+// Advisory per-user daily quota (migration 0207). Fails OPEN on purpose: if the
+// RPC errors, times out or the migration has not run yet, the call goes
+// through. A problem with the quota mechanism must never be the reason someone
+// cannot log their food, and the point of it is catching a runaway account, not
+// enforcing a contract.
+async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
+  try {
+    const base = Deno.env.get('SUPABASE_URL') ?? '';
+    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    if (!base || !key) return true;
+    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
+    });
+    if (!r.ok) return true;
+    return (await r.json()) !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 async function resolveUser(req: Request): Promise<string | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
@@ -463,6 +487,12 @@ Deno.serve(async (req) => {
   if (!userId) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!await withinQuota(userId, 'search', DAILY_SEARCH_LIMIT)) {
+    return new Response(JSON.stringify({ error: `That is ${DAILY_SEARCH_LIMIT} food searches today, well past normal use. The limit resets tomorrow.` }), {
+      status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 

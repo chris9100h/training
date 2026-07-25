@@ -47,6 +47,7 @@ const PASSTHROUGH = ['zane_schedules', 'zane_sessions'];
 // Deliberately NOT part of a personal data backup.
 const EXCLUDED = {
   zane_app_config: 'admin/global config',
+  zane_api_usage: 'server-side daily call counter for the food edge functions, never read by the app and meaningless once restored',
   zane_feature_map: 'admin feature-map draft/override layer (master content is in code), not per-user data',
   zane_feature_map_published: 'published feature-map layer (mirror of the admin draft), not per-user data',
   zane_feature_grants: 'admin-managed grants',
