@@ -1367,6 +1367,11 @@ function App() {
   // training user promptly. checkSwUpdate above keeps the route guard so
   // routine version bumps never even risk nudging someone mid-workout.
   const checkForceUpdate = useCallbackA(() => {
+    // Skip pre-login: anon has no EXECUTE on this RPC by design (correct —
+    // verified live, matches schema.sql), so polling before phase is 'ready'
+    // just logs a guaranteed permission-denied server-side for no reason.
+    // Nobody's watching for a force-update broadcast before they're signed in.
+    if (phaseRef.current !== 'ready') return;
     LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
       if (error || !data) return;
       let stored = null;
