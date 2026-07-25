@@ -496,6 +496,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // original time-of-day. copyMoveIds are foodLogs ids picked from
   // dayEntries (below); copyMoveMode decides whether the originals stay put
   // (copy) or get removed from curDate (move) once submitted.
+  // "Repeat yesterday": which meal is being carried over and which of its
+  // entries are still ticked. Everything starts ticked, because carrying the
+  // whole meal over is the normal case and unticking the one thing that
+  // changed beats picking the three that didn't.
+  const [repeat, setRepeat] = useStateFd(null); // { catId, label, ids }
   const [copyMoveOpen, setCopyMoveOpen] = useStateFd(false);
   const [copyMoveIds, setCopyMoveIds] = useStateFd([]);
   const [copyMoveTarget, setCopyMoveTarget] = useStateFd('');
@@ -920,13 +925,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
   const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
+    // The totals count logged entries only (a planned meal isn't eaten yet),
+    // but `count` counts every entry including planned ones: it gates the
+    // "Repeat yesterday" offer, and a slot that already holds planned meals is
+    // not an empty slot, even though its totals still read zero.
+    let count = 0;
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
+        count++;
         if (e.planned) continue;
         calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
       }
     }
-    return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
+    return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour, mealCats]);
 
   // Yesterday's entries grouped by meal category, so an empty category can
@@ -947,19 +958,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return out;
   }, [store.foodLogs, curDate, mealCats]);
 
-  // One-tap repeat of yesterday's meal into the same (currently empty) slot
-  // today. Copies at each entry's original time of day, exactly like the
-  // Manage-entries sheet's copy does, just without the four taps it takes to
-  // get there. Always lands as logged, never planned: this is "I ate the same
-  // thing again", and a future date has no yesterday worth copying anyway.
-  async function copyCategoryFromYesterday(cat) {
+  // Repeat yesterday's meal into the same (still empty) slot today. Opens a
+  // picker rather than copying straight away: the near-identical meal is the
+  // common case ("same rice and sauce, different meat"), so the useful shape
+  // is the whole meal pre-ticked with one thing to untick, not a yes/no on a
+  // bare item count.
+  function openRepeatYesterday(cat) {
     const src = prevDayByCategory[cat.id] || [];
     if (!src.length) return;
-    const kcal = Math.round(src.reduce((a, e) => a + (e.calories || 0), 0));
-    if (!await confirm(`${src.length} ${src.length === 1 ? 'entry' : 'entries'} · ${kcal} kcal`, { title: `Copy yesterday's ${cat.label.toLowerCase()}?`, ok: 'Copy', cancel: 'Cancel' })) return;
-    if (!await warnIfOverwritingManualMacros(curDate)) return;
-    const copies = src.map(e => ({
-      ...e, id: LB.uid(), date: curDate, planned: false,
+    setRepeat({ catId: cat.id, label: cat.label, ids: src.map(e => e.id) });
+  }
+  function toggleRepeatId(id) {
+    setRepeat(r => (r ? { ...r, ids: r.ids.includes(id) ? r.ids.filter(x => x !== id) : [...r.ids, id] } : r));
+  }
+  // Derived from prevDayByCategory rather than snapshotted into the state, so
+  // the list can't go stale against the store while the sheet is open.
+  const repeatEntries = repeat ? (prevDayByCategory[repeat.catId] || []) : [];
+  const repeatSelected = repeat ? repeatEntries.filter(e => repeat.ids.includes(e.id)) : [];
+  const repeatTotals = sumTotals(repeatSelected);
+
+  async function submitRepeatYesterday() {
+    if (!repeat || !repeatSelected.length) return;
+    // In Plan Mode this is planning today, not recording it: the copies land
+    // as planned entries to be checked off as they're actually eaten, the same
+    // way the meal template's own auto-fill behaves. Without Plan Mode there
+    // is no planned state to land in, so they're logged outright.
+    const planned = planMode;
+    // Only a LOGGED copy reaches the daily log, so only that case can trample
+    // macros typed into the Health tab (same rule commitEntries follows).
+    if (!planned && !await warnIfOverwritingManualMacros(curDate)) return;
+    const copies = repeatSelected.map(e => ({
+      ...e, id: LB.uid(), date: curDate, planned,
       // A copy is its own entry: it must not inherit a split/merge batch (that
       // would offer to "undo" a split on a different day) or a template slot
       // marker (which would make the auto-fill think the slot is already done).
@@ -970,6 +999,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = [...copies, ...(s.foodLogs || [])];
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
     });
+    setRepeat(null);
   }
 
   // Same category/hour grouping for the Manage-entries picker (see the
@@ -2457,8 +2487,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           slot is empty today and yesterday's is not. Once
                           anything is logged here the button is gone, so the
                           card goes back to being a pure read-only summary. */}
-                      {cat.calories === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
-                        <button className="micro-gold" onClick={() => copyCategoryFromYesterday(cat)} style={{
+                      {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
+                        <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
                           display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
                           padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                         }}>
@@ -2988,6 +3018,51 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
           </div>
         )}
+      </Sheet>
+
+      {/* ── Repeat yesterday's meal, minus whatever changed ────────────────
+          Same tick-list idiom as the Manage-entries sheet below, but pointed
+          at YESTERDAY's entries and pre-ticked: the reason to open this is
+          that today's meal is nearly the same, so the work is unticking the
+          one item that isn't. ── */}
+      <Sheet open={!!repeat} onClose={() => setRepeat(null)} title={repeat ? `Repeat ${repeat.label.toLowerCase()}` : 'Repeat yesterday'} titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+          {planMode
+            ? "From yesterday, landing on today at the same times as planned meals you check off as you eat them."
+            : 'From yesterday, landing on today at the same times.'}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 300, overflowY: 'auto' }}>
+          {repeatEntries.map(e => {
+            const checked = !!repeat && repeat.ids.includes(e.id);
+            return (
+              <button key={e.id} onClick={() => toggleRepeatId(e.id)} style={fdCopyMoveRow(checked)}>
+                <div style={fdCopyMoveCheck(checked)}>
+                  {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{e.foodName}</div>
+                  <span style={fdEntryMeta}>
+                    {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {repeatSelected.length > 0 && (
+          <FdMacroPreview calories={repeatTotals.calories} protein={repeatTotals.protein} carbs={repeatTotals.carbs} fat={repeatTotals.fat}
+            sugar={repeatTotals.sugar} satFat={repeatTotals.satFat} sodiumMg={repeatTotals.sodiumMg} />
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={() => setRepeat(null)} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={submitRepeatYesterday} disabled={!repeatSelected.length} style={{ flex: 2 }}>
+            {repeatSelected.length
+              ? `${planMode ? 'Plan' : 'Add'} ${repeatSelected.length} ${repeatSelected.length === 1 ? 'item' : 'items'}`
+              : 'Nothing picked'}
+          </Btn>
+        </div>
       </Sheet>
 
       {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
