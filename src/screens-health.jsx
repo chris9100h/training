@@ -4279,19 +4279,25 @@ function ExportSheet({ open, onClose, store, userId }) {
               }}>{p.label}</button>
             ))}
           </div>
+          {/* minWidth 0 on both halves is load-bearing: a flex item defaults to
+              min-width auto, and a native date input reports an intrinsic width
+              wide enough that two of them plus the arrow do not fit. Without it
+              neither half can shrink to its share, so the row overflows to the
+              right and the TO field hangs past every other control in the
+              sheet. The arrow keeps its own width instead of absorbing that. */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
               <input type="date" value={from} max={to}
                 onChange={e => e.target.value && setFrom(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
-            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
-            <div style={{ flex: 1 }}>
+            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
               <input type="date" value={to} min={from} max={today}
                 onChange={e => e.target.value && setTo(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
           </div>
           {(() => {
