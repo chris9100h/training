@@ -1143,9 +1143,12 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     // flex Training|Rest override (set from the header), then cycle/week's
     // planned-day assumption (flex defaults to rest).
     const isTraining = LB.isTrainingDayForDate(store, date);
+    // This hands dailyLogAdherence a synthetic literal rather than the row,
+    // so the meal-of-choice flag has to be passed in explicitly: it does not
+    // ride along the way it does for the callers that pass the real log.
     let { adherence, targetsSnap } = dayMode
       ? { adherence: null, targetsSnap: null }
-      : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+      : LB.dailyLogAdherence({ protein, carbs, fat, mealOfChoice: existing?.mealOfChoice }, targets, isTraining);
     // Don't let a macro-less save (incomplete macros / no macro targets) wipe an
     // existing flex day-type override off the log.
     if (!dayMode && flexActive && !targetsSnap) {
@@ -1171,6 +1174,10 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
+      // Rebuilt from scratch rather than spread from existing, so anything
+      // not listed here is dropped: without this line, saving the form on a
+      // marked day unmarks it and the day starts being scored again.
+      mealOfChoice: !!existing?.mealOfChoice,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -2378,7 +2385,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, isStatusDay, weightUnit }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, isStatusDay, mealOfChoiceOrdinal, weightUnit }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -2390,11 +2397,17 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     </div>
   );
   const storedAdh = log?.adherence;
+  // A meal-of-choice day is unscored by design, same as sick/vacation: the
+  // one meal absorbs whatever was left, so a percentage measures nothing.
+  // This also has to suppress the FALLBACK below, not just the stored value,
+  // or the card would helpfully re-derive the score the save path discarded.
+  const isMealOfChoice = !!log?.mealOfChoice;
+  const unscoredDay = isStatusDay || isMealOfChoice;
   // On a sick/vacation day adherence is intentionally nulled at save (no target
   // to hit), so don't recompute it from the raw macros here.
-  const adh = storedAdh != null
+  const adh = (storedAdh != null && !isMealOfChoice)
     ? storedAdh
-    : (!isStatusDay && log && dayTarget ? LB.macroAdherence({ protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget) : null);
+    : (!unscoredDay && log && dayTarget ? LB.macroAdherence({ protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget) : null);
   const showAdh = dayTarget != null || adh != null;
   const isPerfect = adh != null && Math.round(adh) >= 97;
   const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';
@@ -2426,6 +2439,11 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
             <span className={isPerfect ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 30, color: adh != null ? adherenceColor(adh) : UI.inkGhost, fontWeight: 300, lineHeight: 1 }}>{adh != null ? `${adh}%` : '—'}</span>
             {verdict && <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adh), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>{verdict}</span>}
+            {isMealOfChoice && (
+              <span style={{ fontSize: 12, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>
+                MEAL OF CHOICE{mealOfChoiceOrdinal > 1 ? ` #${mealOfChoiceOrdinal}` : ''}
+              </span>
+            )}
             <span style={{ flex: 1 }} />
             <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>macro adherence</span>
           </div>
@@ -2617,6 +2635,10 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
     l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
     (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
+    // A meal-of-choice marker is content in its own right. Without this,
+    // setFlexDayType below DELETES an otherwise-empty row when the day is
+    // set to Rest, silently unmarking it.
+    l.mealOfChoice ||
     (l.coachFields && Object.keys(l.coachFields).length)
   );
   const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
@@ -2651,8 +2673,17 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     const isTraining = type === 'training';
     const dayTarget = LB.dayTargetFromMacros(targets, isTraining);
     const hasMacros = existing && existing.protein != null && existing.carbs != null && existing.fat != null;
-    const adherence = (dayTarget && hasMacros)
-      ? LB.macroAdherence({ protein: existing.protein, carbs: existing.carbs, fat: existing.fat }, dayTarget) : null;
+    // Was calling macroAdherence directly and so honoured no gate at all:
+    // flipping the day type wrote a fresh score onto a day that is meant to
+    // carry none. Route it through dailyLogAdherence, which owns the
+    // meal-of-choice rule, and ask for status separately (status is not on
+    // the row, so it stays a caller concern). targetsSnap is still built
+    // below on purpose: unlike dailyLogAdherence this site persists a
+    // snapshot even for a day with no macros yet, because the dayType has
+    // to survive regardless. That asymmetry is this call site's whole job.
+    const unscored = !!LB.statusModeForDate(store, selectedDate);
+    const adherence = (dayTarget && hasMacros && !unscored)
+      ? LB.dailyLogAdherence(existing, targets, isTraining).adherence : null;
     const targetsSnap = dayTarget ? { ...dayTarget, dayType: type } : { dayType: type };
     const now = new Date().toISOString();
     const log = existing
@@ -3398,7 +3429,12 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       else if (dt === 'rest' && hasSession) newType = 'training';
       if (!newType) return l;
       const target = newType === 'training' ? trainingTarget : restTarget;
-      const adherence = target ? LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, target) : null;
+      // Same hole as setFlexDayType: this rewrote a score onto days that
+      // must not carry one. The flag is on the row so dailyLogAdherence
+      // sees it; status has to be asked for.
+      const unscored = l.mealOfChoice || !!LB.statusModeForDate(store, l.date);
+      const adherence = (target && !unscored)
+        ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
       const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
       changed = true;
       return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
@@ -3607,7 +3643,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
+      mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
     // Targets on top (full width, needs the room for the P/C/F chip row), then
     // Adherence + the macro breakdown paired below it, always full-width as a
     // whole, see fullWidthCardIds.
@@ -3899,7 +3936,8 @@ function HealthClientLogs({ clientStore }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} weightUnit={clientUnit} />,
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
-        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit} />
+        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
+        mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />
     ),
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
@@ -4021,6 +4059,14 @@ function ExportSheet({ open, onClose, store, userId }) {
   const applyPreset = (days) => {
     setFrom(healthShiftISO(today, -(days - 1)));
     setTo(today);
+  };
+
+  // See the FROM/TO row below for why each of these is here.
+  const dateInputStyle = {
+    width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+    colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+    padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+    background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
   };
 
   const logsInRange = () =>
@@ -4279,19 +4325,35 @@ function ExportSheet({ open, onClose, store, userId }) {
               }}>{p.label}</button>
             ))}
           </div>
+          {/* Two native date inputs in one row, which needs both halves of the
+              same fix the rest of the app already applies to them:
+
+              WebkitAppearance none, because iOS keeps a date input at the
+              intrinsic width of its own shadow DOM while the native appearance
+              is on, no matter what width you give it. That is what pushed the
+              TO field out past every other control in this sheet. Water's
+              wtInput and the plan editor's dateInputStyle both carry it, which
+              is why their date rows never had the problem.
+
+              minWidth 0, because a flex item defaults to min-width auto and
+              cannot shrink below its content either way. The arrow keeps its
+              own width rather than absorbing the squeeze.
+
+              colorScheme so the native picker matches the theme, same
+              expression the water screen uses. */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
               <input type="date" value={from} max={to}
                 onChange={e => e.target.value && setFrom(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={dateInputStyle} />
             </div>
-            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
-            <div style={{ flex: 1 }}>
+            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
               <input type="date" value={to} min={from} max={today}
                 onChange={e => e.target.value && setTo(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={dateInputStyle} />
             </div>
           </div>
           {(() => {

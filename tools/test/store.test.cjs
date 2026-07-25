@@ -865,6 +865,120 @@ async function testAsync(name, fn) {
     assert.strictEqual(inc.adherence, null); assert.strictEqual(inc.targetsSnap, null);
   });
 
+  test('dailyLogAdherence: a meal-of-choice day scores null but keeps its snapshot', () => {
+    const log = { protein: 200, carbs: 250, fat: 70 };
+    // Same log, same targets: only the flag differs.
+    assert.strictEqual(LB.dailyLogAdherence(log, MACROS, true).adherence, 100);
+    const moc = LB.dailyLogAdherence({ ...log, mealOfChoice: true }, MACROS, true);
+    assert.strictEqual(moc.adherence, null, 'unscored');
+    // The snapshot must SURVIVE, unlike a status day: a flex plan reads the day
+    // type back out of it, so nulling it would silently flip the day to rest.
+    assert.strictEqual(
+      JSON.stringify(moc.targetsSnap),
+      JSON.stringify({ protein: 200, carbs: 250, fat: 70, calories: 2430, dayType: 'training' }));
+    // Rest day keeps its own snapshot the same way.
+    assert.strictEqual(LB.dailyLogAdherence({ ...log, mealOfChoice: true }, MACROS, false).targetsSnap.dayType, 'rest');
+    // A day that was already off target is equally unscored, not "bad".
+    assert.strictEqual(LB.dailyLogAdherence({ protein: 10, carbs: 900, fat: 200, mealOfChoice: true }, MACROS, true).adherence, null);
+    // No targets at all still wins over the flag: nothing to snapshot either.
+    const noT = LB.dailyLogAdherence({ ...log, mealOfChoice: true }, null, true);
+    assert.strictEqual(noT.adherence, null); assert.strictEqual(noT.targetsSnap, null);
+  });
+
+  test('mealOfChoiceRemainder: what is left to spend, floored at zero', () => {
+    const target = { protein: 200, carbs: 400, fat: 70, calories: 3030 };
+    const r = LB.mealOfChoiceRemainder(target, { protein: 150, carbs: 120, fat: 30 });
+    assert.strictEqual(JSON.stringify(r), JSON.stringify({ protein: 50, carbs: 280, fat: 40, calories: 1680 }));
+    // Calories are DERIVED from the clamped macros, never target minus actual:
+    // 50*4 + 280*4 + 40*9 = 1680, which is what the entry gets written with.
+    assert.strictEqual(r.calories, LB.caloriesFromMacros(r.protein, r.carbs, r.fat));
+    // Already over on one macro clamps that one to 0 without going negative,
+    // and without stealing calories from the others.
+    const over = LB.mealOfChoiceRemainder(target, { protein: 260, carbs: 100, fat: 10 });
+    assert.strictEqual(over.protein, 0);
+    assert.strictEqual(over.carbs, 300);
+    assert.strictEqual(over.calories, LB.caloriesFromMacros(0, 300, 60));
+    // An untouched day leaves the whole target.
+    const empty = LB.mealOfChoiceRemainder(target, { protein: 0, carbs: 0, fat: 0 });
+    assert.strictEqual(JSON.stringify({ p: empty.protein, c: empty.carbs, f: empty.fat }), JSON.stringify({ p: 200, c: 400, f: 70 }));
+    // No target, nothing to spend.
+    assert.strictEqual(LB.mealOfChoiceRemainder(null, { protein: 10, carbs: 10, fat: 10 }), null);
+  });
+
+  test('mealOfChoiceWeekCount: Monday-anchored, ordinal by date', () => {
+    // 2026-07-20 is a Monday, 2026-07-26 the Sunday that closes that week.
+    const logs = [
+      { date: '2026-07-19', mealOfChoice: true },  // Sunday BEFORE, previous week
+      { date: '2026-07-22', mealOfChoice: true },
+      { date: '2026-07-25', mealOfChoice: false }, // marked-false must not count
+      { date: '2026-07-26', mealOfChoice: true },  // Sunday, still this week
+      { date: '2026-07-27', mealOfChoice: true },  // next Monday, next week
+    ];
+    const wed = LB.mealOfChoiceWeekCount(logs, '2026-07-22');
+    assert.strictEqual(wed.weekStart, '2026-07-20');
+    assert.strictEqual(wed.count, 2);
+    assert.strictEqual(wed.ordinal, 1);
+    // Sunday belongs to the week that STARTED six days earlier, not the next one.
+    const sun = LB.mealOfChoiceWeekCount(logs, '2026-07-26');
+    assert.strictEqual(sun.weekStart, '2026-07-20');
+    assert.strictEqual(sun.ordinal, 2, 'second of that week');
+    // A date inside the week that is not itself marked has no ordinal.
+    const thu = LB.mealOfChoiceWeekCount(logs, '2026-07-23');
+    assert.strictEqual(thu.count, 2); assert.strictEqual(thu.ordinal, null);
+    // The next Monday opens a fresh week.
+    assert.strictEqual(LB.mealOfChoiceWeekCount(logs, '2026-07-27').weekStart, '2026-07-27');
+    assert.strictEqual(LB.mealOfChoiceWeekCount(logs, '2026-07-27').count, 1);
+    assert.strictEqual(LB.mealOfChoiceWeekCount([], '2026-07-22').count, 0);
+  });
+
+  test('withMealOfChoiceNote: owns one line, never the user\'s text', () => {
+    // Empty note gets just the line.
+    assert.strictEqual(LB.withMealOfChoiceNote(null, 'Pizza'), 'Meal of choice: Pizza');
+    // Existing text is preserved and stays put; ours is appended.
+    const withUser = LB.withMealOfChoiceNote('Slept badly\nSore knee', 'Pizza');
+    assert.strictEqual(withUser, 'Slept badly\nSore knee\nMeal of choice: Pizza');
+    // Rename replaces IN PLACE, so the user's lines never shuffle.
+    const mid = LB.withMealOfChoiceNote('before\nMeal of choice: Pizza\nafter', 'Burger');
+    assert.strictEqual(mid, 'before\nMeal of choice: Burger\nafter');
+    // Idempotent: setting the same name twice must not duplicate the line.
+    assert.strictEqual(LB.withMealOfChoiceNote(withUser, 'Pizza'), withUser);
+    // No name still tells the coach what happened.
+    assert.strictEqual(LB.withMealOfChoiceNote(null, ''), 'Meal of choice');
+    // Clearing removes only our line, and returns null once nothing is left
+    // (matching the offPlanNote.trim() || null convention at save time).
+    assert.strictEqual(LB.withMealOfChoiceNote(mid, null), 'before\nafter');
+    assert.strictEqual(LB.withMealOfChoiceNote('Meal of choice: Pizza', null), null);
+    // An unrelated note is untouched by a clear.
+    assert.strictEqual(LB.withMealOfChoiceNote('Birthday cake', null), 'Birthday cake');
+    // Reading the name back, and degrading gracefully once it is hand-edited away.
+    assert.strictEqual(LB.mealOfChoiceNoteName(withUser), 'Pizza');
+    assert.strictEqual(LB.mealOfChoiceNoteName('Meal of choice'), null);
+    assert.strictEqual(LB.mealOfChoiceNoteName('Slept badly'), null);
+  });
+
+  test('statusModeForDate: cache for today, intervals for everything else', () => {
+    const today = LB.todayISO();
+    const state = {
+      statusMode: 'sick',
+      statusPeriods: [
+        { mode: 'vacation', startedAt: '2026-06-01T00:00:00.000Z', endedAt: '2026-06-09T00:00:00.000Z' },
+        { mode: 'deload', startedAt: '2026-05-01T00:00:00.000Z', endedAt: null },
+      ],
+    };
+    // Today answers from the live cache: an optimistic period row may not have
+    // landed yet, which is why the inline copies short-circuit the same way.
+    assert.strictEqual(LB.statusModeForDate(state, today), 'sick');
+    assert.strictEqual(LB.statusModeForDate({ ...state, statusMode: null }, today), null);
+    // A past date inside a closed period reports that period's mode.
+    assert.strictEqual(LB.statusModeForDate(state, '2026-06-05'), 'vacation');
+    // Outside every period, nothing.
+    assert.strictEqual(LB.statusModeForDate(state, '2026-04-01'), null);
+    // An open period covers every date from its start onwards.
+    assert.strictEqual(LB.statusModeForDate({ statusPeriods: [state.statusPeriods[1]] }, '2026-05-20'), 'deload');
+    assert.strictEqual(LB.statusModeForDate({ statusPeriods: [] }, '2026-05-20'), null);
+    assert.strictEqual(LB.statusModeForDate(state, null), null);
+  });
+
   test('dailyLogsWeekPrefill: today weight + week sum/averages', () => {
     const today = LB.todayISO(); // weight_today is sourced from TODAY's log
     const logs = [

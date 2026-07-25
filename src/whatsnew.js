@@ -17,6 +17,19 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.666',
+    date: '2026-07-25',
+    title: 'Stop guessing your macros 🧮',
+    items: [
+      "🧮 The big one: the app works out your macro targets now. Health → the DAILY TARGETS row → SET → \"Estimate targets for me\". It already knows your bodyweight and how often you actually trained the last four weeks, so it only asks for what it can't know: height, year of birth, sex, and how active you are outside the gym. Out comes a training day and a rest day target. It fills the fields in for you, you still hit save, so nothing changes behind your back.",
+      "🎚️ And the estimate argues back. Slide how hard you want to cycle between training and rest days (all the way right feeds both exactly the same, and your weekly total never moves either way). Type over any number and the other two rebalance to keep that day's calories. Already made up your mind about protein? Tap its padlock and later edits leave it alone. There's a low fat option too, plus a line telling you how far your week actually sits above or below maintenance.",
+      "🔁 Repeat yesterday. Same breakfast every day? An empty meal card offers it whenever yesterday's wasn't empty. You see exactly what's coming over and untick anything that changed: rice and sauce yes, the chicken no. In Plan Mode it lands as planned, not logged.",
+      "🧂 Sugar, saturated fat and sodium. Read off labels and databases alongside your macros now, per food and per day, tucked away under the totals until you actually want to look. They stay out of your adherence score, they're there to be seen.",
+      "⏰ Meal times are yours now. Breakfast at 04:00, dinner at 22:00, whatever your day actually looks like. Settings → Health → Food → Meal times.",
+      "✨ Plus: your real food entries export as a spreadsheet (Health → the export icon), a barcode that comes up empty now offers the label scanner instead of a shrug, and the thin outlines around cards and rows stopped dropping an edge here and there.",
+    ],
+  },
+  {
     id: 'v2.664',
     date: '2026-07-24',
     title: "Today's greatest hits 🎶",
