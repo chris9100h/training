@@ -2250,6 +2250,9 @@ CREATE TABLE zane_foods (
   carbs_per_100g    numeric,
   fat_per_100g      numeric,
   fiber_per_100g    numeric,
+  sugar_per_100g     numeric,                             -- 0204
+  sat_fat_per_100g   numeric,                             -- 0204
+  sodium_mg_per_100g numeric,                             -- 0204, milligrams (OFF reports grams, the Edge Function converts)
   serving_size_g    numeric,
   serving_label     text,
   raw               jsonb,
@@ -2279,6 +2282,9 @@ CREATE TABLE zane_food_logs (
   carbs        numeric     NOT NULL,
   fat          numeric     NOT NULL,
   fiber        numeric,
+  sugar        numeric,                                  -- 0204
+  sat_fat      numeric,                                  -- 0204
+  sodium_mg    numeric,                                  -- 0204, milligrams
   recipe_items jsonb,                                    -- ingredient snapshot for a source:'recipe' entry, null otherwise
   -- Migration 0194: forward reference to zane_food_recipes, which is defined
   -- further below (this table predates it, migration 0186 vs. 0187). Harmless
@@ -2324,6 +2330,9 @@ CREATE TABLE zane_food_favorites (
   carbs       numeric     NOT NULL,
   fat         numeric     NOT NULL,
   fiber       numeric,
+  sugar       numeric,                                -- 0204
+  sat_fat     numeric,                                -- 0204
+  sodium_mg   numeric,                                -- 0204, milligrams
   created_at  timestamptz NOT NULL DEFAULT now(),
   units       jsonb       NOT NULL DEFAULT '[]'       -- [{ label, grams }, ...], optional package/unit sizes
 );
@@ -2376,6 +2385,9 @@ CREATE TABLE zane_food_template_slots (
   carbs        numeric     NOT NULL,
   fat          numeric     NOT NULL,
   fiber        numeric,
+  sugar        numeric,                               -- 0204
+  sat_fat      numeric,                               -- 0204
+  sodium_mg    numeric,                               -- 0204, milligrams
   recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
   recipe_id    text,                                  -- soft ref to the source recipe (no FK)
   logged_total_portions integer,                      -- recipe batch total, recipe slots only

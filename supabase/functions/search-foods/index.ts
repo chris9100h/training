@@ -78,6 +78,12 @@ interface FoodResult {
   carbsPer100g: number | null;
   fatPer100g: number | null;
   fiberPer100g: number | null;
+  // Migration 0204. Sodium in MILLIGRAMS, unlike Open Food Facts, which
+  // reports it in grams: converted at the mapping boundary so everything
+  // downstream (cache row, log entry, UI) speaks one unit.
+  sugarPer100g: number | null;
+  satFatPer100g: number | null;
+  sodiumMgPer100g: number | null;
   servingSizeG: number | null;
   servingLabel: string | null;
   cached?: boolean; // search results only, marks a hit already verified/cached in zane_foods
@@ -123,9 +129,21 @@ function normalizeOffProduct(p: any): FoodResult | null {
     kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
     proteinPer100g, carbsPer100g, fatPer100g,
     fiberPer100g: offNum(n, 'fiber_100g'),
+    sugarPer100g: offNum(n, 'sugars_100g'),
+    satFatPer100g: offNum(n, 'saturated-fat_100g'),
+    // OFF reports sodium in grams. salt_100g is the more widely populated
+    // field on European products, so fall back to it via the standard
+    // salt = sodium x 2.5 relation rather than dropping the value.
+    sodiumMgPer100g: gToMg(offNum(n, 'sodium_100g') ?? saltToSodiumG(offNum(n, 'salt_100g'))),
     servingSizeG: typeof p.serving_quantity === 'number' ? p.serving_quantity : null,
     servingLabel: p.serving_size ?? null,
   };
+}
+function gToMg(g: number | null): number | null {
+  return g == null ? null : Math.round(g * 1000 * 10) / 10;
+}
+function saltToSodiumG(salt: number | null): number | null {
+  return salt == null ? null : salt / 2.5;
 }
 
 async function searchOff(query: string): Promise<FoodResult[]> {
@@ -181,6 +199,11 @@ function normalizeUsdaFood(f: any): FoodResult | null {
     kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
     proteinPer100g, carbsPer100g, fatPer100g,
     fiberPer100g: usdaNum(nutrients, '291'),
+    // 269 total sugars, 606 total saturated fatty acids, 307 sodium. USDA
+    // already reports sodium in mg, so no conversion here (unlike OFF).
+    sugarPer100g: usdaNum(nutrients, '269'),
+    satFatPer100g: usdaNum(nutrients, '606'),
+    sodiumMgPer100g: usdaNum(nutrients, '307'),
     servingSizeG: typeof f.servingSize === 'number' && f.servingSizeUnit === 'g' ? f.servingSize : null,
     servingLabel: f.householdServingFullText ?? null,
   };
@@ -335,16 +358,28 @@ function foodRowToResult(row: any): FoodResult {
     // back consistent instead of silently serving a stale stored figure.
     kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
     proteinPer100g, carbsPer100g, fatPer100g,
-    fiberPer100g: num(row.fiber_per_100g), servingSizeG: num(row.serving_size_g),
+    fiberPer100g: num(row.fiber_per_100g),
+    // Null on every row cached before migration 0204, which is the honest
+    // answer: the values were never fetched, and re-deriving them is
+    // impossible without going back upstream.
+    sugarPer100g: num(row.sugar_per_100g),
+    satFatPer100g: num(row.sat_fat_per_100g),
+    sodiumMgPer100g: num(row.sodium_mg_per_100g),
+    servingSizeG: num(row.serving_size_g),
     servingLabel: row.serving_label ?? null,
   };
 }
 
-async function fetchCachedFood(id: string): Promise<FoodResult | null> {
+// deno-lint-ignore no-explicit-any
+async function fetchCachedFoodRow(id: string): Promise<any | null> {
   const r = await dbFetch(`zane_foods?id=eq.${encodeURIComponent(id)}&select=*`).catch(() => null);
   if (!r?.ok) return null;
   const rows = await r.json().catch(() => null);
-  const row = Array.isArray(rows) ? rows[0] : null;
+  return Array.isArray(rows) ? (rows[0] ?? null) : null;
+}
+
+async function fetchCachedFood(id: string): Promise<FoodResult | null> {
+  const row = await fetchCachedFoodRow(id);
   return row ? foodRowToResult(row) : null;
 }
 
@@ -370,8 +405,23 @@ async function resolveFood(source: 'off' | 'usda', sourceId: string): Promise<{ 
 // Add a food to the shared cache, called when it is actually logged. Re-fetches
 // server-side by id (never trusts client-submitted numbers) and upserts. No-op
 // if the food is already cached, or (USDA) the key is unset.
+// Refreshes instead of no-opping when a cached row predates migration 0204
+// (all three of sugar/sat fat/sodium null): those rows were cached before the
+// values were ever read, so the foods people actually use fill themselves in
+// as they get logged again, without a backfill job. Bounded by cached_at so a
+// food whose source genuinely reports none of the three re-checks at most
+// weekly rather than on every single log.
+const NUTRIENT_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+// deno-lint-ignore no-explicit-any
+function needsNutrientRefresh(row: any): boolean {
+  if (row.sugar_per_100g != null || row.sat_fat_per_100g != null || row.sodium_mg_per_100g != null) return false;
+  const cachedAt = Date.parse(row.cached_at ?? '');
+  return !Number.isFinite(cachedAt) || (Date.now() - cachedAt) > NUTRIENT_REFRESH_MS;
+}
+
 async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void> {
-  if (await fetchCachedFood(`${source}:${sourceId}`)) return;
+  const existing = await fetchCachedFoodRow(`${source}:${sourceId}`);
+  if (existing && !needsNutrientRefresh(existing)) return;
   if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return;
   const food = source === 'off'
     ? await lookupOffBarcode(sourceId)
@@ -388,8 +438,15 @@ async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void
     carbs_per_100g: food.carbsPer100g,
     fat_per_100g: food.fatPer100g,
     fiber_per_100g: food.fiberPer100g,
+    sugar_per_100g: food.sugarPer100g,
+    sat_fat_per_100g: food.satFatPer100g,
+    sodium_mg_per_100g: food.sodiumMgPer100g,
     serving_size_g: food.servingSizeG,
     serving_label: food.servingLabel,
+    // The normalized result, which is what the column was always documented to
+    // hold and never actually got. Keeps a record of exactly what the mapping
+    // produced, so a later mapping fix can be told apart from a source change.
+    raw: food,
     cached_at: new Date().toISOString(),
   };
   await dbFetch('zane_foods', {

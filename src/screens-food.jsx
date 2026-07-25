@@ -59,10 +59,16 @@ function fdScaleEntry(e, scale) {
     quantityG: sc(e.quantityG), calories: sc(e.calories),
     protein: sc1(e.protein), carbs: sc1(e.carbs), fat: sc1(e.fat),
     fiber: e.fiber != null ? sc1(e.fiber) : null,
+    sugar: e.sugar != null ? sc1(e.sugar) : null,
+    satFat: e.satFat != null ? sc1(e.satFat) : null,
+    sodiumMg: e.sodiumMg != null ? sc(e.sodiumMg) : null,
     recipeItems: e.recipeItems ? e.recipeItems.map(ri => ({
       ...ri, quantityG: sc(ri.quantityG), calories: sc(ri.calories),
       protein: sc1(ri.protein), carbs: sc1(ri.carbs), fat: sc1(ri.fat),
       fiber: ri.fiber != null ? sc1(ri.fiber) : null,
+      sugar: ri.sugar != null ? sc1(ri.sugar) : null,
+      satFat: ri.satFat != null ? sc1(ri.satFat) : null,
+      sodiumMg: ri.sodiumMg != null ? sc(ri.sodiumMg) : null,
     })) : null,
   };
 }
@@ -199,7 +205,8 @@ function fdMaterializeSlotEntry(slot, dateISO) {
     id: `pl_${dateISO}_${slot.id}`, date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
     foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null,
     quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
-    fiber: slot.fiber ?? null, recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
+    fiber: slot.fiber ?? null, sugar: slot.sugar ?? null, satFat: slot.satFat ?? null, sodiumMg: slot.sodiumMg ?? null,
+    recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
     loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
     createdAt: new Date().toISOString(),
   };
@@ -352,6 +359,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
+  // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
+  const [extrasOpen, setExtrasOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -456,6 +465,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [customC, setCustomC] = useStateFd('');
   const [customF, setCustomF] = useStateFd('');
   const [customFib, setCustomFib] = useStateFd('');
+  // Migration 0204 extras, all optional and collapsed behind fdExtrasOpen: they
+  // never enter the calorie math, so an empty field means 'unknown', not zero.
+  const [customSugar, setCustomSugar] = useStateFd('');
+  const [customSatFat, setCustomSatFat] = useStateFd('');
+  const [customSodium, setCustomSodium] = useStateFd('');
+  const [customExtrasOpen, setCustomExtrasOpen] = useStateFd(false);
   // Calories, same "derive from macros unless overridden" rule as
   // kcal100Str above: auto-follows protein/carbs/fat (matching how the
   // rest of the app derives calories, e.g. MacroTargetSheet) until the
@@ -798,6 +813,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const recipeItems = entries.map(e => ({
       foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
       protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
+      sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
     }));
     const merged = {
       id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
@@ -806,6 +822,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
       protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
       fiber: hasFiber ? fdRound1(sum('fiber')) : null,
+      sugar: entries.some(e => e.sugar != null) ? fdRound1(sum('sugar')) : null,
+      satFat: entries.some(e => e.satFat != null) ? fdRound1(sum('satFat')) : null,
+      sodiumMg: entries.some(e => e.sodiumMg != null) ? Math.round(sum('sodiumMg')) : null,
       recipeItems, loggedUnit: null,
       // A block mixing planned and logged items is an edge case; conservative
       // default (same bias warnIfOverwritingManualMacros uses elsewhere):
@@ -824,7 +843,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             items: entries.map(e => ({
               foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
               quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
-              fiber: e.fiber ?? null,
+              fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
             })),
             portions: 1, createdAt: now, updatedAt: now,
           }, ...(s.foodRecipes || [])]
@@ -850,8 +869,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     protein: entries.reduce((a, e) => a + (e.protein || 0), 0),
     carbs: entries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: entries.reduce((a, e) => a + (e.fat || 0), 0),
+    // Migration 0204 extras. Summed only over the entries that actually carry
+    // a value, and null when none of them does: a day mixing foods that report
+    // sodium with foods that do not must read as a partial figure, never as a
+    // confident total, and a day made entirely of pre-0204 entries must show
+    // nothing at all instead of a row of zeros.
+    ...fdSumExtras(entries),
   });
   const dayTotals = useMemoFd(() => sumTotals(loggedEntries), [loggedEntries]);
+  const dayHasExtras = dayTotals.sugar != null || dayTotals.satFat != null || dayTotals.sodiumMg != null;
   // Planning aid: where the day is headed if every planned entry gets eaten
   // (logged + planned). Only shown when plan mode is on and the day actually
   // has planned entries, kept strictly separate from dayTotals above so the
@@ -1377,6 +1403,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return;
     }
     const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    // Migration 0204 extras, read off the same panel (sugar and saturated fat
+    // as their own sub-lines, sodium already converted to mg by the scanner).
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
     if (cal == null && p == null && c == null && f == null) {
       setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
       return;
@@ -1390,9 +1419,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // instead, same rule the search-foods edge function applies to every DB
     // result, so a scanned label reports calories the same consistent way.
     const per100 = (label.basis === '100g' || label.basis === '100ml')
-      ? { p, c, f, fib }
+      ? { p, c, f, fib, sug, sat, sod }
       : (label.serving_size_g > 0)
-        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
         : null;
 
     if (per100) {
@@ -1402,6 +1435,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         name, brand: label.brand || null,
         proteinPer100g: per100.p, carbsPer100g: per100.c,
         fatPer100g: per100.f, fiberPer100g: per100.fib,
+        sugarPer100g: per100.sug, satFatPer100g: per100.sat, sodiumMgPer100g: per100.sod,
         servingSizeG: label.serving_size_g > 0 ? label.serving_size_g : null,
         servingLabel: label.serving_label || null,
       });
@@ -1429,6 +1463,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setCustomC(c != null ? String(Math.round(c)) : '');
     setCustomF(f != null ? String(Math.round(f)) : '');
     setCustomFib(fib != null ? String(Math.round(fib)) : '');
+    setCustomSugar(sug != null ? String(fdRound1(sug)) : '');
+    setCustomSatFat(sat != null ? String(fdRound1(sat)) : '');
+    setCustomSodium(sod != null ? String(Math.round(sod)) : '');
+    setCustomExtrasOpen(sug != null || sat != null || sod != null);
     setCustomOpen(true);
   }
 
@@ -1461,6 +1499,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       proteinPer100g: item.protein * per100,
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
+      sugarPer100g: item.sugar != null ? item.sugar * per100 : null,
+      satFatPer100g: item.satFat != null ? item.satFat * per100 : null,
+      sodiumMgPer100g: item.sodiumMg != null ? item.sodiumMg * per100 : null,
       servingSizeG: null, servingLabel: null,
       // zane_food_logs never stores the full units picker list (see
       // matchingFavorite); a favorite matching this same name still offers
@@ -1516,6 +1557,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         proteinPer100g: l.protein * per100,
         carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
         fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
+        // Migration 0204 extras, reconstructed the same way. Absent on
+        // anything logged before those columns existed, which stays null
+        // rather than becoming a fabricated zero.
+        sugarPer100g: l.sugar != null ? l.sugar * per100 : null,
+        satFatPer100g: l.satFat != null ? l.satFat * per100 : null,
+        sodiumMgPer100g: l.sodiumMg != null ? l.sodiumMg * per100 : null,
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
@@ -1561,7 +1608,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const calories = custom
       ? Math.round((fdNum(kcal100Str) || 0) * factor)
       : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0);
-    return { calories, protein, carbs, fat, fiber };
+    // Migration 0204 extras. Scaled by the same factor, straight off the food
+    // (never user-editable like P/C/F: they play no part in the calorie math,
+    // so there is nothing to correct here). null stays null, since "the source
+    // does not report it" must not collapse into a confident zero.
+    const sc1 = (v) => (v == null ? null : fdRound1(v * factor));
+    const sugar = sc1(pendingFood.sugarPer100g);
+    const satFat = sc1(pendingFood.satFatPer100g);
+    const sodiumMg = pendingFood.sodiumMgPer100g == null ? null : Math.round(pendingFood.sodiumMgPer100g * factor);
+    return { calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg };
   }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
@@ -1617,7 +1672,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // openEditEntry), so "anything typed" is a safe dirty check with no
   // false positives.
   async function requestCloseCustomSheet() {
-    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim();
+    const dirty = customName.trim() || customG.trim() || customCal.trim() || customP.trim() || customC.trim() || customF.trim() || customFib.trim()
+      || customSugar.trim() || customSatFat.trim() || customSodium.trim();
     if (dirty && !await confirm("This item won't be saved.", { title: 'Discard item?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     closeCustomSheet();
   }
@@ -1640,6 +1696,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       source: custom ? 'custom' : pendingFood.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
       // The exact unit this entry was logged in (e.g. "Pc"), so a later
       // "count" view (the split sheet) reads back what was actually used
       // instead of guessing via a matching favorite's first unit.
@@ -1658,6 +1715,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodId: null, foodName: name, brand: null, source: 'custom',
       quantityG: g != null ? g : 100, calories: Math.round(cal), protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdNum(customFib) : null,
+      sugar: customSugar !== '' ? fdNum(customSugar) : null,
+      satFat: customSatFat !== '' ? fdNum(customSatFat) : null,
+      sodiumMg: customSodium !== '' ? fdNum(customSodium) : null,
       createdAt: new Date().toISOString(),
     };
   }
@@ -1692,6 +1752,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         id: LB.uid(), foodId: entry.foodId, foodName: entry.foodName, brand: entry.brand,
         source: entry.source, quantityG: entry.quantityG, calories: entry.calories,
         protein: entry.protein, carbs: entry.carbs, fat: entry.fat, fiber: entry.fiber,
+        sugar: entry.sugar ?? null, satFat: entry.satFat ?? null, sodiumMg: entry.sodiumMg ?? null,
         createdAt: new Date().toISOString(),
       };
       // foodFavorites.food_id is a real FK into zane_foods, but that row is
@@ -1799,6 +1860,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   function resetCustomForm() {
     setCustomName(''); setCustomG(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
+    setCustomSugar(''); setCustomSatFat(''); setCustomSodium(''); setCustomExtrasOpen(false);
     setCustomCal(''); setCustomCalTouched(false);
     setFavedId(null);
   }
@@ -1930,6 +1992,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         carbs: (i.carbs || 0) * perTotal,
         fat: (i.fat || 0) * perTotal,
         fiber: i.fiber != null ? i.fiber * perTotal : null,
+        sugar: i.sugar != null ? i.sugar * perTotal : null,
+        satFat: i.satFat != null ? i.satFat * perTotal : null,
+        sodiumMg: i.sodiumMg != null ? i.sodiumMg * perTotal : null,
       })) };
     })() : recipe;
     setEditingEntry(entry);
@@ -1973,6 +2038,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
       protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
       fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
     }));
     const built = {
       foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
@@ -1998,6 +2066,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+      // Migration 0204 extras: summed only over the ingredients that report
+      // them, and left null when none does, so a recipe built from foods
+      // without these values does not log a fabricated zero.
+      sugar: items.some(i => i.sugar != null) ? fdRound1(sum('sugar') * scale) : null,
+      satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
+      sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
       recipeItems,
     };
     // editingEntry (see openEditRecipeEntry) updates the existing row by id
@@ -2271,6 +2345,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
                 projected={planMode && plannedEntries.length ? projectedTotals : null} />
             </BracketFrame>
+
+            {/* Sugar / saturated fat / sodium for the day (migration 0204).
+                Deliberately OUTSIDE the hero frame and folded away: they are
+                not scored, have no target, and the hero's job is the four
+                numbers that do drive adherence. Hidden entirely on a day where
+                nothing reports them (everything logged before 0204). */}
+            {dayHasExtras && (
+              <div>
+                <FdExtrasToggle open={extrasOpen} onToggle={() => setExtrasOpen(o => !o)} style={{ marginBottom: extrasOpen ? 8 : 0 }} />
+                {extrasOpen && (
+                  <>
+                    <FdExtrasRow sugar={dayTotals.sugar} satFat={dayTotals.satFat} sodiumMg={dayTotals.sodiumMg} />
+                    {dayTotals.extrasPartial && (
+                      <div className="micro" style={{ marginTop: 6, lineHeight: 1.5 }}>
+                        Partial: some of today's entries carry no value for these.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {planMode && (
               <button onClick={() => setTemplateOpen(true)} style={fdTemplateBtn}>
@@ -2728,7 +2823,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {qtyPreview && (
-              <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat} />
+              <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat}
+                sugar={qtyPreview.sugar} satFat={qtyPreview.satFat} sodiumMg={qtyPreview.sodiumMg} />
             )}
             <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
@@ -2781,9 +2877,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <input value={customF} onChange={e => setCustomF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
         </div>
-        <Field label="Fiber (g, optional)" style={{ marginBottom: 16 }}>
+        <Field label="Fiber (g, optional)" style={{ marginBottom: 12 }}>
           <input value={customFib} onChange={e => setCustomFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
+        {/* Sugar/saturated fat/sodium (migration 0204). Collapsed by default:
+            they are optional, play no part in the calorie math, and the form
+            already asks for six numbers. A label scan that read them opens
+            this block prefilled, so the values are visible rather than
+            hidden behind a chevron the user never taps. */}
+        <FdExtrasToggle open={customExtrasOpen} onToggle={() => setCustomExtrasOpen(o => !o)} />
+        {customExtrasOpen && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <Field label="Sugar (g)" style={{ flex: 1 }}>
+              <input value={customSugar} onChange={e => setCustomSugar(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+            </Field>
+            <Field label="Sat. fat (g)" style={{ flex: 1 }}>
+              <input value={customSatFat} onChange={e => setCustomSatFat(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+            </Field>
+            <Field label="Sodium (mg)" style={{ flex: 1 }}>
+              <input value={customSodium} onChange={e => setCustomSodium(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="mg" style={fdInputStyle} />
+            </Field>
+          </div>
+        )}
         <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
           <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
           {favedId ? 'Saved to favorites' : 'Save as favorite'}
@@ -3185,6 +3300,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 // preview). netCarbs (settings.netCarbs, passed by each caller) decides
 // whether fiber is subtracted from carbs, same rule every other
 // caloriesFromMacros call in this file follows.
+// Sums sugar/satFat/sodiumMg across entries, keeping "unknown" distinct from
+// zero: a key is null unless at least one entry reports it, and `partial` says
+// whether some entries in the day were missing the value, so the UI can label
+// the figure as incomplete rather than quietly understating it.
+function fdSumExtras(entries) {
+  const out = { sugar: null, satFat: null, sodiumMg: null, extrasPartial: false };
+  ['sugar', 'satFat', 'sodiumMg'].forEach(k => {
+    const known = entries.filter(e => e[k] != null);
+    if (!known.length) return;
+    out[k] = fdRound1(known.reduce((a, e) => a + e[k], 0));
+    if (known.length < entries.length) out.extrasPartial = true;
+  });
+  return out;
+}
 function fdRecipeItemsCalories(items, netCarbs) {
   return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0), 0));
 }
@@ -3230,6 +3359,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
   function adopt() {
     const now = new Date().toISOString();
     const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const numOrNull = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
     setStore(s => {
       if (!s) return s;
       const names = new Set((s.foodRecipes || []).map(r => r.name));
@@ -3249,6 +3379,10 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           calories: Math.round(num(i.calories)),
           protein: num(i.protein), carbs: num(i.carbs), fat: num(i.fat),
           fiber: i.fiber != null && Number.isFinite(Number(i.fiber)) ? Number(i.fiber) : null,
+          // Migration 0204 extras, whitelisted like everything else here: the
+          // snapshot is another user's jsonb, so nothing is spread blindly.
+          // Absent on anything shared before 0204, which stays null.
+          sugar: numOrNull(i.sugar), satFat: numOrNull(i.satFat), sodiumMg: numOrNull(i.sodiumMg),
         })),
         createdAt: now, updatedAt: now,
       };
@@ -3514,6 +3648,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     cal: q ? (m.calories || 0) / q * 100 : 0, p: q ? (m.protein || 0) / q * 100 : 0,
     c: q ? (m.carbs || 0) / q * 100 : 0, f: q ? (m.fat || 0) / q * 100 : 0,
     fib: (m.fiber != null && q) ? m.fiber / q * 100 : null,
+    sug: (m.sugar != null && q) ? m.sugar / q * 100 : null,
+    sat: (m.satFat != null && q) ? m.satFat / q * 100 : null,
+    sod: (m.sodiumMg != null && q) ? m.sodiumMg / q * 100 : null,
   });
   function openAddFood(fav) {
     const q = fav.quantityG || 100;
@@ -3550,7 +3687,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     const d = {
       id: null, kind: 'food', foodId: r.sourceId ? `${r.source}:${r.sourceId}` : null,
       foodName: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId, fromCache: !!r.cached,
-      per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null },
+      per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null,
+        sug: r.sugarPer100g ?? null, sat: r.satFatPer100g ?? null, sod: r.sodiumMgPer100g ?? null },
       gramsStr: r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100',
       hour: 8, dayType: 'any',
     };
@@ -3602,14 +3740,19 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       return;
     }
     const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
     if (cal == null && p == null && c == null && f == null) {
       setPickerLabelError('Could not read the values. Try a clearer photo.');
       return;
     }
     const per100 = (label.basis === '100g' || label.basis === '100ml')
-      ? { p, c, f, fib }
+      ? { p, c, f, fib, sug, sat, sod }
       : (label.serving_size_g > 0)
-        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
         : null;
     if (!per100) {
       setPickerLabelError('Could not tell the portion size from this label. Try a photo that shows the serving size, or use Search instead.');
@@ -3619,7 +3762,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     const d = {
       id: null, kind: 'food', foodId: null,
       foodName: label.name || '', brand: label.brand || null, source: 'custom',
-      per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null },
+      per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null,
+        sug: per100.sug ?? null, sat: per100.sat ?? null, sod: per100.sod ?? null },
       gramsStr: label.serving_size_g > 0 ? String(Math.round(label.serving_size_g)) : '100',
       hour: 8, dayType: 'any',
     };
@@ -3688,6 +3832,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         quantityG: g, calories: Math.round(draft.per100.cal * sc), protein: fdRound1(draft.per100.p * sc),
         carbs: fdRound1(draft.per100.c * sc), fat: fdRound1(draft.per100.f * sc),
         fiber: draft.per100.fib != null ? fdRound1(draft.per100.fib * sc) : null,
+        sugar: draft.per100.sug != null ? fdRound1(draft.per100.sug * sc) : null,
+        satFat: draft.per100.sat != null ? fdRound1(draft.per100.sat * sc) : null,
+        sodiumMg: draft.per100.sod != null ? Math.round(draft.per100.sod * sc) : null,
         recipeItems: null, recipeId: null, loggedTotalPortions: null,
       };
     }
@@ -3702,6 +3849,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
         protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
         fat: fdRound1((i.fat || 0) * scale), fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+        sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
+        satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
+        sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
       }));
       return {
         foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
@@ -3709,6 +3859,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
         carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
         fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+        sugar: items.some(i => i.sugar != null) ? fdRound1(sum('sugar') * scale) : null,
+        satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
+        sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
         recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
       };
     }
@@ -4222,6 +4375,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
       carbs: fdRound1((i.carbs || 0) * factor),
       fat: fdRound1((i.fat || 0) * factor),
       fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
     }));
     closeEditItem();
   }
@@ -4411,7 +4567,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setQtyItem({
       name: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId,
       kcalPer100g: r.kcalPer100g, proteinPer100g: r.proteinPer100g, carbsPer100g: r.carbsPer100g,
-      fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g, fromCache: !!r.cached, units: null,
+      fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g,
+      sugarPer100g: r.sugarPer100g ?? null, satFatPer100g: r.satFatPer100g ?? null, sodiumMgPer100g: r.sodiumMgPer100g ?? null,
+      fromCache: !!r.cached, units: null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
     setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
@@ -4428,6 +4586,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       kcalPer100g: (LB.caloriesFromMacros(l.protein, l.carbs, l.fat, netCarbs ? l.fiber : null) || 0) * per100,
       proteinPer100g: l.protein * per100, carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
       fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
+      sugarPer100g: l.sugar != null ? l.sugar * per100 : null,
+      satFatPer100g: l.satFat != null ? l.satFat * per100 : null,
+      sodiumMgPer100g: l.sodiumMg != null ? l.sodiumMg * per100 : null,
       fromCache: true, units: l.units || null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
@@ -4460,9 +4621,14 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     const carbs = fdRound1((qtyItem.carbsPer100g || 0) * factor);
     const fat = fdRound1((qtyItem.fatPer100g || 0) * factor);
     const fiber = qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null;
+    // Migration 0204 extras, scaled like the rest so an ingredient carries them
+    // into the recipe it joins. null stays null ("source does not report it").
+    const sugar = qtyItem.sugarPer100g != null ? fdRound1(qtyItem.sugarPer100g * factor) : null;
+    const satFat = qtyItem.satFatPer100g != null ? fdRound1(qtyItem.satFatPer100g * factor) : null;
+    const sodiumMg = qtyItem.sodiumMgPer100g != null ? Math.round(qtyItem.sodiumMgPer100g * factor) : null;
     return {
       calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
-      protein, carbs, fat, fiber,
+      protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
   }, [qtyItem, qtyG, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
@@ -4477,6 +4643,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
     }]);
     ensureFoodCached(qtyItem);
     closeQtySheet();
@@ -4513,6 +4680,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
       quantityG: g != null ? g : 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
       fiber: mFib !== '' ? fdNum(mFib) : null,
+      sugar: null, satFat: null, sodiumMg: null,
     }]);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
@@ -5243,6 +5411,42 @@ function FdMacroBits({ protein, carbs, fat, strong }) {
     </span>
   );
 }
+// Disclosure toggle for the sugar/saturated-fat/sodium block (migration 0204).
+// Those three are captured everywhere P/C/F are, but they stay folded away by
+// default: they take no part in calories, targets or adherence, and unfolding
+// them into the hero would push the four numbers that do matter off the fold.
+function FdExtrasToggle({ open, onToggle, style }) {
+  return (
+    <button className="micro" onClick={onToggle} style={{
+      display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+      padding: '4px 0', marginBottom: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', ...style,
+    }}>
+      <i className={`fa-solid fa-chevron-${open ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
+      More nutrients
+    </button>
+  );
+}
+// Read-only counterpart: renders only the values that are actually known. A
+// null means the source never reported the value, which is NOT the same as
+// zero, so it is left out instead of printed as "0g" (and the whole row
+// disappears when nothing is known, e.g. for anything logged before 0204).
+function FdExtrasRow({ sugar, satFat, sodiumMg, style }) {
+  const cells = [
+    sugar != null ? ['Sugar', `${Math.round(sugar)}g`] : null,
+    satFat != null ? ['Sat. fat', `${Math.round(satFat)}g`] : null,
+    sodiumMg != null ? ['Sodium', `${Math.round(sodiumMg)}mg`] : null,
+  ].filter(Boolean);
+  if (!cells.length) return null;
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', ...style }}>
+      {cells.map(([label, value]) => (
+        <span key={label} style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+          {label} <span className="num" style={{ fontWeight: 600, color: UI.inkSoft }}>{value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 // The "big total" macro row: ghost letter + whole grams, sitting under (or
 // beside) a large kcal numeral. Four hand-tuned copies before this existed:
 // the recipe batch hero, the save recap, the staged-picks bar and the day hero
@@ -5272,11 +5476,15 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
 // UI.warn, macros through FdMacroBits): the copies used to print macros at one
 // decimal in their own grey style, so the same food read "P 20.4" while you
 // confirmed it and "P20" a second later in the timeline.
-function FdMacroPreview({ calories, protein, carbs, fat, marginBottom = 16 }) {
+function FdMacroPreview({ calories, protein, carbs, fat, sugar, satFat, sodiumMg, marginBottom = 16 }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom, textShadow: 'none' }}>
-      <span className="num" style={{ fontSize: 15, color: UI.warn }}>{calories} kcal</span>
-      <span style={{ fontSize: 12 }}><FdMacroBits protein={protein} carbs={carbs} fat={fat} strong /></span>
+    <div style={{ padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, marginBottom, textShadow: 'none' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="num" style={{ fontSize: 15, color: UI.warn }}>{calories} kcal</span>
+        <span style={{ fontSize: 12 }}><FdMacroBits protein={protein} carbs={carbs} fat={fat} strong /></span>
+      </div>
+      <FdExtrasRow sugar={sugar} satFat={satFat} sodiumMg={sodiumMg}
+        style={{ marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }} />
     </div>
   );
 }
