@@ -612,6 +612,30 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [waterSubSheet, setWaterSubSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
+  // Food tracker meal boundaries (migration 0206). Resolved rather than read
+  // raw, so an unset setting shows the built-in defaults and the editor always
+  // has six rows to work with.
+  const mealCats = LB.mealCategories(store.settings);
+  // Moves one meal's start hour, always writing the full six-value array so a
+  // partially-set setting can never exist. The buttons already refuse to cross
+  // a neighbour; this clamps again because the array is what gets persisted
+  // and mealCategories rejects a non-ascending one outright.
+  const shiftMealStart = (idx, delta) => {
+    if (idx === 0) return;
+    const starts = mealCats.map(c => c.startHour);
+    const lo = starts[idx - 1] + 1;
+    const hi = idx === starts.length - 1 ? 23 : starts[idx + 1] - 1;
+    const next = Math.min(hi, Math.max(lo, starts[idx] + delta));
+    if (next === starts[idx]) return;
+    starts[idx] = next;
+    setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: starts } }));
+  };
+  const mealStepBtn = (disabled) => ({
+    width: 28, height: 28, flexShrink: 0, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent',
+    color: disabled ? UI.inkGhost : UI.inkSoft, cursor: disabled ? 'default' : 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+  });
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -1944,6 +1968,45 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             </div>
           )}
+          {/* Meal-time boundaries (migration 0206). These used to be fixed at
+              00:00-09:00 Breakfast and so on, which only fits a conventional
+              eating day: shift work, a late household or any fasting window
+              made the timeline group meals under headings nobody would use.
+              Editing START hours (each meal runs to the next one's start) is
+              what keeps a gap or an overlap unrepresentable. Breakfast is
+              pinned to 00:00 so the day is always covered end to end. */}
+          <div style={{ marginTop: 24 }}>
+            <div className="label" style={{ marginBottom: 8 }}>Meal times</div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.5 }}>
+              When each meal starts in the Food Tracker's timeline. Each one runs until the next begins.
+            </div>
+            {mealCats.map((cat, i) => (
+              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+                <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</span>
+                {i === 0 ? (
+                  <span className="num" style={{ fontSize: 13, color: UI.inkGhost }}>00:00</span>
+                ) : (
+                  <>
+                    <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= mealCats[i - 1].startHour + 1}
+                      aria-label={`${cat.label} earlier`} style={mealStepBtn(cat.startHour <= mealCats[i - 1].startHour + 1)}>
+                      <i className="fa-solid fa-minus" style={{ fontSize: 10 }} />
+                    </button>
+                    <span className="num" style={{ width: 44, textAlign: 'center', fontSize: 13, color: UI.ink }}>{String(cat.startHour).padStart(2, '0')}:00</span>
+                    <button onClick={() => shiftMealStart(i, 1)} disabled={cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1)}
+                      aria-label={`${cat.label} later`} style={mealStepBtn(cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1))}>
+                      <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+            {store.settings?.mealWindows && (
+              <button onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: null } }))} style={{
+                marginTop: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+              }}>Reset to default times</button>
+            )}
+          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFoodSubSheet(false)}>Done</Btn>
           </div>

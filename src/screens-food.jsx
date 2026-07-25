@@ -178,18 +178,10 @@ const FD_QUICK_TABS = [
   { id: 'favorites', label: 'Favorites' },
   { id: 'recipes', label: 'Recipes' },
 ];
-// Purely a display grouping for the Log tab's timeline: each range is
-// [startHour, endHour), fixed for now (not a per-user setting). The hourly
-// rows themselves (and their own "+") are unchanged, this just adds a
-// read-only summary card above each cluster, no interaction of its own.
-const FD_MEAL_CATEGORIES = [
-  { id: 'breakfast', label: 'Breakfast', startHour: 0, endHour: 9 },
-  { id: 'snack1', label: 'Snack 1', startHour: 9, endHour: 11 },
-  { id: 'lunch', label: 'Lunch', startHour: 11, endHour: 13 },
-  { id: 'snack2', label: 'Snack 2', startHour: 13, endHour: 16 },
-  { id: 'dinner', label: 'Dinner', startHour: 16, endHour: 20 },
-  { id: 'snack3', label: 'Snack 3', startHour: 20, endHour: 24 },
-];
+// The Log tab's timeline groups its hourly rows under a read-only per-meal
+// summary card. The boundaries are a user setting since migration 0206
+// (settings.mealWindows, edited in Settings > Health > Food), resolved through
+// LB.mealCategories, which also owns the labels and the defaults.
 
 // Build the planned food-log entry a template slot materializes into on a
 // given date. Shared by the auto-fill effect (opening a day) and the immediate
@@ -410,6 +402,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
+  // The barcode whose lookup came back empty, so the results block can offer
+  // the label scan as the way out. Null whenever the last search was a normal
+  // text search or did find something.
+  const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
   // Which AI reads the nutrition label photo: 'grok' (scan-label, the
   // long-standing default) or 'claude' (scan-label-claude), same request/
@@ -917,11 +913,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [dayEntries]);
 
   // Read-only per-category totals shown above each cluster of hours in the
-  // timeline (see FD_MEAL_CATEGORIES), summed straight off byHour's buckets.
+  // timeline (see LB.mealCategories), summed straight off byHour's buckets.
   // Category summary cards reflect the logged truth only: a planned entry
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
-  const categoryTotals = useMemoFd(() => FD_MEAL_CATEGORIES.map(cat => {
+  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
@@ -930,7 +927,50 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }
     }
     return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
-  }), [byHour]);
+  }), [byHour, mealCats]);
+
+  // Yesterday's entries grouped by meal category, so an empty category can
+  // offer to repeat it in one tap. Reads the store only: nothing is fetched
+  // for this, so on a day whose predecessor sits outside the boot window the
+  // offer simply doesn't appear rather than firing a request nobody asked for.
+  const prevDayByCategory = useMemoFd(() => {
+    const prev = fdShiftDate(curDate, -1);
+    const out = {};
+    (store.foodLogs || []).forEach(l => {
+      if (l.date !== prev || l.planned) return;
+      const hour = parseInt((l.time || '').slice(0, 2), 10);
+      if (!Number.isFinite(hour)) return;
+      const cat = mealCats.find(c => hour >= c.startHour && hour < c.endHour);
+      if (!cat) return;
+      (out[cat.id] = out[cat.id] || []).push(l);
+    });
+    return out;
+  }, [store.foodLogs, curDate, mealCats]);
+
+  // One-tap repeat of yesterday's meal into the same (currently empty) slot
+  // today. Copies at each entry's original time of day, exactly like the
+  // Manage-entries sheet's copy does, just without the four taps it takes to
+  // get there. Always lands as logged, never planned: this is "I ate the same
+  // thing again", and a future date has no yesterday worth copying anyway.
+  async function copyCategoryFromYesterday(cat) {
+    const src = prevDayByCategory[cat.id] || [];
+    if (!src.length) return;
+    const kcal = Math.round(src.reduce((a, e) => a + (e.calories || 0), 0));
+    if (!await confirm(`${src.length} ${src.length === 1 ? 'entry' : 'entries'} · ${kcal} kcal`, { title: `Copy yesterday's ${cat.label.toLowerCase()}?`, ok: 'Copy', cancel: 'Cancel' })) return;
+    if (!await warnIfOverwritingManualMacros(curDate)) return;
+    const copies = src.map(e => ({
+      ...e, id: LB.uid(), date: curDate, planned: false,
+      // A copy is its own entry: it must not inherit a split/merge batch (that
+      // would offer to "undo" a split on a different day) or a template slot
+      // marker (which would make the auto-fill think the slot is already done).
+      splitBatch: null, templateSlotId: null,
+      createdAt: new Date().toISOString(),
+    }));
+    setStore(s => {
+      const nextLogs = [...copies, ...(s.foodLogs || [])];
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+    });
+  }
 
   // Same category/hour grouping for the Manage-entries picker (see the
   // copyMove* sheet below), but keeps planned entries (this picker acts on
@@ -939,12 +979,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // are walked low to high, unlike dayEntries itself (newest-first, for the
   // live timeline further down).
   const copyMoveCategories = useMemoFd(() => {
-    return FD_MEAL_CATEGORIES.map(cat => {
+    return mealCats.map(cat => {
       const entries = [];
       for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
       return { ...cat, entries };
     }).filter(cat => cat.entries.length > 0);
-  }, [byHour]);
+  }, [byHour, mealCats]);
 
   // Flat drag-reorder slot list for the whole timeline, in EXACT render order
   // (category by category, hour by hour): one slot per logged entry, or one
@@ -953,7 +993,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // indices back to an actual hour; see handleTimelineReorder.
   const timelineSlots = useMemoFd(() => {
     const out = [];
-    for (const cat of FD_MEAL_CATEGORIES) {
+    for (const cat of mealCats) {
       for (let h = cat.startHour; h < cat.endHour; h++) {
         const es = byHour[h] || [];
         if (es.length) es.forEach(e => out.push({ entry: e, hour: h }));
@@ -961,7 +1001,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }
     }
     return out;
-  }, [byHour]);
+  }, [byHour, mealCats]);
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
@@ -1334,7 +1374,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // by the input's onChange and the field's clear ("x") button.
   function setQueryAndReset(v) {
     setQuery(v);
-    if (!v.trim() && results != null) { setResults(null); setSearchError(null); }
+    if (!v.trim() && results != null) { setResults(null); setSearchError(null); setBarcodeMiss(null); }
   }
 
   // Source the last dispatched search actually ran against, so the effect
@@ -1349,8 +1389,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setSearching(true); setSearchError(null);
     const res = await LB.searchFoods(q, src);
     setSearching(false);
-    if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
+    if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); setBarcodeMiss(null); return; }
     setResults(res.results);
+    // A barcode that finds nothing is a dead end the user is uniquely well
+    // placed to get out of: the product is in their hand and the camera was
+    // open a second ago. Barcode lookup only exists for Open Food Facts, so a
+    // miss is routine for local products. Offer the label scan right there
+    // instead of leaving them on "No matches" with a manual-entry button.
+    setBarcodeMiss(res.isBarcode && !res.results.length ? q : null);
   }
   // Switching the source filter re-runs the last submitted query automatically
   // (a query is already an explicit user action, not the "hammer the API on
@@ -2381,7 +2427,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
-                read-only per-meal summary card (FD_MEAL_CATEGORIES). Adding
+                read-only per-meal summary card (LB.mealCategories). Adding
                 still only ever happens through an hour's own "+", the
                 category card itself has no tap target. The category card
                 sits full-width; only its hour rows are indented, with a
@@ -2407,10 +2453,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                         <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                        <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
-                      </div>
+                      {/* Only offered where it can't be a mistake: this meal
+                          slot is empty today and yesterday's is not. Once
+                          anything is logged here the button is gone, so the
+                          card goes back to being a pure read-only summary. */}
+                      {cat.calories === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
+                        <button className="micro-gold" onClick={() => copyCategoryFromYesterday(cat)} style={{
+                          display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
+                          padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+                          Repeat yesterday
+                        </button>
+                      ) : (
+                        <div style={{ textAlign: 'right' }}>
+                          <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                          <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                        </div>
+                      )}
                     </div>
                     <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <FdHourTrunk />
@@ -2597,7 +2657,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div>
                 <Bezel style={{ marginBottom: 10 }}>Results{results.length ? ` (${results.length})` : ''}</Bezel>
                 {results.length === 0 ? (
-                  <div style={fdEmptyHint}>No matches. Try a different search.</div>
+                  barcodeMiss ? (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ ...fdEmptyHint, paddingBottom: 10 }}>
+                        Barcode {barcodeMiss} is not in the database yet. Photograph the nutrition label instead and the values get read off it.
+                      </div>
+                      <button onClick={() => { setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={{ ...fdActionCard, width: '100%' }}>
+                        <i className="fa-solid fa-camera" style={{ fontSize: 14 }} />
+                        <span>Scan the nutrition label</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={fdEmptyHint}>No matches. Try a different search.</div>
+                  )
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                     {results.map(r => {
@@ -3470,6 +3542,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerSearching, setPickerSearching] = useStateFd(false);
   const [pickerSearchError, setPickerSearchError] = useStateFd(null);
   const [pickerResults, setPickerResults] = useStateFd(null);
+  // Same All/Zane/OFF/USDA filter the main Search tab has. It only appears once
+  // a search has actually run: this sheet is already two rows of chrome deep,
+  // and the filter has nothing to act on before there are results.
+  const [pickerSource, setPickerSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
   // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
   // quintet (same shared per-device localStorage key, see
@@ -3668,11 +3744,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   }
   // override lets a scanned barcode search immediately (handlePickerScan),
   // without waiting a tick for setPickerSearchQuery to land first.
-  async function runPickerFoodSearch(override) {
+  // srcOverride is passed by the source-filter buttons: setPickerSource has not
+  // committed yet at the moment they fire, so reading pickerSource off the
+  // closure here would search with the PREVIOUS filter.
+  async function runPickerFoodSearch(override, srcOverride) {
     const q = (typeof override === 'string' ? override : pickerSearchQuery).trim();
     if (!q || pickerSearching) return;
     setPickerSearching(true); setPickerSearchError(null);
-    const res = await LB.searchFoods(q, null);
+    const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickerSource);
     setPickerSearching(false);
     if (!res.ok) { setPickerSearchError(res.error || 'Search failed. Try again.'); setPickerResults([]); return; }
     setPickerResults(res.results);
@@ -4067,6 +4146,13 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                 {pickerSearching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {pickerResults != null && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+                {FD_SOURCE_FILTERS.map(f => (
+                  <button key={f.label} onClick={() => { setPickerSource(f.id); runPickerFoodSearch(undefined, f.id); }} style={fdSegBtn(pickerSource === f.id)}>{f.label}</button>
+                ))}
+              </div>
+            )}
             {pickerSearchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{pickerSearchError}</div>}
             {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>{pickerLabelError}</div>}
             {pickerResults != null && (
@@ -4540,21 +4626,27 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   const [qtyG, setQtyG] = useStateFd('');
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
+  // Same All/Zane/OFF/USDA filter the main Search tab has, shown only once a
+  // search has run (see the template picker for the same reasoning).
+  const [pickSource, setPickSource] = useStateFd(null);
 
   useEffectFd(() => {
     if (!open) return;
-    setPickTab('search'); setQuery(''); setResults(null); setSearchError(null);
+    setPickTab('search'); setQuery(''); setResults(null); setSearchError(null); setPickSource(null);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
   }, [open]);
 
-  async function runPickerSearch() {
+  // srcOverride: the filter buttons call this in the same tick they set
+  // pickSource, so the state has not committed yet and reading it here would
+  // search with the previous filter.
+  async function runPickerSearch(srcOverride) {
     const q = query.trim();
     if (!q || searching) return;
     setSearching(true); setSearchError(null);
-    const res = await LB.searchFoods(q, null);
+    const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickSource);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
     setResults(res.results);
@@ -4733,10 +4825,17 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                   </button>
                 )}
               </div>
-              <button onClick={runPickerSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
+              <button onClick={() => runPickerSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                 {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {results != null && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+                {FD_SOURCE_FILTERS.map(f => (
+                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
+                ))}
+              </div>
+            )}
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{searchError}</div>}
             {results != null && (
               results.length === 0 ? (
@@ -5296,7 +5395,7 @@ const fdDraftMain = {
   WebkitTapHighlightColor: 'transparent',
 };
 // Read-only meal-category header above a cluster of timeline hours (see
-// FD_MEAL_CATEGORIES): no border accent/interaction of its own, a plain
+// LB.mealCategories): no border accent/interaction of its own, a plain
 // neutral gray instead of an accent tint, since it's a summary, not a
 // control. Layers a flat black wash OVER the same UI.bgInset the hour rows
 // below it use (via a two-stop same-color gradient as the top background

@@ -372,6 +372,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
     macro_calc: sett.macroCalc ?? null,
+    meal_windows: sett.mealWindows ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
@@ -1299,6 +1300,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
         macroTargets: sett.macro_targets ?? null,
         macroCalc: sett.macro_calc ?? null,
+        mealWindows: sett.meal_windows ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
@@ -1889,6 +1891,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
+    JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
@@ -1951,6 +1954,7 @@ async function syncStore(prev, next, userId) {
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
       macro_calc: next.settings?.macroCalc ?? null,
+      meal_windows: next.settings?.mealWindows ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
@@ -4808,6 +4812,36 @@ function macroAdherence(actual, target) {
   return Math.round(weighted * 100);
 }
 
+// ── Food tracker meal categories (migration 0206) ───────────────────────────
+// Labels and default boundaries of the Food Tracker's meal grouping. The
+// definition lives here rather than in screens-food.jsx because two screens
+// need it now: the timeline that renders the groups and the settings editor
+// that changes them.
+const MEAL_CATEGORY_DEFS = [
+  { id: 'breakfast', label: 'Breakfast', defaultStart: 0 },
+  { id: 'snack1', label: 'Snack 1', defaultStart: 9 },
+  { id: 'lunch', label: 'Lunch', defaultStart: 11 },
+  { id: 'snack2', label: 'Snack 2', defaultStart: 13 },
+  { id: 'dinner', label: 'Dinner', defaultStart: 16 },
+  { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
+];
+// Resolves settings.mealWindows (six ascending start hours, first always 0)
+// into the [startHour, endHour) ranges the timeline groups by. Defensive about
+// the stored value: a short, non-ascending or non-numeric array falls back to
+// the defaults rather than rendering a day with holes or overlaps in it, since
+// this drives which entries appear under which heading.
+function mealCategories(settings) {
+  const raw = settings?.mealWindows;
+  const ok = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
+    && raw.every((h, i) => Number.isInteger(h) && h >= 0 && h <= 23 && (i === 0 ? h === 0 : h > raw[i - 1]));
+  const starts = ok ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
+  return MEAL_CATEGORY_DEFS.map((c, i) => ({
+    id: c.id, label: c.label,
+    startHour: starts[i],
+    endHour: i === MEAL_CATEGORY_DEFS.length - 1 ? 24 : starts[i + 1],
+  }));
+}
+
 // ── Macro target estimation (migration 0205) ────────────────────────────────
 // Everything above assumes macro targets already exist. They never did for a
 // user without a coach: the whole adherence system (ring, hero rows, week
@@ -7258,7 +7292,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal,
+  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

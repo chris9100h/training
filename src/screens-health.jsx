@@ -3346,7 +3346,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );
 }
@@ -3608,11 +3608,11 @@ function HealthClientLogs({ clientStore }) {
 
 // ─── Export sheet ─────────────────────────────────────────────────────────────
 
-function ExportSheet({ open, onClose, store }) {
+function ExportSheet({ open, onClose, store, userId }) {
   const today = LB.todayISO();
   const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
   const [to, setTo] = useStateH(today);
-  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | null
+  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
 
   const applyPreset = (days) => {
     setFrom(healthShiftISO(today, -(days - 1)));
@@ -3640,6 +3640,55 @@ function ExportSheet({ open, onClose, store }) {
       m[d].push(s);
     });
     return m;
+  };
+
+  // Per-ENTRY food export, next to the two day-level exports above. Those roll
+  // a day up into one row of totals, which answers "how much" but never "of
+  // what": the actual foods are the first thing anyone reviewing a week wants
+  // to see, and until now they could not leave the app at all.
+  // store.foodLogs only holds the boot window, so anything older in the chosen
+  // range is fetched on demand (same helper the Food screen uses to browse back
+  // past that window) rather than silently exporting a short range.
+  const doExportFoodCSV = async () => {
+    setExporting('food');
+    try {
+      const dates = [];
+      for (let d = from; d <= to; d = healthShiftISO(d, 1)) dates.push(d);
+      const have = new Set((store.foodLogs || []).map(l => l.date));
+      const missing = dates.filter(d => !have.has(d));
+      let extra = [];
+      if (missing.length) {
+        const byDate = await LB.fetchFoodLogsForDates(userId, missing).catch(() => ({}));
+        extra = Object.values(byDate || {}).flat();
+      }
+      const rows = [...(store.foodLogs || []), ...extra]
+        .filter(l => l.date >= from && l.date <= to)
+        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+      const esc = v => {
+        if (v == null || v === '') return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['Date', 'Time', 'Food', 'Brand', 'Source', 'Amount (g)', 'Unit', 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)', 'Fiber (g)', 'Sugar (g)', 'Sat. fat (g)', 'Sodium (mg)', 'Planned'];
+      const body = rows.map(l => [
+        l.date, l.time, l.foodName, l.brand, l.source, l.quantityG,
+        l.loggedUnit ? `${l.loggedUnit.label} (${l.loggedUnit.grams}g)` : '',
+        l.calories, l.protein, l.carbs, l.fat, l.fiber, l.sugar, l.satFat, l.sodiumMg,
+        l.planned ? 'yes' : 'no',
+      ].map(esc).join(','));
+
+      const csv = [header.map(esc).join(','), ...body].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `food-log-${from}-${to}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onClose();
+    } finally {
+      setExporting(null);
+    }
   };
 
   const doExportCSV = () => {
@@ -3859,6 +3908,22 @@ function ExportSheet({ open, onClose, store }) {
             <i className="fa-solid fa-file-csv" style={{ fontSize: 13 }} />
             {exporting === 'csv' ? 'Exporting…' : 'Export as CSV'}
           </button>
+          {/* Only offered once there is a food log to export: for a user who
+              only ever types macros into the daily log this button would be a
+              permanently empty file. */}
+          {(store.foodLogs || []).length > 0 && (
+            <button onClick={doExportFoodCSV} disabled={!!exporting} style={{
+              width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
+              background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+              textShadow: 'none',
+              fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-utensils" style={{ fontSize: 13 }} />
+              {exporting === 'food' ? 'Exporting…' : 'Export food log as CSV'}
+            </button>
+          )}
           <button onClick={doExportPDF} disabled={!!exporting} style={{
             width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',

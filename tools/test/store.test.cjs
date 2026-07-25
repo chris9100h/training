@@ -478,6 +478,39 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
   });
 
+  test('mealCategories: defaults, custom windows, and rejection of broken ones', () => {
+    // JSON instead of deepStrictEqual: store.js runs in a vm sandbox, so its
+    // arrays have a different Array prototype than this file's and a deep
+    // strict compare fails on that alone (same reason the rest of this suite
+    // compares by JSON).
+    const starts = s => JSON.stringify(LB.mealCategories(s).map(c => c.startHour));
+    const ends = s => JSON.stringify(LB.mealCategories(s).map(c => c.endHour));
+    const DEFAULTS = JSON.stringify([0, 9, 11, 13, 16, 20]);
+    // Unset, empty and null all mean "the built-in defaults".
+    assert.strictEqual(starts(null), DEFAULTS);
+    assert.strictEqual(starts({}), DEFAULTS);
+    assert.strictEqual(starts({ mealWindows: null }), DEFAULTS);
+    // Each category ends where the next begins, the last covers to midnight.
+    assert.strictEqual(ends({}), JSON.stringify([9, 11, 13, 16, 20, 24]));
+    // A valid custom set is used verbatim, ends following along.
+    const late = [0, 11, 14, 16, 19, 22];
+    assert.strictEqual(starts({ mealWindows: late }), JSON.stringify(late));
+    assert.strictEqual(ends({ mealWindows: late }), JSON.stringify([11, 14, 16, 19, 22, 24]));
+    // Anything that could produce a gap, an overlap or an uncovered morning is
+    // rejected wholesale rather than half-applied: the grouping decides which
+    // entries appear under which heading, so a broken value must not render.
+    assert.strictEqual(starts({ mealWindows: [1, 9, 11, 13, 16, 20] }), DEFAULTS, 'first hour must be 0');
+    assert.strictEqual(starts({ mealWindows: [0, 11, 9, 13, 16, 20] }), DEFAULTS, 'must ascend');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 9, 13, 16, 20] }), DEFAULTS, 'strictly, no empty category');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16] }), DEFAULTS, 'wrong length');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16, 24] }), DEFAULTS, 'a start of 24 is out of range');
+    assert.strictEqual(starts({ mealWindows: [0, 9, 11, 13, 16, '20'] }), DEFAULTS, 'strings are not hours');
+    assert.strictEqual(starts({ mealWindows: 'nope' }), DEFAULTS);
+    // Labels stay put whatever the boundaries are.
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealWindows: late }).map(c => c.id)),
+      JSON.stringify(['breakfast', 'snack1', 'lunch', 'snack2', 'dinner', 'snack3']));
+  });
+
   test('estimateTdee: Mifflin-St Jeor, both sex constants, activity multiplier', () => {
     // 80 kg, 180 cm, 30 y: base = 10*80 + 6.25*180 - 5*30 = 800 + 1125 - 150 = 1775
     // male +5 -> 1780; x1.55 (moderate) = 2759
