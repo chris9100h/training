@@ -675,7 +675,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                                   color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
                                   background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
                                   borderRadius: 4, padding: '2px 8px',
-                                  border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                                  border: `var(--hair-width) solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                                 }}>
                                   {fmtSetChip(s)}
                                 </span>
@@ -1376,7 +1376,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
       ) : schedules.map(sch => (
-        <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
+        <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
             {sch.id === active && (
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
@@ -1389,7 +1389,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {sch.id !== active && (
-                <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `0.5px solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
+                <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `var(--hair-width) solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
                   ACTIVATE
                 </button>
               )}
@@ -1418,7 +1418,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
               </div>
               <button
                 onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
-                style={{ background: 'transparent', border: `0.5px solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                style={{ background: 'transparent', border: `var(--hair-width) solid var(--hair-accent)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
               >
                 RESUME
               </button>
@@ -1787,7 +1787,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                           color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
                           borderRadius: 4, padding: '2px 8px',
-                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                          border: `var(--hair-width) solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                         }}>
                           {fmtSetChip(s)}
                         </span>

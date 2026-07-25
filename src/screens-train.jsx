@@ -572,7 +572,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const showSign = assisted && isKg;
   const H = 40;
   const base = {
-    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
+    background: 'var(--bg-raised)', border: `var(--hair-width) solid var(--hair)`, borderRadius: 6,
     textShadow: 'none',
     color: 'var(--ink)', fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',

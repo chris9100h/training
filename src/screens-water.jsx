@@ -755,7 +755,7 @@ function wtSwatchBtnStyle(sel) {
   return {
     display: 'grid', placeItems: 'center', borderRadius: 6, cursor: 'pointer',
     background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
-    border: `0.5px solid ${sel ? 'var(--hair-accent)' : UI.hair}`,
+    border: `var(--hair-width) solid ${sel ? 'var(--hair-accent)' : UI.hair}`,
     WebkitTapHighlightColor: 'transparent',
   };
 }

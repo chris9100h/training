@@ -685,7 +685,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
           type="email"
           autoCapitalize="none"
           autoCorrect="off"
-          style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${inviteError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+          style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${inviteError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
         />
         <button
           onClick={handleInvite}

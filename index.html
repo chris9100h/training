@@ -33,8 +33,8 @@
     --ink-soft: rgba(236,228,208,0.66);
     --ink-faint: rgba(236,228,208,0.34);
     --ink-ghost: rgba(236,228,208,0.14);
-    --hair: rgba(236,228,208,0.16);
-    --hair-strong: rgba(236,228,208,0.28);
+    --hair: rgba(236,228,208,0.09);
+    --hair-strong: rgba(236,228,208,0.16);
     /* Accent-toned hairline: the border a row, chip or toggle wears when it is
        the selected/current one. Same threshold problem --hair-strong had, and
        worse here because it usually sits on an accent-tinted fill, so border
@@ -42,11 +42,20 @@
        accent borders drawn at 1px or more stay at their own lower alpha, since
        a full pixel of line already carries the same visual mass. Follows the
        chosen accent automatically via --accent-rgb, in every theme. */
-    --hair-accent: rgba(var(--accent-rgb),0.8);
+    --hair-accent: rgba(var(--accent-rgb),0.45);
     /* Width for every hairline border (the huge majority of UI.hair/
-       UI.hairStrong borders use this literal). A theme can widen it, e.g.
-       paper's 0.5px hairlines were reading as barely-there. */
-    --hair-width: 0.5px;
+       UI.hairStrong borders use this literal). A theme can widen it.
+
+       A whole pixel, deliberately, even though these are hairlines. Below 1px
+       the width lands between device pixels (0.5px is 1.5 of them at 3x) and
+       the engine has to round it per edge. WebKit can round one edge of a box
+       to nothing, which showed up as a row keeping three sides and losing the
+       fourth: measured on device, an edge was either at full strength or gone,
+       never half, which is rounding rather than antialiasing. At 1px there is
+       nothing to round away. The alphas above are set against this width, so
+       moving one without the other changes how heavy every line in the app
+       looks. */
+    --hair-width: 1px;
     /* Empty-track color for input[type="range"] (see the rules below). Same
        as --hair-strong for every theme except paper, which points this at
        its own lighter bg-inset instead (see the paper block for why). */
@@ -747,8 +756,8 @@ var _DARK_INK_SOFT     = 'rgba(236,228,208,0.66)';
 // ratio to it, so soft and strong dividers stay as far apart as they were.
 // Dark and black only: light and paper override both with their own, already
 // much stronger values (0.48 to 0.60 dark ink on a light canvas).
-var _DARK_HAIR         = 'rgba(236,228,208,0.16)';
-var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.28)';
+var _DARK_HAIR         = 'rgba(236,228,208,0.09)';
+var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.16)';
 var _DARK_DANGER       = '#c87469';
 var _DARK_DANGER_RGB   = '200,116,105';
 // Grid overlay (Settings -> Appearance -> Grid), togglable independent of
@@ -813,7 +822,7 @@ window.DARK_MODES = {
   light: {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
     ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.89)', inkFaint: 'rgba(31,27,22,0.72)', inkGhost: 'rgba(31,27,22,0.61)',
-    hair: 'rgba(31,27,22,0.50)', hairStrong: 'rgba(31,27,22,0.60)', knurlRgb: '31,27,22',
+    hair: 'rgba(31,27,22,0.28)', hairStrong: 'rgba(31,27,22,0.34)', knurlRgb: '31,27,22',
     // Tells applyAccentColor's needsDarkenedAccent check this theme's canvas
     // is light, so a raw dark-background-tuned accent hex would be unreadable
     // (see _darkenForLightBg there). Light has no --accent override of its
@@ -865,9 +874,11 @@ window.DARK_MODES = {
     // Same border-alpha fix as light (see there): a low-alpha border stays
     // near-invisible against a light bg no matter how dark the base red is.
     dangerBorderBoost: 1.8,
-    // Darker AND (via hairWidth below) wider than every other theme's
-    // hairline: a thin, faint border reads as "barely there" against paper's
-    // light canvas in a way the same border never was on a dark one.
+    // Much darker than every other theme's hairline: a faint border reads as
+    // "barely there" against paper's light canvas in a way the same border
+    // never was on a dark one. The explicit hairWidth is now the same 1px the
+    // default is, kept only so this theme's width stays pinned to what these
+    // alphas were picked against if the default ever moves again.
     hair: 'rgba(20,20,20,0.48)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
     knurlRgb: '50,70,120', knurlOpacity: 5,
     // Grid on by default (its defining look); textLift/chartTextLiftOpacity/
@@ -928,7 +939,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--danger', m.danger || _DARK_DANGER);
   s.setProperty('--danger-rgb', m.dangerRgb || _DARK_DANGER_RGB);
   s.setProperty('--danger-border-boost', m.dangerBorderBoost || 1);
-  s.setProperty('--hair-width', m.hairWidth || '0.5px');
+  s.setProperty('--hair-width', m.hairWidth || '1px');
   s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);

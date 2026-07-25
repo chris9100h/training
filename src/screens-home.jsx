@@ -488,7 +488,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
                     setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
                   }
                   onClose();
-                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, textShadow: isActive ? 'var(--text-lift)' : 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, textShadow: isActive ? 'var(--text-lift)' : 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {reason}
                 </button>
               );
@@ -971,7 +971,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
         {[['1', 'Easy'], ['2', 'Light'], ['3', 'Steady'], ['4', 'Solid'], ['5', 'Hard'], ['6', 'Max']].map(([n, lbl]) => (
           <button key={n} onClick={() => pick('paceFeeling', Number(n))} style={{
             flex: 1, padding: '10px 2px', borderRadius: 8, cursor: 'pointer',
-            border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+            border: `var(--hair-width) solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
             background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             textShadow: form.paceFeeling === Number(n) ? 'var(--text-lift)' : 'none',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, WebkitTapHighlightColor: 'transparent',
@@ -987,7 +987,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
           <button key={n} onClick={() => pick('effort', n)} style={{
             flex: 1, padding: '10px 0', borderRadius: 6, cursor: 'pointer',
-            border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+            border: `var(--hair-width) solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
             background: form.effort === n ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             textShadow: 'none',
             WebkitTapHighlightColor: 'transparent',
@@ -3116,7 +3116,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <div key={i} style={{
                   flex: seg.count, height: 16, borderRadius: 4,
                   background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.13)',
-                  border: `0.5px solid ${isActive ? UI.goldSoft : UI.hair}`,
+                  border: `var(--hair-width) solid ${isActive ? UI.goldSoft : UI.hair}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   {seg.count >= 2 && (
@@ -3723,7 +3723,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <button key={d.id} onClick={() => applyRealign(i)} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset,
-                border: `0.5px solid ${isCurrent ? 'var(--hair-accent)' : UI.hair}`,
+                border: `var(--hair-width) solid ${isCurrent ? 'var(--hair-accent)' : UI.hair}`,
                 borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>

@@ -2938,7 +2938,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       {CATS.map(c => (
                         <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
                           flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
-                          border: `0.5px solid ${supportCategoryDraft === c.key ? 'var(--hair-accent)' : UI.hairStrong}`,
+                          border: `var(--hair-width) solid ${supportCategoryDraft === c.key ? 'var(--hair-accent)' : UI.hairStrong}`,
                           background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
@@ -2963,7 +2963,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                       onPaste={onPasteSupportMessage}
                       placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `var(--hair-width) solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>
@@ -3010,7 +3010,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                          <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
+                          <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `var(--hair-width) solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
                             {hasImg && n.attachments.map((a, i) => (
                               <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                             ))}
@@ -3040,7 +3040,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
                         onPaste={onPasteSupportMessage}
                         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
-                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `var(--hair-width) solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                         <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                       </label>
@@ -3142,7 +3142,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {STATUSES.map(s => (
                     <button key={s.key} onClick={() => handleSetSupportStatus(supportTicket.coachingId, s.key)} style={{
                       flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                      border: `0.5px solid ${currentStatus === s.key ? sColor[s.key] : UI.hairStrong}`,
+                      border: `var(--hair-width) solid ${currentStatus === s.key ? sColor[s.key] : UI.hairStrong}`,
                       background: currentStatus === s.key ? sBg[s.key] : 'transparent',
                       color: currentStatus === s.key ? sColor[s.key] : UI.inkFaint,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -3167,7 +3167,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                           <div style={{
                             maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isAdminMsg ? '8px 8px 4px 8px' : '8px 8px 8px 4px',
                             background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
-                            border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
+                            border: `var(--hair-width) solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
                             overflow: 'hidden',
                           }}>
                             {hasImg && n.attachments.map((a, i) => (
@@ -3199,7 +3199,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `var(--hair-width) solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>
@@ -3243,7 +3243,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 {filterDefs.map(f => (
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
                     padding: '5px 14px', borderRadius: 999, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                    border: `0.5px solid ${supportCatFilter === f.key ? 'var(--hair-accent)' : UI.hairStrong}`,
+                    border: `var(--hair-width) solid ${supportCatFilter === f.key ? 'var(--hair-accent)' : UI.hairStrong}`,
                     background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                     color: supportCatFilter === f.key ? 'var(--accent)' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,

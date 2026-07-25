@@ -571,7 +571,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 // ─── Toggle ─────────────────────────────────────────────────────────
 function Toggle({ on, onToggle }) {
   return (
-    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
       <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );

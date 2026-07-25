@@ -1464,7 +1464,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 {['fasted', 'fed', 'other'].map(c => (
                   <button key={c} onClick={() => setGl('context', c)} style={{
                     flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
-                    border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
+                    border: `var(--hair-width) solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
                     color: glForm.context === c ? 'var(--accent-ink)' : UI.inkFaint,
                     textShadow: 'none',

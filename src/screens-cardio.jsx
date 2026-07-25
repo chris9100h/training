@@ -674,7 +674,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               if (allSel) { setDays({}); setManualTargets({}); }
               else setDays(Object.fromEntries(CP_WEEKDAY_KEYS.map(k => [k, true])));
             }} style={{
-              background: 'none', border: `0.5px solid ${allSel ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+              background: 'none', border: `var(--hair-width) solid ${allSel ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
               borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
               color: allSel ? 'var(--accent)' : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
@@ -912,7 +912,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>TRAINING DAYS</div>
               <button onClick={() => setDays(allGoalDays ? {} : Object.fromEntries(CP_WEEKDAY_KEYS.map(k => [k, true])))} style={{
-                background: 'none', border: `0.5px solid ${allGoalDays ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+                background: 'none', border: `var(--hair-width) solid ${allGoalDays ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
                 borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
                 color: allGoalDays ? 'var(--accent)' : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
@@ -1025,7 +1025,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '10px 14px', borderRadius: 6,
                 background: isGoal ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
-                border: `0.5px solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
+                border: `var(--hair-width) solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
               }}>
                 <div>
                   <span style={{ fontSize: 12, color: isGoal ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>
@@ -1272,7 +1272,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
             <div key={plan.id} style={{
               padding: '10px 14px',
               background: doneLog ? 'var(--success-tint-xs)' : UI.bgInset,
-              border: `0.5px solid ${doneLog ? 'var(--success-border)' : UI.hairStrong}`,
+              border: `var(--hair-width) solid ${doneLog ? 'var(--success-border)' : UI.hairStrong}`,
               borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12,
             }}>
               <i className={`fa-solid ${act.icon}`} style={{ fontSize: 14, color: doneLog ? UI.ok : 'var(--accent)', flexShrink: 0 }} />

@@ -1043,13 +1043,13 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
       <span style={{
         width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
-        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+        border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
       }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
         {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
       </span>
-      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
       {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
     </button>
   );
