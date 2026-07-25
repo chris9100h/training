@@ -4890,12 +4890,18 @@ function estimateTdee({ weightKg, heightCm, age, sex, activity }) {
 //
 // Returns null without a usable weight or TDEE.
 const TRAINING_SPREAD = 0.10;
-// fatPerKg (optional): the "low fat" option. Caps fat at weightKg * fatPerKg
-// instead of letting it sit at a share of intake, for anyone who would rather
-// spend those calories on carbs. A cap, not a target: if the normal split
-// already lands below it, the lower figure stays. It also overrides the 0.5
-// g/kg floor below, since asking for low fat is an explicit choice, not an
-// accident the floor should protect against.
+// Below this much fat per kg of bodyweight the intake stops being a nutrition
+// choice and starts being a hormonal problem, so the automatic split never
+// goes under it. It is a floor on what this function decides on its own, not a
+// hard limit on what the user may ask for: fatPerKg below it is honoured, and
+// the caller warns (see FAT_FLOOR_PER_KG's use in the estimator sheet).
+const FAT_FLOOR_PER_KG = 0.5;
+// fatPerKg (optional): the "low fat" option. A TARGET, not a ceiling: fat lands
+// on exactly weightKg * fatPerKg and everything that frees goes to carbs, for
+// anyone who would rather eat their calories as carbohydrate. Since it is an
+// explicit number the user chose, it is used as given even below
+// FAT_FLOOR_PER_KG; warning about that is the UI's job, silently overruling it
+// here would just make the field look broken.
 function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg }) {
   const w = Number(weightKg);
   const t = Number(tdee);
@@ -4915,11 +4921,13 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
   const restCal = cycles ? Math.round((daily * 7 - trainingCal * days) / (7 - days)) : daily;
 
   const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
-  // 25% of calories from fat, computed off the average day so the gram figure
-  // is the same on both, then floored: dropping fat below 0.5 g/kg to buy
-  // carbs is not a trade this should make on the user's behalf.
-  let fat = Math.max(Math.round(daily * 0.25 / 9), Math.round(w * 0.5));
-  if (Number(fatPerKg) > 0) fat = Math.min(fat, Math.round(w * Number(fatPerKg)));
+  // With the low-fat option, exactly what was asked for. Otherwise 25% of
+  // calories, computed off the average day so the gram figure is the same on
+  // both, and never under the floor: dropping fat that low to buy carbs is not
+  // a trade to make on the user's behalf, only one they can make themselves.
+  const fat = Number(fatPerKg) > 0
+    ? Math.round(w * Number(fatPerKg))
+    : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
   const carbsFor = (cal) => Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4));
 
   const carbsTraining = carbsFor(trainingCal);
@@ -4933,51 +4941,54 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
 }
 
 // Hand-edit one macro of an estimate and keep the calorie figure it was built
-// around: the other two absorb the difference, split in proportion to the
-// calories they already carry, so an edit nudges the existing split instead of
-// replacing it with an arbitrary one.
+// around: whatever is still free to move absorbs the difference, split in
+// proportion to the calories those macros already carry, so an edit nudges the
+// existing split instead of replacing it.
 //
 // opts.targetCalories is the figure to hold (the estimate's own kcal for that
 // day type). Without it the edit is applied as-is and nothing rebalances.
 //
-// opts.fatPerKg + opts.weightKg re-apply the low-fat cap, but ONLY to a fat
-// figure this function derived. A fat value the user typed themselves wins over
-// the option: an explicit edit is a decision, not an oversight.
+// Three things can hold a macro still:
+//   - it is the one being edited
+//   - opts.locked lists it (the user pinned it by hand)
+//   - it is fat and opts.fatPerKg/weightKg give a low-fat target, which is a
+//     fixed gram figure and so behaves exactly like a lock
+// A fat value the user types or locks themselves wins over the low-fat target:
+// both are explicit choices, and the option is there to be overridden.
 //
-// Nothing goes negative, and no attempt is made to force the total when the
-// edited macro alone already exceeds it. Callers show calories derived from the
-// macros, so that case is visible rather than silently clamped away.
+// When nothing is left free, the edit simply stands and the calorie total moves
+// with it. Callers derive the displayed kcal from the macros, so that is
+// visible rather than silently clamped away. Nothing goes negative.
 function rebalanceMacros(current, key, value, opts = {}) {
   const KCAL = { protein: 4, carbs: 4, fat: 9 };
   const KEYS = ['protein', 'carbs', 'fat'];
   const at = (o, k) => Math.max(0, Number(o?.[k]) || 0);
+  const out = (o) => ({ protein: Math.round(o.protein), carbs: Math.round(o.carbs), fat: Math.round(o.fat) });
   const next = { protein: at(current, 'protein'), carbs: at(current, 'carbs'), fat: at(current, 'fat') };
-  if (!KEYS.includes(key)) return next;
+  if (!KEYS.includes(key)) return out(next);
   next[key] = Math.max(0, Number(value) || 0);
 
-  const target = Number(opts.targetCalories);
-  const others = KEYS.filter(k => k !== key);
-  if (target > 0) {
-    const remaining = Math.max(0, target - next[key] * KCAL[key]);
-    const otherCal = others.reduce((a, k) => a + at(current, k) * KCAL[k], 0);
-    others.forEach(k => {
-      const share = otherCal > 0 ? (at(current, k) * KCAL[k]) / otherCal : 0.5;
-      next[k] = (remaining * share) / KCAL[k];
-    });
-  }
-
-  const cap = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
-    ? Number(opts.weightKg) * Number(opts.fatPerKg)
+  const locked = new Set(Array.isArray(opts.locked) ? opts.locked : []);
+  const fatTarget = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
+    ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
     : null;
-  if (cap != null && key !== 'fat' && next.fat > cap) {
-    // Whatever the cap frees goes to the one macro that is neither capped nor
-    // the one being edited, so the edit itself is never quietly undone.
-    const freed = (next.fat - cap) * KCAL.fat;
-    next.fat = cap;
-    const sink = key === 'carbs' ? 'protein' : 'carbs';
-    next[sink] += freed / KCAL[sink];
-  }
-  return { protein: Math.round(next.protein), carbs: Math.round(next.carbs), fat: Math.round(next.fat) };
+  const fatPinned = fatTarget != null && key !== 'fat' && !locked.has('fat');
+  if (fatPinned) next.fat = fatTarget;
+
+  const target = Number(opts.targetCalories);
+  if (!(target > 0)) return out(next);
+
+  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned));
+  if (!free.length) return out(next);
+
+  const heldCal = KEYS.filter(k => !free.includes(k)).reduce((a, k) => a + next[k] * KCAL[k], 0);
+  const remaining = Math.max(0, target - heldCal);
+  const baseCal = free.reduce((a, k) => a + at(current, k) * KCAL[k], 0);
+  free.forEach(k => {
+    const share = baseCal > 0 ? (at(current, k) * KCAL[k]) / baseCal : 1 / free.length;
+    next[k] = (remaining * share) / KCAL[k];
+  });
+  return out(next);
 }
 
 // True when a macro-target object carries at least one macro (protein/carbs/fat,
@@ -7347,7 +7358,7 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, estimateTdee, macroTargetsFromGoal, rebalanceMacros, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, macroTargetsFromGoal, rebalanceMacros, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,

@@ -1742,6 +1742,10 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // Hand-edited macros, as strings so typing works, or null while the estimate
   // is untouched. See editMacro.
   const [manual, setManual] = useStateH(null);
+  // Macros the user pinned, per day type. A locked macro is left alone when
+  // another one is edited, which is the only way to keep a number you typed
+  // from being rebalanced away by the next edit.
+  const [locks, setLocks] = useStateH({ training: {}, rest: {} });
 
   useEffectH(() => {
     if (!open) return;
@@ -1761,12 +1765,16 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       fatPerStr: String(fatPerToDisplay(calc.fatPerKg > 0 ? calc.fatPerKg : LOW_FAT_DEFAULT_PER_KG)),
     });
     setManual(null);
+    setLocks({ training: {}, rest: {} });
   }, [open]); // eslint-disable-line
 
   const weightInput = healthNum(form.weight);
   const weightKg = weightInput > 0 ? (isLbs ? weightInput * LBS_TO_KG : weightInput) : null;
   const fatPerInput = healthNum(form.fatPerStr);
   const fatPerKg = (form.lowFat && fatPerInput > 0) ? fatPerFromDisplay(fatPerInput) : null;
+  // The automatic split never goes under this much fat per kg; asking for less
+  // is allowed but worth saying out loud rather than silently overruling.
+  const fatBelowFloor = fatPerKg != null && fatPerKg < LB.FAT_FLOOR_PER_KG;
 
   const age = form.birthYear ? (new Date().getFullYear() - healthInt(form.birthYear)) : null;
   const est = LB.estimateTdee({ weightKg, heightCm: healthInt(form.heightCm), age, sex: form.sex, activity: form.activity });
@@ -1781,7 +1789,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // against the previous one are dropped rather than silently carried over
   // onto numbers they were never balanced against.
   const estKey = JSON.stringify([weightKg, form.heightCm, form.birthYear, form.sex, form.activity, form.goal, form.rateKgPerWeek, form.trainingDays, fatPerKg]);
-  useEffectH(() => { setManual(null); }, [estKey]);
+  useEffectH(() => { setManual(null); setLocks({ training: {}, rest: {} }); }, [estKey]);
 
   const estimateStrings = () => (targets ? {
     training: { protein: String(targets.proteinTraining), carbs: String(targets.carbsTraining), fat: String(targets.fatTraining) },
@@ -1807,6 +1815,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       const next = LB.rebalanceMacros(cur, key, clean === '' ? 0 : parseInt(clean, 10), {
         targetCalories: dayType === 'training' ? targets.caloriesTraining : targets.caloriesRest,
         weightKg, fatPerKg,
+        locked: Object.keys(locks[dayType] || {}).filter(k => locks[dayType][k]),
       });
       return {
         ...base,
@@ -1866,14 +1875,38 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   );
   const activityHint = MACRO_ACTIVITY_OPTIONS.find(o => o.id === form.activity)?.hint;
 
-  const macroField = (dayType, key, label) => (
-    <div style={{ flex: 1 }}>
-      <div className="micro" style={{ marginBottom: 4 }}>{label}</div>
-      <input type="text" inputMode="numeric" value={shown?.[dayType]?.[key] ?? ''}
-        onChange={e => editMacro(dayType, key, e.target.value)}
-        style={{ ...inputStyle, fontSize: 14, padding: '7px 8px' }} />
-    </div>
-  );
+  const toggleLock = (dayType, key) =>
+    setLocks(l => ({ ...l, [dayType]: { ...l[dayType], [key]: !l[dayType]?.[key] } }));
+
+  // The label doubles as the lock toggle: a padlock beside each macro, so
+  // pinning one is where you already are when you decide to.
+  const macroField = (dayType, key, label) => {
+    const locked = !!locks[dayType]?.[key];
+    // With the low-fat option on, fat is held by that target anyway, so its
+    // padlock would be a second switch for the same thing.
+    const lockable = !(key === 'fat' && fatPerKg != null);
+    return (
+      <div style={{ flex: 1 }}>
+        <button className="micro" disabled={!lockable}
+          onClick={() => lockable && toggleLock(dayType, key)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4,
+            background: 'none', border: 'none', padding: 0,
+            cursor: lockable ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
+            ...(locked ? { color: 'var(--accent)' } : null),
+          }}>
+          {label}
+          {lockable && <i className={`fa-solid fa-lock${locked ? '' : '-open'}`} style={{ fontSize: 8 }} />}
+        </button>
+        <input type="text" inputMode="numeric" value={shown?.[dayType]?.[key] ?? ''}
+          onChange={e => editMacro(dayType, key, e.target.value)}
+          style={{
+            ...inputStyle, fontSize: 14, padding: '7px 8px',
+            border: `var(--hair-width) solid ${locked ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+          }} />
+      </div>
+    );
+  };
   const daySection = (dayType, label) => (
     <div style={{ marginBottom: dayType === 'training' ? 12 : 0 }}>
       <div className="micro" style={{ marginBottom: 6 }}>
@@ -1952,15 +1985,17 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
         </div>
       </div>
 
-      {/* Low fat: a cap on fat rather than a target, so the calories it frees
-          go to carbs. Off by default, since the normal split is the safer
-          default for anyone not deliberately choosing this. */}
+      {/* Low fat: fat lands ON this figure rather than at a share of intake, and
+          everything it frees goes to carbs. Off by default, since the normal
+          split is the safer one for anyone not deliberately choosing this.
+          Below FAT_FLOOR_PER_KG it still applies, with a warning: the automatic
+          split will not go that low on its own, but the user may ask for it. */}
       <div style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div className="micro">Low fat</div>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3, lineHeight: 1.4 }}>
-              Hold fat to a set amount per {UI.unit()} of bodyweight and put what that frees into carbs.
+              Set fat to a fixed amount per {UI.unit()} of bodyweight and put everything that frees into carbs.
             </div>
           </div>
           <Toggle on={!!form.lowFat} onToggle={() => setForm(f => ({ ...f, lowFat: !f.lowFat }))} />
@@ -1974,9 +2009,21 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
             </div>
             <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, paddingBottom: 10, lineHeight: 1.4 }}>
               {weightKg != null && fatPerKg != null
-                ? `Caps fat at about ${Math.round(weightKg * fatPerKg)} g a day.`
-                : 'Enter a weight and a factor to see the cap.'}
+                ? `Puts fat at about ${Math.round(weightKg * fatPerKg)} g a day.`
+                : 'Enter a weight and a factor to see the result.'}
             </div>
+          </div>
+        )}
+        {fatBelowFloor && (
+          <div style={{
+            display: 'flex', gap: 8, marginTop: 10, padding: '8px 10px', borderRadius: 6,
+            background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`,
+            fontSize: 11, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.45, textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.warn, marginTop: 1 }} />
+            <span>
+              Under {fatPerToDisplay(LB.FAT_FLOOR_PER_KG)} g per {UI.unit()} the automatic split would never go, since fat that low is where hormones start to suffer. Your call, but go in knowing it.
+            </span>
           </div>
         )}
       </div>
@@ -1987,9 +2034,8 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
           {daySection('training', 'TRAINING DAY')}
           {daySection('rest', 'REST DAY')}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: 1.4 }}>
-            {manual
-              ? "Edited. Changing one macro moves the other two to keep the day's calories."
-              : "Change any number and the other two follow to keep the day's calories."}
+            {"Change any number and the others follow to keep the day's calories. Tap a padlock to pin one so later edits leave it alone."}
+            {fatPerKg != null ? ' Fat stays on your low-fat number unless you type over it.' : ''}
           </div>
           {manual && (
             <button onClick={() => setManual(null)} style={{
