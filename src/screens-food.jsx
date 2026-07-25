@@ -355,6 +355,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [extrasOpen, setExtrasOpen] = useStateFd(false);
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
+  const [dayMenu, setDayMenu] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -2354,6 +2355,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // TabBar, never overlapping it) regardless of scroll position.
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <Screen>
+      {/* Day-level actions. Kept as its own sheet rather than inline chrome so
+          the timeline stays about food, and so a once-a-week declaration takes
+          a deliberate detour instead of sitting one tap away all the time. */}
+      <Sheet open={dayMenu} onClose={() => setDayMenu(false)} title={dayLabel}>
+        <button onClick={() => { setDayMenu(false); setMocSheet({ name: mocName || '' }); }}
+          disabled={!dayTarget}
+          style={{ ...fdTemplateBtn, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
+          <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>
+            {isMealOfChoice ? 'Meal of choice, set' : 'Make this a meal of choice day'}
+          </span>
+          <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+        </button>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
+          {dayTarget
+            ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
+            : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
+        </div>
+      </Sheet>
+
       {/* Naming is optional but it is the ONLY thing the coach sees: the name
           goes into the day's off-plan note, which dailyLogsWeekPrefill folds
           into the weekly check-in. The field is prefilled with whatever is
@@ -2530,9 +2551,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   />
                 </div>
               </div>
-              <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
-                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => shiftDay(1)} aria-label="Next day" style={fdNavBtn(false)}>
+                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
+                </button>
+                {/* Day-level overflow. Meal of choice lives in here rather
+                    than on the timeline on purpose: it is a once-a-week
+                    decision you steer toward, and a permanent button made it
+                    a one-tap everyday option. Anything else that acts on the
+                    whole day belongs here too. */}
+                <button onClick={() => setDayMenu(true)} aria-label="Day options" style={fdNavBtn(false)}>
+                  <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
+                </button>
+              </div>
             </div>
 
             {/* Totals hero: same BracketFrame-gold hero Water uses for its own
@@ -2604,13 +2635,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     </button>
                   </div>
                 </div>
-              ) : (
-                <button onClick={() => setMocSheet({ name: '' })} style={fdTemplateBtn}>
-                  <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
-                  <span style={{ flex: 1, textAlign: 'left' }}>Meal of choice</span>
-                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
-                </button>
-              )
+              ) : null
             )}
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
