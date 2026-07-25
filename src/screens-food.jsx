@@ -2401,6 +2401,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </span>
           <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
         </button>
+        {/* Always shown, including the first one and including zero: the point
+            of a counter you dose by is that it is there before you decide, not
+            only once you are already over. */}
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
+          {isMealOfChoice
+            ? `Your ${mocWeek.ordinal}. this week.`
+            : mocWeek.count === 0
+              ? 'None yet this week.'
+              : `${mocWeek.count} so far this week, this would be your ${mocWeek.count + 1}.`}
+        </div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
           {dayTarget
             ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'

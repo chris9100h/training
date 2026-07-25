@@ -124,6 +124,7 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
   return {
     from, to, periodDays, daysLogged: inPeriod.length,
+    mealOfChoice: inPeriod.filter(l => l.mealOfChoice).length,
     trainingsDone, trainingsPlanned, trainingDaysInPeriod,
     cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
     cardioSessions: periodCardio.length,
@@ -2494,7 +2495,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
-  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
+  const { from, to, periodDays, daysLogged, mealOfChoice: mealOfChoiceDays, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
@@ -2602,6 +2603,15 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
       </div>
+      {mealOfChoiceDays > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+          <i className="fa-solid fa-utensils" style={{ fontSize: 10, color: 'var(--accent)' }} />
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+            <span className="num" style={{ color: 'var(--accent)' }}>{mealOfChoiceDays}</span>
+            {` meal of choice day${mealOfChoiceDays === 1 ? '' : 's'}, not scored`}
+          </span>
+        </div>
+      )}
       {tgtCal != null && (
         <>
           <div style={{ height: '0.5px', background: UI.hairStrong, margin: '6px 0' }} />
