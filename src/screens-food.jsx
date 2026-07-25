@@ -1384,18 +1384,31 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (that isn't even counted in its own category's total above it) has no
   // business appearing as its own card, and an hour with nothing BUT a
   // still-planned entry shouldn't appear at all.
+  // An unconfirmed meal of choice rides along as a synthetic entry so the
+  // poster shows the shape of the day the day actually has, including what is
+  // still open for it. It carries a flag rather than looking like a normal
+  // entry: it is not eaten, so it is deliberately NOT in the category totals,
+  // and rendering it as an ordinary card would claim otherwise. Its hour is
+  // kept even when nothing else is logged there, unlike every other empty
+  // hour, because that hour is the whole point of the row.
   const posterCategories = useMemoFd(() => {
+    const mocRow = (isMealOfChoice && !mocEntry && mocRemainder && mocRemainder.calories > 0)
+      ? { id: 'moc', moc: true, foodName: mocName || 'Meal of choice',
+          calories: mocRemainder.calories, protein: mocRemainder.protein,
+          carbs: mocRemainder.carbs, fat: mocRemainder.fat }
+      : null;
     return categoryTotals
       .map(cat => {
         const hours = [];
         for (let h = cat.startHour; h < cat.endHour; h++) {
           const es = (byHour[h] || []).filter(e => !e.planned);
-          if (es.length) hours.push({ hour: h, entries: es });
+          const withMoc = (mocRow && h === mocHour) ? [...es, mocRow] : es;
+          if (withMoc.length) hours.push({ hour: h, entries: withMoc });
         }
         return { ...cat, hours };
       })
       .filter(cat => cat.hours.length > 0);
-  }, [categoryTotals, byHour]);
+  }, [categoryTotals, byHour, isMealOfChoice, mocEntry, mocRemainder, mocName, mocHour]);
   const takeScreenshot = async () => {
     const res = await captureNodeAsPng(captureRef.current, {
       filename: `food-log-${curDate}.png`,
@@ -2496,7 +2509,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </div>
 
             <BracketFrame gold style={{ padding: 20, marginTop: 16 }}>
-              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories} />
+              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
+                unscored={isMealOfChoice ? 'Meal of choice' : null} />
             </BracketFrame>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 20 }}>
@@ -2531,12 +2545,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {entries.map(e => (
-                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)' }}>
+                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)',
+                              ...(e.moc ? { border: `var(--hair-width) dashed var(--hair-accent)` } : null) }}>
+                              {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
                                 {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                 <span style={fdMetaDivider} />
                                 <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                                {e.moc ? ' left for it' : ''}
                               </span>
                             </div>
                           ))}
