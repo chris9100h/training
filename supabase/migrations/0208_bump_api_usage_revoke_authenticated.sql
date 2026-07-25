@@ -1,0 +1,21 @@
+-- Closes a grant migration 0207 left open. Verifying the live database after
+-- applying it showed bump_api_usage executable by `authenticated`, which 0207
+-- never granted: an ALTER DEFAULT PRIVILEGES rule owned by `postgres` hands
+-- EXECUTE on every newly created function to authenticated and service_role.
+-- Migration 0132 removed the equivalent rule for `anon` (which is why the
+-- mandatory anon check in CLAUDE.md passed here), but the authenticated one is
+-- still in place, so `REVOKE ... FROM PUBLIC` alone does not cover it.
+--
+-- Why it matters rather than being cosmetic: bump_api_usage takes p_user_id as
+-- a plain argument and does no auth check of its own, by design, because its
+-- only intended caller is an Edge Function holding the service-role key. Any
+-- signed-in user could therefore call it with SOMEONE ELSE'S id and drive that
+-- person's daily counter over the limit, locking them out of food search and
+-- label scanning for the rest of the day.
+--
+-- The table itself is fine as it stands: the default-privileges rule grants
+-- table permissions too, but zane_api_usage has RLS enabled with no policies,
+-- so those grants expose no rows (the same construction zane_recipe_shares
+-- already relies on).
+
+revoke execute on function public.bump_api_usage(uuid, text, integer) from authenticated;

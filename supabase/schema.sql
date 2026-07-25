@@ -2936,5 +2936,11 @@ BEGIN
 END;
 $function$;
 
-REVOKE EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) FROM PUBLIC;
+-- Migration 0208: REVOKE FROM PUBLIC is not enough on its own here. An ALTER
+-- DEFAULT PRIVILEGES rule owned by postgres grants EXECUTE on every new
+-- function to authenticated (0132 removed the equivalent anon rule, not this
+-- one), and this function takes p_user_id as a plain argument with no auth
+-- check of its own, so any signed-in user could otherwise run another user's
+-- counter over the limit and lock them out for the day.
+REVOKE EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) FROM PUBLIC, authenticated;
 GRANT  EXECUTE ON FUNCTION public.bump_api_usage(uuid, text, integer) TO service_role;
