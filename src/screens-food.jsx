@@ -935,6 +935,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => LB.mealOfChoiceWeekCount(store.dailyLogs, curDate),
     [store.dailyLogs, curDate]);
   const mocName = LB.mealOfChoiceNoteName(dayLog?.offPlanNote);
+  // Where the derived row sits in the timeline. Defaults to the dinner window
+  // (that is what a meal of choice usually is) and is changed in the sheet.
+  const mocDefaultHour = (mealCats.find(c => c.id === 'dinner') || mealCats[mealCats.length - 1] || {}).startHour ?? 18;
+  const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
 
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
@@ -1282,7 +1286,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   //
   // targetsSnap is deliberately left alone. A meal-of-choice day is an ordinary
   // training or rest day and a flex plan reads that choice back out of it.
-  async function setMealOfChoice(on, name) {
+  async function setMealOfChoice(on, name, hour) {
     if (!on && mocEntry) {
       const ok = await confirm(
         'The day goes back to being scored, including the meal you already logged for it.',
@@ -1297,10 +1301,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ? null
         : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: false }, macroTargets, LB.isTrainingDayForDate(s, curDate)).adherence;
       const log = existing
-        ? { ...existing, mealOfChoice: on, offPlanNote, adherence, updatedAt: now }
+        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
             fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
-            mealOfChoice: on, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+            mealOfChoice: on, mealOfChoiceHour: on ? hour : null,
+            adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
   }
@@ -1312,7 +1317,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function confirmMealOfChoice() {
     if (!mocRemainder) return;
     await commitEntries([{
-      id: mocEntryId, date: curDate, time: entryTime(),
+      id: mocEntryId, date: curDate, time: `${String(mocHour).padStart(2, '0')}:00`,
       foodId: null, foodName: mocName || 'Meal of choice', brand: null, source: 'custom',
       quantityG: null,
       calories: mocRemainder.calories, protein: mocRemainder.protein,
@@ -2359,7 +2364,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           the timeline stays about food, and so a once-a-week declaration takes
           a deliberate detour instead of sitting one tap away all the time. */}
       <Sheet open={dayMenu} onClose={() => setDayMenu(false)} title={dayLabel}>
-        <button onClick={() => { setDayMenu(false); setMocSheet({ name: mocName || '' }); }}
+        <button onClick={() => { setDayMenu(false); setMocSheet({ name: mocName || '', hour: mocHour }); }}
           disabled={!dayTarget}
           style={{ ...fdTemplateBtn, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
           <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
@@ -2383,6 +2388,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={!!mocSheet} onClose={() => setMocSheet(null)} title="Meal of choice">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px', marginBottom: 16 }}>
           One meal takes whatever macros are left, and the day stops being scored. Eat the rest of the day light and protein heavy, then spend what is open on this.
+        </div>
+        <div className="micro" style={{ marginBottom: 6 }}>When</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <button onClick={() => setMocSheet(m => ({ ...m, hour: (m.hour + 23) % 24 }))} aria-label="Earlier" style={fdIconBtn(30)}>
+            <i className="fa-solid fa-minus" style={{ fontSize: 11 }} />
+          </button>
+          <span className="num" style={{ fontSize: 18, color: UI.ink, minWidth: 56, textAlign: 'center' }}>
+            {String(mocSheet?.hour ?? mocDefaultHour).padStart(2, '0')}:00
+          </span>
+          <button onClick={() => setMocSheet(m => ({ ...m, hour: (m.hour + 1) % 24 }))} aria-label="Later" style={fdIconBtn(30)}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+          </button>
+          <span style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+            {(mealCats.find(c => (mocSheet?.hour ?? mocDefaultHour) >= c.startHour && (mocSheet?.hour ?? mocDefaultHour) < c.endHour) || {}).label || ''}
+          </span>
         </div>
         <div className="micro" style={{ marginBottom: 6 }}>What is it?</div>
         <input type="text" value={mocSheet?.name ?? ''} placeholder="Pizza with the team"
@@ -2410,7 +2430,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             That would be your {mocWeek.count + 1}. this week. Your call, the app only counts.
           </div>
         )}
-        <Btn onClick={() => { setMealOfChoice(true, mocSheet?.name); setMocSheet(null); }} style={{ width: '100%' }}>
+        <Btn onClick={() => { setMealOfChoice(true, mocSheet?.name, mocSheet?.hour ?? mocDefaultHour); setMocSheet(null); }} style={{ width: '100%' }}>
           {isMealOfChoice ? 'Save' : 'Mark this day'}
         </Btn>
         {isMealOfChoice && (
@@ -2579,64 +2599,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
 
-            {/* Meal of choice: one declared meal absorbs whatever macros are
-                left, while the rest of the day is eaten light and protein
-                heavy. The day is marked on the daily log, which is what makes
-                it unscored everywhere (LB.dailyLogAdherence).
-
-                The unconfirmed meal is a DERIVED row, never a stored planned
-                entry. A stored one would sit inside projectedTotals and make
-                its own budget circular, would freeze at creation instead of
-                tracking the rest of the day, and could not be ticked off at
-                all with plan mode off, since FdCheckbox only renders there. */}
-            {dayTarget && (
-              mocEntry ? (
-                <div style={{ ...fdListRow, cursor: 'default' }}>
-                  <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={fdEntryName}>{mocEntry.foodName}</div>
-                    <span style={fdEntryMeta}>
-                      <span className="num" style={{ color: UI.warn }}>{Math.round(mocEntry.calories)} kcal</span>
-                      {' · '}<FdMacroBits protein={mocEntry.protein} carbs={mocEntry.carbs} fat={mocEntry.fat} />
-                    </span>
-                  </div>
-                  <span className="micro-gold">Eaten</span>
-                </div>
-              ) : isMealOfChoice ? (
-                <div style={{ ...fdCategoryCard, alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="micro-gold" style={{ marginBottom: 4 }}>
-                      Meal of choice{mocWeek.ordinal > 1 ? ` #${mocWeek.ordinal} this week` : ''}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>
-                      {mocName || 'Not named yet'}
-                    </div>
-                    <span style={fdEntryMeta}>
-                      {mocRemainder.calories > 0
-                        ? <><span className="num" style={{ color: UI.warn }}>{mocRemainder.calories} kcal</span>{' · '}
-                            <FdMacroBits protein={mocRemainder.protein} carbs={mocRemainder.carbs} fat={mocRemainder.fat} />
-                            {' left for it'}</>
-                        : 'Budget spent, log it normally'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <button onClick={() => setMocSheet({ name: mocName || '' })} aria-label="Edit meal of choice" style={fdIconBtn(30)}>
-                      <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                    </button>
-                    {/* Own tick rather than FdCheckbox: that one only renders
-                        with plan mode on, and this has to work either way. */}
-                    <button onClick={confirmMealOfChoice} disabled={!(mocRemainder.calories > 0)}
-                      aria-label="Log the meal of choice" style={{
-                        ...fdIconBtn(30),
-                        borderColor: mocRemainder.calories > 0 ? 'var(--hair-accent)' : UI.hairStrong,
-                        color: mocRemainder.calories > 0 ? 'var(--accent)' : UI.inkGhost,
-                      }}>
-                      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
-                    </button>
-                  </div>
-                </div>
-              ) : null
-            )}
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
                 Deliberately OUTSIDE the hero frame and folded away: they are
@@ -2721,7 +2683,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       <FdHourTrunk />
                       {Array.from({ length: cat.endHour - cat.startHour }, (_, i) => cat.startHour + i).map(h => {
                         const es = byHour[h] || [];
-                        const filled = es.length > 0;
+                        // The meal of choice sits in the timeline like any
+                        // other meal, in its category at its hour, instead of
+                        // a card above it: it used to live in one place while
+                        // unconfirmed and jump to another once ticked off.
+                        // Derived, not a stored row, so nothing here is a real
+                        // entry until it is confirmed.
+                        const showMoc = isMealOfChoice && !mocEntry && h === mocHour;
+                        const filled = es.length > 0 || showMoc;
                         // Only today has a "current hour" to mark; a backdated day's
                         // timeline stays plain. Local wall-clock hour (getHours()),
                         // matching the user's own timezone, same as entryTime()/
@@ -2817,7 +2786,38 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                       )}
                                     </div>
                                   );
-                                }) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
+                                }) : (showMoc ? null : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />)}
+                                {showMoc && (
+                                  <div data-reorder-ignore="true" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div className="micro-gold">
+                                        Meal of choice{mocWeek.ordinal > 1 ? ` #${mocWeek.ordinal} this week` : ''}
+                                      </div>
+                                      <div style={fdEntryName}>{mocName || 'Not named yet'}</div>
+                                      <span style={fdEntryMeta}>
+                                        {mocRemainder && mocRemainder.calories > 0
+                                          ? <><span className="num" style={{ color: UI.warn }}>{mocRemainder.calories} kcal</span>{' · '}
+                                              <FdMacroBits protein={mocRemainder.protein} carbs={mocRemainder.carbs} fat={mocRemainder.fat} />
+                                              {' left for it'}</>
+                                          : 'Budget spent, log it normally'}
+                                      </span>
+                                    </div>
+                                    <button onClick={() => setMocSheet({ name: mocName || '', hour: mocHour })} aria-label="Edit meal of choice" style={fdIconBtn(30)}>
+                                      <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                                    </button>
+                                    {/* Own tick rather than FdCheckbox: that one
+                                        only renders with plan mode on, and this
+                                        has to work either way. */}
+                                    <button onClick={confirmMealOfChoice} disabled={!(mocRemainder && mocRemainder.calories > 0)}
+                                      aria-label="Log the meal of choice" style={{
+                                        ...fdIconBtn(30),
+                                        borderColor: (mocRemainder && mocRemainder.calories > 0) ? 'var(--hair-accent)' : UI.hairStrong,
+                                        color: (mocRemainder && mocRemainder.calories > 0) ? 'var(--accent)' : UI.inkGhost,
+                                      }}>
+                                      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                               <div data-reorder-ignore="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
                                 <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>

@@ -540,6 +540,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         water_ml: l.waterMl ?? null, note: l.note ?? null,
         off_plan_note: l.offPlanNote ?? null,
         meal_of_choice: !!l.mealOfChoice,
+        meal_of_choice_hour: l.mealOfChoiceHour ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
       }))
@@ -938,7 +939,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods — used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1174,6 +1175,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
+      mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       updatedAt: l.updated_at ?? null,
@@ -1843,6 +1845,7 @@ async function syncStore(prev, next, userId) {
       water_ml: l.waterMl ?? null, note: l.note ?? null,
       off_plan_note: l.offPlanNote ?? null,
       meal_of_choice: !!l.mealOfChoice,
+      meal_of_choice_hour: l.mealOfChoiceHour ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
       updated_at: l.updatedAt ?? new Date().toISOString(),
@@ -5415,7 +5418,7 @@ async function endDeload(userId, store, setStore) {
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -5433,6 +5436,7 @@ async function refreshHealthLogs(userId) {
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
+      mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       updatedAt: l.updated_at ?? null,
