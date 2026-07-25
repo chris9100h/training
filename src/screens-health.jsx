@@ -4023,6 +4023,14 @@ function ExportSheet({ open, onClose, store, userId }) {
     setTo(today);
   };
 
+  // See the FROM/TO row below for why each of these is here.
+  const dateInputStyle = {
+    width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+    colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+    padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+    background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
+  };
+
   const logsInRange = () =>
     (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).sort((a, b) => a.date < b.date ? -1 : 1);
 
@@ -4279,25 +4287,35 @@ function ExportSheet({ open, onClose, store, userId }) {
               }}>{p.label}</button>
             ))}
           </div>
-          {/* minWidth 0 on both halves is load-bearing: a flex item defaults to
-              min-width auto, and a native date input reports an intrinsic width
-              wide enough that two of them plus the arrow do not fit. Without it
-              neither half can shrink to its share, so the row overflows to the
-              right and the TO field hangs past every other control in the
-              sheet. The arrow keeps its own width instead of absorbing that. */}
+          {/* Two native date inputs in one row, which needs both halves of the
+              same fix the rest of the app already applies to them:
+
+              WebkitAppearance none, because iOS keeps a date input at the
+              intrinsic width of its own shadow DOM while the native appearance
+              is on, no matter what width you give it. That is what pushed the
+              TO field out past every other control in this sheet. Water's
+              wtInput and the plan editor's dateInputStyle both carry it, which
+              is why their date rows never had the problem.
+
+              minWidth 0, because a flex item defaults to min-width auto and
+              cannot shrink below its content either way. The arrow keeps its
+              own width rather than absorbing the squeeze.
+
+              colorScheme so the native picker matches the theme, same
+              expression the water screen uses. */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
               <input type="date" value={from} max={to}
                 onChange={e => e.target.value && setFrom(e.target.value)}
-                style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={dateInputStyle} />
             </div>
             <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
               <input type="date" value={to} min={from} max={today}
                 onChange={e => e.target.value && setTo(e.target.value)}
-                style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={dateInputStyle} />
             </div>
           </div>
           {(() => {
