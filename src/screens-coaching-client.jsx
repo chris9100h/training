@@ -144,7 +144,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {clientStore.inProgress && !isSelf && (
             <div
               onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
-              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.16)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
+              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.16)`, borderBottom: `var(--hair-width) solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
             >
               <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>TRAINING NOW · TAP TO WATCH</span>
@@ -640,7 +640,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                     const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
                     const badgeBoxStyle = {
                       fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                      background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                      background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)',
                       borderRadius: 4, padding: '2px 6px',
                     };
                     const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
@@ -1307,7 +1307,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'flex-end' }}>
         <button
           onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
-          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
@@ -1409,7 +1409,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             </div>
           </div>
           {store.planDrafts?.[sch.id] && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 10px', borderTop: `0.5px solid rgba(var(--accent-rgb),0.2)`, background: UI.goldFaint }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 10px', borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)`, background: UI.goldFaint }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="micro-gold">Unsaved edits</div>
                 <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, marginTop: 1 }}>
@@ -1747,7 +1747,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
             const badgeBoxStyle = {
               fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-              background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+              background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)',
               borderRadius: 4, padding: '2px 6px',
             };
             const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };

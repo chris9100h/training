@@ -1016,7 +1016,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           </div>
 
           {['integer', 'decimal', 'stepper'].includes(fd.type) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${fd.show_in_health_log ? '1.5px' : '0.5px'} solid ${fd.show_in_health_log ? 'var(--accent)' : UI.hair}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${fd.show_in_health_log ? '1.5px' : 'var(--hair-width)'} solid ${fd.show_in_health_log ? 'var(--accent)' : UI.hair}` }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>
@@ -1263,7 +1263,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
             <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>{renderNamePrompt()}</div>
           ) : (
             <button onClick={() => setNamingTemplate('current')} disabled={templateCapReached}
-              style={{ marginTop: 4, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '11px 14px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: templateCapReached ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+              style={{ marginTop: 4, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '11px 14px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: templateCapReached ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
               {templateCapReached ? 'Limit reached, delete one to save another' : 'Save current form as template'}
             </button>
@@ -1356,7 +1356,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
             </div>
             {onSaveTemplate && (
               <button onClick={() => setNamingTemplate('previous')} disabled={templateCapReached}
-                style={{ background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
+                style={{ background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
                 <i className="fa-solid fa-bookmark" style={{ fontSize: 13, flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{templateCapReached ? 'Template limit reached (5/5)' : 'Save previous form as template, then continue'}</span>
               </button>
@@ -1479,7 +1479,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           </div>
         ))}
         <button onClick={openAddSection}
-          style={{ width: '100%', padding: '12px', background: 'transparent', borderRadius: 8, border: `0.5px dashed ${UI.hairStrong}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          style={{ width: '100%', padding: '12px', background: 'transparent', borderRadius: 8, border: `var(--hair-width) dashed ${UI.hairStrong}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
           <i className="fa-solid fa-plus" />
           Add section
         </button>

@@ -529,7 +529,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           <button onClick={() => setRaw(String(correctedTotal).replace('.', ','))} style={{
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
             background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
-            border: `0.5px solid var(--accent-deep)`,
+            border: `var(--hair-width) solid var(--accent-deep)`,
             color: 'var(--accent-ink)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
             fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
             textShadow: 'none',
@@ -551,7 +551,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             setFresh(false);
           }} style={{
             height: 46, borderRadius: 4, border: 'none', cursor: 'pointer',
-            background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
+            background: 'var(--bg-raised)', boxShadow: `0 0 0 var(--hair-width) var(--hair)`,
             textShadow: 'none',
             color: k === '⌫' ? UI.inkSoft : UI.ink,
             fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
@@ -6113,7 +6113,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span className="micro-gold">{session.dayName}</span>
           {(store.statusMode === 'deload' || session.isDeload) && (
-            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
           {mesoState && mesoWeek != null && mesoState.weeks != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
@@ -6815,7 +6815,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                                 fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                                 background: 'rgba(var(--accent-rgb),0.12)',
-                                border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                                border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)',
                                 borderRadius: 4, padding: '2px 6px',
                               }}>{LB.techniqueRounds(s, { exName: entry.name }).badge}</span>
                               {LB.techniqueRounds(s, { exName: entry.name }).anyVaried && (
@@ -8228,7 +8228,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
                             {LB.parseDate(h.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: '2-digit' })}
                           </span>
-                          {isPR && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>}
+                          {isPR && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {working.map((s, i) => {
@@ -8248,7 +8248,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                 {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
                                 {tr.badge && (
-                                  <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.08em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap' }}>{tr.badge}{tr.totalReps != null ? ` ${tr.totalReps}` : ''}</span>
+                                  <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.08em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap' }}>{tr.badge}{tr.totalReps != null ? ` ${tr.totalReps}` : ''}</span>
                                 )}
                               </span>
                             );

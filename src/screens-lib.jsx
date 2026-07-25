@@ -353,7 +353,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             color: tab === id ? UI.gold : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
             letterSpacing: '0.1em', textTransform: 'uppercase',
-            borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
+            borderBottom: `var(--hair-width) solid ${tab === id ? UI.gold : 'transparent'}`,
             marginBottom: -0.5,
             transition: 'color 0.2s',
           }}>{label}</button>
@@ -1700,7 +1700,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         {LB.parseDate(h.session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                       </span>
                       {isPR && (
-                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -2616,11 +2616,11 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
-                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
-                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -3434,7 +3434,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
-            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
             {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
@@ -3501,7 +3501,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Screenshot-only header */}
         {capturing && (
           <div style={{ marginBottom: -4 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
@@ -3509,7 +3509,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
-                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                   {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
@@ -3968,7 +3968,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
         {/* Exercise entries */}
         <div style={{ position: 'relative' }}>
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
+          {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {muscleGroups.map(tag => (
@@ -4368,7 +4368,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           {capturing && !twoCol && (
             <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+          {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginTop: 10 }} />}
         </div>
         </div>
       </div>
@@ -4837,7 +4837,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                     {st.skipped ? (
                       <>
                         <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
-                        <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
+                        <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
                       </>
                     ) : isChain ? (
                       // Round 0 (mirrored onto st.kg/reps) is edited via
@@ -4876,7 +4876,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                           </>
                         )}
                         {isEmpty && (
-                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
                         )}
                       </>
                     )}
@@ -4988,7 +4988,7 @@ function IntensityBadge({ label, highlight, decline }) {
       fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em',
       color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : 'var(--accent)',
       background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.10)',
-      border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
+      border: `var(--hair-width) solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
       borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', flexShrink: 0,
     }}>{label}</span>
   );
@@ -5074,7 +5074,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
     return (
       <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
         <div style={{ marginBottom: 6 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
@@ -5092,7 +5092,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
     return (
       <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
         <div style={{ marginBottom: 6 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
@@ -5115,7 +5115,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   return (
     <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
       <div style={{ marginBottom: 6 }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
       </div>
       <div style={{ display: isMyo ? 'inline-flex' : 'flex', flexDirection: isMyo ? 'column' : 'row', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
@@ -5252,7 +5252,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
         {/* Screenshot-only header */}
         {capturing && (
           <div style={{ marginBottom: -4 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>SESSION COMPARE</div>
@@ -5378,7 +5378,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
             ));
           })()}
         </div>
-        {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: -4 }} />}
+        {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginTop: -4 }} />}
 
         {extraCmpEntries.length > 0 && !capturing && (
           <div className="micro" style={{ color: UI.inkFaint, marginTop: -10 }}>
@@ -5755,7 +5755,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5784,7 +5784,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                       {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
@@ -5819,7 +5819,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5853,7 +5853,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5879,7 +5879,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}

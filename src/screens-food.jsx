@@ -2583,7 +2583,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
           </div>
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Food Log</div>

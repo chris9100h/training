@@ -1502,7 +1502,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setGlForm({ ...emptyGl, time: new Date().toTimeString().slice(0, 5) });
             setAddingGlucose(true); setEditingGlucoseId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
@@ -1580,7 +1580,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setBpForm({ ...emptyBp, time: new Date().toTimeString().slice(0, 5) });
             setAddingBp(true); setEditingBpId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
@@ -1654,14 +1654,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setTempForm({ ...emptyTemp, time: new Date().toTimeString().slice(0, 5) });
             setAddingTemp(true); setEditingTempId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
 
       {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)` }}>
           <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {layoutRows(coachFields).map((row, ri) => (
@@ -2114,9 +2114,9 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // Every 11px block below sets its line height in whole pixels rather than as
   // a ratio, and that is load-bearing, not a style preference. 11 x 1.4 is
   // 15.39px and 11 x 1.45 is 15.94px, so each line of body copy pushed
-  // everything under it onto a fractional offset. Hairlines are 0.5px, and a
-  // 0.5px border at a fractional offset gets smeared across two device rows
-  // instead of landing on one, which reads as a missing edge. It moved while
+  // everything under it onto a fractional offset, and a hairline border at a
+  // fractional offset renders inconsistently instead of landing crisply on
+  // one device row, which reads as a missing or blurred edge. It moved while
   // typing because the line under "Maintenance about" rewraps as the numbers
   // change width, so every edit reshuffled the sub-pixel phase of the macro
   // inputs right below it. Whole-pixel line heights keep those offsets integral
@@ -2416,7 +2416,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   const isPerfect = adh != null && Math.round(adh) >= 97;
   const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `var(--hair-width) solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
       <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em' }}>{label}</span>
     </span>
@@ -2617,7 +2617,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
       )}
       {tgtCal != null && (
         <>
-          <div style={{ height: '0.5px', background: UI.hairStrong, margin: '6px 0' }} />
+          <div style={{ height: 'var(--hair-width)', background: UI.hairStrong, margin: '6px 0' }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
             {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
               <div key={i} style={{ textAlign: 'center' }}>
@@ -2726,7 +2726,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
               style={{
                 flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                 background: sel ? UI.goldFaint : has ? UI.goldFaint : 'transparent',
-                border: `${sel ? '2px' : '0.5px'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
+                border: `${sel ? '2px' : 'var(--hair-width)'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
                 borderRadius: 4, cursor: 'pointer',
                 minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
@@ -2890,7 +2890,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
           </div>
           {sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -2971,7 +2971,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
           </div>
           {sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3040,7 +3040,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
               grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3152,7 +3152,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                 grid) shows just the chart, matching Glucose/BP/Temp. */}
             {!compact && (
               <>
-                <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+                <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {todayEntries.map(n => (
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3567,7 +3567,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
-          background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+          background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent', flexShrink: 0,
@@ -3738,7 +3738,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           margin: '0 16px 12px',
           padding: '10px 14px',
           background: 'rgba(var(--accent-rgb), 0.16)',
-          border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+          border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`,
           borderRadius: 6,
           display: 'flex', alignItems: 'center', gap: 10,
           cursor: 'pointer',
@@ -3767,7 +3767,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
               <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>All Health cards are hidden.</div>
               <button onClick={() => go({ name: 'settings' })} style={{
-                background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+                background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
                 borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
@@ -4255,7 +4255,7 @@ function ExportSheet({ open, onClose, store, userId }) {
             : '';
 
           const badge = (icon, label) =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
                <span>${icon}</span>${label}
              </span>`;
 
@@ -4287,7 +4287,7 @@ function ExportSheet({ open, onClose, store, userId }) {
               ${stat('Carbs', l.carbs, 'g')}
               ${stat('Fat', l.fat, 'g')}
             </div>
-            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
+            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
           </div>`;
         }).join('');
 

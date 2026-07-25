@@ -1366,7 +1366,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             </div>
 
             <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
@@ -1577,7 +1577,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             Copies this plan into a client's account. You'll pick whether it activates right away.
           </div>
           {versions && !viewingActiveVersion && (
-            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `0.5px solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
+            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
               <span style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.9)', fontFamily: UI.fontUi, lineHeight: 1.4 }}>
                 You're viewing {selectedVersion.validFrom > today ? 'a scheduled version' : 'a past version'} (from {fmtVDate(selectedVersion.validFrom)}), not the active one. That's what gets pushed.
               </span>
@@ -3046,7 +3046,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
               background: UI.goldFaint, color: UI.gold, fontWeight: 600,
             }}>{t}</button>
             <button onClick={() => removeCustom(t)} title="Remove" style={{
-              background: UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${UI.goldSoft}`,
+              background: UI.goldFaint, border: 'none', borderLeft: `var(--hair-width) solid ${UI.goldSoft}`,
               color: UI.gold, opacity: 0.55, padding: '0 8px', cursor: 'pointer', fontSize: 12,
             }}>×</button>
           </div>
@@ -4437,7 +4437,7 @@ function PlanWizard({ store, setStore, go }) {
       return <div key={dt} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden', border: `1px solid ${armed ? UI.danger : (on ? 'var(--accent)' : UI.goldSoft)}` }}>
         <button onClick={() => pickDay(dt)} style={{ flex: 1, minWidth: 0, padding: '13px 4px', border: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.goldFaint, color: on ? 'var(--accent)' : UI.gold, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>
-        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
+        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `var(--hair-width) solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
       </div>;
     };
     // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
@@ -4794,7 +4794,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{window.FIVE_THREE_ONE.name}</span>
-              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
             </div>
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
@@ -4832,7 +4832,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{p.name}</span>
-              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
             </div>
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>

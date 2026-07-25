@@ -378,7 +378,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
   return (
     <div
       onClick={handleCardClick}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.10)`, pointerEvents: 'none' }} />
@@ -781,7 +781,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             )}
             {onEdit && (
               <button onClick={onEdit}
-                style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+                style={{ background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
             )}
             {exportMode === 'pick' ? (
               <>
@@ -1040,7 +1040,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             {options.map(opt => (
               <button key={opt.value} onClick={() => onChange(value === opt.value ? null : opt.value)}
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
-                  border: `${value === opt.value ? '1.5px' : '0.5px'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
+                  border: `${value === opt.value ? '1.5px' : 'var(--hair-width)'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
                   background: value === opt.value ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
                   textShadow: 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -1065,7 +1065,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
                   textShadow: sel && (opt.color === 'accent' || opt.color === 'danger') ? 'var(--text-lift)' : 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
-                  border: `${sel ? '1.5px' : '0.5px'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
+                  border: `${sel ? '1.5px' : 'var(--hair-width)'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
                 {opt.label}
               </button>
             );
@@ -1158,7 +1158,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
-        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
             ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week, review before submitting`
             : prefill
@@ -1329,7 +1329,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {!thisWeek && checkinEnabled && canSubmitToday && (
             <button onClick={() => setEditTarget('new')}
-              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               Submit this week's check-in
             </button>
           )}
@@ -1341,13 +1341,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               would wrongly hide the preview whenever last week was checked in. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'var(--text-lift)', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'var(--text-lift)', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
           {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: previewOpen ? 'var(--text-lift)' : 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : 'var(--hair-width)'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: previewOpen ? 'var(--text-lift)' : 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
             </button>
           )}

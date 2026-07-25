@@ -495,7 +495,7 @@ function PasskeySheet({ open, onClose }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         <button onClick={handleAdd} disabled={adding} style={{
           width: '100%', padding: '12px 0', borderRadius: 6,
-          background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.25)',
+          background: 'rgba(var(--accent-rgb),0.10)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.25)',
           color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
           cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1,
           WebkitTapHighlightColor: 'transparent',
@@ -570,7 +570,7 @@ function PasskeySheet({ open, onClose }) {
                         <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
                       </button>
                       <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
-                        background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                        background: 'rgba(var(--danger-rgb),0.08)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.2)',
                         color: UI.danger, borderRadius: 6, padding: '5px 12px',
                         fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                         cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
@@ -2176,7 +2176,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     {confirmDeletePeriodId === p.id && (
                       <div style={{ display: 'flex', gap: 8, paddingBottom: 14 }}>
                         <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Cancel</button>
-                        <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
+                        <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
                       </div>
                     )}
                   </div>
@@ -3215,7 +3215,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {confirmDeleteTicket ? (
                     <div style={{ display: 'flex', gap: 6 }}>
                       <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
-                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: '0.5px solid rgba(var(--danger-rgb),0.3)' }}>
+                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.3)' }}>
                         {deletingTicket ? 'Deleting…' : 'Confirm delete'}
                       </Btn>
                     </div>
@@ -3540,7 +3540,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
-            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
@@ -3584,7 +3584,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               );
             }
             if (webPushVerified) return (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.16)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.16)', border: 'var(--hair-width) solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 5px rgba(var(--accent-rgb),0.7)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
                   <span className="micro" style={{ color: 'var(--accent)' }}>ACTIVE</span>

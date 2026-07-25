@@ -152,7 +152,7 @@ function UpdateBanner({ onUpdate }) {
         padding: '32px 28px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 10, textAlign: 'center',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 var(--hair-width) rgba(var(--accent-rgb),0.2)',
       }}>
         <div style={{
           width: 48, height: 48, borderRadius: 6,
@@ -204,7 +204,7 @@ function WhatsNewModal({ entries, onDismiss }) {
         padding: '28px 26px',
         display: 'flex', flexDirection: 'column', gap: 18,
         overflowY: 'auto',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 var(--hair-width) rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
         // This panel draws the same paper grid Card/Sheet do (bg-texture
         // above), so it needs the same lift or the grid cuts straight

@@ -545,7 +545,7 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
     );
   }
   return (
-    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 8 }}>
+    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `var(--hair-width) solid rgba(var(--danger-rgb),0.2)`, borderRadius: 8 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
@@ -787,7 +787,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[['1','Easy'],['2','Light'],['3','Steady'],['4','Solid'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
             <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
-              border: `${form.paceFeeling === Number(n) ? '1.5px' : '0.5px'} solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+              border: `${form.paceFeeling === Number(n) ? '1.5px' : 'var(--hair-width)'} solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
               background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
               textShadow: form.paceFeeling === Number(n) ? 'var(--text-lift)' : 'none',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
@@ -810,7 +810,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[1,2,3,4,5,6,7,8,9,10].map(n => (
             <button key={n} onClick={() => set('effort', form.effort === n ? null : n)} style={{
               flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-              border: `${form.effort === n ? '1.5px' : '0.5px'} solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+              border: `${form.effort === n ? '1.5px' : 'var(--hair-width)'} solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
               background: form.effort === n ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
               textShadow: form.effort === n ? 'var(--text-lift)' : 'none',
               WebkitTapHighlightColor: 'transparent',
@@ -2877,7 +2877,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             flexShrink: 0,
             padding: '10px 16px',
             background: UI.goldFaint,
-            borderBottom: `0.5px solid ${UI.goldSoft}`,
+            borderBottom: `var(--hair-width) solid ${UI.goldSoft}`,
             display: 'flex', alignItems: 'center', gap: 10,
             position: 'relative', zIndex: 1,
           }}>
@@ -2929,7 +2929,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     MESO · DELOAD
                   </span>
                 );
@@ -2989,13 +2989,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     );
                   }
                   return (
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                       {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   );
                 })()}
                 {deloadHintActive && (
-                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     Deload ready
                   </span>
                 )}
@@ -3068,7 +3068,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.13)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  border: `${isSelected ? '2px' : 'var(--hair-width)'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -3341,7 +3341,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession, store.exercises, store.dailyLogs)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
                 </div>
               </Frame>
-              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.15)', border: '0.5px solid rgba(var(--danger-rgb),0.40)', cursor: 'pointer' }}>
+              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.15)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.40)', cursor: 'pointer' }}>
                 <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>
                   {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
                 </div>

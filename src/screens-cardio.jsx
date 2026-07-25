@@ -1008,13 +1008,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       const actLabel = cpActivity(activityType).label;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.11)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
+          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.11)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
               Your <strong style={{ color: UI.ink }}>{actLabel}</strong> plan: <strong style={{ color: UI.ink }}>{total} sessions</strong> over <strong style={{ color: UI.ink }}>{totalWeeksPreview} weeks</strong>. Each session progresses slightly. Every 4th calendar week is a lighter recovery week.
             </div>
           </div>
           {preview?.warnings?.map((msg, i) => (
-            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.16)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.16)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
               <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, lineHeight: 1.5 }}>⚠ {msg}</span>
             </div>
           ))}
@@ -1300,7 +1300,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
                 <button onClick={() => { setLogPrefill({ type: plan.activityType, distanceM: target.distanceM, durationMinutes: target.durationMinutes }); setLogOpen(true); }} style={{
                   flexShrink: 0, padding: '5px 12px', borderRadius: 4,
                   background: 'rgba(var(--accent-rgb),0.12)',
-                  border: '0.5px solid rgba(var(--accent-rgb),0.3)',
+                  border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.3)',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
                   color: 'var(--accent)', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 }}>LOG</button>
