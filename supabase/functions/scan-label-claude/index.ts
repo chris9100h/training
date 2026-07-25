@@ -20,7 +20,9 @@
 //
 // One action: POST { image: <base64, no data: prefix>, mimeType?: 'image/jpeg' }
 // -> { is_nutrition_label, name, brand, basis, serving_size_g, serving_label,
-//      calories, protein_g, carbs_g, fat_g, fiber_g }.
+//      calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sat_fat_g,
+//      sodium_mg }. The last three arrived with migration 0204; sodium is
+//      returned in MILLIGRAMS whatever unit the label printed.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
