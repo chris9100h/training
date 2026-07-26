@@ -251,6 +251,71 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     );
   };
 
+  // Long-press on the Health slot (whichever of Health/Water/Food it's
+  // currently showing, from any tab) reveals the two OTHER slots just above
+  // the dock; drag onto one while still holding and release there to jump
+  // straight to it. A plain short tap is untouched, still runs the cycle
+  // above via handleTabClick. Bottom-dock only, the sidebar has no reach
+  // problem to solve and keeps the plain click-cycle.
+  const [reveal, setReveal] = React.useState(null); // { anchorX, bottom, hoverId } | null
+  const barRef = React.useRef(null);
+  const pressTimerRef = React.useRef(null);
+  const pressStartRef = React.useRef(null);
+  const suppressClickRef = React.useRef(false);
+  const activeListenersRef = React.useRef(null);
+  const healthIdx = tabs.findIndex(t => t.id === 'health');
+  const currentHealthSlot = tabs.find(t => t.id === 'health')?.healthSlot || 'health';
+  const cancelPressTimer = () => { if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; } };
+  const resolveHealthOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-health-option]')?.getAttribute('data-health-option') || null;
+  React.useEffect(() => () => {
+    cancelPressTimer();
+    if (activeListenersRef.current) {
+      document.removeEventListener('pointermove', activeListenersRef.current.onMove);
+      document.removeEventListener('pointerup', activeListenersRef.current.onUp);
+      document.removeEventListener('pointercancel', activeListenersRef.current.onUp);
+      activeListenersRef.current = null;
+    }
+  }, []);
+  const healthOnPointerDown = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pressStartRef.current = { x: e.clientX, y: e.clientY };
+    cancelPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      const r = barRef.current?.getBoundingClientRect();
+      if (!r) return;
+      suppressClickRef.current = true;
+      // Clamped so the two-chip popup (roughly 180-220px wide) can't clip off
+      // a narrow phone's edge when Health sits in an outer tab slot.
+      const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
+      const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
+      setReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+      const onMove = (ev) => setReveal(rv => rv && { ...rv, hoverId: resolveHealthOption(ev.clientX, ev.clientY) });
+      const onUp = (ev) => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        activeListenersRef.current = null;
+        setReveal(null);
+        const pick = resolveHealthOption(ev.clientX, ev.clientY);
+        if (pick) onChange(pick);
+      };
+      activeListenersRef.current = { onMove, onUp };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
+    }, 420);
+  };
+  const healthOnPointerMove = (e) => {
+    if (!pressTimerRef.current || !pressStartRef.current) return;
+    if (Math.hypot(e.clientX - pressStartRef.current.x, e.clientY - pressStartRef.current.y) > 10) cancelPressTimer();
+  };
+  const healthOnPointerUp = cancelPressTimer;
+  const healthOnClick = (id) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    handleTabClick(id);
+  };
+
   if (sidebar) {
     return (
       <div style={{
@@ -338,13 +403,14 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const ICON_H = 26;     // icon-zone height, drives the icon→label gap
   const ICON_SZ = 24;    // glyph size in the bottom dock (sidebar untouched)
   return (
+    <>
     <div style={{
       flexShrink: 0,
       padding: `10px 12px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
       background: 'transparent',
       zIndex: 20,
     }}>
-      <div style={{
+      <div ref={barRef} style={{
         position: 'relative',
         background: 'rgba(var(--bg-rgb),0.92)',
         backdropFilter: 'blur(24px) saturate(130%)',
@@ -394,8 +460,16 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
             const { healthSlot, iconKey, label } = t;
+            const isHealthTab = t.id === 'health';
             return (
-              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
+              <button key={t.id} data-tour={`tab-${t.id}`}
+                onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
+                onPointerDown={isHealthTab ? healthOnPointerDown : undefined}
+                onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
+                onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
+                onPointerCancel={isHealthTab ? healthOnPointerUp : undefined}
+                onContextMenu={isHealthTab ? (e) => e.preventDefault() : undefined}
+                style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
@@ -406,6 +480,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
                 WebkitTapHighlightColor: 'transparent',
+                ...(isHealthTab ? { userSelect: 'none', touchAction: 'manipulation' } : null),
               }}>
                 {/* Icon zone, matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
@@ -442,6 +517,39 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         </div>
       </div>
     </div>
+    {reveal && (
+      <div style={{
+        position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
+        display: 'flex', gap: 8, padding: 8,
+        background: 'rgba(var(--bg-rgb),0.92)',
+        backdropFilter: 'blur(24px) saturate(130%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 8,
+        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        animation: 'fadeUp 0.15s ease-out',
+        zIndex: 30,
+      }}>
+        {['health', 'water', 'food'].filter(id => id !== currentHealthSlot).map(id => {
+          const hovered = reveal.hoverId === id;
+          return (
+            <div key={id} data-health-option={id} style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              padding: '10px 18px', borderRadius: 6,
+              background: hovered ? 'rgba(var(--accent-rgb),0.22)' : 'transparent',
+              border: `1px solid ${hovered ? UI.gold : UI.hairStrong}`,
+              color: hovered ? UI.gold : UI.inkSoft,
+            }}>
+              {React.cloneElement(TAB_ICONS[id], { width: 22, height: 22 })}
+              <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {{ health: 'Health', water: 'Water', food: 'Food' }[id]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    )}
+    </>
   );
 }
 
