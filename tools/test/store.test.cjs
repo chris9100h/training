@@ -326,6 +326,15 @@ async function testAsync(name, fn) {
     const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new');
   });
+  // With a base, "not in base" already means never confirmed synced. Applying
+  // the 2-day recency rule on top of that deleted exactly the sessions that a
+  // longer offline stretch (or a sync wedged on an unrelated failing row) had
+  // been unable to push.
+  test('mergeSessions keeps a never-synced OLD session when a base exists', () => {
+    const sess = { id: 'oldlocal', date: '2026-05-01', ended: 'x', entries: [] };
+    const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
+    assert.strictEqual(sessions.map(s => s.id).join(','), 'oldlocal', 'never-synced workouts must not expire from the cache');
+  });
   test('mergeSessions does NOT resurrect a session deleted locally (in base, not in cur, still on server)', () => {
     const sess = { id: 'del', date: '2026-06-09', ended: 'x', entries: [] };
     // fresh still has it (sync delete not yet propagated), cur doesn't (user deleted it), base has it
@@ -607,6 +616,34 @@ async function testAsync(name, fn) {
       // Carbs never had to be clamped at zero to make the day fit.
       assert.ok(m.carbsRest > 0, `${days} training days leaves real carbs on a rest day`);
     }
+  });
+
+  test('macroTargetsFromGoal: protein/fat crowding out a cycled rest day does not overshoot the week', () => {
+    // High protein+fat settings on an aggressively cycled single-training-day
+    // week: protein*4 + fat*9 alone (2295 kcal) lands right at the rest day's
+    // own calorie figure, clamping its carbs to 0. Before the fix, that made
+    // the rest day's real calories 2295 instead of its intended lower figure
+    // with nothing compensating trainingCal for the difference, so the week
+    // quietly averaged above the 2325 kcal target instead of hitting it.
+    const params = { tdee: 2600, weightKg: 90, goal: 'cut', rateKgPerWeek: 0.25, trainingDays: 1, proteinPerKg: 3, fatPerKg: 1.5 };
+    const m = LB.macroTargetsFromGoal(params);
+    assert.strictEqual(m.carbsRest, 0, 'the rest day is the one that gets crowded out');
+    assert.ok(m.carbsTraining > 0, 'training day still has room, so only the rest day should clamp');
+    const daily = Math.max(Math.round(2600 - 0.25 * 7700 / 7), Math.round(2600 * 0.6));
+    const weeklyAvg = LB.weeklyAverageCalories(m.caloriesTraining, m.caloriesRest, params.trainingDays);
+    assert.ok(Math.abs(weeklyAvg - daily) <= 2, `week averages ${weeklyAvg} against a ${daily} kcal target`);
+  });
+
+  test('macroTargetsFromGoal: a target too low for protein+fat alone still degrades cleanly', () => {
+    // protein*4 + fat*9 (2550 kcal) here exceeds even the flat daily target
+    // (1200 kcal), so no split can hit it: both day types should bottom out
+    // at the same protein+fat floor, carbs at 0, rather than crash, go
+    // negative, or leave the two day types inexplicably different.
+    const m = LB.macroTargetsFromGoal({ tdee: 2000, weightKg: 100, goal: 'cut', rateKgPerWeek: 1.5, trainingDays: 1, proteinPerKg: 3, fatPerKg: 1.5 });
+    assert.strictEqual(m.carbsTraining, 0);
+    assert.strictEqual(m.carbsRest, 0);
+    assert.strictEqual(m.caloriesTraining, m.caloriesRest);
+    assert.ok(Number.isFinite(m.caloriesTraining) && m.caloriesTraining > 0);
   });
 
   test('macroTargetsFromGoal: 0 and 7 training days have nothing to cycle against', () => {

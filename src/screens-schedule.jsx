@@ -1,4 +1,4 @@
-/* Schedules — list, detail, edit, create */
+/* Schedules, list, detail, edit, create */
 
 const { useState: useStateS, useMemo: useMemoS, useEffect: useEffectS } = React;
 
@@ -15,7 +15,7 @@ function useIsPadS() {
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
 // Shared chrome for this screen's compact "mini" bottom sheets (a small
-// gold-label header + custom content) — distinct from the app-wide `Sheet`
+// gold-label header + custom content), distinct from the app-wide `Sheet`
 // component (big uppercase display title, keyboard-aware, used for full
 // settings/detail panels). These stack on top of each other (versions →
 // backups → preview → date-pickers), so `dim` lets an inner sheet skip its
@@ -109,7 +109,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (data.type !== 'zane-plan' || !data.schedule) { alert('Invalid plan file.'); return; }
+        if (data.type !== 'zane-plan' || !data.schedule) { UI.alert('Invalid plan file.'); return; }
         const idMap = {};
         const newExercises = [];
         (data.exercises || []).forEach(ex => {
@@ -151,7 +151,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         }
         setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
         go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
-      } catch (_) { alert('Could not read plan file.'); }
+      } catch (_) { UI.alert('Could not read plan file.'); }
     };
     reader.readAsText(file);
   };
@@ -479,7 +479,7 @@ function FiveThreeOneProgress({ sch, store }) {
   );
 }
 
-// ─── Plan viewer — fully read-only, no edit affordances ───────────────
+// ─── Plan viewer, fully read-only, no edit affordances ───────────────
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
 // that will be prefilled when training, with no controls that change it.
@@ -498,7 +498,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const today = LB.todayISO();
 
   // Versions are stored newest-first. The viewer shows one version at a time and
-  // defaults to the one in effect today — so a not-yet-effective future version
+  // defaults to the one in effect today, so a not-yet-effective future version
   // never hijacks the displayed position (the bug: today showed the new version's
   // day instead of the one actually active today).
   const versions = sch?.versions?.length ? sch.versions : null;
@@ -512,7 +512,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // True when the version being viewed is the one actually in effect today.
   const viewingActiveVersion = !versions || safeVerIdx === activeVerIdx;
 
-  // TODAY marker — only when this is the active plan AND we're viewing the
+  // TODAY marker, only when this is the active plan AND we're viewing the
   // version in effect today. Position is read straight from the displayed
   // version, so there's no cross-version id translation to get wrong.
   const todayDayId = (isActivePlan && viewingActiveVersion)
@@ -548,6 +548,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [editStartDateVal, setEditStartDateVal] = useStateS('');
   const [backupSheet, setBackupSheet] = useStateS(false);
   const [backups, setBackups] = useStateS(null);
+  const [backupsError, setBackupsError] = useStateS(false);
   const [restoreFromSheet, setRestoreFromSheet] = useStateS(false);
   const [restoreFromDate, setRestoreFromDate] = useStateS('');
   const [restoreFromDayIdx, setRestoreFromDayIdx] = useStateS(0);
@@ -564,13 +565,17 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
+    setBackupsError(false);
     if (!sch) return;
-    const { data } = await LB.supabase
+    const { data, error } = await LB.supabase
       .from('zane_schedule_backups')
       .select('id, days, schedule_name, created_at')
       .eq('schedule_id', sch.id)
       .order('created_at', { ascending: false })
       .limit(10);
+    // A failed fetch used to render as "No backups yet", i.e. the sheet told
+    // the user their restore points did not exist whenever they were offline.
+    if (error) { setBackups([]); setBackupsError(true); return; }
     setBackups(data || []);
   };
 
@@ -580,7 +585,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       { ok: 'Restore', danger: true }
     )) return;
     if (!(sch?.versions || []).length) {
-      // Unversioned plan — just replace days directly
+      // Unversioned plan, just replace days directly
       setBackupSheet(false);
       setStore(s => ({
         ...s,
@@ -588,7 +593,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       }));
       return;
     }
-    // Versioned plan — ask for effective date (date picker appears on top of backup list)
+    // Versioned plan, ask for effective date (date picker appears on top of backup list)
     setPendingBackup(backup);
     setRestoreFromDate(LB.todayISO());
     setRestoreFromDayIdx(0);
@@ -626,20 +631,20 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   }, [selectedDayId]);
 
   // Computed here (before the early returns below) purely so the seedRefs
-  // hooks that depend on it always run — every other hook in this component
+  // hooks that depend on it always run, every other hook in this component
   // is declared before those returns too; a hook declared after them would
   // violate React's rules of hooks the moment `sch`/`displayDays` changes
   // across renders of this same (unkeyed, long-lived) instance.
   const dayForSeed = displayDays.find(d => d.id === selectedDayId) || displayDays[0] || null;
   // Merge in server history for exercises whose local window is thin (fresh
-  // device/reinstall) — same call the real session-start flow awaits, so the
+  // device/reinstall), same call the real session-start flow awaits, so the
   // weight/progression preview here doesn't disagree with what actually gets
   // seeded once the session starts. Resolves instantly when the local window
   // already suffices; never rejects (falls back silently offline).
   const [seedRefs, setSeedRefs] = useStateS({});
   React.useEffect(() => {
     let cancelled = false;
-    // In preview there is no history to seed from (fresh materialized exercises) —
+    // In preview there is no history to seed from (fresh materialized exercises),
     // the preview shows the planned sets/reps instead, so skip the network call.
     if (preview || !dayForSeed?.items?.length) { setSeedRefs({}); return; }
     LB.fetchSeedEntries(store, dayForSeed.items, dayForSeed.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
@@ -808,7 +813,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       cycleIndex: 0,
       // Reset the start date that doesn't apply to this plan type, so a later
       // type switch can't read a stale date left over from a different plan.
-      // Flex plans have no date anchor at all — position is the cycleIndex.
+      // Flex plans have no date anchor at all, position is the cycleIndex.
       cycleStartDate:    (isWeekday || isFlex) ? null          : LB.todayISO(),
       weekPlanStartDate: isWeekday             ? LB.todayISO() : null,
     }));
@@ -881,7 +886,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       // whatever happens to be newest.
       copy.days = JSON.parse(JSON.stringify(versionDays));
       copy.archived = false;
-      // My Plans / Client Templates is a bucket on the COACH's own Plan tab —
+      // My Plans / Client Templates is a bucket on the COACH's own Plan tab,
       // meaningless once the plan lands in the client's account, and the
       // client isn't a coach so it would never surface there anyway. Reset it
       // so a pushed "client template" doesn't carry the flag along for no
@@ -966,7 +971,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     // is first-wins keyed on validFrom, so it would silently drop the edited
     // version (irreversible history loss) instead of moving it.
     if ((sch.versions || []).some(v => v.validFrom !== selectedVersion.validFrom && v.validFrom === newDate)) {
-      alert('Another version of this plan already starts on that date. Pick a different date.');
+      UI.alert('Another version of this plan already starts on that date. Pick a different date.');
       return;
     }
     const newVersions = LB.dedupeVersionsByDate(
@@ -988,7 +993,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const doReactivate = (date) => {
     if (!selectedVersion || !date) return;
     const newVer = { validFrom: date, days: JSON.parse(JSON.stringify(selectedVersion.days || [])) };
-    // One version per date — newVer is first, so it replaces any same-date entry.
+    // One version per date, newVer is first, so it replaces any same-date entry.
     const newVersions = LB.dedupeVersionsByDate([newVer, ...(sch.versions || [])]);
     const newIdx = newVersions.indexOf(newVer);
     setStore(s => ({
@@ -1035,7 +1040,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     </div>
   );
 
-  // Cross-device meso set/weight adjustments — must pass store.mesoStates
+  // Cross-device meso set/weight adjustments, must pass store.mesoStates
   // (the DB-synced source of truth) same as every other call site, otherwise
   // this preview silently falls back to a per-device localStorage cache that
   // may not exist here, showing the un-adjusted baseline plan. Resolved once
@@ -1137,7 +1142,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 ) : seedSets.map((st, si) => {
                   const kg = st.kg != null ? `${st.kg}${UI.unit()}` : '—';
                   // A null seeded rep count means the training screen would
-                  // actually show a blank input for that set — falling back
+                  // actually show a blank input for that set, falling back
                   // to the flat plan-level reps here would show a concrete
                   // number that won't actually be pre-filled.
                   const reps = isUni
@@ -1366,7 +1371,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             </div>
 
             <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
@@ -1577,7 +1582,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             Copies this plan into a client's account. You'll pick whether it activates right away.
           </div>
           {versions && !viewingActiveVersion && (
-            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `0.5px solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
+            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
               <span style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.9)', fontFamily: UI.fontUi, lineHeight: 1.4 }}>
                 You're viewing {selectedVersion.validFrom > today ? 'a scheduled version' : 'a past version'} (from {fmtVDate(selectedVersion.validFrom)}), not the active one. That's what gets pushed.
               </span>
@@ -1696,7 +1701,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             {backups === null && (
               <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
             )}
-            {backups !== null && backups.length === 0 && (
+            {backups !== null && backups.length === 0 && backupsError && (
+              <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0', lineHeight: 1.6 }}>
+                Could not load your backups. Check your connection.
+                <div style={{ marginTop: 10 }}><Btn kind="ghost" onClick={openBackupSheet}>Try again</Btn></div>
+              </div>
+            )}
+            {backups !== null && backups.length === 0 && !backupsError && (
               <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No backups yet. Backups are saved automatically when you update your plan.</div>
             )}
             {(backups || []).map(b => {
@@ -1763,7 +1774,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 })}
               </div>
 
-              {/* Exercise list — all days rendered in a CSS grid stack so the
+              {/* Exercise list, all days rendered in a CSS grid stack so the
                   sheet height is anchored to the tallest day; non-active days
                   are invisible but still occupy space, preventing resize on switch */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '0 22px 12px' }}>
@@ -1849,7 +1860,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   );
 }
 
-// ─── Edit screen — rename, manage pattern ─
+// ─── Edit screen, rename, manage pattern ─
 // The "Progression" explainer body, shared by the plan editor's info sheet and
 // the new-plan wizard's info modal. Content only (no wrapper / buttons) so each
 // caller can host it in a Sheet or a high-z overlay as its stacking allows.
@@ -2070,17 +2081,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       if (startDayIdx && startDayIdx > 0) newVersionEntry.cycleOffset = startDayIdx;
       let versions;
       if (existingVersions.length === 0) {
-        // First versioned change — anchor the original plan
+        // First versioned change, anchor the original plan
         const anchorDate = originalStart || LB.todayISO();
         versions = [newVersionEntry, { validFrom: anchorDate, days: originalDays }];
       } else {
-        // Already versioned — prepend new version, keep rest
+        // Already versioned, prepend new version, keep rest
         versions = [newVersionEntry, ...existingVersions];
       }
-      // One version per date — the new entry is first, so it wins for its date
+      // One version per date, the new entry is first, so it wins for its date
       // (replaces any existing version with the same validFrom instead of duplicating).
       versions = LB.dedupeVersionsByDate(versions);
-      savedDraft = { ...draft, versions };
+      // withVersionedDays, not a plain spread: dedupeVersionsByDate sorts
+      // newest-first, so a version scheduled for a FUTURE date ends up at
+      // index 0 and the just-edited days are no longer versions[0].days.
+      // Keeping draft.days regardless broke the documented
+      // days === versions[0].days invariant, and the next non-structural save
+      // then wrote the edited days over that future version.
+      savedDraft = LB.withVersionedDays(draft, versions);
       // Don't touch cycleStartDate / weekPlanStartDate: versions[] encodes
       // when each plan version takes effect; getPlanDaysForDate /
       // getCyclePosForDate derive the correct position for any given date.
@@ -2090,14 +2107,22 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       // Keep the newest version's days in sync with sch.days so the
       // version-aware viewer reflects the change.
       if (draft.versions?.length) {
-        savedDraft = { ...draft, versions: draft.versions.map((v, i) => i === 0 ? { ...v, days: draft.days } : v) };
+        // Only sync the newest version when it is actually the CURRENT one. A
+        // version dated in the future sits at index 0 (newest-first), and
+        // writing today's non-structural edit into it silently rewrote a plan
+        // change the user scheduled for later.
+        const todayStr = LB.todayISO();
+        const curIdx = draft.versions.findIndex(v => (v.validFrom || '') <= todayStr);
+        savedDraft = curIdx < 0
+          ? draft
+          : LB.withVersionedDays(draft, draft.versions.map((v, i) => i === curIdx ? { ...v, days: draft.days } : v));
       }
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
 
     // If mesocycle_weeks or mesocycle_autoregulate changed (activated, deactivated,
     // weeks count changed, or the unbounded flag flipped), clear any stored meso
-    // state for this plan — it belongs to the old config.
+    // state for this plan, it belongs to the old config.
     if (original.mesocycle_weeks !== draft.mesocycle_weeks || original.mesocycle_autoregulate !== draft.mesocycle_autoregulate) {
       // Clear localStorage cache (new per-plan key + legacy single key)
       try { localStorage.removeItem('logbook-meso-state-' + draft.id); } catch {}
@@ -2108,7 +2133,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
     // If the flex flag actually changed on the active plan, apply the date-anchor
     // change now (turning flex on clears the anchor so date math stops driving
-    // position; turning it off re-anchors to today). Done here — not on toggle —
+    // position; turning it off re-anchors to today). Done here, not on toggle,
     // so discarding the draft leaves the active plan's cycle position untouched.
     if (isActive && LB.isFlexPlan(original) !== LB.isFlexPlan(draft)) {
       const turnedOn = LB.isFlexPlan(draft);
@@ -2174,9 +2199,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     if (editVerIdx > 0) { doSaveVersion(); return; } // older version → update in place, no date prompt
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
     const isWdPlan = LB.isWeekdayPlan(original);
+    // Weekday plans compared only WHICH weekdays exist, so changing a day's
+    // type (Push -> Pull) or swapping a whole day in via import (new id, new
+    // name, new exercises) counted as non-structural and rewrote the history
+    // retroactively with no version prompt. Compare the same identity fields
+    // the cycle branch does, keyed by weekday.
+    const wdKey = days => JSON.stringify([...(days || [])]
+      .map(d => ({ w: d.weekday, id: d.id, n: d.name }))
+      .sort((a, b) => String(a.w).localeCompare(String(b.w))));
     const structurallyChanged = isWdPlan
-      ? JSON.stringify([...(original.days || [])].map(d => d.weekday).sort()) !==
-        JSON.stringify([...(draft.days || [])].map(d => d.weekday).sort())
+      ? wdKey(original.days) !== wdKey(draft.days)
       : draft.days.length !== original.days.length ||
         draft.days.some((d, i) => {
           const orig = original.days[i] || {};
@@ -2239,7 +2271,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the exercise library.`
         : 'Switch this plan to weekday mode?';
       if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: dayCount > 0 ? 'Reset & switch' : 'Switch', danger: dayCount > 0 })) return;
-      // Weekday plans can't be flex — clear the modifier on switch.
+      // Weekday plans can't be flex, clear the modifier on switch.
       setDraft(d => ({ ...d, mode: 'weekday', days: [], is_flex: false }));
     } else {
       // Weekday → Cycle: just strip weekday assignments, keep exercises
@@ -2256,8 +2288,22 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // Flex is a modifier on Cycle mode: ordered days, but the position advances
   // only when you train/skip (never by date). Toggling it on an active plan
   // clears the date anchor so the date-based cycle math stops driving position.
-  const toggleFlex = () => {
+  const toggleFlex = async () => {
     const turningOn = !isFlex;
+    // Turning flex ON deletes every REST day, and turning it back off does not
+    // bring them back. Every other day deletion in this editor is confirmed,
+    // this one silently dropped days the user had built.
+    if (turningOn) {
+      const restDays = (draft.days || []).filter(day => day.name === 'REST');
+      if (restDays.length) {
+        const n = restDays.length;
+        const ok = await confirm(
+          `Flex plans have no rest days: the ${n === 1 ? 'rest day' : `${n} rest days`} in this plan will be removed, and switching flex back off will not restore ${n === 1 ? 'it' : 'them'}.`,
+          { title: 'Remove rest days?', ok: 'Remove & switch', cancel: 'Keep editing', danger: true }
+        );
+        if (!ok) return;
+      }
+    }
     setDraft(d => {
       const next = { ...d, is_flex: turningOn };
       if (turningOn) {
@@ -2274,7 +2320,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       return next;
     });
     // The date-anchor change is applied in doSave (gated on the flag actually
-    // changing), never here — toggling then discarding must not reset the
+    // changing), never here, toggling then discarding must not reset the
     // active plan's cycle position.
   };
 
@@ -2333,7 +2379,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </Field>
 
-        {/* Options row — opens modifiers sheet */}
+        {/* Options row, opens modifiers sheet */}
         {(() => {
           const parts = [];
           if (!isWeekday && isFlex) {
@@ -2544,7 +2590,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             // day's id when importing "from plan" across plans (to carry that
             // day's session history over). updated.id then no longer matches any
             // existing day, so matching on it silently dropped the whole import
-            // — the exercises appeared in the editor but never saved.
+            //, the exercises appeared in the editor but never saved.
             setOpenDay(null);
             setDraft(d => ({ ...d, days: d.days.map(x => x.id === editingDay ? updated : x) }));
             setEditingDay(null);
@@ -2556,10 +2602,22 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           store={store} setStore={setStore}
           title="Choose day type"
           hideRest={isFlex}
+          schedule={draft}
           onClose={() => setPickingType(false)}
           onPick={addDayType}
           onImport={(day, migrateId) => {
-            setDraft(d => ({ ...d, days: [...d.days, { id: migrateId || LB.uid(), name: day.name, items: day.items }] }));
+            setDraft(d => {
+              // Same collision guard the weekday import and copyItemsFromDay
+              // use. Without it, importing a day OUT OF THE PLAN BEING EDITED
+              // (or importing the same foreign day twice) appended a second
+              // day carrying an id the plan already has. Both then resolve to
+              // the first copy, saving overwrites both with the same content,
+              // React renders duplicate keys, and logged sessions can no
+              // longer be attributed to one day.
+              const collides = migrateId && d.days.some(x => x.id === migrateId);
+              const id = (migrateId && !collides) ? migrateId : LB.uid();
+              return { ...d, days: [...d.days, { id, name: day.name, items: day.items }] };
+            });
             setPickingType(false);
           }}
         />
@@ -2596,7 +2654,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 <button key={i} disabled={taken} onClick={() => {
                   setDraft(d => {
                     // Keep the source day's id (carries its session history) unless
-                    // that id already exists in this plan — then use a fresh one.
+                    // that id already exists in this plan, then use a fresh one.
                     const collides = d.days.some(x => x.id === pendingImportDay.migrateId);
                     const id = (pendingImportDay.migrateId && !collides) ? pendingImportDay.migrateId : LB.uid();
                     return { ...d, days: [...d.days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
@@ -2604,7 +2662,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   setPendingImportDay(null);
                 }} style={{
                   // Exactly like the "Training days" grid: accent = already has a
-                  // day (locked here), grey = free — tap a free one to place.
+                  // day (locked here), grey = free, tap a free one to place.
                   flex: 1, minWidth: 0, height: 44, borderRadius: 6,
                   border: `1px solid ${taken ? UI.goldSoft : UI.hairStrong}`,
                   background: taken ? UI.goldFaint : 'transparent',
@@ -2616,7 +2674,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             })}
           </div>
           <div className="micro" style={{ color: UI.inkFaint, marginTop: 12, lineHeight: 1.6 }}>
-            Highlighted weekdays already have a day — tap a free one.
+            Highlighted weekdays already have a day, tap a free one.
           </div>
         </MiniSheet>
       )}
@@ -2785,7 +2843,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                    No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
+                    No fixed days and no rest days, your next workout simply waits until you log it, whenever that is.
                   </div>
                 </div>
               </button>
@@ -2817,7 +2875,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
                     </div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                      {hasGoal ? 'Used for your weekly adherence score and deload timing.' : 'Just train whenever — adherence and deload timing won\'t apply.'}
+                      {hasGoal ? 'Used for your weekly adherence score and deload timing.' : 'Just train whenever, adherence and deload timing won\'t apply.'}
                     </div>
                   </div>
                 </div>
@@ -2983,7 +3041,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
       <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Progression">
         <ProgressionInfoBody />
-        <Btn kind="ghost" onClick={() => { setMesoInfoOpen(false); go({ name: 'autoreg-guide', mode: draft.mesocycle_weeks != null ? 'C' : (draft.mesocycle_autoregulate_mode === 'load' ? 'B' : 'A'), back: { name: 'schedule-edit', scheduleId } }); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+        {/* Leaving for the guide goes through the same dirty confirm as the
+            TopBar back, and the back target carries versionFrom: without it,
+            coming back from the guide dropped into the CURRENT version of the
+            plan while the editor was on an older one, and unsaved edits went
+            away with no prompt. */}
+        <Btn kind="ghost" onClick={async () => {
+          if (dirty && !(await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true }))) return;
+          setMesoInfoOpen(false);
+          go({ name: 'autoreg-guide', mode: draft.mesocycle_weeks != null ? 'C' : (draft.mesocycle_autoregulate_mode === 'load' ? 'B' : 'A'), back: { name: 'schedule-edit', scheduleId, versionFrom } });
+        }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
         <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
       </Sheet>
     </Screen>
@@ -2997,7 +3064,10 @@ const dayEditIconBtn = {
 };
 
 // ─── Day-type picker (sheet) ─────────────────────────────────────────
-function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hideRest = false }) {
+// `schedule` is the plan being edited, passed through to DayCopyPicker so its
+// isSamePlan test can work: without it the picker offered the CURRENT plan's
+// own days as importable "with history" and handed back their ids.
+function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hideRest = false, schedule = null }) {
   const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
   const [newName, setNewName] = useStateS('');
@@ -3046,7 +3116,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
               background: UI.goldFaint, color: UI.gold, fontWeight: 600,
             }}>{t}</button>
             <button onClick={() => removeCustom(t)} title="Remove" style={{
-              background: UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${UI.goldSoft}`,
+              background: UI.goldFaint, border: 'none', borderLeft: `var(--hair-width) solid ${UI.goldSoft}`,
               color: UI.gold, opacity: 0.55, padding: '0 8px', cursor: 'pointer', fontSize: 12,
             }}>×</button>
           </div>
@@ -3105,7 +3175,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
       {importOpen && (
         <DayCopyPicker
           store={store}
-          schedule={null}
+          schedule={schedule}
           currentDayId={null}
           onClose={() => setImportOpen(false)}
           onCopy={(selections) => {
@@ -3128,7 +3198,7 @@ function dayTypeChip(dashed) {
   };
 }
 
-// ─── Day copy / migrate picker — two-level: plan list → day list ─────
+// ─── Day copy / migrate picker, two-level: plan list → day list ─────
 // multiSelect=true (default): day level shows checkboxes + confirm button,
 //   onCopy(Array<{day, migrateId}>) called with all selected days.
 // multiSelect=false: single-click immediately calls onCopy(day, migrateId).
@@ -3158,7 +3228,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
     s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
   );
 
-  // Templates whose exercises still exist — mapped to a copyable plan day.
+  // Templates whose exercises still exist, mapped to a copyable plan day.
   const templates = (store.workoutTemplates || []).filter(t => (t.exercises || []).some(it => LB.findExercise(store, it.exId)));
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
@@ -3359,7 +3429,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 // ─── Day editor (exercises within a day) ─────────────────────────────
 function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, feedbackDrivenWeight, store, setStore, onClose, onSave }) {
   // The exercise note is global (same record, shared across every plan that
-  // uses this exercise) — not part of this day/plan item — so it's read from
+  // uses this exercise), not part of this day/plan item, so it's read from
   // and written straight back to store.exercises, independent of onSave's
   // item patch (same field the training screen's "Exercise note" edits).
   const exercise = LB.findExercise(store, item.exId);
@@ -3374,7 +3444,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   const [repsPerSet, setRepsPerSet] = useStateS(
     hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
   );
-  // Independent of `mode` — a per-exercise Smart Progression override, kept
+  // Independent of `mode`, a per-exercise Smart Progression override, kept
   // across Uniform/Per Set switches. null = inherit the global setting,
   // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
   const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
@@ -3483,14 +3553,14 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
       {queueTotal > 1 && (
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 12 }}>Exercise {queuePos} / {queueTotal}</div>
       )}
-      {/* Mode toggle — hidden for checkbox-only exercises */}
+      {/* Mode toggle, hidden for checkbox-only exercises */}
       {!isCheckboxOnly && <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
         <button style={toggleStyle(mode === 'range')} onClick={() => switchMode('range')}>Range</button>
         <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>}
 
-      {/* Sets stepper — always visible */}
+      {/* Sets stepper, always visible */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Sets</span>
@@ -3551,7 +3621,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
       )}
       {!isCheckboxOnly && !feedbackDrivenWeight && (() => {
         if (mode === 'range') {
-          // Range's own Max is always the ceiling when on — no separate
+          // Range's own Max is always the ceiling when on, no separate
           // offset number to configure, just whether progression applies
           // to this exercise at all. progOverride 0 = off, anything else
           // (including a leftover Uniform/Per-Set custom value) = on.
@@ -3565,14 +3635,14 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
               </div>
               <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
                 {isOn
-                  ? `Hit ${rangeMax} reps on every set and we'll suggest a weight bump next session — works even with Smart Progression off in Settings.`
+                  ? `Hit ${rangeMax} reps on every set and we'll suggest a weight bump next session, works even with Smart Progression off in Settings.`
                   : 'Smart Progression is off for this exercise.'}
               </div>
             </div>
           );
         }
         // When the global setting is off, "inherit" always resolves to off
-        // too — showing "Default" as a choice would be misleading, so the
+        // too, showing "Default" as a choice would be misleading, so the
         // toggle reframes as a plain On/Off for this exercise instead. Either
         // way the left button always maps to null (inherit) and the right
         // button to an explicit offset; only the labels (and whether 0 is
@@ -3598,7 +3668,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
                 ? (globalOn ? 'Uses the global Smart Progression setting.' : 'Smart Progression is off for this exercise.')
                 : progOverride === 0
                   ? 'Smart Progression is off for this exercise.'
-                  : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump — overrides the global Smart Progression setting.`}
+                  : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump, overrides the global Smart Progression setting.`}
             </div>
           </div>
         );
@@ -3656,7 +3726,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         <TextInput value={exNote} onChange={setExNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
       <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, marginBottom: 20, lineHeight: 1.4 }}>
-        Shown every time you train this exercise, in any plan — not specific to this one.
+        Shown every time you train this exercise, in any plan, not specific to this one.
       </div>
       <Btn onClick={handleSave} style={{ width: '100%' }}>Apply</Btn>
     </Sheet>
@@ -3668,7 +3738,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
 // longer next to a same-group partner so distant rows can't stay silently
 // coupled. Shared between DayEditor (local edits) and DayCopyPicker
 // (template import), which previously copied supersetGroup ids verbatim
-// with no normalization — a template exercise deleted from the library since
+// with no normalization, a template exercise deleted from the library since
 // the template was saved could leave its former partner tagged with a stale,
 // orphaned group id in the freshly-imported day.
 function normalizeSupersets(items) {
@@ -3771,7 +3841,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
   const copyItemsFromDay = async (sourceDay, migrateId) => {
     const srcPlan = (store.schedules || []).find(s => (s.days || []).some(d => d.id === sourceDay.id));
     if (!await confirm531LiftImport(confirm, srcPlan, sourceDay.items, LB.is531Plan(schedule))) return;
-    // Deep-copy each item and remap superset group ids — a shallow spread
+    // Deep-copy each item and remap superset group ids, a shallow spread
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
     const copied = sourceDay.items.map(it => {
@@ -3801,7 +3871,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
         // Unlink just this seam, not the whole run: the part from here
         // backward keeps the original group id, the part from b onward gets
         // a fresh one so it stays linked to itself instead of losing its own
-        // pairing — normalizeSupersets then drops the id from either side
+        // pairing, normalizeSupersets then drops the id from either side
         // that ends up without an adjacent same-group neighbor (a lone
         // remaining member). Previously this cleared the id on every item
         // sharing the group, dissolving an entire 3+ member giant set over
@@ -3822,7 +3892,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
         return { ...d, items: items.map(it => it.supersetGroup === bGid ? { ...it, supersetGroup: a.supersetGroup } : it) };
       }
       if (a.supersetGroup) {
-        // Extend a's existing group to include b (the new joiner) — reusing
+        // Extend a's existing group to include b (the new joiner), reusing
         // a's id instead of always minting a fresh one, otherwise linking a
         // third item next to an existing pair silently orphans the pair's
         // other member.
@@ -3835,7 +3905,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
         return { ...d, items };
       }
       // Brand-new pair. Never copy the set count across a cardio/strength
-      // pairing — a cardio item's `sets` (always 0) would silently zero out
+      // pairing, a cardio item's `sets` (always 0) would silently zero out
       // the strength exercise's planned working sets.
       const gid = LB.uid();
       items[idx] = { ...a, supersetGroup: gid };
@@ -4210,7 +4280,7 @@ function PlanWizard({ store, setStore, go }) {
   // behind it) and keep the wizard mounted so in-progress choices are not lost.
   const [wizInfoOpen, setWizInfoOpen] = useStateS(false);
   const [wizGuideOpen, setWizGuideOpen] = useStateS(false);
-  const [autoregMode, setAutoregMode] = useStateS('both'); // 'both' | 'load' — what the autoregulate plan tunes
+  const [autoregMode, setAutoregMode] = useStateS('both'); // 'both' | 'load', what the autoregulate plan tunes
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
   const [mesoStartRir, setMesoStartRir] = useStateS(3);
   const [mesoEndRir, setMesoEndRir] = useStateS(0);
@@ -4437,11 +4507,11 @@ function PlanWizard({ store, setStore, go }) {
       return <div key={dt} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden', border: `1px solid ${armed ? UI.danger : (on ? 'var(--accent)' : UI.goldSoft)}` }}>
         <button onClick={() => pickDay(dt)} style={{ flex: 1, minWidth: 0, padding: '13px 4px', border: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.goldFaint, color: on ? 'var(--accent)' : UI.gold, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>
-        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
+        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `var(--hair-width) solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
       </div>;
     };
     // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
-    // lose the thread: every day with its picked type (— if still open), the day
+    // lose the thread: every day with its picked type (a placeholder if still open), the day
     // being edited highlighted. Scrolls internally if the plan is very long.
     // Size the overview from the same source of truth as computePlanSteps and
     // buildPlanSkeleton (customCount), not customDays.length, which a prior
@@ -4794,7 +4864,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{window.FIVE_THREE_ONE.name}</span>
-              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
             </div>
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
@@ -4832,7 +4902,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{p.name}</span>
-              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
             </div>
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>

@@ -44,6 +44,15 @@ Deno.serve(async (req) => {
 
     // All open sessions including day_name and date for the notification
     const sessRes = await dbFetch('zane_sessions?ended=is.null&select=id,user_id,started_at,day_name,date');
+    // The `.catch(() => [])` fallbacks below only cover a malformed BODY. On a
+    // non-2xx PostgREST reply the body parses fine as an error OBJECT, so the
+    // fallback never fires and the loop iterates an object, throwing a
+    // TypeError that run().catch() swallows. Check the status, like
+    // water-reminder already does.
+    if (!sessRes.ok) {
+      console.error(`[auto-close] sessions query failed: ${sessRes.status} ${await sessRes.text().catch(() => '')}`);
+      return { closed: 0, deleted: 0 };
+    }
     const sessions: { id: string; user_id: string; started_at: string; day_name: string; date: string }[] = await sessRes.json().catch(() => []);
 
     let closed = 0, deleted = 0;
@@ -51,7 +60,7 @@ Deno.serve(async (req) => {
     for (const sess of sessions) {
       // User settings
       const settRes = await dbFetch(
-        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,in_progress_session_id`
+        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id`
       );
       const [sett] = await settRes.json().catch(() => [null]);
       const timeoutMin: number = sett?.session_timeout_minutes ?? 90;
@@ -64,7 +73,7 @@ Deno.serve(async (req) => {
       const hasSets = sets.length > 0;
       // started_at is legitimately NULL until the last warmup set completes
       // ("start with warmup"), but the seeded sets themselves sync right
-      // away — so hasSets is true well before started_at is ever set. Prefer
+      // away, so hasSets is true well before started_at is ever set. Prefer
       // the real set timestamp whenever one exists; only fall back to
       // started_at (and then to "now", i.e. not yet inactive) when there's
       // truly no activity of any kind to go on.
@@ -75,7 +84,7 @@ Deno.serve(async (req) => {
 
       // A session that isn't this user's currently-tracked in-progress one is
       // an orphan (lost cross-device start race, or a local abandon/delete
-      // that hasn't synced yet) — the client's own boot reconciliation
+      // that hasn't synced yet), the client's own boot reconciliation
       // (store.js loadFromSupabase) silently deletes any such session rather
       // than treating it as real, so mirror that here instead of "closing"
       // it with a real notification for a workout the user never left open.
@@ -90,17 +99,17 @@ Deno.serve(async (req) => {
       }
 
       if (!hasSets) {
-        // Butt start — delete everything silently
+        // Butt start, delete everything silently
         await dbFetch(`zane_sets?session_id=eq.${sess.id}`, { method: 'DELETE' });
         await dbFetch(`zane_session_entries?session_id=eq.${sess.id}`, { method: 'DELETE' });
         await dbFetch(`zane_sessions?id=eq.${sess.id}`, { method: 'DELETE' });
         console.log(`[auto-close] deleted butt-start session ${sess.id}`);
         deleted++;
       } else {
-        // Has sets — close with ended = last set's updated_at. started_at is
+        // Has sets, close with ended = last set's updated_at. started_at is
         // legitimately NULL until the last warmup set completes ("start with
         // warmup"), so a session abandoned mid-warmup has no real start time
-        // to compute a duration from — leave duration_minutes unset rather
+        // to compute a duration from, leave duration_minutes unset rather
         // than let `new Date(null)` (epoch 1970) silently produce a
         // multi-million-minute duration.
         const startedAt = sess.started_at ? new Date(sess.started_at) : null;
@@ -129,10 +138,16 @@ Deno.serve(async (req) => {
           const msg = durationMinutes != null
             ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
             : `Session auto-ended after ${timeoutMin} min of inactivity.`;
-          if (sett.pushover_user_key) {
+          // Pushover INSTEAD of Web Push when the user chose that channel, the
+          // same rule the three reminder functions follow. This used to send
+          // both whenever a key existed, so a Pushover user got every
+          // auto-close twice.
+          const viaPushover = !!sett.use_pushover && !!sett.pushover_user_key;
+          if (viaPushover) {
             await sendPushover(sett.pushover_user_key, sess.user_id, msg);
+          } else {
+            await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
           }
-          await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
         }
         closed++;
       }
@@ -147,7 +162,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[auto-close] done — closed: ${closed}, deleted: ${deleted}`);
+    console.log(`[auto-close] done, closed: ${closed}, deleted: ${deleted}`);
     return { closed, deleted };
   };
 

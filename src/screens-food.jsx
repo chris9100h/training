@@ -81,9 +81,46 @@ function fdScaleEntry(e, scale) {
 // and FdIngredientPicker's confirmStageItem. Expects an object with source/
 // sourceId/fromCache (pendingFood and FdIngredientPicker's qtyItem both have
 // this shape already).
+//
+// Returns whether the food is actually cached now. confirmLogFood and
+// confirmStageItem fire this without awaiting the result and rely on the
+// self-heal cacheFood itself documents (a dropped call gets retried on the
+// next log of the same food), so they can ignore it. toggleFavorite cannot:
+// it awaits this specifically so the favorite it is about to write never
+// races ahead of the cache row its food_id points at, and cacheFood's
+// underlying fetch resolves even on a failed request rather than rejecting,
+// so without checking the result here that guarantee was never enforced.
 async function ensureFoodCached(pendingFoodOrItem) {
   if (pendingFoodOrItem?.sourceId && !pendingFoodOrItem.fromCache) {
-    await LB.cacheFood(pendingFoodOrItem.source, pendingFoodOrItem.sourceId);
+    const res = await LB.cacheFood(pendingFoodOrItem.source, pendingFoodOrItem.sourceId);
+    return !!(res && res.ok);
+  }
+  return true;
+}
+// Label-scanner provider: one per-device setting (localStorage key
+// logbook-label-scanner-provider) read by TWO components that can be mounted
+// at the same time (FoodScreen and the ingredient picker's search tab). Each
+// held its own useState seeded once at mount, so toggling in one left the
+// other on the old provider for the rest of the session. Route every read and
+// write through here and broadcast the change.
+function fdReadScannerProvider() {
+  try { return localStorage.getItem('logbook-label-scanner-provider') || 'grok'; }
+  catch (_) { return 'grok'; }
+}
+function fdWriteScannerProvider(v) {
+  try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
+}
+// English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
+// "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
+function fdOrdinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
   }
 }
 // Input filter for decimal numeric fields (grams, macros): keeps digits and a
@@ -310,10 +347,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }
     });
     if (!toRequest.length) return;
+    // Give up for the rest of the day once a repair round fails. Nothing is
+    // marked repaired on failure, so an outage (or the daily API quota, where
+    // every attempt is itself a quota hit) had this retrying the same failing
+    // batch on every single mount of this screen.
+    const ATTEMPT_KEY = 'logbook-food-fav-cache-attempt';
+    const todayStr = LB.todayISO();
+    try { if (localStorage.getItem(ATTEMPT_KEY) === todayStr) return; } catch (_) {}
     Promise.all(toRequest.map(f => LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1)).then(res => ({ foodId: f.foodId, ok: !!(res && res.ok) })))).then(results => {
       let changed = false;
       results.forEach(r => { if (r.ok) { repaired.add(r.foodId); changed = true; } });
       if (changed) { try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {} }
+      if (results.some(r => !r.ok)) { try { localStorage.setItem(ATTEMPT_KEY, todayStr); } catch (_) {} }
     });
   }, []);
 
@@ -414,7 +459,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // long-standing default) or 'claude' (scan-label-claude), same request/
   // response contract either way. Per-device only, not a synced setting:
   // this is a comparison toggle, not a user-facing preference.
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -917,6 +967,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
     [dayTarget, dayTotals, isMealOfChoice],
   );
+  // Same formula, but against the Plan+Logged projection instead of the
+  // logged truth: "if you eat everything still planned today, where does
+  // that leave your adherence". Shown in the projection table, never in the
+  // hero ring itself, so the real (logged-only) adherence stays the one
+  // number that drives the ring and the daily log.
+  const projectedAdherence = useMemoFd(
+    () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: projectedTotals.protein, carbs: projectedTotals.carbs, fat: projectedTotals.fat }, dayTarget) : null,
+    [dayTarget, projectedTotals, isMealOfChoice],
+  );
   // The budget the meal inherits. Computed against PROJECTED totals, not just
   // logged: a shake still planned for 21:00 is already spoken for, and not
   // subtracting it here would let it be spent twice. This is also why the
@@ -925,9 +984,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const mocRemainder = useMemoFd(
     () => LB.mealOfChoiceRemainder(dayTarget, projectedTotals),
     [dayTarget, projectedTotals]);
-  // Deterministic id, the same idiom the template slots use: two devices
-  // confirming the same meal collide into one row instead of duplicating.
-  const mocEntryId = `moc_${curDate}`;
+  // Deterministic id so two devices confirming the same meal collide into one
+  // row instead of duplicating, the same reason foodTemplateDays' marker id is
+  // `${userId}_${today}` (this file, above). id is the PRIMARY KEY on
+  // zane_food_logs, a table shared by every user, so date alone is not
+  // enough: two different users marking a meal of choice on the same
+  // calendar day would otherwise both compute the exact same id and collide
+  // with each other's row, not just their own past confirmation.
+  const mocEntryId = `moc_${userId}_${curDate}`;
   const mocEntry = useMemoFd(
     () => (store.foodLogs || []).find(l => l.id === mocEntryId) || null,
     [store.foodLogs, mocEntryId]);
@@ -935,11 +999,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => LB.mealOfChoiceWeekCount(store.dailyLogs, curDate),
     [store.dailyLogs, curDate]);
   const mocName = LB.mealOfChoiceNoteName(dayLog?.offPlanNote);
-  // Where the derived row sits in the timeline. Defaults to the dinner window
-  // (that is what a meal of choice usually is) and is changed in the sheet.
-  const mocDefaultHour = (mealCats.find(c => c.id === 'dinner') || mealCats[mealCats.length - 1] || {}).startHour ?? 18;
-  const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
-
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
     const m = {};
@@ -957,6 +1016,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
   const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  // Where the derived meal-of-choice row sits in the timeline. Defaults to the
+  // dinner window (that is what a meal of choice usually is), changed in the
+  // sheet. Must stay BELOW mealCats: these are const, so reading mealCats from
+  // above it is a temporal dead zone and throws on every render of this screen.
+  const mocDefaultHour = (mealCats.find(c => c.id === 'dinner') || mealCats[mealCats.length - 1] || {}).startHour ?? 18;
+  const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
   const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
     // The totals count logged entries only (a planned meal isn't eaten yet),
@@ -1031,7 +1096,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     setStore(s => {
       const nextLogs = [...copies, ...(s.foodLogs || [])];
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+      // Same rule commitEntries follows: a planned-only batch must never reach
+      // patchDaily, which (seeing no logged entries at all when this is the
+      // day's first foodLogs row) would null the day's macros/adherence and
+      // silently wipe manually-entered Health-tab macros, the exact case the
+      // guard above skips the warning for because planning is supposed to
+      // leave the day untouched.
+      const dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setRepeat(null);
   }
@@ -1148,8 +1220,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // dates still present in store.foodLogs, so a day that just dropped to
     // zero entries would otherwise keep showing a stale adherence % from
     // when it still had entries.
+    // Clearing targetsSnap on an emptied day used to throw away the flex
+    // plan's Training|Rest override, which lives in targetsSnap.dayType and is
+    // the user's explicit choice for that day, not derived data. The Health
+    // tab's own save() and its food reconciler both preserve exactly this.
+    const keptDayType = existing?.targetsSnap?.dayType;
+    const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: null }) }
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
       : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
@@ -1261,6 +1339,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // planned cards; patchDaily then folds its macros into the day, since a
   // logged entry counts and a planned one doesn't.
   async function setEntryPlanned(entry, planned) {
+    // Unticking the meal of choice means "not eaten after all", and its
+    // honest inverse is going back to a live budget, not a frozen row. Left as
+    // an ordinary planned entry it would keep claiming the macros it happened
+    // to be worth at the moment it was ticked, while the derived row that
+    // tracks the rest of the day stayed hidden behind it, and it would then
+    // spend that stale budget again through projectedTotals. Dropping the row
+    // brings the live one straight back.
+    if (planned && entry.id === mocEntryId) {
+      setStore(s => {
+        const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
+        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+      });
+      return;
+    }
     // Flipping TO logged claims the day for the tracker. If this is the first
     // logged entry on a day that carries manual Health-tab macros, warn before
     // patchDaily overwrites them, same as a fresh logged add (commitEntries).
@@ -1284,8 +1376,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // feeds the coach's weekly check-in. Bumping updatedAt is not optional
   // either: sync_daily_logs_batch drops any write that reuses the old stamp.
   //
-  // targetsSnap is deliberately left alone. A meal-of-choice day is an ordinary
-  // training or rest day and a flex plan reads that choice back out of it.
+  // Routed through dailyLogAdherence rather than hand-rolled, same reason
+  // setFlexDayType and the retroactive day-type heal in screens-health.jsx
+  // are: it owns the meal-of-choice rule AND now also builds targetsSnap
+  // (previously left null on a fresh day until something else happened to
+  // write it). Status is not on the row, so undeclaring still has to ask
+  // statusModeForDate itself, or un-marking on a sick/vacation day would hand
+  // it a real score, the same hole those two call sites had before Phase 2.4.
+  // Marking on needs no such check: mealOfChoice alone already forces
+  // dailyLogAdherence's result to null.
   async function setMealOfChoice(on, name, hour) {
     if (!on && mocEntry) {
       const ok = await confirm(
@@ -1297,15 +1396,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
-      const adherence = on
-        ? null
-        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: false }, macroTargets, LB.isTrainingDayForDate(s, curDate)).adherence;
+      const isTraining = LB.isTrainingDayForDate(s, curDate);
+      const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      const { adherence, targetsSnap } = unscored
+        ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
+        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining);
       const log = existing
-        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, updatedAt: now }
+        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
             fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
             mealOfChoice: on, mealOfChoiceHour: on ? hour : null,
-            adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+            adherence, targetsSnap, updatedAt: now, createdAt: now };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
   }
@@ -1315,11 +1416,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // manual-macro warning and the daily-log mirror like anything else. From here
   // on it is a normal row: editable, movable, deletable.
   async function confirmMealOfChoice() {
-    if (!mocRemainder) return;
+    // mealOfChoiceRemainder only returns null with no macro target at all; a
+    // fully-spent budget still comes back as a real {calories:0,...} object,
+    // which is truthy. Same threshold the row's own "Budget spent, log it
+    // normally" copy already uses, or tapping the checkbox there would still
+    // log a real zero-macro entry instead of the no-op that copy promises.
+    if (!mocRemainder || mocRemainder.calories <= 0) return;
     await commitEntries([{
       id: mocEntryId, date: curDate, time: `${String(mocHour).padStart(2, '0')}:00`,
       foodId: null, foodName: mocName || 'Meal of choice', brand: null, source: 'custom',
-      quantityG: null,
+      // zane_food_logs.quantity_g is NOT NULL. There is no real weight here
+      // (the remainder is macro-only), so this follows buildCustomEntry's own
+      // fallback for the same situation, above.
+      quantityG: 100,
       calories: mocRemainder.calories, protein: mocRemainder.protein,
       carbs: mocRemainder.carbs, fat: mocRemainder.fat,
       fiber: null, sugar: null, satFat: null, sodiumMg: null,
@@ -1468,7 +1577,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
       if (!selected.length) return s;
       const now = new Date().toISOString();
-      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned }));
+      const clones = selected.map(l => ({
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned,
+        // Same rule "Repeat yesterday" follows: a copy is its own entry and
+        // must not inherit the split/merge batch (its "undo split" would act
+        // on another day) or the template-slot marker (auto-fill would treat
+        // that slot as already filled on the target day and skip it).
+        splitBatch: null, templateSlotId: null,
+      }));
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
@@ -1937,7 +2053,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // every retry forever. Await the cache write BEFORE writing the
       // favorite into the store, so the sync batch never races ahead of it.
       if (fav.foodId) {
-        await ensureFoodCached(pendingFood);
+        const cached = await ensureFoodCached(pendingFood);
+        // The whole point of awaiting above was to guarantee food_id exists
+        // before the favorite does. If the cache call itself failed, writing
+        // the favorite anyway just moves the FK failure into the sync queue,
+        // permanently this time. Bail instead: the star silently doesn't
+        // take, same as any other failed write in this screen with no retry
+        // surface, rather than syncing a favorite that can never land.
+        if (!cached) return;
         // Marks the still-open pendingFood cached, so confirmLogFood
         // (tapping Add right after starring, same sheet visit) sees
         // fromCache: true and skips its own redundant ensureFoodCached call
@@ -2029,7 +2152,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // ensureFoodCached call above), so starring then logging the same food
     // in one sheet visit, in either order, only ever fires one cache
     // request instead of one from each call site.
-    if (entry.foodId) ensureFoodCached(pendingFood).then(() => setPendingFood(f => (f ? { ...f, fromCache: true } : f)));
+    //
+    // food_id is a real FK into zane_foods. If the cache row never lands, the
+    // sync upsert fails with 23503, and because the flush is one Promise.all
+    // over every table that failure takes sessions, sets and health down with
+    // it on every retry. Nothing repairs it either: the re-cache effect below
+    // deliberately skips foodIds that are already logged. So drop the id when
+    // the cache write failed. The macros are denormalized onto the row and the
+    // FK is purely informational, so the entry itself stays intact.
+    if (entry.foodId) {
+      ensureFoodCached(pendingFood).then(cached => {
+        if (cached) { setPendingFood(f => (f ? { ...f, fromCache: true } : f)); return; }
+        setStaged(list => list.map(e => (e.id === entry.id ? { ...e, foodId: null } : e)));
+      });
+    }
     closeQtySheet();
   }
 
@@ -2386,6 +2522,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </span>
           <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
         </button>
+        {/* Always shown, including the first one and including zero: the point
+            of a counter you dose by is that it is there before you decide, not
+            only once you are already over. */}
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
+          {isMealOfChoice
+            ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
+            : mocWeek.count === 0
+              ? 'None yet this week.'
+              : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
+        </div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
           {dayTarget
             ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
@@ -2441,6 +2587,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {mocWeek.count > 0 && !isMealOfChoice && (
           <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 16 }}>
             That would be your {mocWeek.count + 1}. this week. Your call, the app only counts.
+          </div>
+        )}
+        {/* Once the meal is CONFIRMED it is an ordinary logged entry, and Save
+            here only rewrites the day marker: the entry's own time and name
+            stay as they were. Saying so beats silently ignoring half of what
+            this sheet lets you edit. */}
+        {isMealOfChoice && mocEntry && (
+          <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 12 }}>
+            This meal is already logged. Editing the time or name here only changes the day marker, edit the entry itself in the timeline.
           </div>
         )}
         <Btn onClick={() => { setMealOfChoice(true, mocSheet?.name, mocSheet?.hour ?? mocDefaultHour); setMocSheet(null); }} style={{ width: '100%' }}>
@@ -2499,7 +2654,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
           </div>
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Food Log</div>
@@ -2612,6 +2767,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <BracketFrame gold style={{ padding: 20 }}>
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
+                projectedAdherence={projectedAdherence}
                 unscored={isMealOfChoice ? 'Meal of choice' : null}
                 onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
@@ -2805,7 +2961,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   );
                                 }) : (showMoc ? null : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />)}
                                 {showMoc && (
-                                  <div data-reorder-ignore="true" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  // Only this row's own hour still needs a reorder
+                                  // slot when there's nothing else logged here (see
+                                  // the empty-hour placeholder above, whose slot this
+                                  // row takes over in that case): timelineSlots pushes
+                                  // exactly one {entry:null} for an hour with no real
+                                  // entries, and the DOM has to carry exactly one
+                                  // matching data-reorder-item or every later hour's
+                                  // drag index drifts by one. When es is non-empty the
+                                  // real entries already supply that hour's slot(s), so
+                                  // this row must NOT add a second one on top.
+                                  <div data-reorder-ignore="true" data-reorder-item={es.length === 0 ? 'true' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    {/* The shared checkbox, not a lookalike: its
+                                        plan-mode gate lives at the entry call site,
+                                        not inside it, so this row can render it
+                                        unconditionally and still look like every
+                                        other tickable row. */}
+                                    <FdCheckbox checked={false} onToggle={confirmMealOfChoice} />
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                       <div className="micro-gold">
                                         Meal of choice{mocWeek.ordinal > 1 ? ` #${mocWeek.ordinal} this week` : ''}
@@ -2821,17 +2993,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                     </div>
                                     <button onClick={() => setMocSheet({ name: mocName || '', hour: mocHour })} aria-label="Edit meal of choice" style={fdIconBtn(30)}>
                                       <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                                    </button>
-                                    {/* Own tick rather than FdCheckbox: that one
-                                        only renders with plan mode on, and this
-                                        has to work either way. */}
-                                    <button onClick={confirmMealOfChoice} disabled={!(mocRemainder && mocRemainder.calories > 0)}
-                                      aria-label="Log the meal of choice" style={{
-                                        ...fdIconBtn(30),
-                                        borderColor: (mocRemainder && mocRemainder.calories > 0) ? 'var(--hair-accent)' : UI.hairStrong,
-                                        color: (mocRemainder && mocRemainder.calories > 0) ? 'var(--accent)' : UI.inkGhost,
-                                      }}>
-                                      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
                                     </button>
                                   </div>
                                 )}
@@ -3515,7 +3676,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
             ))}
           </div>
         </div>
@@ -3534,7 +3695,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           can go above the recipe's own portion count too. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
-          <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
+          // Always share the LIVE recipe. When this sheet is opened from an
+          // already-logged entry (openEditRecipeEntry) the prompt holds a
+          // rescaled reconstruction of the entry's snapshot, which has no
+          // calories, foodId, brand or source. Sharing that upserted it over
+          // the existing share row under the SAME token, so a link already
+          // sent to someone else silently degraded.
+          <button onClick={() => openShareRecipe((store.foodRecipes || []).find(r => r.id === recipeLogPrompt.recipe.id) || recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
           </button>
         )}
@@ -3861,7 +4028,12 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
-  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
+  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setPickerLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
   const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
@@ -3962,6 +4134,54 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setStore(s => ({ ...s, foodMealPlans: [copy, ...(s.foodMealPlans || [])], foodTemplateSlots: [...(s.foodTemplateSlots || []), ...slotCopies] }));
     setManageOpen(false);
     setViewedPlanId(newId);
+  }
+  // The other half of exportPlan. Without it the export wrote a file format
+  // nothing could read back, unlike the training plan, which has both halves.
+  // Same validation shape the training plan importer uses (type tag first,
+  // then the array it needs), because this creates real rows.
+  function importPlan() {
+    // input.click() must stay synchronous inside the user gesture (iOS Safari).
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      let payload;
+      try { payload = JSON.parse(await file.text()); }
+      catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK', cancel: null }); return; }
+      if (!payload || payload.type !== 'zane-meal-plan' || !Array.isArray(payload.slots)) {
+        await confirm('That file is not a Zane meal plan export.', { title: 'Invalid file', ok: 'OK', cancel: null });
+        return;
+      }
+      const id = LB.uid();
+      const now = new Date().toISOString();
+      const asTemplate = isCoach && planSubTab === 'templates';
+      const name = (typeof payload.name === 'string' && payload.name.trim()) ? payload.name.trim() : 'Imported meal plan';
+      // Slots are fully denormalized in the export, so they only need fresh
+      // ids and the new plan's id. Anything else in the file is ignored.
+      const slots = payload.slots
+        .filter(sl => sl && typeof sl === 'object')
+        .map((sl, i) => ({
+          ...sl, id: LB.uid(), mealPlanId: id, createdAt: now,
+          hour: Number.isFinite(+sl.hour) ? +sl.hour : 12,
+          sortIdx: Number.isFinite(+sl.sortIdx) ? +sl.sortIdx : i,
+        }));
+      setStore(st => {
+        const list = st.foodMealPlans || [];
+        const plan = { id, name, archived: false, isTemplate: asTemplate, coachId: null, createdAt: now, updatedAt: now };
+        const makeActive = !asTemplate && (!st.activeMealTemplateId || !list.some(p => p.id === st.activeMealTemplateId && !p.archived && !p.isTemplate));
+        return {
+          ...st,
+          foodMealPlans: [plan, ...list],
+          foodTemplateSlots: [...(st.foodTemplateSlots || []), ...slots],
+          ...(makeActive ? { activeMealTemplateId: id } : {}),
+        };
+      });
+      setManageOpen(false);
+      setViewedPlanId(id);
+    };
+    input.click();
   }
   // Self-contained JSON: each slot already carries its own denormalized food/
   // recipe snapshot (docs/database.md), so there's nothing to look up, unlike
@@ -4542,7 +4762,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
+              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
             ))}
           </div>
         </div>
@@ -4610,6 +4830,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             </Btn>
             <Btn kind="ghost" onClick={() => exportPlan(viewedPlan)} style={{ width: '100%' }}>
               <i className="fa-solid fa-file-export" style={{ marginRight: 8 }} /> Export (JSON)
+            </Btn>
+            <Btn kind="ghost" onClick={importPlan} style={{ width: '100%' }}>
+              <i className="fa-solid fa-file-import" style={{ marginRight: 8 }} /> Import (JSON)
             </Btn>
             <Btn kind="ghost" onClick={() => deletePlan(viewedPlan)} style={{ width: '100%', color: UI.danger }}>
               <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
@@ -5053,8 +5276,15 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   }
 
   const recentPicks = useMemoFd(() => {
+    // Sort by (date, time) first, exactly like recentFoodsAll: store.foodLogs
+    // is not in date order (a backdated entry gets prepended), so the
+    // first-seen-wins walk below picked essentially arbitrary "recent" foods.
+    const sorted = [...(store.foodLogs || [])].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (a.time || '') < (b.time || '') ? 1 : (a.time || '') > (b.time || '') ? -1 : 0;
+    });
     const seen = new Set(); const out = [];
-    for (const l of (store.foodLogs || [])) {
+    for (const l of sorted) {
       const key = l.foodId || `custom:${l.foodName}`;
       if (seen.has(key)) continue;
       seen.add(key); out.push(l);
@@ -5420,13 +5650,14 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // resolvable the hero can only show a bare total, which is also the exact
 // moment the question "what should this number be?" comes up. Omitted by the
 // poster, so the button never renders into an exported image.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets, unscored }) {
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
+      calories: { delta: projected.calories - dayTotals.calories, total: projected.calories },
       protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
       carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
       fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
-    }} />
+    }} goalCalories={goalCalories} adherence={projectedAdherence} />
   ) : null;
   return dayTarget ? (
     <>
@@ -5480,21 +5711,40 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // a lighter, dashed-topped table so it reads as a forecast, not part of the
 // logged truth above it. The old standalone "+N kcal projected" line was
 // dropped as redundant once this table shipped.
-function FdProjectionLine({ macros }) {
+// goalCalories/adherence: what the day's adherence would read if every still-
+// planned entry gets eaten. Shown only under Plan + Logged (the side these
+// numbers actually describe), never under Still planned, which is a pure
+// remainder with no target of its own to be judged against.
+function FdProjectionLine({ macros, goalCalories, adherence }) {
   return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
-        <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}` }}>
+      {/* Divider is scoped to this row alone (label + macro bits), not the
+          whole block, so it stops where the two columns actually diverge
+          instead of running down past a projection line that belongs to
+          neither column on its own. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+        <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
+          <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
+          </div>
+        </div>
+        <div style={{ textAlign: 'center', paddingLeft: 10 }}>
+          <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+          </div>
         </div>
       </div>
-      <div style={{ textAlign: 'center', paddingLeft: 10 }}>
-        <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+      {/* What the day's adherence would read at Plan + Logged (every still-
+          planned entry eaten): centered under the whole table, since it's a
+          property of the full projection, not of one column. */}
+      {adherence != null && (
+        <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
+          <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
         </div>
-      </div>
+      )}
     </div>
   );
 }

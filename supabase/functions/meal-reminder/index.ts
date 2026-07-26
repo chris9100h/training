@@ -25,7 +25,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-const PUSHOVER_TOKEN = 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
+const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a planned meal is this far past its time
 const WINDOW_MS = 60 * 60 * 1000;     // = cron cadence (hourly): the meal fires on the tick that crosses the grace threshold
 const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-meal (>=23:00) day-boundary look-back

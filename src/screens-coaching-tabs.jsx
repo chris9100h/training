@@ -1,4 +1,4 @@
-/* Coaching screens — tab router, coach/client tab views, check-in forms,
+/* Coaching screens, tab router, coach/client tab views, check-in forms,
    and the window.Screens registration. Shares globals with
    screens-coaching-core.jsx (loaded first). */
 
@@ -66,7 +66,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 }
 
 // ─── CoachingTabScreen ────────────────────────────────────────────────────────
-// Root screen for the coaching tab — routes to coach or client view.
+// Root screen for the coaching tab, routes to coach or client view.
 // When the user is both coach and client, shows a two-tab layout.
 
 function CoachingTabScreen({ store, setStore, userId, go, initialClientTab }) {
@@ -196,7 +196,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       const coaching = await LB.reloadCoachingState(userId);
       setStore(s => s ? { ...s, coaching } : s);
     } catch (e) {
-      alert(e.message);
+      UI.alert(e.message);
     } finally {
       setEnding(null);
     }
@@ -361,7 +361,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       setRequested(true);
       setTimeout(() => setRequested(false), 4000);
     } catch (_) {
-      alert('Could not send the reminder. Please try again.');
+      UI.alert('Could not send the reminder. Please try again.');
     }
   };
 
@@ -378,7 +378,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
   return (
     <div
       onClick={handleCardClick}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.10)`, pointerEvents: 'none' }} />
@@ -489,7 +489,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   // the viewer's unit for self-coaching / previews where no client unit is passed.
   const wUnit = clientUnit || UI.unit();
 
-  // Planned macro avg row — mirrors HealthWeekCard logic.
+  // Planned macro avg row, mirrors HealthWeekCard logic.
   // Resolve the macro entry that was active at the END of this check-in week
   // (Sunday = weekStart + 6 days) so past check-ins use the targets from that time.
   const activeMacros = (() => {
@@ -515,7 +515,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const planFat  = planMacro('fatTraining',      'fatRest');
   const showPlanRow = hasMacroResponse && (planCal != null || planProt != null || planCarb != null || planFat != null);
 
-  // Format one field's stored value for display — shared with the trend-card
+  // Format one field's stored value for display, shared with the trend-card
   // formatter (checkinFieldValue in screens-coaching-detail.jsx) so a field
   // never shows a different number here than it does on the chart.
   const fmtValue = (f, v) => checkinFieldValue(f, v, { distUnit, weightUnit: wUnit });
@@ -532,7 +532,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
 
   const wToday = responses.weight_today, wAvg = responses.weight_avg_last_week;
   // Response keys not in the current schema (e.g. fields the coach later removed)
-  // — surfaced in an "Additional" block so submitted data never silently vanishes.
+  //, surfaced in an "Additional" block so submitted data never silently vanishes.
   const schemaKeys = new Set(sections.flatMap(s => (s.fields || []).map(f => f.key)));
   const extraKeys = Object.keys(responses).filter(k => !schemaKeys.has(k) && has(responses[k]));
 
@@ -761,7 +761,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             );
           })}
 
-          {/* Submitted fields no longer in the schema — kept visible, never dropped */}
+          {/* Submitted fields no longer in the schema, kept visible, never dropped */}
           {extraKeys.length > 0 && (
             <div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ADDITIONAL</div>
@@ -771,7 +771,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             </div>
           )}
 
-          {/* Actions row — export always visible, edit/delete when handlers are present */}
+          {/* Actions row, export always visible, edit/delete when handlers are present */}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             {onDelete && (
               <button onClick={onDelete}
@@ -781,7 +781,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             )}
             {onEdit && (
               <button onClick={onEdit}
-                style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+                style={{ background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
             )}
             {exportMode === 'pick' ? (
               <>
@@ -1040,7 +1040,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             {options.map(opt => (
               <button key={opt.value} onClick={() => onChange(value === opt.value ? null : opt.value)}
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
-                  border: `${value === opt.value ? '1.5px' : '0.5px'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
+                  border: `${value === opt.value ? '1.5px' : 'var(--hair-width)'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
                   background: value === opt.value ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
                   textShadow: 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -1065,7 +1065,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
                   textShadow: sel && (opt.color === 'accent' || opt.color === 'danger') ? 'var(--text-lift)' : 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
-                  border: `${sel ? '1.5px' : '0.5px'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
+                  border: `${sel ? '1.5px' : 'var(--hair-width)'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
                 {opt.label}
               </button>
             );
@@ -1104,7 +1104,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
       allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = f.key === 'hydration_ml' ? String(UI.waterToEntry(dailyPrefill[f.key])) : String(dailyPrefill[f.key]); });
     }
     // Performance-vs-last-week is derived from logged sessions (the same source
-    // the live preview uses), not from daily/cardio logs — apply it on top.
+    // the live preview uses), not from daily/cardio logs, apply it on top.
     if (perfPrefill != null && allFields.some(f => f.key === 'performance_vs_last_week')) {
       base.performance_vs_last_week = perfPrefill;
     }
@@ -1158,7 +1158,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
-        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
             ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week, review before submitting`
             : prefill
@@ -1211,7 +1211,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).filter(t => t.id !== id) }));
   };
   const weekStart = LB.checkinWeekStart();
-  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet — only
+  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet, only
   // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
   const canSubmitToday = new Date().getDay() !== 0;
   // Monday of the current training week (what's accumulating right now for the upcoming check-in)
@@ -1237,9 +1237,12 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
       setTimeout(() => setConfirmDelete(c => c === ci.id ? null : c), 3000);
       return;
     }
+    // `deleting` was set and never read, so a second tap on the confirm state
+    // fired a second delete while the first was still in flight.
+    if (deleting) return;
     setDeleting(true);
     try { await LB.deleteCheckin(ci.id, userId); await load(); }
-    catch (e) { alert(e.message || 'Could not delete check-in.'); }
+    catch (e) { UI.alert(e.message || 'Could not delete check-in.'); }
     finally { setDeleting(false); setConfirmDelete(null); }
   };
 
@@ -1329,25 +1332,25 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {!thisWeek && checkinEnabled && canSubmitToday && (
             <button onClick={() => setEditTarget('new')}
-              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               Submit this week's check-in
             </button>
           )}
-          {/* Sunday only (!canSubmitToday). The preview shows previewWeekStart —
-              the CURRENT in-progress week — which is independent of weekStart's
+          {/* Sunday only (!canSubmitToday). The preview shows previewWeekStart,
+              the CURRENT in-progress week, which is independent of weekStart's
               submission status, so it must NOT be gated on !thisWeek: since
               checkinWeekStart now correctly points weekStart at last week on
               Sunday (already submitted → thisWeek truthy), gating on !thisWeek
               would wrongly hide the preview whenever last week was checked in. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'var(--text-lift)', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'var(--text-lift)', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
           {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: previewOpen ? 'var(--text-lift)' : 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : 'var(--hair-width)'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: previewOpen ? 'var(--text-lift)' : 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
             </button>
           )}
@@ -1389,7 +1392,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
         ) : null}
 
         {past.length > 0 && (
@@ -1410,7 +1413,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
                   </div>
                 ))}
               </div>
@@ -1477,7 +1480,7 @@ function CheckInRequestModal({ coaching }) {
 }
 
 // ─── CoachingTabClientView ────────────────────────────────────────────────────
-// Client's coaching tab — messages + nutrition + check-in.
+// Client's coaching tab, messages + nutrition + check-in.
 
 function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false, initialTab }) {
   const coaching = store.coaching?.asClient;
@@ -1496,7 +1499,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       const newCoaching = await LB.reloadCoachingState(userId);
       setStore(s => s ? { ...s, coaching: newCoaching } : s);
     } catch (e) {
-      alert(e.message);
+      UI.alert(e.message);
     } finally {
       setEnding(false);
     }
@@ -1676,8 +1679,6 @@ Object.assign(window.Screens, {
   CoachingUnreadBanner,
   CoachingNotesSheet,
   CoachingBannerGroup,
-  CoachingSettingsSection,
-  CoachingDashboard,
   CoachClientScreen,
   CoachPlanEditorScreen,
   CoachNewPlanScreen,

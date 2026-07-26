@@ -1,4 +1,4 @@
-/* Health screen — daily weight / steps / macros logging + dashboard charts.
+/* Health screen, daily weight / steps / macros logging + dashboard charts.
    Optional tab (settings → showHealthTab). Daily logs live in store.dailyLogs
    and sync through the same diff model as cardio logs (UI mutates via setStore;
    store.js syncStore writes them). Adherence is computed + persisted at save
@@ -51,7 +51,7 @@ const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null 
 
 const caloriesFromMacros = LB.caloriesFromMacros;
 
-// Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
+// Windowed series builder for the charts, pure, so HealthScreen (dailyLogs)
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
 // `windowOverride` (optional {start,end}) lets a caller replace the default
@@ -80,7 +80,7 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   return { from, to, data };
 }
 
-// Period overview (Mon-anchored week or rolling 1M/3M window) — pure, shared
+// Period overview (Mon-anchored week or rolling 1M/3M window), pure, shared
 // by HealthScreen and HealthClientLogs. planningState is whatever
 // LB.plannedTrainingDay needs (store, or clientStore || {}).
 function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf, today, selectedDate }) {
@@ -124,6 +124,7 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
   return {
     from, to, periodDays, daysLogged: inPeriod.length,
+    mealOfChoice: inPeriod.filter(l => l.mealOfChoice).length,
     trainingsDone, trainingsPlanned, trainingDaysInPeriod,
     cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
     cardioSessions: periodCardio.length,
@@ -614,7 +615,7 @@ function HealthBarChart({ series, from, to, format, target, color = 'var(--accen
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
   // Inset both ends by half a bar (+gap) so the first/last bars never bleed
-  // into the y-axis labels or right edge — matters most in the 1W view.
+  // into the y-axis labels or right edge, matters most in the 1W view.
   const inset = bw / 2 + 3;
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -667,7 +668,7 @@ function HealthMacroChart({ series, from, to }) {
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
   // Inset both ends by half a bar (+gap) so the first/last bars never bleed
-  // into the y-axis labels or right edge — matters most in the 1W view.
+  // into the y-axis labels or right edge, matters most in the 1W view.
   const inset = bw / 2 + 3;
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -938,6 +939,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
   };
 
+  // Glucose, blood pressure and body temperature are written straight to
+  // Supabase and are NOT part of the syncStore diff, so a failed write has no
+  // offline retry behind it: the optimistic row is rolled back and the reading
+  // is simply gone. Rolling back silently made that look like the entry was
+  // never typed. Always say so.
+  const warnWriteFailed = async (what) => {
+    await confirm(`Could not save your ${what}. Check your connection and enter it again.`, { title: 'Not saved', ok: 'OK', cancel: null });
+  };
+
   const saveBp = async () => {
     if (savingBp) return;
     const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
@@ -954,13 +964,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
         setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
         const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
-        if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
+        if (error) { if (origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) })); await warnWriteFailed('blood pressure reading'); }
       } else {
         const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
         setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
         setAddingBp(false); setBpForm(emptyBp);
         const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
-        if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+        if (error) { setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('blood pressure reading'); }
       }
     } finally {
       setSavingBp(false);
@@ -972,7 +982,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.bloodPressureLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_blood_pressure_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   const saveTemp = async () => {
@@ -992,13 +1002,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
         setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
         const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
-        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); }
+        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); await warnWriteFailed('temperature reading'); }
       } else {
         const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
         setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
         setAddingTemp(false); setTempForm(emptyTemp);
         const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
-        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; await warnWriteFailed('temperature reading'); }
       }
       // Fever nudge: only for a reading logged against TODAY (status is a
       // "right now" concept, see dayMode above), only once (skip if already
@@ -1025,12 +1035,17 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.bodyTempLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_body_temp_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   const saveGlucose = async () => {
     const mmol = glucoseFromInput(glForm.value, glUnit);
-    if (mmol == null) return;
+    // Same "Invalid reading" feedback the BP and temperature forms in this very
+    // sheet give: a silent return looked like the Save button was dead.
+    if (mmol == null) {
+      await confirm('Enter a valid glucose value.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
     // Normalize the free-text time to zero-padded HH:MM (so entries sort
     // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
     const normTime = (s) => {
@@ -1047,13 +1062,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
       setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
       const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
-      if (error && origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) }));
+      if (error) { if (origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) })); await warnWriteFailed('glucose reading'); }
     } else {
       const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
       setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
       setAddingGlucose(false); setGlForm(emptyGl);
       const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
-      if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+      if (error) { setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('glucose reading'); }
     }
   };
 
@@ -1062,7 +1077,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.glucoseLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, glucoseLogs: [orig, ...(s.glucoseLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, glucoseLogs: [orig, ...(s.glucoseLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   useEffectH(() => {
@@ -1072,7 +1087,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
-    // macros alone would produce — so it keeps auto-updating live as macros
+    // macros alone would produce, so it keeps auto-updating live as macros
     // are edited again. A genuine manual override (saved value differs from
     // the macro-derived one) is preserved instead of being silently dropped.
     const existingAutoCals = existing
@@ -1176,8 +1191,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       offPlanNote: form.offPlanNote.trim() || null,
       // Rebuilt from scratch rather than spread from existing, so anything
       // not listed here is dropped: without this line, saving the form on a
-      // marked day unmarks it and the day starts being scored again.
+      // marked day unmarks it and the day starts being scored again. The hour
+      // rides along the same way, or a save from this form would silently
+      // reset the food module's timeline slot for the day back to default.
       mealOfChoice: !!existing?.mealOfChoice,
+      mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -1498,7 +1516,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setGlForm({ ...emptyGl, time: new Date().toTimeString().slice(0, 5) });
             setAddingGlucose(true); setEditingGlucoseId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
@@ -1576,7 +1594,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setBpForm({ ...emptyBp, time: new Date().toTimeString().slice(0, 5) });
             setAddingBp(true); setEditingBpId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
@@ -1650,14 +1668,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setTempForm({ ...emptyTemp, time: new Date().toTimeString().slice(0, 5) });
             setAddingTemp(true); setEditingTempId(null);
           }} style={{
-            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            width: '100%', padding: '9px', background: UI.bgInset, border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
 
       {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)` }}>
           <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {layoutRows(coachFields).map((row, ri) => (
@@ -2110,9 +2128,9 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // Every 11px block below sets its line height in whole pixels rather than as
   // a ratio, and that is load-bearing, not a style preference. 11 x 1.4 is
   // 15.39px and 11 x 1.45 is 15.94px, so each line of body copy pushed
-  // everything under it onto a fractional offset. Hairlines are 0.5px, and a
-  // 0.5px border at a fractional offset gets smeared across two device rows
-  // instead of landing on one, which reads as a missing edge. It moved while
+  // everything under it onto a fractional offset, and a hairline border at a
+  // fractional offset renders inconsistently instead of landing crisply on
+  // one device row, which reads as a missing or blurred edge. It moved while
   // typing because the line under "Maintenance about" rewraps as the numbers
   // change width, so every edit reshuffled the sub-pixel phase of the macro
   // inputs right below it. Whole-pixel line heights keep those offsets integral
@@ -2243,7 +2261,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       {shown ? (
         <Card style={{ padding: 14, marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
-            {headlineStat('Maintenance', est.tdee, 'what you burn')}
+            {headlineStat('Maintenance', est ? est.tdee : null, 'what you burn')}
             <Hairline vertical style={{ alignSelf: 'stretch' }} />
             {headlineStat('Your week', weekAvgCalories, deltaLabel,
               deltaContradictsGoal ? UI.warn : UI.inkSoft)}
@@ -2412,7 +2430,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   const isPerfect = adh != null && Math.round(adh) >= 97;
   const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `var(--hair-width) solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
       <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em' }}>{label}</span>
     </span>
@@ -2455,7 +2473,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, wUnit)}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl) : null, UI.waterSummaryUnit())}
+        {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl, wUnit) : null, UI.waterSummaryUnit(wUnit))}
         {stat('Calories', log?.calories != null ? log.calories : null)}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
@@ -2494,7 +2512,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
-  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
+  const { from, to, periodDays, daysLogged, mealOfChoice: mealOfChoiceDays, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
@@ -2596,15 +2614,24 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           ? cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)
           : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
-        {cell('Water', water != null ? UI.waterSummaryValue(water) : null, UI.waterSummaryUnit())}
+        {cell('Water', water != null ? UI.waterSummaryValue(water, wUnit) : null, UI.waterSummaryUnit(wUnit))}
         {cell('Calories', r(calories))}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
       </div>
+      {mealOfChoiceDays > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+          <i className="fa-solid fa-utensils" style={{ fontSize: 10, color: 'var(--accent)' }} />
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+            <span className="num" style={{ color: 'var(--accent)' }}>{mealOfChoiceDays}</span>
+            {` meal of choice day${mealOfChoiceDays === 1 ? '' : 's'}, not scored`}
+          </span>
+        </div>
+      )}
       {tgtCal != null && (
         <>
-          <div style={{ height: '0.5px', background: UI.hairStrong, margin: '6px 0' }} />
+          <div style={{ height: 'var(--hair-width)', background: UI.hairStrong, margin: '6px 0' }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
             {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
               <div key={i} style={{ textAlign: 'center' }}>
@@ -2629,7 +2656,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const jsDow = anchorDate.getDay();
   const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  // A day counts as "logged" (gold marker) only if it carries real content — a
+  // A day counts as "logged" (gold marker) only if it carries real content, a
   // flex day-type-only override log (just targetsSnap.dayType) must not light up.
   const hasLogContent = l => l && (
     l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
@@ -2692,7 +2719,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== selectedDate)] }));
   };
   const sunday = days[6];
-  // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
+  // Month label for the week, spans two months at a boundary (e.g. "MAY – JUN").
   const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
   const monthLabel = mLabel(monday) === mLabel(sunday)
     ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
@@ -2701,7 +2728,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   return (
     <div style={{ flexShrink: 0, padding: '4px 16px 12px' }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6, paddingLeft: 2 }}>{monthLabel}</div>
-      {/* Day cells — same card style as the home screen day strip */}
+      {/* Day cells, same card style as the home screen day strip */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         {days.map((d, i) => {
           const sel = d === selectedDate;
@@ -2713,7 +2740,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
               style={{
                 flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                 background: sel ? UI.goldFaint : has ? UI.goldFaint : 'transparent',
-                border: `${sel ? '2px' : '0.5px'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
+                border: `${sel ? '2px' : 'var(--hair-width)'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
                 borderRadius: 4, cursor: 'pointer',
                 minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
@@ -2725,7 +2752,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
-              {/* Day-type indicator — ALWAYS shown: dumbbell = training, dot = rest.
+              {/* Day-type indicator, ALWAYS shown: dumbbell = training, dot = rest.
                  Logged status is conveyed by the gold cell bg/border + the small
                  check below. */}
               <div style={{ height: 13, marginTop: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -2744,7 +2771,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           );
         })}
       </div>
-      {/* Calendar picker + LOG button — calendar is an overlaid <input> for iOS compat */}
+      {/* Calendar picker + LOG button, calendar is an overlaid <input> for iOS compat */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
           <button style={{
@@ -2877,7 +2904,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
           </div>
           {sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -2958,7 +2985,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
           </div>
           {sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3027,7 +3054,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
               grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && sortedReadings.length > 0 && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3139,7 +3166,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                 grid) shows just the chart, matching Glucose/BP/Temp. */}
             {!compact && (
               <>
-                <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+                <div style={{ height: 'var(--hair-width)', background: UI.hair, margin: '8px 0' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {todayEntries.map(n => (
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -3231,11 +3258,66 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // the user hasn't set personal targets). asClient or self-coaching row.
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
 
+  // Edits a period that is already closed, i.e. history. Never touches
+  // statusMode/statusModeSince (those describe TODAY) and never touches the
+  // open period. mode null on the first day of the period deletes it, on a
+  // later day it shortens it to end the day before; a different mode rewrites
+  // the period's mode.
+  const editHistoricStatusPeriod = async (period, mode, dayStr) => {
+    const prevPeriods = store.statusPeriods;
+    const firstDay = (period.startedAt || '').slice(0, 10);
+    const removes = mode === null && dayStr <= firstDay;
+    const newEndedAt = (() => {
+      const d = new Date(dayStr + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString();
+    })();
+    setStore(s => ({
+      ...s,
+      statusPeriods: removes
+        ? (s.statusPeriods || []).filter(p => p.id !== period.id)
+        : (s.statusPeriods || []).map(p => p.id !== period.id ? p : (mode === null ? { ...p, endedAt: newEndedAt } : { ...p, mode })),
+    }));
+    try {
+      if (removes) await LB.deleteStatusPeriodById(userId, period.id);
+      else if (mode === null) await LB.closeStatusPeriodById(userId, period.id, newEndedAt);
+      else await LB.updateStatusPeriodMode(userId, period.id, mode);
+    } catch (e) {
+      console.error('historic status period write failed', e);
+      setStore(s => ({ ...s, statusPeriods: prevPeriods }));
+      UI.alert('Could not update that day. Please try again.');
+    }
+  };
+
   const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
     const startedAt = startDateStr
       ? new Date(startDateStr + 'T12:00:00').toISOString()
       : new Date().toISOString();
+    // Editing a PAST day is a different operation from changing today's
+    // status. Every write below addresses "the period that is currently open",
+    // so tapping Normal on a day that belongs to an already closed period used
+    // to delete or shorten the RUNNING Sick/Vacation period instead, silently
+    // and without an undo. Route a past day to the period that actually covers
+    // it, addressed by id, and leave statusMode alone unless that period is
+    // the open one.
+    const todayStr = LB.todayISO();
+    if (startDateStr && startDateStr < todayStr) {
+      const covering = (store.statusPeriods || []).find(p => {
+        const from = (p.startedAt || '').slice(0, 10);
+        const to = p.endedAt ? p.endedAt.slice(0, 10) : null;
+        return from <= startDateStr && (!to || startDateStr <= to);
+      });
+      const isOpen = !!covering && !covering.endedAt;
+      // Inside the open period the existing "since / normal from" semantics are
+      // exactly right, so only the historical case needs the new path.
+      if (covering && !isOpen) {
+        await editHistoricStatusPeriod(covering, mode, startDateStr);
+        return;
+      }
+      if (!covering && mode && (store.statusPeriods || []).some(p => !p.endedAt)) {
+        UI.alert('You already have an open status period. End that one first, then mark this day.');
+        return;
+      }
+    }
     // "Normal from day X" = the period ended the day BEFORE X (X is the first normal day).
     // Applies whether X is a past day or today.
     const closedAt = mode === null
@@ -3273,13 +3355,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     } catch (e) {
       console.error('status period write failed', e);
       setStore(s => ({ ...s, ...prevStatus }));
-      alert('Could not update your status. Please try again.');
+      UI.alert('Could not update your status. Please try again.');
       return;
     }
     if (coachingId && modeChanged) {
       try {
-        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
-                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+        const body = mode === 'sick'     ? 'Status: Sick, taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation, back soon!'
                    : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
         await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
@@ -3377,9 +3459,16 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           return period?.mode || null;
         })();
         const isTraining = LB.isTrainingDayForDate(s, log.date);
+        // A day that was already scored keeps the target it was scored
+        // against: targetsSnap is a save-time snapshot by contract. Without
+        // this, editing the macro targets today re-scored the whole logged
+        // history against the new numbers, so past adherence (and every coach
+        // view and check-in built on it) changed retroactively.
+        const snap = log.targetsSnap;
+        const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
         let { adherence, targetsSnap } = dayMode
           ? { adherence: null, targetsSnap: null }
-          : LB.dailyLogAdherence(log, effectiveTargets, isTraining);
+          : LB.dailyLogAdherence(log, effectiveTargets, isTraining, storedTarget);
         if (!dayMode && flexActive && !targetsSnap) {
           const dt = log.targetsSnap?.dayType;
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
@@ -3406,7 +3495,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   //    logged session (incl. a freestyle session on a rest day) is really a
   //    training day, so its target/adherence should follow.
   // The two sets are disjoint (training+no-session vs rest+session), so a rewrite
-  // always flips the day out of both conditions — no oscillation. Adherence is
+  // always flips the day out of both conditions, no oscillation. Adherence is
   // recomputed against the new target; the dayType is corrected even when macro
   // targets are absent (keeps the health strip/indicator honest).
   const flexActive = useMemoH(
@@ -3419,33 +3508,41 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
     const trainingTarget = LB.dayTargetFromMacros(effectiveTargets, true);
     const restTarget = LB.dayTargetFromMacros(effectiveTargets, false);
-    let changed = false;
-    const nextLogs = (store.dailyLogs || []).map(l => {
-      if (l.date >= today) return l;
-      const dt = l.targetsSnap?.dayType;
-      const hasSession = sessionDates.has(l.date);
-      let newType = null;
-      if (dt === 'training' && !hasSession && (flexActive || !!LB.plannedTrainingDay(store, l.date))) newType = 'rest';
-      else if (dt === 'rest' && hasSession) newType = 'training';
-      if (!newType) return l;
-      const target = newType === 'training' ? trainingTarget : restTarget;
-      // Same hole as setFlexDayType: this rewrote a score onto days that
-      // must not carry one. The flag is on the row so dailyLogAdherence
-      // sees it; status has to be asked for.
-      const unscored = l.mealOfChoice || !!LB.statusModeForDate(store, l.date);
-      const adherence = (target && !unscored)
-        ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
-      const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
-      changed = true;
-      return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+    // Built inside the updater, not from the render closure: this used to map
+    // over the `store.dailyLogs` captured at render and hand the result to
+    // setStore wholesale, which threw away any dailyLogs update queued in the
+    // same commit (the food reconciler above queues exactly that).
+    setStore(s => {
+      let changed = false;
+      const nextLogs = (s.dailyLogs || []).map(l => {
+        if (l.date >= today) return l;
+        const dt = l.targetsSnap?.dayType;
+        const hasSession = sessionDates.has(l.date);
+        let newType = null;
+        if (dt === 'training' && !hasSession && (flexActive || !!LB.plannedTrainingDay(s, l.date))) newType = 'rest';
+        else if (dt === 'rest' && hasSession) newType = 'training';
+        if (!newType) return l;
+        const target = newType === 'training' ? trainingTarget : restTarget;
+        // Same hole as setFlexDayType: this rewrote a score onto days that
+        // must not carry one. The flag is on the row so dailyLogAdherence
+        // sees it; status has to be asked for.
+        const unscored = l.mealOfChoice || !!LB.statusModeForDate(s, l.date);
+        // Unlike the food reconciler this genuinely needs the CURRENT targets:
+        // the day type itself changed, and the old snapshot only holds the
+        // target for the type that turned out to be wrong.
+        const adherence = (target && !unscored)
+          ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
+        const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
+        changed = true;
+        return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+      });
+      return changed ? { ...s, dailyLogs: nextLogs } : s;
     });
-    if (!changed) return;
-    setStore(s => ({ ...s, dailyLogs: nextLogs }));
   }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
-  // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
+  // window doesn't leave most of the chart empty, 80 of 90 days fills the chart.
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
 
   const windowDays = tfDays(tf);
@@ -3460,7 +3557,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
   const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
 
-  // Cardio chart series — minutes summed per day from store.cardioLogs.
+  // Cardio chart series, minutes summed per day from store.cardioLogs.
   const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays, weekWindow), [store.cardioLogs, tf, selectedDate]);
 
   // Historical avg macro target for the chart window (from persisted targetsSnap).
@@ -3507,13 +3604,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
-      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      // Refill the visible slots in place instead of appending the invisible
+      // ids at the end. Flushing them to the back permanently reordered every
+      // card that merely had no data yet (or was hidden in settings), so
+      // showing it again put it at the bottom rather than where it was.
+      let vi = 0;
+      const next = prev.map(id => (isCardVisible(id) ? moved[vi++] : id));
       try { localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
       return next;
     });
   };
 
-  // Period overview — adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
+  // Period overview, adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
   const weekStats = useMemoH(() => computeHealthWeekStats({
     logs: dailyLogs, sessions: store.sessions, cardioLogs: store.cardioLogs,
     planningState: store, tf, today, selectedDate,
@@ -3554,7 +3656,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
-          background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+          background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent', flexShrink: 0,
@@ -3603,17 +3705,11 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const dayIsTraining = LB.isTrainingDayForDate(store, selectedDate);
   const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   // Whether the selected day fell inside a sick/vacation status period (drives
-  // adherence suppression). parseDate returns a Date; compare on getTime().
-  const selectedIsStatusDay = (() => {
-    const sd = LB.parseDate(selectedDate);
-    const t = sd ? sd.getTime() : null;
-    if (t == null) return false;
-    return (store.statusPeriods || []).some(p => {
-      const start = new Date(p.startedAt).getTime();
-      const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
-      return t >= start && t <= end;
-    });
-  })();
+  // adherence suppression). Shared predicate, not an inline scan: selectedDate
+  // can be today (see dayLabel above), and today has to answer from the live
+  // statusMode cache rather than scanning statusPeriods, since a just-started
+  // period may not have landed there yet.
+  const selectedIsStatusDay = !!LB.statusModeForDate(store, selectedDate);
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see the onExpand wiring per card and
   // expandableCards further down, which the sheet renders from by this id).
@@ -3731,7 +3827,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           margin: '0 16px 12px',
           padding: '10px 14px',
           background: 'rgba(var(--accent-rgb), 0.16)',
-          border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+          border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`,
           borderRadius: 6,
           display: 'flex', alignItems: 'center', gap: 10,
           cursor: 'pointer',
@@ -3751,7 +3847,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <div ref={captureRef}>
         <HealthDateStrip store={store} setStore={setStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} targets={effectiveTargets} />
 
-        {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
+        {/* max-width cap so charts don't blow up on iPad. Reorderable cards,
            drag the grip to reorder; order persists per device. Week/Today span
            both columns; the rest sit in a 2-col grid (fullWidthCardIds above). */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
@@ -3760,7 +3856,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
               <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>All Health cards are hidden.</div>
               <button onClick={() => go({ name: 'settings' })} style={{
-                background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+                background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
                 borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
@@ -3827,14 +3923,18 @@ function HealthClientLogs({ clientStore }) {
     if (from === to) return;
     setCardOrder(prev => {
       // ReorderList reports from/to as indices into the VISIBLE cards it
-      // rendered, not the full order array — glucose/weekly are routinely
+      // rendered, not the full order array, glucose/weekly are routinely
       // absent for new coaching clients, so splicing prev directly (as this
       // used to) reordered the wrong card whenever any card was hidden.
       const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
-      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      // Refill the visible slots in place, see the client-side twin: appending
+      // the invisible ids permanently pushed every temporarily empty card to
+      // the bottom.
+      let vi = 0;
+      const next = prev.map(id => (isCardVisible(id) ? moved[vi++] : id));
       try { localStorage.setItem(COACH_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
       return next;
     });
@@ -3937,7 +4037,7 @@ function HealthClientLogs({ clientStore }) {
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
-        mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />
+        mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(logs, selectedDate).ordinal} />
     ),
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
@@ -4108,7 +4208,17 @@ function ExportSheet({ open, onClose, store, userId }) {
       const missing = dates.filter(d => !have.has(d));
       let extra = [];
       if (missing.length) {
-        const byDate = await LB.fetchFoodLogsForDates(userId, missing).catch(() => ({}));
+        // A failed fetch here used to be swallowed into {}, so a spotty
+        // connection produced a CSV that looked complete but silently
+        // dropped whatever was outside the boot window. Abort instead: no
+        // file is a more honest outcome than a wrong one for an export.
+        let byDate;
+        try {
+          byDate = await LB.fetchFoodLogsForDates(userId, missing);
+        } catch (e) {
+          UI.alert('Could not load the full date range. Please try again.');
+          return;
+        }
         extra = Object.values(byDate || {}).flat();
       }
       const rows = [...(store.foodLogs || []), ...extra]
@@ -4158,9 +4268,20 @@ function ExportSheet({ open, onClose, store, userId }) {
 
       // Transposed: column A = metric label, columns B… = one per date (ascending).
       // Row 1 = date header row (A1 empty).
-      const dates = logs.map(l => l.date);
+      // The date axis is the union of daily logs, cardio and sessions, not the
+      // daily logs alone: a day with a workout or a run but no daily-log row
+      // (nothing weighed, no macros typed) used to vanish from the export
+      // entirely, so the training and cardio columns silently under-reported.
       const byDate = {};
       logs.forEach(l => { byDate[l.date] = l; });
+      const dates = [...new Set([
+        ...logs.map(l => l.date),
+        ...Object.keys(cardio).filter(d => d >= from && d <= to),
+        ...Object.keys(sessions).filter(d => d >= from && d <= to),
+      ])].sort();
+      // Metric fns read l.<field>, so days without a daily log need a stub row
+      // rather than undefined.
+      dates.forEach(d => { if (!byDate[d]) byDate[d] = { date: d }; });
 
       const metrics = [
         { label: `Weight (${unit})`, fn: l => l.weight },
@@ -4238,7 +4359,7 @@ function ExportSheet({ open, onClose, store, userId }) {
             : '';
 
           const badge = (icon, label) =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
                <span>${icon}</span>${label}
              </span>`;
 
@@ -4270,7 +4391,7 @@ function ExportSheet({ open, onClose, store, userId }) {
               ${stat('Carbs', l.carbs, 'g')}
               ${stat('Fat', l.fat, 'g')}
             </div>
-            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
+            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
           </div>`;
         }).join('');
 

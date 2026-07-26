@@ -258,7 +258,17 @@ function WaterScreen({ store, setStore, go, userId }) {
   const coffeeSizes = ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
   const bottleEnabled = settings.waterBottleEnabled !== false;
   const bottleMl = settings.waterBottleMl || 1500;
-  const today = wtDateStr(0);
+  // Re-derived on a timer, not once per render: leaving this screen open over
+  // midnight kept "today" on yesterday, so every entry added after 00:00
+  // landed on the wrong day (and the ring kept showing yesterday's progress).
+  const [today, setToday] = useStateW(() => wtDateStr(0));
+  useEffectW(() => {
+    const tick = () => setToday(cur => { const now = wtDateStr(0); return now === cur ? cur : now; });
+    const iv = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
 
   // Keep the user's UTC offset fresh so the reminder cron can place "now" on the
   // local ramp. Only writes when it actually changed (travel / DST).

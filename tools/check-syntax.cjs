@@ -24,7 +24,10 @@ const jsxSources = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]);
 
 // Plain scripts loaded via <script src> (vendored supabase.js excluded:
 // minified third-party bundle, not authored here).
-const plainSources = ['src/store.js', 'src/whatsnew.js', 'sw.js', 'src/programs-db.js', 'src/feature-map-db.js'];
+// src/exercise-db.js and src/autoreg-guide-page.js are shipped too and had no
+// CI signal at all: a syntax error while adding a catalog exercise would have
+// gone green here and left window.SYSTEM_EXERCISES undefined in production.
+const plainSources = ['src/store.js', 'src/whatsnew.js', 'sw.js', 'src/programs-db.js', 'src/feature-map-db.js', 'src/exercise-db.js', 'src/autoreg-guide-page.js'];
 
 // Files that share one global scope in the browser (everything except sw.js,
 // which runs in its own Service Worker realm, and vendored supabase.js).
@@ -48,7 +51,11 @@ const plainSources = ['src/store.js', 'src/whatsnew.js', 'sw.js', 'src/programs-
 //     else in the file), and isImprovement/isDecline duplicated between
 //     screens-lib.jsx and screens-coaching-core.jsx took down the entire
 //     Coaching module the moment that pairing first reached production.
-const globalScopeSources = ['src/store.js', 'src/whatsnew.js', ...jsxSources];
+// exercise-db.js and programs-db.js and feature-map-db.js are classic
+// <script>s in index.html too, so their top-level names share this same scope.
+// autoreg-guide-page.js is NOT here: it only ever loads on the standalone
+// autoreg.html page, which has no other app script.
+const globalScopeSources = ['src/store.js', 'src/whatsnew.js', 'src/exercise-db.js', 'src/programs-db.js', 'src/feature-map-db.js', ...jsxSources];
 
 let failed = false;
 const functionDecls = new Map(); // name -> [{ file, body }]

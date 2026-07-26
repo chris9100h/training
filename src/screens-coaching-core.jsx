@@ -1,9 +1,9 @@
-/* Coaching screens — coach dashboard + client view + client-side invite handling */
+/* Coaching screens, coach dashboard + client view + client-side invite handling */
 
 const { useState: useStateC, useEffect: useEffectC, useRef: useRefC, useMemo: useMemoC } = React;
 
 // Check-in load state shared by ClientCheckInsTab (coach view, -detail.jsx)
-// and ClientCheckInTab (client/self view, -tabs.jsx) — both used to
+// and ClientCheckInTab (client/self view, -tabs.jsx), both used to
 // hand-roll the identical checkins/loadErr/schema/coachingMacrosHistory
 // state + load effect.
 function useCoachingCheckins(coachingId) {
@@ -53,7 +53,7 @@ function CoachSyncErrorPill({ show }) {
 function fmtDate(iso) {
   if (!iso) return '—';
   // Date-only strings (YYYY-MM-DD, e.g. session.date) parse as UTC midnight via
-  // new Date() and render the previous day in negative-UTC zones — parse those
+  // new Date() and render the previous day in negative-UTC zones, parse those
   // at local noon via LB.parseDate. Full timestamps keep new Date().
   const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? LB.parseDate(iso) : new Date(iso);
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
@@ -146,10 +146,15 @@ function CoachingPendingBanner({ store, setStore, userId }) {
     setLoading(true);
     try {
       await LB.respondToCoachingInvite(pending.id, accept);
-      const fresh = await LB.loadFromSupabase(userId);
-      setStore(s => ({ ...s, ...fresh }));
+      // Only the coaching slice, via reloadCoachingState. This used to splat a
+      // raw loadFromSupabase snapshot over the whole store, bypassing the
+      // entire merge pipeline in app.jsx: anything created offline and not yet
+      // synced (a finished workout, a health entry) was replaced by the server
+      // state and gone.
+      const coaching = await LB.reloadCoachingState(userId);
+      setStore(s => ({ ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } }));
     } catch (e) {
-      alert('Error: ' + e.message);
+      UI.alert('Error: ' + e.message);
     } finally {
       setLoading(false);
     }
@@ -176,14 +181,14 @@ function CoachingPendingBanner({ store, setStore, userId }) {
           <button
             disabled={loading}
             onClick={() => respond(true)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
           >
             ACCEPT
           </button>
           <button
             disabled={loading}
             onClick={() => respond(false)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}
           >
             DECLINE
           </button>
@@ -198,7 +203,7 @@ function CoachingPendingBanner({ store, setStore, userId }) {
 
 function CoachingUnreadBanner({ store, userId, onOpen }) {
   // Same filtered source CoachingBannerGroup uses to decide whether to render
-  // this at all — recomputing independently is exactly how this banner ended
+  // this at all, recomputing independently is exactly how this banner ended
   // up showing an unfiltered count/preview that disagreed with its own parent.
   const notes = LB.unreadCoachingNotes(store);
   if (!notes.length) return null;
@@ -213,7 +218,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
         background: `rgba(var(--accent-rgb), 0.16)`,
-        border: `0.5px solid rgba(var(--accent-rgb), 0.35)`,
+        border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.35)`,
         borderRadius: 6, padding: '10px 14px', cursor: 'pointer',
       }}
     >
@@ -234,7 +239,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
 }
 
 // ─── ChatThread ───────────────────────────────────────────────────────────────
-// Single named thread — message bubbles + compose input.
+// Single named thread, message bubbles + compose input.
 
 function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack, setStore }) {
   const [notes, setNotes] = useStateC([]);
@@ -316,7 +321,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
       setImageFile(null);
       setImagePreview(null);
       reload();
-    } catch (e) { alert(e.message); } finally { setSending(false); }
+    } catch (e) { UI.alert(e.message); } finally { setSending(false); }
   };
 
   return (
@@ -385,7 +390,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 }
 
 // ─── ThreadList ────────────────────────────────────────────────────────────────
-// Thread list + inline create — used in both coach Notes tab and client sheet.
+// Thread list + inline create, used in both coach Notes tab and client sheet.
 
 function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canDelete }) {
   const [threads, setThreads] = useStateC([]);
@@ -402,7 +407,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
       setThreads(loaded);
       if (setStore && (unreadNotes || []).length) {
         const validThreadIds = new Set(loaded.map(t => t.id));
-        // Only this coaching's notes — callers pass the global unread list, which
+        // Only this coaching's notes, callers pass the global unread list, which
         // also holds other relationships' notes and support_ tickets. Never mark
         // those read here.
         // Stale = threadless (no UI to show them) OR referencing a deleted thread
@@ -432,7 +437,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
     try {
       await LB.deleteCoachingThread(t.id);
       reload();
-    } catch (err) { alert(err.message); }
+    } catch (err) { UI.alert(err.message); }
   };
 
   const create = async () => {
@@ -443,7 +448,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
       setNewName('');
       setCreating(false);
       reload();
-    } catch (e) { alert(e.message); } finally { setSaving(false); }
+    } catch (e) { UI.alert(e.message); } finally { setSaving(false); }
   };
 
   // unread count per thread
@@ -478,7 +483,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           const unread = unreadByThread[t.id] || 0;
           return (
             <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.16)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.16)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <i className="fa-solid fa-comment" style={{ fontSize: 14, color: 'var(--accent)' }} />
               </div>
               <div style={{ flex: 1 }}>
@@ -518,7 +523,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
               </button>
             </div>
           ) : (
-            <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
               New Thread
             </button>
@@ -531,7 +536,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
 }
 
 // ─── CoachingNotesSheet ───────────────────────────────────────────────────────
-// Thread list sheet for clients — opens from home unread banner or settings.
+// Thread list sheet for clients, opens from home unread banner or settings.
 
 function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
   const coachingId = store.coaching?.asClient?.id;
@@ -556,191 +561,6 @@ function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
   );
 }
 
-// ─── CoachingSettingsSection ──────────────────────────────────────────────────
-// Section rendered inside SettingsScreen under "Coaching".
-
-function CoachingSettingsSection({ store, setStore, userId, go }) {
-  const asClient = store.coaching?.asClient;
-  const asCoach = store.coaching?.asCoach || [];
-  const [inviteEmail, setInviteEmail] = useStateC('');
-  const [inviting, setInviting] = useStateC(false);
-  const [inviteError, setInviteError] = useStateC('');
-  const [ending, setEnding] = useStateC(false);
-  const [threadOpen, setThreadOpen] = useStateC(false);
-  const [confirmEl, confirm] = useConfirm();
-
-  const handleInvite = async () => {
-    if (!inviteEmail.trim()) return;
-    setInviting(true);
-    setInviteError('');
-    try {
-      const result = await LB.inviteClient(inviteEmail.trim());
-      if (result?.startsWith('ERROR:not_found')) { setInviteError('No user found with that email.'); return; }
-      if (result?.startsWith('ERROR:self')) { setInviteError('You cannot coach yourself.'); return; }
-      if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
-      if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
-      if (result?.startsWith('ERROR:')) { setInviteError('Could not send invite.'); return; }
-      setInviteEmail('');
-      const fresh = await LB.loadFromSupabase(userId);
-      setStore(s => ({ ...s, ...fresh }));
-    } catch (e) {
-      setInviteError(e.message);
-    } finally {
-      setInviting(false);
-    }
-  };
-
-  const handleEndCoaching = async (coachingId) => {
-    if (!await confirm('This will immediately revoke access to training data.', { title: 'End coaching?', ok: 'End', danger: true })) return;
-    setEnding(true);
-    try {
-      await LB.endCoaching(coachingId);
-      const fresh = await LB.loadFromSupabase(userId);
-      setStore(s => ({ ...s, ...fresh }));
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setEnding(false);
-    }
-  };
-
-  return (
-    <>
-    {confirmEl}
-    <CoachingNotesSheet open={threadOpen} store={store} setStore={setStore} userId={userId} onClose={() => setThreadOpen(false)} />
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-
-      {/* As client */}
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, marginTop: 4 }}>MY COACH</div>
-      {asClient ? (
-        <div style={{ background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{asClient.coachName}</div>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{asClient.coachEmail}</div>
-              {asClient.status === 'pending' && <div className="micro" style={{ color: 'var(--accent)', marginTop: 2 }}>PENDING YOUR RESPONSE</div>}
-            </div>
-            <button onClick={() => handleEndCoaching(asClient.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
-              END
-            </button>
-          </div>
-          {asClient.status === 'active' && (
-            <div
-              onClick={() => setThreadOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}
-            >
-              <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
-              <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Messages</span>
-              {(store.coaching?.unreadNotes?.length > 0) && (
-                <div style={{ background: 'var(--accent)', color: 'var(--accent-ink)', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
-                  {store.coaching.unreadNotes.length}
-                </div>
-              )}
-              <ChevronRight />
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
-          No coach assigned.
-        </div>
-      )}
-
-      {/* As coach */}
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MY CLIENTS</div>
-
-      {asCoach.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-          {asCoach.map(c => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
-              onClick={() => c.status === 'active' && go({ name: 'coaching-client', coachingId: c.id, clientId: c.clientId, clientName: c.clientName })}
-            >
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{c.clientName}</div>
-                {c.status === 'pending' && <div className="micro" style={{ color: UI.inkFaint, marginTop: 1 }}>PENDING ACCEPTANCE</div>}
-              </div>
-              {c.status === 'active' && <ChevronRight />}
-              <button onClick={e => { e.stopPropagation(); handleEndCoaching(c.id); }} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
-                END
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Invite new client */}
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>INVITE CLIENT</div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          value={inviteEmail}
-          onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
-          onKeyDown={e => e.key === 'Enter' && handleInvite()}
-          placeholder="client@email.com"
-          type="email"
-          autoCapitalize="none"
-          autoCorrect="off"
-          style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${inviteError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
-        />
-        <button
-          onClick={handleInvite}
-          disabled={inviting || !inviteEmail.trim()}
-          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
-        >
-          {inviting ? '…' : 'INVITE'}
-        </button>
-      </div>
-      {inviteError && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi, marginTop: 5 }}>{inviteError}</div>}
-    </div>
-    </>
-  );
-}
-
-// ─── CoachingDashboard ────────────────────────────────────────────────────────
-
-function CoachingDashboard({ store, setStore, userId, go }) {
-  const clients = (store.coaching?.asCoach || []).filter(c => c.status === 'active');
-
-  return (
-    <Screen scroll>
-      <TopBar title="Clients" onBack={() => go({ name: 'settings' })} />
-      {clients.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
-          No active clients yet.<br />Invite clients from Settings → Coaching.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 12px 24px' }}>
-          {clients.map(c => (
-            <ClientCard key={c.id} client={c} go={go} />
-          ))}
-        </div>
-      )}
-    </Screen>
-  );
-}
-
-function ClientCard({ client, go }) {
-  return (
-    <div
-      onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName })}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}
-    >
-      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName}</div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
-      </div>
-      <ChevronRight />
-    </div>
-  );
-}
 
 // ─── CoachClientScreen ────────────────────────────────────────────────────────
-// Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
+// Full coach view for a single client, 4 tabs: Overview, Plan, Sessions, Notes.

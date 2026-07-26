@@ -15,7 +15,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-const PUSHOVER_TOKEN = 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
+const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const THRESHOLD_ML = 250;              // only nudge when this far behind the ramp
 const COOLDOWN_MS = 60 * 60 * 1000;    // at most one nudge per hour per user
 
@@ -90,7 +91,7 @@ async function sendReminders() {
     const expected = Math.round(goal * (localH - start) / (end - start));
 
     // Today's logged water (the client mirrors the day's sum into water_ml).
-    // A failed fetch must NOT read as "0 ml logged" — that would fire a false
+    // A failed fetch must NOT read as "0 ml logged", that would fire a false
     // "you're behind" push at a user who already hit their goal, so skip this
     // user's check entirely rather than guessing on bad data.
     const dRes = await dbFetch(`zane_daily_logs?user_id=eq.${row.user_id}&date=eq.${localDate}&select=water_ml`);

@@ -1,4 +1,4 @@
-/* Settings screen — appearance, training, data, account, admin */
+/* Settings screen, appearance, training, data, account, admin */
 
 const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = React;
 
@@ -39,7 +39,7 @@ const SETTINGS_TEXTAREA_STYLE = {
   fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
 };
 
-// Admin support-inbox ticket row — active and archived are the same shape,
+// Admin support-inbox ticket row, active and archived are the same shape,
 // the archived variant just mutes it (dimmed colors/opacity, smaller text,
 // no unread dot / "no messages yet" placeholder / timestamp).
 function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
@@ -217,7 +217,7 @@ function HowToSheet({ open, onClose }) {
           <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={btnStyle}>
             <div style={{ textAlign: 'left' }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes, coach and client side</div>
             </div>
             {chevron}
           </button>
@@ -225,7 +225,7 @@ function HowToSheet({ open, onClose }) {
           <button onClick={() => setOsPickerOpen(true)} style={btnStyle}>
             <div style={{ textAlign: 'left' }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Install as app</div>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Add Zane to your home screen — works on iPhone and Android</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Add Zane to your home screen, works on iPhone and Android</div>
             </div>
             {chevron}
           </button>
@@ -495,7 +495,7 @@ function PasskeySheet({ open, onClose }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         <button onClick={handleAdd} disabled={adding} style={{
           width: '100%', padding: '12px 0', borderRadius: 6,
-          background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.25)',
+          background: 'rgba(var(--accent-rgb),0.10)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.25)',
           color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
           cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1,
           WebkitTapHighlightColor: 'transparent',
@@ -506,7 +506,7 @@ function PasskeySheet({ open, onClose }) {
         </button>
 
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, marginBottom: 20, lineHeight: 1.5 }}>
-          Each device needs its own passkey — Face ID, Touch ID or device PIN.
+          Each device needs its own passkey, Face ID, Touch ID or device PIN.
         </div>
 
         {(error || successMsg) && (
@@ -570,7 +570,7 @@ function PasskeySheet({ open, onClose }) {
                         <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
                       </button>
                       <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
-                        background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                        background: 'rgba(var(--danger-rgb),0.08)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.2)',
                         color: UI.danger, borderRadius: 6, padding: '5px 12px',
                         fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                         cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
@@ -591,7 +591,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -695,8 +695,13 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
-  const [importSourceUnit, _setImportSourceUnit] = useStateSet(store.settings?.unit || 'kg');
-  const importSourceUnitRef = useRefSet(store.settings?.unit || 'kg');
+  // Did step 1 of the restore flow actually produce a file in this sheet visit?
+  const [backupOk, setBackupOk] = useStateSet(false);
+  // Weight axis only: 'mixed' is kg on the weight side, and the picker below
+  // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
+  // user with neither button selected and a bogus unit mismatch on import.
+  const [importSourceUnit, _setImportSourceUnit] = useStateSet(LB.weightAxisUnit(store.settings?.unit));
+  const importSourceUnitRef = useRefSet(LB.weightAxisUnit(store.settings?.unit));
   const setImportSourceUnit = v => { importSourceUnitRef.current = v; _setImportSourceUnit(v); };
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -803,7 +808,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [adminEmailSending, setAdminEmailSending] = useStateSet(false);
   const [adminEmailMsg, setAdminEmailMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
+  // Detected/reported in app.jsx (boot, foreground, controllerchange), this
   // screen only reads it for display, so it stays fresh even if Settings is
   // never opened.
   const swVersion = store.settings?.swVersion || '';
@@ -828,9 +833,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
     const loadPending = () => LB.supabase.rpc('get_pending_users').then(({ data }) => { if (mounted) setPendingUsers(data || []); }).catch(() => {});
     loadSessions(); if (isAdmin) { loadGrants(); loadPending(); }
-    const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
+    // 2s only while the sheet is actually open (that view has live timers); a
+    // slow heartbeat otherwise, just to keep the badge count honest. This used
+    // to hammer the RPC every 2 seconds for as long as the Settings screen was
+    // mounted, sheet open or not.
+    const period = activeUsersSheet ? 2000 : 60000;
+    const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, period);
     return () => { mounted = false; clearInterval(iv); };
-  }, [hasActiveUsersAccess, isAdmin]);
+  }, [hasActiveUsersAccess, isAdmin, activeUsersSheet]);
 
   useEffectSet(() => {
     if (!pushSheet) return;
@@ -961,7 +971,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   }, [isAdmin, accountSheet, adminSheet]);
 
   // Admin-only: full user list (name/email/last-known SW version/plan count)
-  // — the single source for the unseen-signup badge (computed from it) and
+  //, the single source for the unseen-signup badge (computed from it) and
   // the All-users sheet, which folds in what used to be the separate Recent
   // Sign-ups/Onboarded views as client-side filters. Loaded on mount and
   // refreshed whenever Account/Admin opens, so the badge stays current.
@@ -1023,7 +1033,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   // A sign-up counts as "new" only if it's both unseen on this device AND
-  // registered recently — otherwise a fresh admin device would flag every
+  // registered recently, otherwise a fresh admin device would flag every
   // existing user as new.
   const NEW_SIGNUP_DAYS = 14;
   const isNewSignup = (u) => {
@@ -1096,7 +1106,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const supportBottomRef = useRefSet(null);
   const adminBottomRef = useRefSet(null);
   const [pendingCountdown, setPendingCountdown] = useStateSet(120);
-  useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); clearInterval(countdownIntervalRef.current); }, []);
+  // Also roll back a still-pending push verification on unmount. Leaving the
+  // screen mid-verification used to leave a live row in zane_push_subscriptions
+  // and a real browser subscription behind, with the UI showing push as off:
+  // the device kept receiving pushes nobody could turn off from here.
+  const webPushPendingRef = useRefSet(false);
+  useEffectSet(() => { webPushPendingRef.current = webPushPending; }, [webPushPending]);
+  useEffectSet(() => () => {
+    clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); clearInterval(countdownIntervalRef.current);
+    if (webPushPendingRef.current) {
+      LB.unsubscribeWebPush(userId).catch(() => {});
+      try { localStorage.setItem('logbook-push-enabled', 'false'); localStorage.removeItem('logbook-push-verified'); } catch (_) {}
+    }
+  }, []);
 
   const cancelPendingPush = async () => {
     clearTimeout(pendingTimeoutRef.current);
@@ -1132,7 +1154,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         pendingTimeoutRef.current = setTimeout(async () => {
           await cancelPendingPush();
           clearTimeout(pushStatusTimer.current);
-          setPushStatus('Verification timed out — push not enabled');
+          setPushStatus('Verification timed out, push not enabled');
           pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
         }, 2 * 60 * 1000);
         sendWebPushCode();
@@ -1148,7 +1170,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       clearTimeout(pushStatusTimer.current);
       const msg = e.message?.toLowerCase() ?? '';
       setPushStatus(msg.includes('denied') || msg.includes('permission')
-        ? 'Permission denied — enable notifications in browser settings'
+        ? 'Permission denied, enable notifications in browser settings'
         : `Error: ${e.message}`);
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 7000);
     } finally {
@@ -1163,7 +1185,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const verifyWebPushCode = () => {
     if (codeInput.trim() !== webPushCode) {
       clearTimeout(pushStatusTimer.current);
-      setPushStatus('Wrong code — check the notification');
+      setPushStatus('Wrong code, check the notification');
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
       return;
     }
@@ -1193,7 +1215,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     finally { setVerifyLoading(false); }
   };
   const verifyCode = () => {
-    if (codeInput.trim() !== pendingCode) { setPushStatus('Incorrect code — check the Pushover notification'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+    if (codeInput.trim() !== pendingCode) { setPushStatus('Incorrect code, check the Pushover notification'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
     setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: pushKeyDraft.trim(), usePushover: true } }));
     setPushoverStep('idle'); setPendingCode(''); setCodeInput(''); setPushKeyDraft('');
     setPushStatus('✓ Pushover active'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 4000);
@@ -1210,7 +1232,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
       const data = await res.json().catch(() => ({}));
       if (res.status === 202 || data.scheduled) { setPushStatus('✓ Sent'); }
-      else if (data.skipped) { setPushStatus('No subscription found — try toggling push off and on'); }
+      else if (data.skipped) { setPushStatus('No subscription found, try toggling push off and on'); }
       else { setPushStatus(`Error: ${JSON.stringify(data)}`); }
     } catch (e) { setPushStatus(`Error: ${e.message}`); }
     pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
@@ -1220,18 +1242,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
     const nonce = String(Date.now());
     const title = 'Zane Test';
-    const message = 'Rest done — keep going! 💪';
+    const message = 'Rest done, keep going! 💪';
     const usesPushover = !!(store.settings?.pushoverUserKey && store.settings?.usePushover);
     try {
       if (usesPushover) {
         const res = await LB.fnFetch(LB.PUSHOVER_URL, { message, title, delaySeconds, nonce, ttl: 10 });
         if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
-        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
-        else { const data = await res.json().catch(() => ({})); setPushStatus(data.skipped ? 'Key not synced yet — try again' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled, notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        else { const data = await res.json().catch(() => ({})); setPushStatus(data.skipped ? 'Key not synced yet, try again' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
       } else {
         const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title, message, delaySeconds, nonce });
         if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
-        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled, notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
         else { const data = await res.json().catch(() => ({})); setPushStatus(`Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
       }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
@@ -1239,7 +1261,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const toggleReminder = () => {
     const next = !reminderEnabled;
     if (next && !pushEnabled) {
-      // Push not active — open push sheet instead of enabling reminder
+      // Push not active, open push sheet instead of enabling reminder
       setTrainingSheet(false);
       setPushSheet(true);
       return;
@@ -1249,11 +1271,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const updateReminderTime = (val) => { setReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } })); };
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
+  // exportBackup throws on a partial fetch on purpose (an incomplete backup
+  // silently wipes the missing rows on the next restore). That throw used to
+  // land in an unhandled rejection here, so step 1 of the restore flow could
+  // fail without a single visible sign while step 2 stayed armed.
+  // Returns true only when a file actually reached the user.
   const exportData = async (filename) => {
-    const backup = await LB.exportBackup(store, userId);
-    const { blob, gz } = await LB.backupToBlob(backup);
-    const base = filename || `zane-${LB.todayISO()}.json`;
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = gz ? `${base}.gz` : base; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try {
+      const backup = await LB.exportBackup(store, userId);
+      const { blob, gz } = await LB.backupToBlob(backup);
+      const base = filename || `zane-${LB.todayISO()}.json`;
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = gz ? `${base}.gz` : base; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setBackupOk(true);
+      return true;
+    } catch (err) {
+      setBackupOk(false);
+      await confirm(`Could not create the backup: ${err?.message || 'Unknown error'}. Nothing was downloaded, so do not restore over this data yet.`, { title: 'Backup failed', ok: 'OK' });
+      return false;
+    }
   };
   const runImport = () => {
     // input.click() must be synchronous in the user-gesture handler (iOS Safari).
@@ -1267,19 +1302,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
 
       // Auto-detect source unit from backup; update toggle + ref so the user sees it.
+      // Normalized to the weight axis, so a 'mixed' backup detects as kg.
       const detectedUnit = backup.settings?.unit;
-      if (detectedUnit === 'kg' || detectedUnit === 'lbs') setImportSourceUnit(detectedUnit);
+      if (detectedUnit === 'kg' || detectedUnit === 'lbs' || detectedUnit === 'mixed') setImportSourceUnit(LB.weightAxisUnit(detectedUnit));
 
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
+      // Compare the WEIGHT axis, not the raw setting: 'mixed' means kg weight,
+      // so a mixed user importing a kg backup must not convert anything.
       const userUnit = store.settings?.unit || 'kg';
-      const srcUnit = importSourceUnitRef.current;
-      const unitMismatch = srcUnit !== userUnit;
-      const unitNote = unitMismatch ? ` Weights will be converted from ${srcUnit.toUpperCase()} to ${userUnit.toUpperCase()}.` : '';
+      const userAxis = LB.weightAxisUnit(userUnit);
+      const srcAxis = LB.weightAxisUnit(importSourceUnitRef.current);
+      const unitMismatch = srcAxis !== userAxis;
+      const unitNote = unitMismatch ? ` Weights will be converted from ${srcAxis.toUpperCase()} to ${userAxis.toUpperCase()}.` : '';
       const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.${unitNote}`, { title: 'Replace data?', ok: 'Replace', danger: true });
       if (!ok) return;
+      // targetUnit stays the real setting ('mixed' keeps its mi distances).
       const unitConvert = unitMismatch
-        ? { multiplier: srcUnit === 'kg' ? 2.20462 : 1 / 2.20462, targetUnit: userUnit }
+        ? { multiplier: srcAxis === 'kg' ? 2.20462 : 1 / 2.20462, targetUnit: userUnit }
         : null;
       setImporting(true);
       setImportProgress({ pct: 0, phase: 'Starting…' });
@@ -1290,7 +1330,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const handleSignOut = async () => { await flushBeforeSignOut(userId); await LB.signOut(); };
+  const handleSignOut = async () => { markIntentionalSignOut(); await flushBeforeSignOut(userId); await LB.signOut(); };
 
   const attachSupportImageFile = (file) => {
     if (!file) return;
@@ -1354,7 +1394,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (error || !note) { restore(); alert('Message failed to send. Please try again.'); return; }
+      if (error || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       setSupportActiveNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
       setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
@@ -1363,7 +1403,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           : t
       )}));
       LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview });
-    } catch (e) { restore(); alert(e.message || 'Message failed to send. Please try again.'); }
+    } catch (e) { restore(); UI.alert(e.message || 'Message failed to send. Please try again.'); }
     finally { setSupportSending(false); }
   };
 
@@ -1382,7 +1422,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const restore = () => { setSupportDraft(body); setSupportImageFile(imgFile); setSupportImagePreview(imgPreview); };
     try {
       const { data: coachingId, error: ticketErr } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
-      if (ticketErr || !coachingId) { restore(); alert('Could not open the ticket. Please try again.'); return; }
+      if (ticketErr || !coachingId) { restore(); UI.alert('Could not open the ticket. Please try again.'); return; }
       let attachments = null;
       if (imgFile) {
         const url = await LB.uploadChatImage(imgFile, userId);
@@ -1392,7 +1432,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (noteErr || !note) { restore(); alert('Message failed to send. Please try again.'); return; }
+      if (noteErr || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       {
         const preview = attachments ? (body || '📷 Image') : body;
         const newTicket = {
@@ -1407,7 +1447,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         setSupportView('thread');
         LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview });
       }
-    } catch (e) { restore(); alert(e.message || 'Could not create the ticket. Please try again.'); }
+    } catch (e) { restore(); UI.alert(e.message || 'Could not create the ticket. Please try again.'); }
     finally { setSupportSending(false); }
   };
 
@@ -1433,11 +1473,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (error || !note) { restore(); alert('Reply failed to send. Please try again.'); return; }
+      if (error || !note) { restore(); UI.alert('Reply failed to send. Please try again.'); return; }
       setSupportTicketNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
       LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
-    } catch (e) { restore(); alert(e.message || 'Reply failed to send. Please try again.'); }
+    } catch (e) { restore(); UI.alert(e.message || 'Reply failed to send. Please try again.'); }
     finally { setSupportAdminSending(false); }
   };
 
@@ -1455,12 +1495,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   // Pushes the "New version available" banner to every connected client
-  // without needing an sw.js cache-version bump — see admin_force_update.
+  // without needing an sw.js cache-version bump, see admin_force_update.
   const handleForceUpdateAll = async () => {
     if (!await confirm('Every connected user will see the update banner and be prompted to refresh.', { title: 'Force refresh all users?', ok: 'Send' })) return;
     const { error } = await LB.supabase.rpc('admin_force_update');
     if (!error) {
-      // The broadcast has no per-user exclusion — without this, the device
+      // The broadcast has no per-user exclusion, without this, the device
       // that sent it would see its own banner too. Mark the freshly-set nonce
       // as already seen on THIS device before checkForceUpdate ever polls it.
       const { data: nonce } = await LB.supabase.rpc('get_force_update_nonce');
@@ -1514,7 +1554,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!supportTicket) return;
     const coachingId = supportTicket.coachingId;
     const { error } = await LB.supabase.rpc('archive_support_ticket', { p_coaching_id: coachingId });
-    if (error) { alert('Could not archive the ticket: ' + error.message); return; }
+    if (error) { UI.alert('Could not archive the ticket: ' + error.message); return; }
     setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
     setSupportTicket(null);
     setSupportAdminDraft('');
@@ -1551,7 +1591,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       // that succeeded, so a failed delete can't orphan a ticket whose
       // attachments are already gone.
       const { error: delErr } = await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
-      if (delErr) { alert('Could not delete the ticket: ' + delErr.message); return; }
+      if (delErr) { UI.alert('Could not delete the ticket: ' + delErr.message); return; }
       if (paths.length > 0) {
         await LB.supabase.storage.from('chat-attachments').remove(paths).catch(() => {});
       }
@@ -1596,7 +1636,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       const { error } = await LB.supabase.auth.updateUser({ email: trimmed });
       if (error) { setEmailMsg({ text: error.message || 'Failed to update email', ok: false }); }
-      else { setEmailMsg({ text: `Confirmation link sent to ${trimmed} — click the link in your new inbox to complete the change`, ok: true }); }
+      else { setEmailMsg({ text: `Confirmation link sent to ${trimmed}, click the link in your new inbox to complete the change`, ok: true }); }
     } catch (e) {
       setEmailMsg({ text: e.message || 'Something went wrong', ok: false });
     } finally {
@@ -1611,7 +1651,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       { title: 'Delete all data?', ok: 'Delete all', danger: true, requireText: 'Delete my data' }
     );
     if (!ok) return;
-    await LB.deleteAllData(userId); await LB.signOut();
+    // deleteAllData can throw halfway through (network drop, RLS). Arming the
+    // sign-out latch before it and letting the rejection escape left the
+    // account partly deleted, the user on the raw crash overlay, and the latch
+    // stuck on for the rest of the page session (which makes the next
+    // involuntary SIGNED_OUT wipe the pending local diff). Arm it only right
+    // before the sign-out that it describes, and report a failure.
+    try {
+      await LB.deleteAllData(userId);
+    } catch (err) {
+      await confirm(`Deleting your data failed partway through: ${err?.message || 'Unknown error'}. You are still signed in. Check your connection and try again.`, { title: 'Delete failed', ok: 'OK' });
+      return;
+    }
+    markIntentionalSignOut();
+    await LB.signOut();
   };
 
   // Coaching derived values
@@ -1619,9 +1672,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const selfOn = !!store.settings?.beYourOwnCoach;
   const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching || selfOn);
 
+  // With an active coaching relationship the tab is forced on (coachingTabOn
+  // ORs hasCoaching in), so the switch used to spring right back while quietly
+  // clearing beYourOwnCoach as a side effect, without ending the self-coaching
+  // relationship. Disable it in that state instead of pretending it does
+  // something, and stop touching beYourOwnCoach here: turning self-coaching
+  // off is toggleSelf's job, which also ends the relationship server-side.
+  const coachingTabLocked = hasCoaching;
   const toggleTab = () => {
-    const turningOff = coachingTabOn;
-    setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn, ...(turningOff ? { beYourOwnCoach: false } : {}) } }));
+    if (coachingTabLocked) return;
+    setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn } }));
   };
   const toggleSelf = async () => {
     const next = !selfOn;
@@ -1868,10 +1928,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={coachingSheet} onClose={() => setCoachingSheet(false)} title="Coaching">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Coaching tab" first>
-            <Toggle on={coachingTabOn} onToggle={toggleTab} />
+            <Toggle on={coachingTabOn} onToggle={toggleTab} disabled={coachingTabLocked} />
           </Row>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
+            {coachingTabLocked
+              ? 'The coaching tab stays pinned while a coaching relationship is active.'
+              : 'Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.'}
           </div>
           {coachingTabOn && (
             <div style={{ marginTop: 12 }}>
@@ -1879,7 +1941,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <Toggle on={selfOn} onToggle={toggleSelf} />
               </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
+                Track your own training like a coach would, stats, nutrition, check-ins & notes, just for you.
               </div>
             </div>
           )}
@@ -2176,7 +2238,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     {confirmDeletePeriodId === p.id && (
                       <div style={{ display: 'flex', gap: 8, paddingBottom: 14 }}>
                         <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Cancel</button>
-                        <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
+                        <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
                       </div>
                     )}
                   </div>
@@ -2368,7 +2430,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </Row>
           {!pushEnabled && (
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-              Requires push notifications — toggling will open the push setup.
+              Requires push notifications, toggling will open the push setup.
             </div>
           )}
           <div style={{ marginTop: 24 }}>
@@ -2474,7 +2536,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+            <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
         </div>
@@ -2496,7 +2558,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <span style={{ color: UI.ink, fontWeight: 600 }}>Step 1:</span> Download a backup of your current data first.{' '}
               <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
             </div>
-            <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
+            <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>
+              {backupOk ? '1 · Backup downloaded ✓' : '1 · Backup current data'}
+            </Btn>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
               <span style={{ fontSize: 12, color: UI.inkSoft }}>Source weight unit</span>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -2510,6 +2574,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 ))}
               </div>
             </div>
+            {!backupOk && (
+              <div style={{ fontSize: 12, color: UI.gold, lineHeight: 1.5, padding: '0 2px' }}>
+                No backup downloaded yet in this session. The restore replaces your data permanently, so do step 1 first.
+              </div>
+            )}
             <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
           </div>
         )}
@@ -2526,7 +2595,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <window.Screens.UnitPromptModal
           onDone={(chosenUnit) => {
             setUnitPickerOpen(false);
-            localStorage.setItem('logbook-unit-prompted', '1');
             // Mixed = kg weight + mi distance; sync the cardio dist key so
             // all cardio screens immediately reflect the chosen distance unit.
             const distUnit = chosenUnit === 'lbs' ? 'mi' : chosenUnit === 'mixed' ? 'mi' : 'km';
@@ -2564,7 +2632,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             ))}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}` }}>
-            {[['BIG', 'Heavy compounds — squat, deadlift, overhead press'], ['MEDIUM', 'Moderate compounds — bench, pull-up, lunge'], ['SMALL', 'Isolation — bicep curl, lateral raise, tricep extension']].map(([k, v]) => (
+            {[['BIG', 'Heavy compounds, squat, deadlift, overhead press'], ['MEDIUM', 'Moderate compounds, bench, pull-up, lunge'], ['SMALL', 'Isolation, bicep curl, lateral raise, tricep extension']].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                 <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
                 <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
@@ -2615,7 +2683,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div className="micro" style={{ marginBottom: 8 }}>REP RANGE TOP (+reps above target)</div>
                 <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
               </div>
-              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps. Works the same with per-set rep targets — each set uses its own threshold.</div>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps. Works the same with per-set rep targets, each set uses its own threshold.</div>
             </>
           )}
           <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
@@ -2675,7 +2743,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const current = store.settings?.equipmentConfig?.[invKey] ?? allPlates;
           const toggle = (p) => {
             // The plate calculator's correction math indexes the smallest
-            // available plate (plateSet[plateSet.length - 1]) — an empty
+            // available plate (plateSet[plateSet.length - 1]), an empty
             // inventory turns that into NaN throughout. Refuse to deselect
             // the last remaining plate instead of allowing an empty set.
             if (current.includes(p) && current.length <= 1) return;
@@ -2726,8 +2794,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Progression disclaimer sheet ══ */}
       <SettingsSheet open={progDisclaimer} onClose={() => setProgDisclaimer(false)} title="Smart Progression">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
-          <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6 }}>The reps shown in your sets are <span style={{ color: UI.gold }}>minimum reps</span> — the floor the algorithm needs to track progression.</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
+          <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6 }}>The reps shown in your sets are <span style={{ color: UI.gold }}>minimum reps</span>, the floor the algorithm needs to track progression.</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range, so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setProgDisclaimer(false); setProgressionSheet(true); }}>Got it</Btn>
       </SettingsSheet>
@@ -2752,7 +2820,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   </button>
                 </Row>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
-                  Open registration for a batch — auto-approved until used up, then turns back on.
+                  Open registration for a batch, auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
@@ -2776,7 +2844,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={broadcastSheet} onClose={() => setBroadcastSheet(false)} title="Message All Users">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-            Sends a message into every user's support ticket (creating one first if they don't have one yet) — the same inbox they already use to reach support, so it shows up even on an older app version.
+            Sends a message into every user's support ticket (creating one first if they don't have one yet), the same inbox they already use to reach support, so it shows up even on an older app version.
           </div>
           <textarea
             value={broadcastBody}
@@ -2836,7 +2904,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ ...iStyle, appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' }}
                   disabled={!opts}
                 >
-                  <option value="">{opts ? '— None (clear) —' : 'Loading…'}</option>
+                  <option value="">{opts ? 'None (clear)' : 'Loading…'}</option>
                   {(opts || []).map(o => (
                     <option key={o.key} value={o.key}>{o.label}</option>
                   ))}
@@ -2858,7 +2926,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         })()}
       </SettingsSheet>
 
-      {/* ══ VIP backgrounds — current assignments sub-sheet ══ */}
+      {/* ══ VIP backgrounds, current assignments sub-sheet ══ */}
       <SettingsSheet open={vipBgListSheet} onClose={() => setVipBgListSheet(false)} title="Current Assignments">
         {(() => {
           const opts = vipBgOptions || [];
@@ -2886,7 +2954,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         })()}
       </SettingsSheet>
 
-      {/* ══ Auto-approve batch sheet (admin) — rendered after adminSheet so it sits on top ══ */}
+      {/* ══ Auto-approve batch sheet (admin), rendered after adminSheet so it sits on top ══ */}
       <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <div>
@@ -2996,7 +3064,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </div>
                   )}
                 </div>
-                {/* Messages — scrollable */}
+                {/* Messages, scrollable */}
                 <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportActiveLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportActiveLoading && supportActiveNotes.length === 0 && (
@@ -3026,7 +3094,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   })()}
                   <div ref={supportBottomRef} />
                 </div>
-                {/* Compose — sticks to bottom */}
+                {/* Compose, sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
                   <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                     {supportImagePreview && (
@@ -3103,7 +3171,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         })()}
       </FullSheet>
 
-      {/* ══ Support inbox full-screen sheet (admin) — inbox list + ticket detail in one ══ */}
+      {/* ══ Support inbox full-screen sheet (admin), inbox list + ticket detail in one ══ */}
       <FullSheet
         open={supportInboxSheet}
         onClose={supportTicket
@@ -3150,7 +3218,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* Thread — scrollable, takes remaining height */}
+                {/* Thread, scrollable, takes remaining height */}
                 <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
@@ -3185,7 +3253,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   })()}
                   <div ref={adminBottomRef} />
                 </div>
-                {/* Compose — sticks to bottom */}
+                {/* Compose, sticks to bottom */}
                 <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
@@ -3215,7 +3283,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {confirmDeleteTicket ? (
                     <div style={{ display: 'flex', gap: 6 }}>
                       <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
-                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: '0.5px solid rgba(var(--danger-rgb),0.3)' }}>
+                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.3)' }}>
                         {deletingTicket ? 'Deleting…' : 'Confirm delete'}
                       </Btn>
                     </div>
@@ -3290,7 +3358,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </FullSheet>
 
 
-      {/* ══ All users sheet (admin) ══ — folds in what used to be separate
+      {/* ══ All users sheet (admin) ══, folds in what used to be separate
           Recent sign-ups (New sign-ups only filter) and Onboarded (Onboarded
           only filter) sheets, plus the SW-version lookup. */}
       <SettingsSheet open={allUsersSheet} onClose={() => setAllUsersSheet(false)} title="All users">
@@ -3342,7 +3410,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </Row>
               </Frame>
               {allUsersOutdatedOnly && !swVersion && (
-                <div className="micro" style={{ color: UI.inkFaint }}>Your own version isn't known yet — this device hasn't reported one.</div>
+                <div className="micro" style={{ color: UI.inkFaint }}>Your own version isn't known yet, this device hasn't reported one.</div>
               )}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div className="micro" style={{ color: UI.inkGhost }}>{filtered.length} of {allUsers.length}{swVersion ? ` · you're on ${swVersion}` : ''}</div>
@@ -3395,7 +3463,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         })()}
       </SettingsSheet>
 
-      {/* ══ User detail sheet (admin — plans list) ══ */}
+      {/* ══ User detail sheet (admin, plans list) ══ */}
       <SettingsSheet open={adminUserDetailSheet} onClose={() => setAdminUserDetailSheet(false)} title={adminUserDetail?.name || adminUserDetail?.email || 'User'}>
         {adminUserDetailLoading
           ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
@@ -3463,7 +3531,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         }
       </SettingsSheet>
 
-      {/* ══ Plan detail sheet (admin — day chips + exercise cards) ══ */}
+      {/* ══ Plan detail sheet (admin, day chips + exercise cards) ══ */}
       <SettingsSheet open={adminPlanDetailSheet} onClose={() => setAdminPlanDetailSheet(false)} title={adminPlanDetail?.name || 'Plan'}>
         {adminPlanDetail && (() => {
           const days = adminPlanDetail.days || [];
@@ -3540,7 +3608,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
-            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
@@ -3553,7 +3621,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               : <Toggle on={pushEnabled || webPushPending} onToggle={togglePush} />}
           </Row>
           {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
-            <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
+            <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover, see Advanced</div>
           )}
           {(pushEnabled || webPushPending) && !store.settings?.usePushover && webPushSub && (() => {
             const iStyle = { ...SETTINGS_INPUT_STYLE, fontSize: 20, letterSpacing: '0.3em', textAlign: 'center' };
@@ -3584,7 +3652,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               );
             }
             if (webPushVerified) return (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.16)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.16)', border: 'var(--hair-width) solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 5px rgba(var(--accent-rgb),0.7)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
                   <span className="micro" style={{ color: 'var(--accent)' }}>ACTIVE</span>
@@ -3598,7 +3666,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             );
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active — not yet verified</div>
+                <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active, not yet verified</div>
                 <button onClick={sendWebPushCode} style={accentBtn}>Send verification code</button>
               </div>
             );

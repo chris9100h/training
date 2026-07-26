@@ -1,7 +1,7 @@
 // DEPLOY WITH verify_jwt = false. This function does its OWN auth in
 // resolveCaller() below (signed-in user OR the service-role key), which is the
 // real security boundary. It MUST stay false because the long-rest relay chain
-// calls this function back with the service-role key and no apikey header — the
+// calls this function back with the service-role key and no apikey header, the
 // gateway's verify_jwt=true rejects that self-call (HTTP 401, ~40 ms) and the
 // chain dies, so rest-timer pushes silently never fire for delays > 10 s.
 const corsHeaders = {
@@ -13,7 +13,7 @@ const corsHeaders = {
 const SELF_URL  = 'https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover';
 const ANON_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 const MAX_CHUNK = 10;   // seconds per relay hop
-const MAX_DELAY = 3600; // cap user-supplied delays at 1 h — rest timers are minutes
+const MAX_DELAY = 3600; // cap user-supplied delays at 1 h, rest timers are minutes
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -37,7 +37,7 @@ async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
 
 // Resolve the caller: a real signed-in user (normal app calls) or the
 // service-role key (internal relay hops + other edge functions). The bare
-// anon key is NOT enough — without this check the function was an open
+// anon key is NOT enough, without this check the function was an open
 // relay anyone could use to push arbitrary messages via our Pushover token,
 // cancel other users' notification chains, or start unbounded relay chains.
 async function resolveCaller(req: Request): Promise<{ internal: boolean; userId: string | null }> {
@@ -68,10 +68,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+  const token = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 
   let {
-    message = 'Rest over — keep going! 💪',
+    message = 'Rest over, keep going! 💪',
     title = 'Zane',
     delaySeconds = 0,
     nonce = '',   // unique token per rest period; empty = no cancellation check
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     const [sett] = await r.json().catch(() => [null]);
     userKey = sett?.push_enabled ? (sett?.pushover_user_key ?? '') : '';
     if (!cancel && !userKey) {
-      // Nothing to deliver to — e.g. the key was just typed and hasn't synced yet
+      // Nothing to deliver to, e.g. the key was just typed and hasn't synced yet
       return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
   const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
 
   // First call only: register this nonce as the currently active one.
-  // Relay hops skip this — the nonce is already stored from the initial call.
+  // Relay hops skip this, the nonce is already stored from the initial call.
   if (nonce && !_relay) {
     await dbFetch('zane_pushover_active', {
       method: 'POST',
@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
       await new Promise(r => setTimeout(r, MAX_CHUNK * 1000));
       // Cancel chain if a newer set started
       if (nonce && !await isNonceCurrent(nonce, userId)) {
-        console.log('[pushover] cancelled — newer rest timer active');
+        console.log('[pushover] cancelled, newer rest timer active');
         return;
       }
       // Relay hops authenticate with the service-role key (caller JWTs could
@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
       if (delaySeconds > 0) await new Promise(r => setTimeout(r, delaySeconds * 1000));
       // Cancel send if a newer set started
       if (nonce && !await isNonceCurrent(nonce, userId)) {
-        console.log('[pushover] cancelled — newer rest timer active');
+        console.log('[pushover] cancelled, newer rest timer active');
         return;
       }
       console.log('[pushover] sending');

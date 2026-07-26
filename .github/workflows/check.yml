@@ -31,3 +31,6 @@ jobs:
       # ?v= cache-buster tracks the sw.js CACHE version so branch/prod deploys
       # never serve it a stale feature-map catalog.
       - run: node tools/check-cache-version.cjs
+      # House rule: no em-dashes anywhere. A sweep removed 926 of them; this
+      # keeps them from creeping back in via app text or changelog entries.
+      - run: node tools/check-emdash.cjs

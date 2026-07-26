@@ -130,7 +130,7 @@ function AGSecHead({ n, title, sub, chip }) {
       <div style={{ fontFamily: UI.fontNum, fontSize: 11, letterSpacing: '.14em', color: UI.gold }}>{n}</div>
       <h2 className="display" style={{ fontSize: 'clamp(23px,5vw,32px)', margin: '7px 0 0', letterSpacing: '-.01em', display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         {title}
-        {chip && <span style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: UI.gold, border: `0.5px solid ${agTint(UI.gold, 45)}`, background: agTint(UI.gold, 8), borderRadius: 999, padding: '3px 10px' }}>{chip}</span>}
+        {chip && <span style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: UI.gold, border: `var(--hair-width) solid ${agTint(UI.gold, 45)}`, background: agTint(UI.gold, 8), borderRadius: 999, padding: '3px 10px' }}>{chip}</span>}
       </h2>
       {sub && <p style={{ color: UI.inkSoft, margin: '11px 0 0', fontSize: 14.5, maxWidth: '62ch' }}>{sub}</p>}
     </div>
@@ -545,7 +545,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, padding: '26px 4px 4px' }}>
                 {[[118, 12, 'Set 1'], [94, 10, 'Set 2'], [70, 8, 'Set 3']].map(([h, v, l]) => (
                   <div key={l} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: '100%', maxWidth: 58, height: h, borderRadius: '4px 4px 0 0', background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldDeep})`, border: `0.5px solid ${agTint(UI.gold, 50)}`, borderBottom: 'none', position: 'relative' }}>
+                    <div style={{ width: '100%', maxWidth: 58, height: h, borderRadius: '4px 4px 0 0', background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldDeep})`, border: `var(--hair-width) solid ${agTint(UI.gold, 50)}`, borderBottom: 'none', position: 'relative' }}>
                       <div style={{ position: 'absolute', top: -22, left: 0, right: 0, textAlign: 'center', fontFamily: UI.fontNum, fontWeight: 700, fontSize: 13, color: UI.ink }}>{v}</div>
                     </div>
                     <div style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.05em', textTransform: 'uppercase', color: UI.inkFaint }}>{l}</div>

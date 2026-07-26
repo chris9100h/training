@@ -7,7 +7,7 @@ const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterU
 
 // Shown when a user tries to delete the built-in CARDIO exercise (bulk-select
 // or the exercise detail). It is auto-seeded per user and re-created if removed,
-// so silently refusing just reads as "delete is broken" — which cost us a real
+// so silently refusing just reads as "delete is broken", which cost us a real
 // support ticket. Explain instead.
 const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to stay, always ready to drop into a plan or session.";
 
@@ -207,6 +207,10 @@ function LibraryScreen({ store, setStore, go, userId }) {
         versions: (sch.versions || []).map(v => ({ ...v, days: (v.days || []).map(day => ({ ...day, items: stripItems(day.items) })) })),
         ...(sch.program_data ? { program_data: stripProgramData(sch.program_data, del) } : {}),
       })),
+      // Workout templates reference exercises by exId too and were never
+      // cleaned: Home kept advertising "Push A · 8 ex" while the preview
+      // listed the two that still existed.
+      workoutTemplates: (s.workoutTemplates || []).map(t => ({ ...t, exercises: (t.exercises || []).filter(x => !del.has(x.exId)) })),
     }));
     exitSelect();
   };
@@ -224,7 +228,14 @@ function LibraryScreen({ store, setStore, go, userId }) {
     const lastTwo = new Map();
     const seenFirst = new Map();
     sortedSessions.forEach(s => {
+      // Per SESSION, not per entry: an exercise trained twice in one session
+      // (two entries) used to fill both "last two sessions" slots with that
+      // same session, so cur and prev were computed from the same workout and
+      // the trend arrow was permanently neutral.
+      const seenHere = new Set();
       s.entries.forEach(e => {
+        if (seenHere.has(e.exId)) return;
+        seenHere.add(e.exId);
         const arr = lastTwo.get(e.exId) || [];
         if (arr.length < 2) {
           lastTwo.set(e.exId, [...arr, s]);
@@ -353,7 +364,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             color: tab === id ? UI.gold : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
             letterSpacing: '0.1em', textTransform: 'uppercase',
-            borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
+            borderBottom: `var(--hair-width) solid ${tab === id ? UI.gold : 'transparent'}`,
             marginBottom: -0.5,
             transition: 'color 0.2s',
           }}>{label}</button>
@@ -363,7 +374,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {tab === 'db' && (
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 4 }}>
-            Browse the catalog and tap Check &amp; Add — review or tweak the exercise first, then it becomes your own editable copy, ready for your plans.
+            Browse the catalog and tap Check &amp; Add, review or tweak the exercise first, then it becomes your own editable copy, ready for your plans.
           </div>
         )}
         {(tab === 'all' || tab === 'db') && (() => {
@@ -398,7 +409,9 @@ function LibraryScreen({ store, setStore, go, userId }) {
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
           const isToday = days === 0;
-          const top = lastEntry?.sets?.find(s => s.kg != null);
+          // Warm-ups and skipped sets are not "the last set": on an exercise
+          // with a warm-up ramp this showed the 30% opener as the latest lift.
+          const top = lastEntry?.sets?.find(s => s.kg != null && !s.warmup && !s.skipped);
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
@@ -666,7 +679,7 @@ function EquipmentPills({ value, onChange }) {
   );
 }
 
-// Single tappable chip matching the muscle/equipment pickers — used for the
+// Single tappable chip matching the muscle/equipment pickers, used for the
 // smaller choices in the exercise editor (size, movement, rep target) so every
 // chip in the form is the same size.
 function Chip({ on, onClick, children }) {
@@ -696,7 +709,7 @@ function MusclePills({ value, onChange }) {
   );
 }
 
-// SVG knurl for use inside html2canvas — repeating-linear-gradient doesn't render there.
+// SVG knurl for use inside html2canvas, repeating-linear-gradient doesn't render there.
 // useLayoutEffect resolves width="100%" to a pixel value before html2canvas serializes
 // the SVG as a data URL (where percentage widths lose their containing block context).
 function SvgKnurl({ style }) {
@@ -773,7 +786,7 @@ function GoldSectionLabel({ children, style }) {
 // full-page background, so dividers there always draw full width.
 async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing, fitWidth = false } = {}) {
   if (!node) return { ok: false, reason: 'no-node' };
-  // html2canvas is loaded on demand (not at boot) — fetch it on first use.
+  // html2canvas is loaded on demand (not at boot), fetch it on first use.
   const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
   if (!html2canvas) return { ok: false, reason: 'unavailable' };
   setCapturing?.(true);
@@ -784,7 +797,7 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   scrollParent.style.height = 'auto';
   scrollParent.style.minHeight = 'auto';
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-  // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
+  // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
   // The avatar is a freshly-mounted <img>; on first capture it may not have
@@ -891,7 +904,7 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   }
 }
 
-// Shared "how is this logged" picker. Appears whenever load isn't inherent —
+// Shared "how is this logged" picker. Appears whenever load isn't inherent,
 // no_equipment / bodyweight equipment, or a mobility movement (the union, since
 // a mobility exercise may keep any equipment). Three modes resolve to
 // LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
@@ -913,8 +926,8 @@ function loggingPickerVisible(equipment, movementType) {
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
 function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullBodyweight, onPullBodyweight, hasLoggedWeight }) {
   if (!loggingPickerVisible(equipment, movementType)) return null;
-  const info = logMode === 'reps' ? 'Tracks reps only — no weight, adds 0 to volume.'
-             : logMode === 'checkbox' ? 'Just tick each set off — no reps or weight, 0 volume.'
+  const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
+             : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
              : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
              : null;
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
@@ -935,7 +948,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
                 <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
                 <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
               </div>
-              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab — tap Log there to record it.</div>}
+              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab, tap Log there to record it.</div>}
             </>
           ) : (
             <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
@@ -979,15 +992,15 @@ function adjacentWizardStep(current, dir, equipment, movementType) {
 }
 
 const WIZARD_INTRO = {
-  name: 'Give it a clear name — this is what shows up in your plans and history.',
+  name: 'Give it a clear name, this is what shows up in your plans and history.',
   muscle: 'Which muscle(s) does it train? Used to count your weekly sets per muscle. Pick one or more.',
-  size: 'The times below are your own rest timers — heavier lifts get more rest. Set them under Settings › Training › Session › Rest timers, or just tweak rest mid-workout.',
+  size: 'The times below are your own rest timers, heavier lifts get more rest. Set them under Settings › Training › Session › Rest timers, or just tweak rest mid-workout.',
   equipment: 'What do you load or do it with? This also decides how weight is entered while training.',
   movement: 'How is it performed? Decides whether you log one number or one per side.',
   logging: 'What do you want to record for each set while training?',
 };
 const WIZARD_EQUIP_META = {
-  no_equipment:   { icon: 'fa-ban',            sub: 'Bands, ab-wheel, sled — or nothing at all' },
+  no_equipment:   { icon: 'fa-ban',            sub: 'Bands, ab-wheel, sled, or nothing at all' },
   bodyweight:     { icon: 'fa-person',         sub: 'Just your bodyweight (push-ups, pull-ups)' },
   cable:          { icon: 'fa-grip-vertical',  sub: 'Cable pulley / stack' },
   dumbbell:       { icon: 'fa-dumbbell',       sub: 'Dumbbells or kettlebells' },
@@ -1067,7 +1080,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     </div>;
   } else if (step === 'size') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['big', 'Big', 'Heavy compounds — squat, deadlift, overhead press'], ['medium', 'Medium', 'Moderate lifts — bench, row, pull-up, lunge'], ['small', 'Small', 'Isolation — curls, lateral raises, extensions']]
+      {[['big', 'Big', 'Heavy compounds, squat, deadlift, overhead press'], ['medium', 'Medium', 'Moderate lifts, bench, row, pull-up, lunge'], ['small', 'Small', 'Isolation, curls, lateral raises, extensions']]
         .map(([val, label, sub]) => optRow({ key: val, icon: 'fa-stopwatch', label, sub, active: category === val, badge: restLabel(val) + ' rest', onClick: () => { setCategory(val); goNext(); } }))}
     </div>;
   } else if (step === 'equipment') {
@@ -1086,13 +1099,13 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     const showPull = equipment === 'bodyweight' && logMode === 'weight';
     const hasLoggedWeight = LB.latestBodyweight(store) != null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['time', 'Time', 'fa-stopwatch', 'Countdown per set, no weight, 0 volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
+      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off, no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight, adds 0 to volume'], ['time', 'Time', 'fa-stopwatch', 'Countdown per set, no weight, 0 volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both, the usual for weighted lifts']]
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); if (!(val === 'weight' && equipment === 'bodyweight')) goNext(); } }))}
       {showPull && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
           {hasLoggedWeight
-            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab — tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
+            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab, tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
                 .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
             : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
         </div>
@@ -1151,7 +1164,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // being duplicated via "Check & Add": every field is pre-filled and the wizard
   // is skipped, dropping straight into the review sheet so the user can tweak
   // anything before committing. A plain "New exercise" has no seed.
-  // A fresh new exercise starts blank — EXCEPT the muscle group, which pre-fills
+  // A fresh new exercise starts blank, EXCEPT the muscle group, which pre-fills
   // from an active Library filter (initialTags) so "filter by Back → create" keeps
   // Back selected (now shown in the muscle step, not silently skipped). Equipment/
   // movement come from no filter, so they start unset. A catalog `seed` pre-fills
@@ -1174,7 +1187,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // seed skips it (null = review sheet). The wizard forces a pick at each step, so
   // equipment/movement are never left unset by the time the review sheet renders.
   const [wizardStep, setWizardStep] = useStateL(seed ? null : 'name');
-  // Wizard equipment pick: activate the Health tab silently — the info sheet is
+  // Wizard equipment pick: activate the Health tab silently, the info sheet is
   // z-100 and would hide behind the z-9998 wizard; the pull toggle in the review
   // form covers the rest.
   const wizardSetEquipment = (key) => {
@@ -1184,7 +1197,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   // When the Logging picker first becomes relevant (no_equipment / bodyweight
   // equipment, or a mobility movement) and the user hasn't chosen a mode yet,
-  // pre-select a sensible default — without clobbering a manual pick.
+  // pre-select a sensible default, without clobbering a manual pick.
   useEffectL(() => {
     if (logModeTouched || !loggingPickerVisible(equipment, movementType)) return;
     setLogMode(movementType === 'mobility' ? 'checkbox' : equipment === 'bodyweight' ? 'weight' : 'reps');
@@ -1249,7 +1262,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           </div>
           {showSizeInfo && (
             <div style={{ marginTop: 6, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {[['BIG','Heavy compounds — squat, deadlift, overhead press'],['MEDIUM','Moderate compounds — bench press, pull-up, lunge'],['SMALL','Isolation — bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
+              {[['BIG','Heavy compounds, squat, deadlift, overhead press'],['MEDIUM','Moderate compounds, bench press, pull-up, lunge'],['SMALL','Isolation, bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
                 <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                   <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
                   <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
@@ -1306,7 +1319,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
       <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-            The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
+            The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight, it'll be pre-filled automatically when you train bodyweight exercises.
           </div>
           <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
         </div>
@@ -1320,7 +1333,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
 function ExerciseDetailScreen(props) {
   const ex = LB.findExercise(props.store, props.exId);
-  // Redirect from an effect — never call go() during render. The inner
+  // Redirect from an effect, never call go() during render. The inner
   // component mounts only when the exercise exists, so its hook order stays
   // stable even if the exercise is deleted while the screen is open.
   useEffectL(() => { if (!ex) props.go(props.back || { name: 'lib' }); }, [!!ex]);
@@ -1397,6 +1410,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         versions: (sch.versions || []).map(v => ({ ...v, days: (v.days || []).map(day => ({ ...day, items: stripItems(day.items) })) })),
         ...(sch.program_data ? { program_data: cleanPd(sch.program_data) } : {}),
       })),
+      // Same cleanup as the bulk delete: templates hold exIds as well.
+      workoutTemplates: (s.workoutTemplates || []).map(t => ({ ...t, exercises: (t.exercises || []).filter(x => x.exId !== exId) })),
     }));
     go({ name: 'lib' });
   };
@@ -1418,7 +1433,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       .filter(s => s.ended && s.entries.some(e => e.exId === exId))
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
     const seen = new Set(local.map(h => h.session.id));
-    // Session metadata (dayName, date, …) is fully loaded at boot — attach it
+    // Session metadata (dayName, date, …) is fully loaded at boot, attach it
     // to the server rows so the list renders like the local ones.
     const metaById = new Map(store.sessions.map(s => [s.id, s]));
     const remote = (serverRows || [])
@@ -1548,7 +1563,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               </div>
               {showSizeInfoEdit && (
                 <div style={{ marginTop: 6, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {[['BIG','Heavy compounds — squat, deadlift, overhead press'],['MEDIUM','Moderate compounds — bench press, pull-up, lunge'],['SMALL','Isolation — bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
+                  {[['BIG','Heavy compounds, squat, deadlift, overhead press'],['MEDIUM','Moderate compounds, bench press, pull-up, lunge'],['SMALL','Isolation, bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
                     <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                       <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
                       <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
@@ -1624,7 +1639,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             {ex.movement_type === 'cardio' && <Pill gold>Cardio</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             {ex.equipment && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
-            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && ex.movement_type !== 'cardio' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && ex.movement_type !== 'cardio' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group, Edit</span>}
           </div>
         )}
       </div>
@@ -1646,7 +1661,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           </a>
         )}
 
-        {/* Stats — SubDials */}
+        {/* Stats, SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           {isTimeEx
             ? <SubDial label="Best Time" value={bestTime ? LB.fmtDuration(bestTime) : '—'} size={90} gold />
@@ -1663,7 +1678,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : isAssistedEx ? 'BEST LOAD · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}
 
-        {/* Note — read-only here; edited via the Edit button's form below */}
+        {/* Note, read-only here; edited via the Edit button's form below */}
         <div>
           <Bezel>NOTE{ex.note && ex.note_pinned ? <span style={{ color: 'var(--accent)', marginLeft: 8, letterSpacing: 0 }}><i className="fa-solid fa-thumbtack" style={{ fontSize: 9 }} /> PINNED</span> : ''}</Bezel>
           <div style={{ marginTop: 12 }}>
@@ -1700,7 +1715,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         {LB.parseDate(h.session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                       </span>
                       {isPR && (
-                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1741,7 +1756,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-              The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
+              The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight, it'll be pre-filled automatically when you train bodyweight exercises.
             </div>
             <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
           </div>
@@ -2012,7 +2027,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     if (sch?.versions?.length) return LB.getCycleNumForDate(sch, todayISO) - 1;
     return Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen);
   })();
-  // Start of the current cycle window — use the version-aware helper when versions exist
+  // Start of the current cycle window, use the version-aware helper when versions exist
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
     if (sch?.versions?.length) {
@@ -2078,7 +2093,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     return () => { on = false; };
   }, [thisPeriodSessions]);
 
-  // Calendar-week sessions — used for consistency card ("This Week")
+  // Calendar-week sessions, used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     return d >= monday && d <= sunday;
@@ -2132,7 +2147,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   // Best session by volume
   const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s, store.exercises, store.dailyLogs) > LB.totalVolume(best, store.exercises, store.dailyLogs) ? s : best, sessions[0]) : null;
 
-  // Streaks — rest days are transparent, only missed training days break the streak
+  // Streaks, rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
 
   const isTrainingDay = (date) => {
@@ -2160,7 +2175,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
 
   // Streaks scan up to ~730 days (+ the full history for the longest streak).
   // Memoize so this only re-runs when the day rolls over, the sessions change,
-  // or the active plan changes — not on every unrelated re-render.
+  // or the active plan changes, not on every unrelated re-render.
   const { currentStreak, longestStreak } = useMemoL(() => {
     const periods = store.statusPeriods || [];
     const isInStatusPeriod = (d) => {
@@ -2177,7 +2192,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
       if (planStart && d < planStart) break; // don't count before plan start
       const key = LB.fmtISO(d);
       if (sessionDateSet.has(key)) { cur++; }
-      else if (i === 0) { /* today not done yet — don't break */ }
+      else if (i === 0) { /* today not done yet, don't break */ }
       else if (isTrainingDay(d) && !isInStatusPeriod(d)) { break; }
       // rest day or sick/vacation day → continue without breaking or counting
     }
@@ -2259,8 +2274,15 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     LB.fetchTopExercises(userId, 5).then(rows => { if (on && rows) setTopExerciseCounts(rows); }).catch(() => {});
     return () => { on = false; };
   }, [userId]);
+  // A deleted exercise still has history, so the server aggregate can return
+  // an exId with no local row. It used to render as a "?" line that looked and
+  // felt like a link but only bounced back (the exercise screen has nothing to
+  // show). Label it as deleted and make it inert.
   const topExercises = (topExerciseCounts || [])
-    .map(({ exId, count }) => ({ id: exId, name: store.exercises.find(e => e.id === exId)?.name || '?', count }));
+    .map(({ exId, count }) => {
+      const ex = store.exercises.find(e => e.id === exId);
+      return { id: exId, name: ex?.name || 'Deleted exercise', count, missing: !ex };
+    });
 
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
@@ -2344,7 +2366,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
       <div>
         <GoldSectionLabel style={{ marginBottom: 14 }}>CONSISTENCY</GoldSectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {/* Streaks are day-based and assume fixed training days — meaningless for
+          {/* Streaks are day-based and assume fixed training days, meaningless for
               flexible plans, where the rotation never expects a specific day. */}
           {!isFlex && (
             <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '14px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
@@ -2398,16 +2420,16 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
         <div>
           <GoldSectionLabel style={{ marginBottom: 14 }}>TOP EXERCISES</GoldSectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {topExercises.map(({ id, name, count }, i) => (
+            {topExercises.map(({ id, name, count, missing }, i) => (
               <React.Fragment key={id}>
-              <div onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
+              <div onClick={missing ? undefined : () => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '11px 0',
-                cursor: 'pointer',
+                cursor: missing ? 'default' : 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="num" style={{ fontSize: i === 0 ? 13 : 11, color: i === 0 ? UI.gold : UI.inkFaint, width: 16 }}>{i + 1}</span>
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: i === 0 ? UI.gold : UI.ink }}>{name}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: missing ? UI.inkFaint : i === 0 ? UI.gold : UI.ink, fontStyle: missing ? 'italic' : 'normal' }}>{name}</span>
                 </div>
                 <span className="num" style={{ fontSize: 13, color: i === 0 ? UI.gold : UI.inkSoft }}>{count}×</span>
               </div>
@@ -2616,11 +2638,11 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
-                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
-                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -2887,7 +2909,7 @@ const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
 // Sessions eligible for comparison against `s`: same dayId, ended, excluding
-// itself — newest first. Deload sessions excluded for the same reason as
+// itself, newest first. Deload sessions excluded for the same reason as
 // prevEntryMap below (artificially light, not a fair comparison baseline).
 // Shared by the Compare button (SessionDetailScreen) and the session picker
 // (SessionCompareScreen).
@@ -2923,7 +2945,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const _shotGridOn = !!window.__gridEnabled;
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
-  // Sessions outside the boot window carry no entries — lazy-load them into
+  // Sessions outside the boot window carry no entries, lazy-load them into
   // the store on first open (also makes editing work; aggExercises > 0 tells
   // a windowed-out session apart from a genuinely empty one).
   const needsEntries = !!(s && s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0);
@@ -3115,7 +3137,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // while computeMesoGains scored PRE-seal, so a set with reps entered but never marked done
   // (finish() seals it skipped) can flip allHit/earlyMiss here. Rare edge, one increment.
   const fbEarnInputs = () => {
-    const unit = store.settings?.unit || 'kg';
     const out = [];
     (s.entries || []).forEach(e => {
       if (e.isCardio || !e.exId) return;
@@ -3128,7 +3149,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
       const allHit = attempted && outcome.allHit;
       const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
-      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, null);
       out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
     });
     return out;
@@ -3317,7 +3338,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }));
   };
 
-  // Deload sessions are deliberately light — comparing against one as "last
+  // Deload sessions are deliberately light, comparing against one as "last
   // time" would show every set as a fabricated "improvement" purely because
   // it beats the artificially-reduced deload weights. store.js already
   // excludes deload from lastSessionForExercise/recentSessionsForExercise;
@@ -3352,7 +3373,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     : st.reps != null;
 
   // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
-  // loses to a prior 90kg×10 — matches the PR logic used everywhere else
+  // loses to a prior 90kg×10, matches the PR logic used everywhere else
   // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
   // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
   // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
@@ -3434,7 +3455,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
-            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
             {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
@@ -3501,7 +3522,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Screenshot-only header */}
         {capturing && (
           <div style={{ marginBottom: -4 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
@@ -3509,7 +3530,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
-                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                   {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
@@ -3519,7 +3540,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* Celebration banner — screen only */}
+        {/* Celebration banner, screen only */}
         {justFinished && !capturing && (() => {
           return (
             <BracketFrame gold style={{ marginBottom: 4 }}>
@@ -3548,7 +3569,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           );
         })()}
 
-        {/* Save as template — freestyle sessions only, right after finishing */}
+        {/* Save as template, freestyle sessions only, right after finishing */}
         {justFinished && !capturing && s.isFreestyle && (s.entries || []).length > 0 && (
           tplSaved ? (
             <div style={{ marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em' }}>
@@ -3571,7 +3592,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           )
         )}
 
-        {/* Feel — prompt after finish, always editable */}
+        {/* Feel, prompt after finish, always editable */}
         {!capturing && (
           <div style={{ marginBottom: 4 }}>
             {justFinished && !s.feel && (
@@ -3593,7 +3614,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* Stats — circle dials on screen, flat grid in screenshot */}
+        {/* Stats, circle dials on screen, flat grid in screenshot */}
         {!justFinished && !capturing && (
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
@@ -3968,7 +3989,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
         {/* Exercise entries */}
         <div style={{ position: 'relative' }}>
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
+          {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {muscleGroups.map(tag => (
@@ -4004,7 +4025,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
 
-                // Cardio entry — show activity summary instead of sets
+                // Cardio entry, show activity summary instead of sets
                 // isCardio may be missing on entries loaded from DB (not a DB column),
                 // so derive it from the exercise's movement_type as fallback.
                 const isEntryCardio = !!e.isCardio || exObj?.movement_type === 'cardio';
@@ -4259,13 +4280,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       }
 
                       // AMRAP Variations: badge + per-round chips, each with its
-                      // label above (unless it's just the exercise's own name —
+                      // label above (unless it's just the exercise's own name,
                       // no variation was actually logged for that round).
                       if (st.technique === 'amrap_variations' && !isCheckboxOnly) {
                         const tr = LB.techniqueRounds(st, { exName });
                         const drops = tr.rounds;
                         // Show every round's label once ANY round diverges from
-                        // the exercise name — showing only the diverging rounds
+                        // the exercise name, showing only the diverging rounds
                         // would leave the unvaried ones (usually round 1) looking
                         // unlabeled next to their labeled neighbors.
                         const anyVaried = tr.anyVaried;
@@ -4368,7 +4389,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           {capturing && !twoCol && (
             <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+          {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginTop: 10 }} />}
         </div>
         </div>
       </div>
@@ -4604,7 +4625,18 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
-      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, ...patch, skipped: false, done: true }) }
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => {
+        if (k !== sIdx) return st;
+        const next = { ...st, ...patch, skipped: false };
+        // done used to be forced true on every edit, so CLEARING a set's
+        // fields left an empty set marked done: it still counted toward the
+        // set count and (with a stale kg) toward volume. A set is done when it
+        // holds data; an explicit done in the patch (checkbox exercises, which
+        // have no numbers at all) wins.
+        if ('done' in patch) return next;
+        const hasData = next.kg != null || next.reps != null || next.repsL != null || next.repsR != null || next.timeSec != null;
+        return { ...next, done: hasData };
+      }) }
     ));
   };
 
@@ -4698,7 +4730,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
       // UTC-midnight date viewed west of UTC, rolled the day forward by one on
       // re-serialization (Mike's "set today → history shows Jul 6" ticket).
       // `date` is read everywhere as a day via slice/parseDate, never as a
-      // wall-clock time — started_at/ended carry the actual times.
+      // wall-clock time, started_at/ended carry the actual times.
       patch.date = draftDate + 'T12:00:00.000Z';
     }
     // Only touch duration when the field was actually changed: it is seeded from
@@ -4837,14 +4869,42 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                     {st.skipped ? (
                       <>
                         <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
-                        <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
+                        <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
                       </>
                     ) : isChain ? (
                       // Round 0 (mirrored onto st.kg/reps) is edited via
-                      // the rounds list below, not a flat row here —
+                      // the rounds list below, not a flat row here,
                       // showing both would just be two inputs for the
                       // same number.
                       <span className="micro" style={{ color: UI.inkFaint }}>{LB.plannedTechniqueLabel(st.technique)}</span>
+                    ) : logMode === 'time' ? (
+                      // Time exercises store timeSec, which had no editor here
+                      // at all: the sheet offered kg and reps fields for a
+                      // plank, and the logged duration was unreachable.
+                      <>
+                        <input type="text" inputMode="numeric" value={st.timeSec ?? ''}
+                          placeholder="—" onFocus={e => e.target.select()}
+                          onChange={ev => updateSet(eIdx, sIdx, { timeSec: ev.target.value === '' ? null : +ev.target.value })}
+                          style={numInputStyle} />
+                        <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>sec</span>
+                        {st.timeSec == null && (
+                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                        )}
+                      </>
+                    ) : logMode === 'checkbox' ? (
+                      // Checkbox exercises have no numbers at all: done or not.
+                      // Two empty kg/reps fields were pure noise here.
+                      <>
+                        <button onClick={() => updateSet(eIdx, sIdx, { done: !st.done })} style={{
+                          background: st.done ? 'rgba(var(--accent-rgb),0.15)' : 'transparent',
+                          border: `var(--hair-width) solid ${st.done ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+                          borderRadius: 4, padding: '3px 10px', color: st.done ? 'var(--accent)' : UI.inkFaint,
+                          fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi,
+                        }}>{st.done ? 'Done' : 'Not done'}</button>
+                        {!st.done && (
+                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                        )}
+                      </>
                     ) : (
                       <>
                         <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
@@ -4876,7 +4936,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                           </>
                         )}
                         {isEmpty && (
-                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
                         )}
                       </>
                     )}
@@ -4988,7 +5048,7 @@ function IntensityBadge({ label, highlight, decline }) {
       fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em',
       color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : 'var(--accent)',
       background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.10)',
-      border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
+      border: `var(--hair-width) solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
       borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', flexShrink: 0,
     }}>{label}</span>
   );
@@ -5021,7 +5081,7 @@ function FinisherTags({ drops, labelFor }) {
 }
 
 // ─── SESSION COMPARE ───────────────────────────────────────────────────
-// Set-string formatting for the compact "compared" (right) column — kept
+// Set-string formatting for the compact "compared" (right) column, kept
 // as plain text (not chips) since the 100px column has no room for chip
 // pills; the full drop/myo/partial chain still reads fine as a string.
 function fmtCompareSet(st) {
@@ -5044,7 +5104,7 @@ function fmtCompareSet(st) {
     const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
     return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`) + strSfx;
   }
-  // Checkbox / no-numeric completed set: show a tick, not a meaningless '— × —'.
+  // Checkbox / no-numeric completed set: show a tick, not a meaningless row of placeholder dashes.
   if (st.done && st.kg == null && st.reps == null && st.repsL == null && st.repsR == null) return '✓';
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
   return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
@@ -5053,7 +5113,7 @@ function fmtCompareSet(st) {
 const isTechniqueSet = (st) => !!st && !!st.technique;
 
 // Badge + connected chips for today's (left column) drop/myo/myo-match/
-// lengthened-partial set — same visual language as SessionDetailScreen's
+// lengthened-partial set, same visual language as SessionDetailScreen's
 // per-set chip rendering (colored rail, badge tag, bordered chips joined
 // by →/↺, Total chip for myo variants). Chips wrap onto their own line
 // within the flexible compare column instead of overflowing it.
@@ -5074,7 +5134,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
     return (
       <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
         <div style={{ marginBottom: 6 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
@@ -5092,7 +5152,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
     return (
       <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
         <div style={{ marginBottom: 6 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
@@ -5115,7 +5175,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   return (
     <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
       <div style={{ marginBottom: 6 }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `var(--hair-width) solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
       </div>
       <div style={{ display: isMyo ? 'inline-flex' : 'flex', flexDirection: isMyo ? 'column' : 'row', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
@@ -5150,7 +5210,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const [pickerOpen, setPickerOpen] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
   const captureRef = useRefL(null);
-  // Screenshot background: same treatment as the HomeScreen watermark — VIPs
+  // Screenshot background: same treatment as the HomeScreen watermark, VIPs
   // get their custom image, everyone else the faint centered ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
@@ -5160,7 +5220,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const _shotGridOn = !!window.__gridEnabled;
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
-  // Default comparison should look backward in time — comparing an older
+  // Default comparison should look backward in time, comparing an older
   // session against a later one is never the intent when just opening the
   // screen. Only fall back to a later candidate if no earlier one exists.
   const earlierCandidates = s ? candidates.filter(c => (c.ended || '') < (s.ended || '')) : [];
@@ -5169,7 +5229,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   useEffectL(() => { if (!s || !cmp) go({ name: 'hist' }); }, [!!s, !!cmp]);
 
   // Either side may be outside the 70-day boot window (aggregates only, no
-  // entries) — lazy-load on demand, same pattern as SessionDetailScreen.
+  // entries), lazy-load on demand, same pattern as SessionDetailScreen.
   const needsEntries = (sess) => !!(sess && sess.ended && !(sess.entries || []).length && (sess.aggExercises || 0) > 0);
   useEffectL(() => {
     const need = [s, cmp].filter(needsEntries).map(x => x.id);
@@ -5196,7 +5256,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const volDelta = volA - volB;
   const volDeltaRounded = Math.round(volDelta);
   const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
-  // isCardio may be missing on entries loaded from DB (not a DB column) — fall
+  // isCardio may be missing on entries loaded from DB (not a DB column), fall
   // back to the exercise's movement_type, matching SessionDetailScreen.
   const isEntryCardio = (e) => !!e.isCardio || store.exercises.find(x => x.id === e.exId)?.movement_type === 'cardio';
   const entries = s.entries.filter(e => !isEntryCardio(e));
@@ -5207,7 +5267,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   // Same html2canvas flow as SessionDetailScreen's takeScreenshot. The
   // watermark here is a full-page centered background (HomeScreen-style)
   // rather than a foreground corner mark, so unlike SessionDetailScreen there's
-  // no need to dodge it — knurl dividers always draw full width.
+  // no need to dodge it, knurl dividers always draw full width.
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${s.dayName}-compare-${s.date.slice(0, 10)}.png`,
     setCapturing,
@@ -5240,7 +5300,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
         {capturing && _shotGridOn && <SvgGrid />}
 
-        {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
+        {/* Screenshot background watermark, centered, faint, full document (HomeScreen-style) */}
         {capturing && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
@@ -5252,7 +5312,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
         {/* Screenshot-only header */}
         {capturing && (
           <div style={{ marginBottom: -4 }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>SESSION COMPARE</div>
@@ -5294,7 +5354,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {(() => {
             const renderEntry = (entry, ei) => {
-              const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
+              // Match the Nth occurrence, not just the exId: an exercise
+              // trained twice in a session (two entries with the same exId)
+              // compared BOTH of its entries against the other session's
+              // first one.
+              const occ = (s.entries || []).filter((e, i) => e.exId === entry.exId && i < ei).length;
+              const cmpEntry = (cmp.entries || []).filter(e => e.exId === entry.exId)[occ];
               const sets = (entry.sets || []).filter(st => !st.warmup);
               const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
               const maxLen = Math.max(sets.length, cmpSets.length);
@@ -5378,7 +5443,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
             ));
           })()}
         </div>
-        {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: -4 }} />}
+        {capturing && <div style={{ height: 'var(--hair-width)', background: UI.gold, marginTop: -4 }} />}
 
         {extraCmpEntries.length > 0 && !capturing && (
           <div className="micro" style={{ color: UI.inkFaint, marginTop: -10 }}>
@@ -5531,7 +5596,10 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
   );
 }
 
-function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
+// `back` is the route to return to. It used to be hardcoded to Settings, so
+// opening the spectator from a coach's client view dropped the coach into
+// Settings on the way back.
+function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
   const [session, setSession] = useStateL(null);
   const [exIdx, setExIdx] = useStateL(0);
   // Auto-follow the trainee's current exercise. Turned off the moment the
@@ -5539,6 +5607,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
   // back; tapping the live exercise (or the LIVE badge) re-engages it.
   const [followLive, setFollowLive] = useStateL(true);
   const [loading, setLoading] = useStateL(true);
+  const loadingRef = useRefL(true);
+  const [loadError, setLoadError] = useStateL(false);
   const [ended, setEnded] = useStateL(false);
   const [now, setNow] = useStateL(Date.now());
   const chipRowRef = useRefL(null);
@@ -5552,9 +5622,16 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
     const params = { p_user_id: targetUserId };
     if (sessionId) params.p_session_id = sessionId;
     LB.supabase.rpc('get_active_session_detail', params)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A failed poll is NOT "not training": rendering it as such told the
+        // coach the client had stopped whenever the network hiccuped.
+        if (error) { setLoadError(true); loadingRef.current = false; setLoading(false); return; }
+        setLoadError(false);
         if (!data?.length) {
-          if (!loading) setEnded(true);
+          // loadingRef, not the `loading` state: this closure is created once
+          // per render but the interval keeps calling the FIRST one, where
+          // loading is still true, so "Session ended" could never appear.
+          if (!loadingRef.current) setEnded(true);
           setSession(null);
         } else {
           const d = data[0];
@@ -5563,9 +5640,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           // Position is synced separately (see the follow-live effect below) so
           // a poll never overrides the spectator's manual navigation.
         }
+        loadingRef.current = false;
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => { setLoadError(true); loadingRef.current = false; setLoading(false); });
   };
 
   useEffectL(() => {
@@ -5607,21 +5685,21 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
     const dismiss = () => {
       const list = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
       if (!list.includes(sessionId)) { list.push(sessionId); localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); }
-      go({ name: 'settings' });
+      go(back || { name: 'settings' });
     };
     return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;
   }
 
   if (!session) return (
     <Screen>
-      <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
+      <TopBar title={userName} onBack={() => go(back || { name: 'settings' })} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
-        <div style={{ fontSize: 32, color: UI.inkGhost }}>✓</div>
+        <div style={{ fontSize: 32, color: UI.inkGhost }}>{loadError ? '!' : '✓'}</div>
         <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.inkSoft }}>
-          {ended ? 'Session ended' : 'Not training right now'}
+          {loadError ? "Couldn't load" : ended ? 'Session ended' : 'Not training right now'}
         </div>
         <div className="micro" style={{ color: UI.inkFaint }}>
-          {ended ? `${userName} has finished their workout.` : `${userName} has no active session.`}
+          {loadError ? 'Check your connection.' : ended ? `${userName} has finished their workout.` : `${userName} has no active session.`}
         </div>
       </div>
     </Screen>
@@ -5755,7 +5833,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5784,7 +5862,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                       {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
@@ -5808,7 +5886,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 );
               }
 
-              // AMRAP Variations — show every round's label once ANY round
+              // AMRAP Variations, show every round's label once ANY round
               // diverges from the exercise name, not just the diverging ones,
               // so the unvaried round (usually round 1) doesn't look unlabeled
               // next to its labeled neighbors.
@@ -5819,7 +5897,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5853,7 +5931,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5879,7 +5957,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -6001,7 +6079,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         </div>
       )}
 
-      {/* Progress footer — only shown when historical avg is available */}
+      {/* Progress footer, only shown when historical avg is available */}
       {(() => {
         const totalSetsDone  = entries.reduce((s, e) => s + (e.sets?.filter(x => x.done).length || 0), 0);
         const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped).length || 0), 0);
@@ -6149,7 +6227,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
   const getValue = (st) => {
     // Sessions of the same exercise don't all have the same working-set
-    // count (a set added/removed on some day) — the per-set chart line
+    // count (a set added/removed on some day), the per-set chart line
     // below reads sess.sets[si] up to the longest session's count, so a
     // shorter session's slot at that index is undefined, not a set with
     // null values.
@@ -6231,7 +6309,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
             </span>
           </div>
 
-          {/* SVG Chart — maxWidth keeps it from ballooning on iPad */}
+          {/* SVG Chart, maxWidth keeps it from ballooning on iPad */}
           <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
             <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
             <line x1={PAD_L} y1={VH - PAD_B} x2={VW - PAD_R} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
@@ -6301,7 +6379,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => {
                     // Intensity-technique sets show every round, not just the
-                    // first — this compact list used to silently drop the
+                    // first, this compact list used to silently drop the
                     // rest of a drop-set/myo-rep/AMRAP set's data.
                     const tr = LB.techniqueRounds(st);
                     return (

@@ -1,4 +1,4 @@
-/* Cardio plans — list, create/edit, home widget */
+/* Cardio plans, list, create/edit, home widget */
 
 const { useState: useStateCard, useEffect: useEffectCard, useMemo: useMemoCard } = React;
 
@@ -19,7 +19,7 @@ function cpActivity(type) {
   return CARDIO_ACTIVITIES.find(a => a.id === type) || { id: type, label: type, icon: 'fa-person-running' };
 }
 
-// Thin wrappers over the shared LB cardio helpers (store.js) — kept as local
+// Thin wrappers over the shared LB cardio helpers (store.js), kept as local
 // names since they're used throughout this file, but no longer their own
 // reimplementation. Used to skip comma-decimal normalization (cpDistToM) and
 // use a different km precision than the rest of the app (cpFmtDist); both
@@ -187,7 +187,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
     weekNum != null ? `Session ${weekNum}/${totalWeeks}` : null,
   ].filter(Boolean).join(' · ').toUpperCase();
 
-  // Target for the selected day — use nearest upcoming date for that weekday so
+  // Target for the selected day, use nearest upcoming date for that weekday so
   // goal plan progression and manual targets are both computed correctly.
   const selTarget = (() => {
     if (!plan.days[selDay]) return null;
@@ -205,7 +205,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
         {/* Descriptor */}
         <div className="micro" style={{ color: UI.inkFaint }}>{descriptor}</div>
 
-        {/* Action buttons row — mirrors workout plan viewer */}
+        {/* Action buttons row, mirrors workout plan viewer */}
         <div style={{ display: 'flex', gap: 8 }}>
           {!plan.archived && (
             isActive ? (
@@ -228,12 +228,12 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
           }
         </div>
 
-        {/* Deactivate — secondary row when active */}
+        {/* Deactivate, secondary row when active */}
         {isActive && !plan.archived && (
           <Btn kind="ghost" onClick={() => setStore(s => ({ ...s, activeCardioPlanId: null }))} style={{ width: '100%', fontSize: 12 }}>Deactivate</Btn>
         )}
 
-        {/* Day chips — full width, today dot */}
+        {/* Day chips, full width, today dot */}
         <div style={{ display: 'flex', gap: 4 }}>
           {CP_WEEKDAY_KEYS.map(k => {
             const isTraining = !!plan.days[k];
@@ -464,9 +464,9 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     const last = ws[ws.length - 1];
     if (last) {
       if (goal.type === 'duration' && goalDurMin && last.duration_minutes < goalDurMin * 0.995) {
-        warnings.push(`Maximum progression applied — you may not reach ${goalDurMin} min by the due date. Consider extending the timeline.`);
+        warnings.push(`Maximum progression applied, you may not reach ${goalDurMin} min by the due date. Consider extending the timeline.`);
       } else if (goal.type !== 'duration' && goalDistM && last.distance_m < goalDistM * 0.995) {
-        warnings.push(`Maximum progression applied — you may not fully reach ${cpFmtDist(goalDistM, du)} by the due date. Consider extending the timeline.`);
+        warnings.push(`Maximum progression applied, you may not fully reach ${cpFmtDist(goalDistM, du)} by the due date. Consider extending the timeline.`);
       }
     }
     setPreview({ weeks: ws, warnings });
@@ -578,7 +578,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
   };
 
   const renderStep = () => {
-    /* Step 0 — activity */
+    /* Step 0, activity */
     if (step === 0) {
       const isCustomSel = !!activityType && !CARDIO_ACTIVITIES.find(a => a.id === activityType);
       return (
@@ -636,12 +636,12 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Step 1 — mode */
+    /* Step 1, mode */
     if (step === 1) return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {[
           { id: 'manual', icon: 'fa-calendar-days', label: 'Manual plan',
-            sub: 'Fixed weekly targets per day — you choose the distance or duration for each session.' },
+            sub: 'Fixed weekly targets per day, you choose the distance or duration for each session.' },
           { id: 'goal',   icon: 'fa-bullseye',      label: 'Goal plan',
             sub: 'Set a target and a due date. The app builds a progressive plan to get you there.' },
         ].map(m => (
@@ -663,7 +663,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       </div>
     );
 
-    /* Manual step 2 — days */
+    /* Manual step 2, days */
     if (mode === 'manual' && step === 2) {
       const allSel = CP_WEEKDAY_KEYS.every(k => days[k]);
       return (
@@ -716,7 +716,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, color: UI.ink }}>Daily targets</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
-                {useTargets ? 'Set distance or duration goals per day' : 'Just show up — no specific targets'}
+                {useTargets ? 'Set distance or duration goals per day' : 'Just show up, no specific targets'}
               </div>
             </div>
           </button>
@@ -724,7 +724,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Manual step 3 — targets */
+    /* Manual step 3, targets */
     if (mode === 'manual' && step === 3) {
       const activeDays = CP_WEEKDAY_KEYS.filter(k => days[k]);
 
@@ -830,7 +830,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Goal step 2 — goal details + days */
+    /* Goal step 2, goal details + days */
     if (mode === 'goal' && step === 2) {
       const allGoalDays = CP_WEEKDAY_KEYS.every(k => days[k]);
       return (
@@ -936,7 +936,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Goal step 3 — current fitness */
+    /* Goal step 3, current fitness */
     if (mode === 'goal' && step === 3) {
       const actLabel = cpActivity(activityType).label.toLowerCase();
       if (goal.type === 'duration') return (
@@ -991,7 +991,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Goal step 4 — preview */
+    /* Goal step 4, preview */
     if (mode === 'goal' && step === 4) {
       const ws = preview?.weeks || [];
       const total = ws.length;
@@ -1008,13 +1008,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       const actLabel = cpActivity(activityType).label;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.11)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
+          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.11)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
               Your <strong style={{ color: UI.ink }}>{actLabel}</strong> plan: <strong style={{ color: UI.ink }}>{total} sessions</strong> over <strong style={{ color: UI.ink }}>{totalWeeksPreview} weeks</strong>. Each session progresses slightly. Every 4th calendar week is a lighter recovery week.
             </div>
           </div>
           {preview?.warnings?.map((msg, i) => (
-            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.16)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.16)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
               <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, lineHeight: 1.5 }}>⚠ {msg}</span>
             </div>
           ))}
@@ -1051,7 +1051,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       );
     }
 
-    /* Last step — name */
+    /* Last step, name */
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>PLAN NAME</div>
@@ -1237,7 +1237,7 @@ function CardioPlanScreen({ store, setStore, go, userId }) {
   );
 }
 
-// ─── TodayCardioWidget — rendered on HomeScreen ─────────────────────────────
+// ─── TodayCardioWidget, rendered on HomeScreen ─────────────────────────────
 function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
   const [logOpen,   setLogOpen]   = useStateCard(false);
   const [logPrefill,setLogPrefill]= useStateCard(null);
@@ -1300,7 +1300,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
                 <button onClick={() => { setLogPrefill({ type: plan.activityType, distanceM: target.distanceM, durationMinutes: target.durationMinutes }); setLogOpen(true); }} style={{
                   flexShrink: 0, padding: '5px 12px', borderRadius: 4,
                   background: 'rgba(var(--accent-rgb),0.12)',
-                  border: '0.5px solid rgba(var(--accent-rgb),0.3)',
+                  border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.3)',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
                   color: 'var(--accent)', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 }}>LOG</button>

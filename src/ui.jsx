@@ -1,4 +1,4 @@
-/* Bodybuilding redesign — Golden Era aesthetic.
+/* Bodybuilding redesign, Golden Era aesthetic.
    Exposes: UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill,
    Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
    btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
@@ -9,7 +9,7 @@ const UI = {
   bg:       'var(--bg)',
   bgRaised: 'var(--bg-raised)',
   bgInset:  'var(--bg-inset)',
-  // Aliases for the raised card surface — kept so existing UI.bgCard /
+  // Aliases for the raised card surface, kept so existing UI.bgCard /
   // UI.bgElevated call sites resolve to a real value instead of `undefined`
   // (which rendered a transparent background).
   bgCard:     'var(--bg-raised)',
@@ -53,7 +53,7 @@ function Screen({ children, scroll = true, style = {} }) {
   );
 }
 
-// Long-press (500ms) on a screen title jumps home — a fast way out of deep
+// Long-press (500ms) on a screen title jumps home, a fast way out of deep
 // screens (Settings sub-views, Coaching, History, ...) without repeated
 // back-taps. window.__goHome is wired once in app.jsx's root component so
 // this shared component doesn't need `go` threaded through every screen.
@@ -127,7 +127,7 @@ function TopBar({ title, sub, onBack, right }) {
   );
 }
 
-// ─── SubTabBar — segmented control for in-screen sub-navigation ───────
+// ─── SubTabBar, segmented control for in-screen sub-navigation ───────
 // Used e.g. to switch Plan ⇄ Library inside the merged "Plan" tab.
 function SubTabBar({ tabs, active, onChange, style = {} }) {
   return (
@@ -153,7 +153,7 @@ function SubTabBar({ tabs, active, onChange, style = {} }) {
   );
 }
 
-// ─── TabBar — floating dock with position indicator ──────────────────
+// ─── TabBar, floating dock with position indicator ──────────────────
 const TAB_ICONS = {
   coaching: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -323,9 +323,9 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     );
   }
 
-  // ── Bottom dock — "gold key" active indicator ──────────────────────
+  // ── Bottom dock, "gold key" active indicator ──────────────────────
   // A floating industrial bar: the active tab reads like a pressed mechanical
-  // key — a solid gold plate that slides under the active icon (dark glyph on
+  // key, a solid gold plate that slides under the active icon (dark glyph on
   // gold), topped by a thin gold rail. Inactive tabs are faint icon+label.
   const n = tabs.length;
   // Geometry. The gold plate is absolutely positioned (its size doesn't affect
@@ -335,7 +335,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const KEY = 36;        // gold plate width/height (square, radius-6 key)
   const KEY_TOP = 6;     // plate offset from the row top
   const PAD_TOP = 5;     // button top padding
-  const ICON_H = 26;     // icon-zone height — drives the icon→label gap
+  const ICON_H = 26;     // icon-zone height, drives the icon→label gap
   const ICON_SZ = 24;    // glyph size in the bottom dock (sidebar untouched)
   return (
     <div style={{
@@ -354,7 +354,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         padding: '7px 6px 4px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
-        {/* knurled top edge — grip texture, signature of the kit */}
+        {/* knurled top edge, grip texture, signature of the kit */}
         <div className="knurl" style={{ position: 'absolute', top: 7, left: 14, right: 14 }} />
         <div style={{ display: 'flex', position: 'relative', paddingTop: 6 }}>
           {/* Sliding gold key plate behind the active icon */}
@@ -376,7 +376,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
               zIndex: 0,
             }} />
           )}
-          {/* Top rail above the active plate — mechanical selector cue */}
+          {/* Top rail above the active plate, mechanical selector cue */}
           {idx >= 0 && (
             <div style={{
               position: 'absolute',
@@ -407,7 +407,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 transition: 'color 0.25s',
                 WebkitTapHighlightColor: 'transparent',
               }}>
-                {/* Icon zone — matches the key plate footprint so the glyph
+                {/* Icon zone, matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
                 <div style={{
                   position: 'relative', width: KEY, height: ICON_H,
@@ -415,7 +415,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                   color: on ? 'var(--accent-ink)' : UI.inkFaint,
                   transform: on ? 'scale(1.2)' : 'scale(1)',
                   // Delay the darkening so the glyph only turns near-black once
-                  // the gold plate has slid underneath it (plate is 0.35s) —
+                  // the gold plate has slid underneath it (plate is 0.35s),
                   // otherwise a dark icon sits on the dark bar mid-slide and
                   // looks like it vanishes. Lightening on deselect is immediate.
                   transition: on
@@ -525,7 +525,9 @@ const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
 // ─── Stepper ────────────────────────────────────────────────────────
-function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) {
+// `max` was accepted by five call sites and never implemented, so those
+// steppers had no upper bound at all.
+function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big = false }) {
   const round = (v) => Math.round(v * 1000) / 1000;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
@@ -541,12 +543,13 @@ function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) 
         fontSize: big ? 36 : 22, color: UI.ink, minWidth: big ? 100 : 64,
         fontVariantNumeric: 'tabular-nums',
       }}>{value ?? '—'}{suffix && <span style={{ fontSize: big ? 14 : 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}</div>
-      <button onClick={() => onChange(round((+value || 0) + step))} style={{
+      <button onClick={() => onChange(max != null ? Math.min(max, round((+value || 0) + step)) : round((+value || 0) + step))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
         borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
         fontSize: big ? 22 : 18, lineHeight: 1, fontWeight: 300,
         WebkitTapHighlightColor: 'transparent',
+        opacity: (max != null && (+value || 0) >= max) ? 0.4 : 1,
       }}>+</button>
     </div>
   );
@@ -569,9 +572,12 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 }
 
 // ─── Toggle ─────────────────────────────────────────────────────────
-function Toggle({ on, onToggle }) {
+// disabled: for a switch whose state is dictated by something else (e.g. the
+// coaching tab while a relationship is active). Renders muted and stops
+// tapping, instead of springing back and looking broken.
+function Toggle({ on, onToggle, disabled = false }) {
   return (
-    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+    <div onClick={disabled ? undefined : onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
       <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
@@ -581,10 +587,10 @@ function Toggle({ on, onToggle }) {
 // keyboardHeight: lets a caller report a non-native on-screen keyboard (e.g.
 // this app's custom numeric keypad, which focuses no real <input> so the
 // visualViewport-based auto-detection below never fires for it) is open, at
-// a known height — combined with the auto-detected kbHeight via Math.max so
+// a known height, combined with the auto-detected kbHeight via Math.max so
 // existing callers (default 0) are unaffected.
 // accent: swaps the neutral hairline border/drag-handle for an accent-toned
-// edge plus an ambient glow — reserved for sheets that represent something
+// edge plus an ambient glow, reserved for sheets that represent something
 // deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
 // Variations chain sheet), not a general-purpose "make it gold" switch.
 // zIndex: lets a caller override the default stacking tier (100) when it
@@ -636,7 +642,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   if (!open) return null;
   const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
   // Above a real keyboard (native or this app's custom one), the panel no
-  // longer sits flush against the physical bottom edge — it floats above
+  // longer sits flush against the physical bottom edge, it floats above
   // it, so it reads as its own card: full rounding + bottom border instead
   // of the bottom-sheet's "attached to the screen edge" look, plus a small
   // gap off the keyboard instead of sitting flush on top of it.
@@ -658,7 +664,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
     // would swallow every tap meant for its keys as a backdrop-dismiss
     // instead. A native on-screen keyboard isn't part of this page's DOM at
     // all (a separate OS/browser compositing layer), so there's nothing
-    // underneath for the backdrop to block — it keeps its full extent
+    // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
@@ -669,11 +675,11 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
     }}>
       {/* accent: inset a few px off the screen edges so the glow has room
           to actually render there instead of bleeding straight off-screen
-          — a plain width:100% sheet runs edge-to-edge, leaving nowhere for
+         , a plain width:100% sheet runs edge-to-edge, leaving nowhere for
           an outward glow on the sides to be visible. */}
       <div style={{ position: 'relative', width: (accent || center) ? 'calc(100% - 32px)' : '100%', maxWidth: 540 }}>
         {/* Same breathing glow as the Intensity button (.intensity-glow /
-            @keyframes intensityGlow in index.html) — a sibling of the
+            @keyframes intensityGlow in index.html), a sibling of the
             panel, not a child of it: the panel has overflow:'auto' for its
             scrollable content, which clips any child's box-shadow the
             instant it bleeds past the panel's own edge, so an ambient glow
@@ -696,7 +702,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
           textShadow: 'var(--text-lift)',
           ...(!cardLike && { borderBottom: 'none' }),
           // Floating above the keyboard, every edge needs to read as a real
-          // boundary on its own — the bottom-sheet variant gets that for free
+          // boundary on its own, the bottom-sheet variant gets that for free
           // from the drag handle and the darker screen behind it, but a
           // floating card has nothing else anchoring its bottom edge, so the
           // same 1px hairline there can vanish against the dark backdrop. A
@@ -704,16 +710,16 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
           // right where it needs it, without touching the other three sides.
           boxShadow: shadowLayers.join(', '),
           // The 3rd value here used to be the bare number 18 instead of '18px'
-          // — React silently drops the *entire* padding declaration (not just
+          //, React silently drops the *entire* padding declaration (not just
           // that one component) when a shorthand's value contains a unitless
           // non-zero number, no warning either. That only ever showed up with
           // the keyboardHeight prop in play (effectiveKbHeight > 0), i.e. only
           // on the drop/myo/AMRAP chain sheets whenever this app's on-screen
-          // keypad was open — exactly the "content goes edge to edge" bug
+          // keypad was open, exactly the "content goes edge to edge" bug
           // reported repeatedly, confirmed via an isolated minimal React
           // repro. Every other Sheet in the app never sets keyboardHeight, so
           // effectiveKbHeight stays 0 and always took the (valid) calc()
-          // branch — which is why "all other sheets work fine" was true.
+          // branch, which is why "all other sheets work fine" was true.
           padding: `16px 22px ${center ? '22px' : (floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)')}`,
           animation: 'sheet-up 0.22s ease',
           // With a custom keypad open, become a flex column so the content
@@ -759,7 +765,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
 
 // ─── ImageLightbox ──────────────────────────────────────────────────
 // Full-screen viewer for a tapped chat/attachment image. Tap anywhere (or
-// the close button) to dismiss. src is nullable — render unconditionally
+// the close button) to dismiss. src is nullable, render unconditionally
 // and pass the tapped image's URL, or null to keep it closed.
 function ImageLightbox({ src, onClose }) {
   if (!src) return null;
@@ -833,7 +839,7 @@ const ICON_CALENDAR = (
 function useConfirm(zIndex = 100) {
   const [state, setState] = React.useState(null);
   // requireText: when set, the user must type this phrase (case-insensitive) to
-  // unlock the confirm button — a deliberate friction gate for irreversible,
+  // unlock the confirm button, a deliberate friction gate for irreversible,
   // account-wide actions (e.g. Delete all data).
   const [typed, setTyped] = React.useState('');
   const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false, requireText = null } = {}) =>
@@ -884,7 +890,7 @@ function Hairline({ vertical = false, color, style = {} }) {
   return <div className="knurl" style={{ flexShrink: 0, ...style }} />;
 }
 
-// Heavy corner brackets — industrial equipment aesthetic
+// Heavy corner brackets, industrial equipment aesthetic
 function BracketFrame({ children, gold = false, style = {}, padding = 22, ...rest }) {
   const c = gold ? UI.gold : UI.hairStrong;
   const len = 20;
@@ -904,7 +910,7 @@ function BracketFrame({ children, gold = false, style = {}, padding = 22, ...res
   );
 }
 
-// Frame — bordered container
+// Frame, bordered container
 function Frame({ children, accent = false, style = {}, padding = 18, onClick }) {
   return (
     <div onClick={onClick} style={{
@@ -920,7 +926,7 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
   );
 }
 
-// Stat block — replaces circular watch sub-dial with a flat, bold stat display
+// Stat block, replaces circular watch sub-dial with a flat, bold stat display
 function SubDial({ label, value, sub, size = 110, gold = false, style = {} }) {
   const numSize = String(value).length > 5
     ? size * 0.17
@@ -1122,7 +1128,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
   );
 }
 
-// Weight unit label ('kg' or 'lbs'). Pure display label — the stored number is
+// Weight unit label ('kg' or 'lbs'). Pure display label, the stored number is
 // the same regardless of unit (lbs users enter lbs directly, no conversion).
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
@@ -1133,7 +1139,11 @@ UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 // even differ. UI.unit() is the VIEWER's unit, so a coach reviewing a client's
 // hydration sees it in the coach's own unit, no client-unit plumbing needed.
 UI.FLOZ_ML = 29.5735;
-UI.waterInFloz = () => UI.unit() === 'lbs';
+// The optional `u` overrides the viewer's own unit. A coach reading a client's
+// day must see the CLIENT's units (weight and temperature already do this via
+// explicit props); water used to fall through to window.__UNIT and relabel the
+// client's litres as fl oz.
+UI.waterInFloz = (u) => (u || UI.unit()) === 'lbs';
 UI.mlToFloz = (ml) => ml / UI.FLOZ_ML;
 UI.flozToMl = (oz) => oz * UI.FLOZ_ML;
 // Label for the raw water-entry field (whole units the user types).
@@ -1145,8 +1155,51 @@ UI.waterEntryToMl = (v) => UI.waterInFloz() ? Math.round(UI.flozToMl(v)) : Math.
 // Quick-add increments in the viewer's unit (a glass / a bottle vs 250/500 ml).
 UI.waterQuickAdds = () => UI.waterInFloz() ? [8, 16] : [250, 500];
 // Summary tile display: imperial shows whole fl oz, else litres (1 decimal).
-UI.waterSummaryUnit = () => UI.waterInFloz() ? 'fl oz' : 'L';
-UI.waterSummaryValue = (ml) => UI.waterInFloz() ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
+UI.waterSummaryUnit = (u) => UI.waterInFloz(u) ? 'fl oz' : 'L';
+UI.waterSummaryValue = (ml, u) => UI.waterInFloz(u) ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
+
+// Styled stand-in for window.alert(). The app has useConfirm() for anything
+// that asks a question, but a plain "this failed" message forced a component
+// to be async and to render confirmEl, so ~40 error paths reached for the raw
+// browser dialog instead: the same failure was reported two completely
+// different ways depending on which code path hit it, and on iOS the native
+// dialog also steals focus and can interrupt a sheet mid-animation.
+// Imperative on purpose (own DOM, no React state), so it can be called from
+// anywhere, including a catch inside a non-async handler.
+// Returns a Promise that resolves when it's dismissed.
+UI.alert = (message, { title = null, ok = 'OK' } = {}) => new Promise(resolve => {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)';
+  const box = document.createElement('div');
+  box.style.cssText = `max-width:340px;width:100%;background:${UI.bg};border:1px solid ${UI.hairStrong};border-radius:8px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.45)`;
+  if (title) {
+    const h = document.createElement('div');
+    h.style.cssText = `font-family:${UI.fontDisplay};font-size:22px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${UI.ink};margin-bottom:10px`;
+    h.textContent = title;
+    box.appendChild(h);
+  }
+  const p = document.createElement('div');
+  p.style.cssText = `font-family:${UI.fontUi};font-size:13px;line-height:1.55;color:${UI.inkSoft};margin-bottom:18px;white-space:pre-wrap`;
+  p.textContent = String(message == null ? '' : message);
+  box.appendChild(p);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = ok;
+  btn.style.cssText = `width:100%;padding:11px 0;border:none;border-radius:6px;background:var(--accent);color:var(--accent-ink);font-family:${UI.fontUi};font-size:13px;font-weight:600;cursor:pointer;text-shadow:none`;
+  box.appendChild(btn);
+  wrap.appendChild(box);
+  const close = () => {
+    document.removeEventListener('keydown', onKey);
+    if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    resolve();
+  };
+  const onKey = e => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
+  btn.addEventListener('click', close);
+  wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(wrap);
+  btn.focus();
+});
 
 // True when the app runs inside a third-party app's in-app browser (X,
 // Instagram, Facebook, TikTok, ...) rather than a real browser. Those WKWebView
@@ -1186,12 +1239,12 @@ UI.authErrorMessage = (e, fallback = 'Something went wrong') => {
 };
 
 // Chart Y-axis domain with breathing room. Pads by 5% of the visible value
-// SPAN (max − min) — not of the value itself — so a point keeps a consistent
+// SPAN (max − min), not of the value itself, so a point keeps a consistent
 // gap from the edge no matter how far the data sits from zero. (Value-based
 // padding fails when the min is small relative to the span: e.g. steps 25k–101k
 // gave the 25k point only ~1.5% headroom and it looked glued to the bottom.)
 //   • top    = dataMax + 5% of span   (unless a fixed `max` is supplied)
-//   • bottom = dataMin − 5% of span, clamped at 0 — every metric here is
+//   • bottom = dataMin − 5% of span, clamped at 0, every metric here is
 //     non-negative and 0 stays a hard floor (unless a fixed `min` is supplied,
 //     or `zeroFloor` pins it to 0 for bar / area-from-baseline charts).
 // A flat series (span 0) falls back to 5% of the value so it still centres.
@@ -1238,7 +1291,7 @@ UI.niceStepDomain = (dataMin, dataMax, step, opts) => {
 // fddb_dash drag: long-press to pick up on touch, a small move-threshold
 // on mouse, a floating ghost that tracks the finger, and an accent
 // drop-line showing where the row will land. Built for the no-build React
-// setup — it drives the DOM imperatively for the duration of the drag (no
+// setup, it drives the DOM imperatively for the duration of the drag (no
 // state churn) and only commits the new order via onReorder on drop.
 //
 // Usage:
@@ -1260,7 +1313,7 @@ UI.niceStepDomain = (dataMin, dataMax, step, opts) => {
 // fall back to scrolling the whole page and tolerate more pre-drag jitter
 // (12px) before treating it as a page scroll; horizontal chip strips scroll
 // themselves and cancel sooner (8px) since sideways finger movement is much
-// more often an intentional scroll — these two thresholds already drifted
+// more often an intentional scroll, these two thresholds already drifted
 // apart once (see the historical dy>dx bug fix this replaced), which is
 // exactly the kind of drift a shared engine prevents going forward.
 const DRAG_AXIS = {
@@ -1277,7 +1330,7 @@ function attachDragReorderAxis(axis, container, getCb, options) {
   let state = null;
   let rafId = null;
 
-  // Reorderable rows that belong to THIS list (closest list ancestor is us —
+  // Reorderable rows that belong to THIS list (closest list ancestor is us,
   // guards against any nested reorder list inside a row).
   const items = () => Array.prototype.slice
     .call(container.querySelectorAll('[data-reorder-item]'))
@@ -1351,11 +1404,27 @@ function attachDragReorderAxis(axis, container, getCb, options) {
     } else {
       insertIdx = list.length;
       line = null;
+      // Cross-axis center of the ghost, so a multi-COLUMN layout can be hit
+      // tested at all. With the main axis alone every item in the same grid
+      // row shares one midpoint, so the second column was unreachable by drag
+      // (confirmed in the 2-col Health card grid).
+      const crossPos = axis === 'v' ? (state.lastX ?? state.startX) : (state.lastY ?? state.startY);
+      const crossGrab = axis === 'v' ? state.offsetX : state.offsetY;
+      const crossCenter = crossPos - crossGrab + (state.srcCrossSize || 0) / 2;
       for (let k = 0; k < list.length; k++) {
         const r = list[k].getBoundingClientRect();
         const start = axis === 'v' ? r.top : r.left;
         const size = axis === 'v' ? r.height : r.width;
-        if (cardCenter < start + size / 2) { insertIdx = k; line = start - 3; break; }
+        const crossStart = axis === 'v' ? r.left : r.top;
+        const crossSize = axis === 'v' ? r.width : r.height;
+        // Same row/column as the ghost? Then the cross axis decides, otherwise
+        // the main axis does. Single-column lists never take the cross branch,
+        // so their behavior is unchanged.
+        const sameLine = Math.abs((start + size / 2) - cardCenter) < size / 2;
+        const isAfter = sameLine
+          ? cardCenter < start + size / 2 || crossCenter < crossStart + crossSize / 2
+          : cardCenter < start + size / 2;
+        if (isAfter) { insertIdx = k; line = start - 3; break; }
       }
       if (line === null) {
         const last = list[list.length - 1];
@@ -1425,6 +1494,9 @@ function attachDragReorderAxis(axis, container, getCb, options) {
     state.offsetX = x - rect.left;
     state.offsetY = y - rect.top;
     state.srcSize = axis === 'v' ? rect.height : rect.width;
+    state.srcCrossSize = axis === 'v' ? rect.width : rect.height;
+    state.lastX = x;
+    state.lastY = y;
     state.started = true;
     document.body.classList.add('reorder-dragging');
     moveGhost(x, y);
@@ -1555,7 +1627,7 @@ UI.useDragReorder = function (options) {
   return setRef;
 };
 
-// Grip affordance for a reorderable row — replaces up/down arrows. The whole
+// Grip affordance for a reorderable row, replaces up/down arrows. The whole
 // row is draggable; this is the visual cue. Pass `style` to tweak per use.
 function DragHandle({ style } = {}) {
   return (
