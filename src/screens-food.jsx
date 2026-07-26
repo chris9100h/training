@@ -5173,6 +5173,21 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // Same All/Zane/OFF/USDA filter the main Search tab has, shown only once a
   // search has run (see the template picker for the same reasoning).
   const [pickSource, setPickSource] = useStateFd(null);
+  // Scan entry points for the Search tab, mirroring FoodScreen's own
+  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
+  // quintet (same shared per-device localStorage key, see
+  // logbook-label-scanner-provider in CLAUDE.md).
+  const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
+  const [scanOpen, setScanOpen] = useStateFd(false);
+  const [labelScanning, setLabelScanning] = useStateFd(false);
+  const [labelError, setLabelError] = useStateFd(null);
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
+  const labelInputRef = useRefFd(null);
 
   useEffectFd(() => {
     if (!open) return;
@@ -5181,19 +5196,101 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
+    setScanPickerOpen(false); setScanOpen(false); setLabelScanning(false); setLabelError(null);
   }, [open]);
 
-  // srcOverride: the filter buttons call this in the same tick they set
-  // pickSource, so the state has not committed yet and reading it here would
-  // search with the previous filter.
-  async function runPickerSearch(srcOverride) {
-    const q = query.trim();
+  // override: handleScan calls this in the same tick it sets query, so the
+  // state has not committed yet and reading it here would search the
+  // previous query. srcOverride: same deal for the filter buttons and
+  // pickSource.
+  async function runPickerSearch(override, srcOverride) {
+    const q = (typeof override === 'string' ? override : query).trim();
     if (!q || searching) return;
     setSearching(true); setSearchError(null);
     const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickSource);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
     setResults(res.results);
+  }
+  // A scanned barcode runs straight through the normal search (same as
+  // FoodScreen's handleScan): the found product shows as a result to tap.
+  function handleScan(code) {
+    setScanOpen(false);
+    setQuery(code);
+    runPickerSearch(code);
+  }
+
+  // Nutrition-label scan, mirrors FoodScreen's handleLabelFile/prefillFromLabel
+  // pair, landing in the same qtyItem/quantity-step shape a search result
+  // uses (openQtyForResult) instead of a separate path.
+  async function handleLabelFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setLabelError(null);
+    setLabelScanning(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
+      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      setLabelScanning(false);
+      if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
+      prefillFromLabel(res.label);
+    } catch (_) {
+      setLabelScanning(false);
+      setLabelError('Could not read that image. Try again.');
+    }
+  }
+
+  // Same per-100 normalization FoodScreen's prefillFromLabel does. A scalable
+  // basis (100g/100ml, or a serving weight to convert through) opens the
+  // quantity step exactly like a search result (openQtyForResult); source:
+  // 'custom' and no sourceId means confirmStageItem's ensureFoodCached call
+  // correctly skips caching it, same as any hand-typed food. No scalable
+  // basis at all falls back to the manual-entry form's typed totals, this
+  // sheet's only other way to stage a fixed (non-scalable) amount.
+  function prefillFromLabel(label) {
+    if (!label || label.is_nutrition_label === false) {
+      setLabelError("That doesn't look like a nutrition label. Try a straight-on photo of the table.");
+      return;
+    }
+    const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
+    if (cal == null && p == null && c == null && f == null) {
+      setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
+      return;
+    }
+    const per100 = (label.basis === '100g' || label.basis === '100ml')
+      ? { p, c, f, fib, sug, sat, sod }
+      : (label.serving_size_g > 0)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
+        : null;
+
+    if (per100) {
+      const netCarbs = !!store.settings?.netCarbs;
+      setQtyItem({
+        name: label.name || '', brand: label.brand || null, source: 'custom', sourceId: null,
+        kcalPer100g: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0,
+        proteinPer100g: per100.p, carbsPer100g: per100.c, fatPer100g: per100.f, fiberPer100g: per100.fib,
+        sugarPer100g: per100.sug, satFatPer100g: per100.sat, sodiumMgPer100g: per100.sod,
+        fromCache: false, units: null,
+      });
+      setQtyUnitIdx(null); setQtyCountStr('');
+      setQtyG((label.basis === '100g' || label.basis === '100ml') ? '100' : String(Math.round(label.serving_size_g)));
+      return;
+    }
+
+    // No scalable basis: fall back to the manual-entry form's typed totals,
+    // this sheet's own last resort, same role FoodScreen's Custom Item form
+    // plays for this case.
+    setManualOpen(true);
+    setMName(label.name || ''); setMG('');
+    setMP(p != null ? String(Math.round(p)) : ''); setMC(c != null ? String(Math.round(c)) : ''); setMF(f != null ? String(Math.round(f)) : '');
+    setMFib(fib != null ? String(Math.round(fib)) : '');
   }
 
   function closeQtySheet() { setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr(''); }
@@ -5349,7 +5446,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     fat: fdRound1(staged.reduce((a, i) => a + (i.fat || 0), 0)),
   }), [staged]);
 
-  // Two sibling Sheets, not one nested in the other's children (the app's
+  // Sibling Sheets, not nested in each other's children (the app's
   // documented overlay convention, docs/internals.md "Modal-/Overlay-
   // Landschaft": a Sheet that must render above another already-open Sheet
   // gets a bumped zIndex instead, tier 200 = "must sit above a specific open
@@ -5369,21 +5466,25 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <div style={{ position: 'relative', width: '100%' }}>
                 <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerSearch(); }}
-                  type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                  type="text" placeholder="Search food, or scan →" style={{ ...fdInputStyle, paddingRight: 32 }} />
                 {query && (
                   <button onClick={() => { setQuery(''); setResults(null); setSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
                     <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
                   </button>
                 )}
               </div>
+              <button onClick={() => setScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
+                <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
+              </button>
               <button onClick={() => runPickerSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                 {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>{labelError}</div>}
             {results != null && (
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
                 {FD_SOURCE_FILTERS.map(f => (
-                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
+                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(undefined, f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
                 ))}
               </div>
             )}
@@ -5567,6 +5668,39 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
           </>
         )}
       </Sheet>
+
+      {/* ── Barcode vs. label picker (opened by the search row's scan
+          button), same sibling-Sheet/zIndex-200 pattern as the quantity step
+          above, since it also must render above the still-open "Add
+          ingredients" Sheet. ── */}
+      <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)" zIndex={200}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          <button onClick={() => { setScanPickerOpen(false); setScanOpen(true); }} style={fdScanChoice}>
+            <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>The code on the packaging</span>
+          </button>
+          <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+            ))}
+          </div>
+        </div>
+      </Sheet>
+
+      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
+          which works on iOS Safari without any library. */}
+      <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
+      {labelScanning && <FdLabelBusy />}
+      {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </>
   );
 }
