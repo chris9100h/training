@@ -248,6 +248,147 @@ function fdSlotMatchesDate(slot, store, dateISO) {
   return slot.dayType === 'training' ? isTraining : !isTraining;
 }
 
+// ── Shopping list ────────────────────────────────────────────────────
+// What to buy, derived from two independent signals that never double-count
+// the same food (see fdBuildShoppingList): the last FD_SHOPPING_ANALYSIS_DAYS
+// of what was actually eaten (pattern detection), and the active meal plan's
+// template slots projected across the shopping window (definite, not
+// inferred). shoppingDays is a display/scale knob, not a second analysis
+// window: it rescales the historical daily rate AND the projection
+// lookahead together (see fdBuildShoppingList for why those two must move
+// in lockstep instead of the projection staying fixed at a calendar week).
+const FD_SHOPPING_ANALYSIS_DAYS = 14;
+const FD_SHOPPING_STAPLE_MIN = 3;
+const FD_SHOPPING_DAYS_DEFAULT = 7;
+
+function fdNormFoodName(name) {
+  return (name || '').trim().toLowerCase();
+}
+// foodId is always "<source>:<sourceId>" (see confirmStageItem), so a
+// name-based key can never collide with one.
+function fdShoppingKey(foodId, foodName) {
+  return foodId ? `id:${foodId}` : `name:${fdNormFoodName(foodName)}`;
+}
+// A food-log-shaped row (a real store.foodLogs entry, or a virtual
+// fdMaterializeSlotEntry projection row, both share the same shape) -> its
+// flat "leaf" items to tally. A recipe's recipeItems snapshot never carries
+// a foodId (confirmRecipeLog, applyBlockRecipe and a template slot's own
+// draftBuilt all agree on that shape, see docs/database.md's zane_food_logs
+// section), so every exploded leaf is name-keyed even if the recipe's own
+// ingredients were originally real zane_foods matches. A recipe row with no
+// recipeItems (a legacy row predating the snapshot) falls back to one opaque
+// leaf rather than silently dropping it.
+function fdExplodeForShopping(entry) {
+  if (entry.source === 'recipe' && entry.recipeItems && entry.recipeItems.length) {
+    return entry.recipeItems.map(ri => ({ foodId: null, foodName: ri.foodName, quantityG: ri.quantityG || 0 }));
+  }
+  return [{ foodId: entry.foodId || null, foodName: entry.foodName, quantityG: entry.quantityG || 0 }];
+}
+function fdFavoriteShoppingKeys(foodFavorites) {
+  const set = new Set();
+  (foodFavorites || []).forEach(f => set.add(fdShoppingKey(f.foodId, f.foodName)));
+  return set;
+}
+// Last FD_SHOPPING_ANALYSIS_DAYS of ACTUALLY-EATEN entries (planned rows
+// never count toward "what do I typically buy"). store.foodLogs is
+// boot-windowed to LB.FOOD_HISTORY_WINDOW_DAYS (30, see foodHistCutoff
+// above), well past 14, so this never needs the lazy old-date fetch the
+// timeline's own scroll-back uses. date > todayISO is excluded too: Plan
+// Mode allows future-dated rows, and those belong to the projection below,
+// not the "what did I eat" tally.
+function fdShoppingHistoryTally(foodLogs, todayISO) {
+  const cutoff = fdShiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
+  const tally = new Map();
+  (foodLogs || []).forEach(e => {
+    if (e.planned || e.date < cutoff || e.date > todayISO) return;
+    fdExplodeForShopping(e).forEach(leaf => {
+      const key = fdShoppingKey(leaf.foodId, leaf.foodName);
+      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0, count: 0 };
+      row.totalGrams += leaf.quantityG;
+      row.count += 1;
+      tally.set(key, row);
+    });
+  });
+  return tally;
+}
+// The active plan's slots projected across `days` calendar days from today
+// (today included), reusing fdSlotMatchesDate/fdMaterializeSlotEntry
+// verbatim, the exact functions the real per-day auto-fill effect uses.
+// Empty map with no active plan or no slots: contributes nothing rather
+// than throwing, callers treat an empty projection as "no plan-driven need".
+function fdShoppingProjectionTally(store, todayISO, days) {
+  const tally = new Map();
+  const activePlanId = store.activeMealTemplateId;
+  const slots = activePlanId ? (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId) : [];
+  if (!slots.length) return tally;
+  for (let i = 0; i < days; i++) {
+    const d = fdShiftDate(todayISO, i);
+    slots.forEach(slot => {
+      if (!fdSlotMatchesDate(slot, store, d)) return;
+      fdExplodeForShopping(fdMaterializeSlotEntry(slot, d)).forEach(leaf => {
+        const key = fdShoppingKey(leaf.foodId, leaf.foodName);
+        const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0 };
+        row.totalGrams += leaf.quantityG;
+        tally.set(key, row);
+      });
+    });
+  }
+  return tally;
+}
+// Merges the two signals without ever double-counting a food: a projected
+// food's quantity is the projection's own total for the window, full stop,
+// never added to the historical estimate (a template slot is a definite
+// future need, not a second vote alongside an inferred one). A food with no
+// projection falls back to the historical daily rate scaled to
+// shoppingDays, gated by the staple/favorite threshold: a favorited food
+// only needs to have actually been logged once in the window to qualify
+// (favoriting is already a strong "I need this" signal), a non-favorited one
+// needs 3+. A key only reaches the history map at all via a real
+// occurrence, so "favorited but never logged in the window" can't reach
+// this filter and is correctly never resurrected.
+function fdBuildShoppingList(store, todayISO, shoppingDays) {
+  const favKeys = fdFavoriteShoppingKeys(store.foodFavorites);
+  const hist = fdShoppingHistoryTally(store.foodLogs, todayISO);
+  const proj = fdShoppingProjectionTally(store, todayISO, shoppingDays);
+  const keys = new Set([...hist.keys(), ...proj.keys()]);
+  const out = [];
+  keys.forEach(key => {
+    const p = proj.get(key);
+    if (p) {
+      if (p.totalGrams > 0) out.push({ key, foodName: p.foodName, grams: p.totalGrams, fromProjection: true });
+      return;
+    }
+    const h = hist.get(key);
+    if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
+    const grams = (h.totalGrams / FD_SHOPPING_ANALYSIS_DAYS) * shoppingDays;
+    if (grams > 0) out.push({ key, foodName: h.foodName, grams, fromProjection: false });
+  });
+  return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
+}
+// Display rounding: under 50g rounds to the nearest 5, under 1000g to the
+// nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
+// exactly "nearest 100g" once expressed in kg, reused rather than writing a
+// second decimal-rounding rule). Never rounds a genuinely non-zero amount
+// down to a misleading 0.
+function fdRoundShoppingQty(grams) {
+  if (!(grams > 0)) return '0g';
+  if (grams >= 1000) return `${fdRound1(grams / 1000)}kg`;
+  const unit = grams < 50 ? 5 : 25;
+  return `${Math.round(grams / unit) * unit || unit}g`;
+}
+// Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
+// preference, not worth a synced setting/migration, self-heals to the
+// default on a fresh device. Unlike logbook-label-scanner-provider this has
+// exactly one simultaneous reader (ShoppingListScreen itself), so no
+// cross-component broadcast is needed.
+function fdReadShoppingDays() {
+  try { const v = parseInt(localStorage.getItem('logbook-shopping-list-days'), 10); return v > 0 ? v : FD_SHOPPING_DAYS_DEFAULT; }
+  catch (_) { return FD_SHOPPING_DAYS_DEFAULT; }
+}
+function fdWriteShoppingDays(v) {
+  try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
+}
+
 // Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
 // accent-bordered box when planned (not eaten yet), the same box filled with a
 // check once logged (eaten). Tapping toggles the entry's planned state.
@@ -593,6 +734,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
   // mode. Controls the recurring fixum slots that auto-fill each day's plan.
   const [templateOpen, setTemplateOpen] = useStateFd(false);
+  // Shopping list overlay. Unlike templateOpen this is NOT plan-mode gated:
+  // its historical-frequency half is useful with Plan Mode off, the
+  // template-projection half just contributes nothing without an active plan.
+  const [shoppingOpen, setShoppingOpen] = useStateFd(false);
   // Timeline entry whose overflow (kebab) action menu is open, or null. The
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
@@ -2818,6 +2963,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </button>
             )}
 
+            <button onClick={() => setShoppingOpen(true)} style={{ ...fdTemplateBtn, marginTop: planMode ? 8 : 0 }}>
+              <i className="fa-solid fa-basket-shopping" style={{ fontSize: 13, color: 'var(--accent)' }} />
+              <span style={{ flex: 1, textAlign: 'left' }}>Shopping list</span>
+              <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+            </button>
+
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
                 read-only per-meal summary card (LB.mealCategories). Adding
@@ -3801,6 +3952,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
+
+      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} today={today} />
 
       {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
           buttons. Recomputes its options from the open entry. */}
@@ -4940,6 +5093,61 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           </>
         )}
       </Sheet>
+    </Screen>
+  );
+}
+
+// What to buy: a pure read/derive view, never writes to the store, so unlike
+// its siblings it takes no setStore/userId and needs no useConfirm. See
+// fdBuildShoppingList for the full merge logic.
+function ShoppingListScreen({ open, onClose, store, today }) {
+  const [shoppingDays, setShoppingDays] = useStateFd(fdReadShoppingDays);
+  function changeShoppingDays(v) {
+    const n = Math.max(1, Math.min(30, Math.round(v)));
+    setShoppingDays(n);
+    fdWriteShoppingDays(n);
+  }
+
+  // Gated on `open` so this doesn't recompute while the screen sits closed.
+  // Deps cover everything fdBuildShoppingList reads, directly or through
+  // LB.isTrainingDayForDate's own schedule/session lookups.
+  const list = useMemoFd(
+    () => open ? fdBuildShoppingList(store, today, shoppingDays) : [],
+    [open, store.foodLogs, store.foodFavorites, store.foodTemplateSlots, store.activeMealTemplateId,
+     store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
+  );
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title="Shopping list" onBack={onClose} />
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Card style={{ textAlign: 'center' }}>
+          <div className="micro" style={{ marginBottom: 10 }}>Shopping for the next</div>
+          <Stepper value={shoppingDays} step={1} min={1} max={30}
+            suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
+        </Card>
+
+        {!list.length ? (
+          <Empty title="Nothing yet"
+            sub="Log meals for a couple of weeks, or set up a meal plan, and your regulars will show up here."
+            icon={<i className="fa-solid fa-basket-shopping" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {list.map(item => (
+              <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default' }}>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{item.foodName}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {item.fromProjection && <Pill gold>Plan</Pill>}
+                  <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </Screen>
   );
 }

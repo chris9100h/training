@@ -95,6 +95,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-label-scanner-provider`: `'grok'` (Default) oder `'claude'`, welche Edge Function (`scan-label` bzw. `scan-label-claude`) den Nährwert-Label-Scan liest. Toggle im Scan-Sheet (`FoodScreen`), Vergleichs-/Debug-Feature, kein User-Setting, per Gerät
   - `logbook-food-fav-cache-attempt`: Datum des letzten fehlgeschlagenen Favoriten-Cache-Reparaturlaufs (`FoodScreen`). Ohne diesen Merker hat ein Fehlschlag (Netz weg, Tages-Quota erschöpft) den kompletten Batch bei jedem Mount des Screens erneut versucht, was die Quota selbst weiter aufgezehrt hat, per Gerät
   - `logbook-food-fav-cache-repaired`: JSON-Array von `foodId`s, deren `zane_foods`-Cache-Zeile die einmalige Reparatur in `FoodScreen` bereits nachgezogen hat (Favoriten aus der Zeit vor dem `food_id`-Caching schlugen sonst bei jedem Sync am FK fehl). Ohne diesen Merker würde der Effekt bei jedem Mount des Screens erneut je Favorit einen Request feuern, per Gerät
+  - `logbook-shopping-list-days`: Anzahl Tage, für die die Shopping List (`FoodScreen` → `ShoppingListScreen`) einkaufen soll (Default 7, Stepper direkt im Screen). Skaliert sowohl die aus der 14-Tage-Historie hochgerechnete Menge als auch das Lookahead-Fenster der Meal-Plan-Projektion (siehe `fdBuildShoppingList`), kein User-Setting, per Gerät
 
 ## What's New / Changelog
 
