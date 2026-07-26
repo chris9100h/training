@@ -2013,6 +2013,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
           </div>
+          <div style={{ marginTop: 16 }}>
+            <Row label="Hide meal categories" first>
+              <Toggle on={!!store.settings?.hideFoodCategories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, hideFoodCategories: !s.settings?.hideFoodCategories } }))} />
+            </Row>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Show the Food Tracker's daily timeline as one flat hour list instead of grouping it under Breakfast/Lunch/Dinner header cards. Every hour still has its own "+" to log or plan something.
+            </div>
+          </div>
           {store.settings?.planMode && (
             <div style={{ marginTop: 16 }}>
               <Row label="Meal reminders" first>

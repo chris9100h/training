@@ -265,6 +265,7 @@ CREATE TABLE public.zane_user_settings (
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
   plan_mode boolean NOT NULL DEFAULT false,
+  hide_food_categories boolean NOT NULL DEFAULT false, -- 0214: flat hour timeline instead of meal-category header cards, display-only
   default_checkin_schema jsonb,
   status_mode text,
   status_mode_since timestamp with time zone,

@@ -1039,6 +1039,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour, mealCats]);
 
+  // settings.hideFoodCategories swaps the six meal-category groups for one
+  // synthetic all-day group (label: null skips the header card, see the
+  // timeline render below). Every hour still renders exactly as it does
+  // today, filled or empty, since the hour loop only ever reads
+  // startHour/endHour off whichever group it's handed. Categories themselves
+  // stay the basis for "Repeat yesterday" and Manage Entries either way,
+  // this only affects what the main timeline draws.
+  const timelineGroups = useMemoFd(
+    () => store.settings?.hideFoodCategories ? [{ id: 'all', label: null, startHour: 0, endHour: 24 }] : categoryTotals,
+    [store.settings?.hideFoodCategories, categoryTotals]
+  );
+
   // Yesterday's entries grouped by meal category, so an empty category can
   // offer to repeat it in one tap. Reads the store only: nothing is fetched
   // for this, so on a day whose predecessor sits outside the boot window the
@@ -2826,33 +2838,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <div>
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
               <div ref={timelineDragRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {categoryTotals.map(cat => (
+                {timelineGroups.map(cat => (
                   <div key={cat.id}>
-                    <div style={fdCategoryCard}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
-                        <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
-                      </div>
-                      {/* Only offered where it can't be a mistake: this meal
-                          slot is empty today and yesterday's is not. Once
-                          anything is logged here the button is gone, so the
-                          card goes back to being a pure read-only summary. */}
-                      {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
-                        <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
-                          display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
-                          padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                        }}>
-                          <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
-                          Repeat yesterday
-                        </button>
-                      ) : (
-                        <div style={{ textAlign: 'right' }}>
-                          <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                          <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                    {cat.label && (
+                      <div style={fdCategoryCard}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
+                          <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                         </div>
-                      )}
-                    </div>
-                    <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {/* Only offered where it can't be a mistake: this meal
+                            slot is empty today and yesterday's is not. Once
+                            anything is logged here the button is gone, so the
+                            card goes back to being a pure read-only summary. */}
+                        {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
+                          <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
+                            display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
+                            padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                          }}>
+                            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+                            Repeat yesterday
+                          </button>
+                        ) : (
+                          <div style={{ textAlign: 'right' }}>
+                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                            <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ position: 'relative', marginTop: cat.label ? 6 : 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <FdHourTrunk />
                       {Array.from({ length: cat.endHour - cat.startHour }, (_, i) => cat.startHour + i).map(h => {
                         const es = byHour[h] || [];
