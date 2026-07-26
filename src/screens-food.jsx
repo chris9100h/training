@@ -5717,25 +5717,34 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // remainder with no target of its own to be judged against.
 function FdProjectionLine({ macros, goalCalories, adherence }) {
   return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-      <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
-        <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
-        </div>
-      </div>
-      <div style={{ textAlign: 'center', paddingLeft: 10 }}>
-        <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
-        </div>
-        {adherence != null && (
-          <div style={{ marginTop: 4, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
-            {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
-            <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}` }}>
+      {/* Divider is scoped to this row alone (label + macro bits), not the
+          whole block, so it stops where the two columns actually diverge
+          instead of running down past a projection line that belongs to
+          neither column on its own. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+        <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
+          <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
           </div>
-        )}
+        </div>
+        <div style={{ textAlign: 'center', paddingLeft: 10 }}>
+          <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+          </div>
+        </div>
       </div>
+      {/* What the day's adherence would read at Plan + Logged (every still-
+          planned entry eaten): centered under the whole table, since it's a
+          property of the full projection, not of one column. */}
+      {adherence != null && (
+        <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
+          <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
+        </div>
+      )}
     </div>
   );
 }
