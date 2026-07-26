@@ -967,6 +967,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
     [dayTarget, dayTotals, isMealOfChoice],
   );
+  // Same formula, but against the Plan+Logged projection instead of the
+  // logged truth: "if you eat everything still planned today, where does
+  // that leave your adherence". Shown in the projection table, never in the
+  // hero ring itself, so the real (logged-only) adherence stays the one
+  // number that drives the ring and the daily log.
+  const projectedAdherence = useMemoFd(
+    () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: projectedTotals.protein, carbs: projectedTotals.carbs, fat: projectedTotals.fat }, dayTarget) : null,
+    [dayTarget, projectedTotals, isMealOfChoice],
+  );
   // The budget the meal inherits. Computed against PROJECTED totals, not just
   // logged: a shake still planned for 21:00 is already spoken for, and not
   // subtracting it here would let it be spent twice. This is also why the
@@ -2758,6 +2767,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <BracketFrame gold style={{ padding: 20 }}>
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories}
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
+                projectedAdherence={projectedAdherence}
                 unscored={isMealOfChoice ? 'Meal of choice' : null}
                 onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
             </BracketFrame>
@@ -5640,13 +5650,14 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // resolvable the hero can only show a bare total, which is also the exact
 // moment the question "what should this number be?" comes up. Omitted by the
 // poster, so the button never renders into an exported image.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, onSetTargets, unscored }) {
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
+      calories: { delta: projected.calories - dayTotals.calories, total: projected.calories },
       protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
       carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
       fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
-    }} />
+    }} goalCalories={goalCalories} adherence={projectedAdherence} />
   ) : null;
   return dayTarget ? (
     <>
@@ -5700,7 +5711,11 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // a lighter, dashed-topped table so it reads as a forecast, not part of the
 // logged truth above it. The old standalone "+N kcal projected" line was
 // dropped as redundant once this table shipped.
-function FdProjectionLine({ macros }) {
+// goalCalories/adherence: what the day's adherence would read if every still-
+// planned entry gets eaten. Shown only under Plan + Logged (the side these
+// numbers actually describe), never under Still planned, which is a pure
+// remainder with no target of its own to be judged against.
+function FdProjectionLine({ macros, goalCalories, adherence }) {
   return (
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
       <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `var(--hair-width) solid ${UI.hairStrong}` }}>
@@ -5714,6 +5729,12 @@ function FdProjectionLine({ macros }) {
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
         </div>
+        {adherence != null && (
+          <div style={{ marginTop: 4, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+            {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
+            <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
+          </div>
+        )}
       </div>
     </div>
   );

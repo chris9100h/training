@@ -5612,15 +5612,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Rendered in BOTH return paths (empty freestyle early return + main return),
   // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
   // highlight); the Confirm button commits it, so a mis-tap is correctable first.
-  // Dismissing commits the SAME default the resumed-session path stamps
-  // ('normal', or the re-entry ramp when it applies). The sheet used to be
-  // unleavable: no skip control, backdrop and X wired to a no-op, and Confirm
-  // disabled until something was picked, so an auto-opened prompt could trap
-  // the whole training screen. Leaving readiness null instead is not an
-  // option, every downstream meso prompt is gated on it being set.
-  const dismissReadiness = () => chooseReadiness(readinessReentry ? 'reentry' : 'normal');
+  // Deliberately unleavable: backdrop/onClose is a no-op and Confirm stays
+  // disabled until something is picked. The user must answer, no default gets
+  // stamped on their behalf, every downstream meso prompt reads this choice.
   const readinessSheet = (
-    <Sheet open={readinessOpen} onClose={dismissReadiness} title="How do you feel today?">
+    <Sheet open={readinessOpen} onClose={() => {}} title="How do you feel today?">
       <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
         Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
       </div>
@@ -5650,10 +5646,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
       })}
       <Btn onClick={() => chooseReadiness(readinessSel)} disabled={readinessSel == null} style={{ width: '100%', marginTop: 12, opacity: readinessSel == null ? 0.4 : 1 }}>Confirm</Btn>
-      <button onClick={dismissReadiness} style={{
-        width: '100%', marginTop: 10, padding: '10px 0', background: 'transparent', border: 'none',
-        color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', textShadow: 'none',
-      }}>Not now</button>
     </Sheet>
   );
 
