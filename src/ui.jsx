@@ -520,6 +520,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     {reveal && (
       <div style={{
         position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
+        transformOrigin: 'bottom center',
         display: 'flex', gap: 8, padding: 8,
         background: 'rgba(var(--bg-rgb),0.92)',
         backdropFilter: 'blur(24px) saturate(130%)',
@@ -527,7 +528,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
-        animation: 'fadeUp 0.15s ease-out',
+        animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
         zIndex: 30,
       }}>
         {['health', 'water', 'food'].filter(id => id !== currentHealthSlot).map(id => {
