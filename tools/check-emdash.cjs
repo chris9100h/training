@@ -13,10 +13,22 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const EM = '—';
 
+// Edge functions ship user-visible text too (push titles and bodies), and the
+// first version of this gate skipped them, so a sweep of src/ left 25 behind
+// in supabase/functions, including the rest-timer push message.
+const edgeFns = (() => {
+  const dir = path.join(root, 'supabase', 'functions');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter(d => fs.existsSync(path.join(dir, d, 'index.ts')))
+    .map(d => `supabase/functions/${d}/index.ts`);
+})();
+
 const files = [
   ...fs.readdirSync(path.join(root, 'src')).filter(f => /\.(js|jsx)$/.test(f) && f !== 'supabase.js').map(f => `src/${f}`),
   ...fs.readdirSync(root).filter(f => f.endsWith('.html')),
   'sw.js',
+  ...edgeFns,
 ];
 
 const hits = [];

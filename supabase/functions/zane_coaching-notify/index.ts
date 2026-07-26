@@ -20,7 +20,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
-// The caller must be a real signed-in user — the bare anon key is not
+// The caller must be a real signed-in user, the bare anon key is not
 // enough. Without this, anyone could trigger spoofed "message from your
 // coach" pushes for arbitrary coaching relationships.
 async function resolveUser(req: Request): Promise<string | null> {
@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
   }
 
   // Determine recipient (the other party in the coaching relationship).
-  // The author is always the authenticated caller — never taken from the body.
+  // The author is always the authenticated caller, never taken from the body.
   const coachingRes = await dbFetch(`zane_coaching?id=eq.${encodeURIComponent(coachingId)}&select=coach_id,client_id`);
   const coaching: { coach_id: string; client_id: string }[] = await coachingRes.json().catch(() => []);
   if (!coaching[0]) {

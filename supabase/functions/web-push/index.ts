@@ -1,12 +1,12 @@
-// Native Web Push via VAPID — supports immediate sends and relay-chain delayed
+// Native Web Push via VAPID, supports immediate sends and relay-chain delayed
 // sends (same architecture as the pushover function). Both chains share the
 // same zane_pushover_active nonce table so cancelPushover() in the app
 // invalidates both at once.
 //
 // Called by:
-//   • the signed-in user (app) — immediate or delayed, acting on themselves
-//   • other edge functions (service-role) — immediate only (coaching, reminder…)
-//   • itself as relay hops — delayed delivery via recursive self-calls
+//   • the signed-in user (app), immediate or delayed, acting on themselves
+//   • other edge functions (service-role), immediate only (coaching, reminder…)
+//   • itself as relay hops, delayed delivery via recursive self-calls
 //
 // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be set as Supabase secrets.
 
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
     if (delaySeconds > MAX_CHUNK) {
       await new Promise(r => setTimeout(r, MAX_CHUNK * 1000));
       if (nonce && !await isNonceCurrent(nonce, targetUserId)) {
-        console.log('[web-push] cancelled — newer rest timer active');
+        console.log('[web-push] cancelled, newer rest timer active');
         return;
       }
       EdgeRuntime.waitUntil(
@@ -175,7 +175,7 @@ Deno.serve(async (req) => {
     } else {
       if (delaySeconds > 0) await new Promise(r => setTimeout(r, delaySeconds * 1000));
       if (nonce && !await isNonceCurrent(nonce, targetUserId)) {
-        console.log('[web-push] cancelled — newer rest timer active');
+        console.log('[web-push] cancelled, newer rest timer active');
         return;
       }
       await deliverPush(targetUserId, title, text, url);

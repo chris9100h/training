@@ -2,7 +2,7 @@
 // dashboard (Settings → Admin → All users → user detail → Send email).
 // Delivery goes through Resend, the same provider already handling
 // Supabase Auth's transactional mail (password reset, email change) for
-// this project — RESEND_API_KEY must be set as a Supabase Edge Function
+// this project, RESEND_API_KEY must be set as a Supabase Edge Function
 // secret, and RESEND_FROM_EMAIL should match the @zane-wo.com sender
 // already verified there (falls back to a default if unset).
 

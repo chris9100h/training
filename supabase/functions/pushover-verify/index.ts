@@ -1,6 +1,6 @@
 // Sends a 6-digit verification code to a Pushover user key.
 // Used to confirm a Pushover account is reachable before saving it.
-// The code is returned to the client for comparison — verification is a
+// The code is returned to the client for comparison, verification is a
 // UX confirmation of delivery, not a security gate.
 
 const corsHeaders = {
