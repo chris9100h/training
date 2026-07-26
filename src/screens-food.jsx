@@ -3123,7 +3123,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
                           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
+                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
                               <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
                             </div>
                             {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
@@ -3183,7 +3183,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {recentFoods.map(l => (
                     <button key={l.id} onClick={() => reAddFromRecent(l)} style={fdResultRow}>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <div style={fdEntryName}>{l.foodName}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                          <div style={{ ...fdEntryName, minWidth: 0 }}>{l.foodName}</div>
+                        </div>
                         {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -3207,7 +3210,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     <div key={f.id} style={fdQuickRowWrap}>
                       <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                          <div style={fdEntryName}>{f.foodName}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                            <div style={{ ...fdEntryName, minWidth: 0 }}>{f.foodName}</div>
+                          </div>
                           {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -5079,7 +5085,10 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
               {items.map(i => (
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
-                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    </div>
                     <span style={fdEntryMeta}>
                       {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
                       <span style={fdMetaDivider} />
@@ -5567,7 +5576,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
               {favoritesSorted.map(f => (
                 <button key={f.id} onClick={() => openQtyForLog(f)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <div style={fdEntryName}>{f.foodName}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <div style={{ ...fdEntryName, minWidth: 0 }}>{f.foodName}</div>
+                    </div>
                     {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -5588,7 +5600,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
               {recentPicks.map(l => (
                 <button key={l.id} onClick={() => openQtyForLog(l)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <div style={fdEntryName}>{l.foodName}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <div style={{ ...fdEntryName, minWidth: 0 }}>{l.foodName}</div>
+                    </div>
                     {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
