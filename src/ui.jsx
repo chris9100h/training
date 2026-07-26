@@ -304,7 +304,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
       document.addEventListener('pointercancel', onUp);
-    }, 300);
+    }, 200);
   };
   const healthOnPointerMove = (e) => {
     if (!pressTimerRef.current || !pressStartRef.current) return;
