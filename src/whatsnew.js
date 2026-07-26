@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.676',
+    date: '2026-07-26',
+    title: 'Fewer taps to Water & Food 👆',
+    items: [
+      "👆 Health, Water and Food share one spot in the bottom bar, so reaching Water or Food from anywhere else meant tapping your way through Health first. Now just press and hold that tab: the other two pop up right above it, drag onto the one you want and let go to jump straight there. Let go without hitting one and nothing happens, no harm done. A quick tap still cycles through all three exactly like before.",
+      "🔮 In Plan Mode, the Plan + Logged side of your food log now also shows a projected adherence percentage: where you'd land if every meal you've still got planned for today actually gets eaten. A quick gut check before you decide to skip or swap something.",
+      "💪 Fixed: drop sets, myo reps and AMRAP finishers on unilateral exercises (think single-arm rows, single-leg presses) were quietly using your first set's rep count for every later step, throwing off volume, e1RM and PRs. Fixed going forward, and we went back and repaired your existing history too.",
+      "✨ Smaller fixes: no more duplicate push notifications on some setups, backup and restore handles a few more edge cases safely (units, older food history), a sync hiccup can no longer get permanently stuck on one bad food entry, and confirmation popups look like the app now instead of a bare browser dialog.",
+    ],
+  },
+  {
     id: 'v2.666',
     date: '2026-07-25',
     title: 'Stop guessing your macros 🧮',
