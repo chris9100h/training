@@ -895,6 +895,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ? [{
             id: recipeId, name,
             items: entries.map(e => ({
+              id: LB.uid(),
               foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
               quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
               fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
@@ -4957,7 +4958,12 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   useEffectFd(() => {
     if (!open) return;
     const n = recipe?.name || '';
-    const it = recipe?.items || [];
+    // Backfill a stable id for any item that predates one: applyBlockRecipe's
+    // "Create a recipe from HH:00" once saved recipe items with no id field
+    // at all. Every item's id then read as undefined, so removeItem's
+    // list.filter(i => i.id !== id) matched that same undefined on EVERY
+    // item and wiped the whole recipe instead of the one being removed.
+    const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
     const p = recipe?.portions || 1;
     setName(n); setItems(it); setPortions(p);
     initialSnap.current = JSON.stringify({ name: n, items: it, portions: p });
