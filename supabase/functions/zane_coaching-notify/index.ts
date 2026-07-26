@@ -75,8 +75,8 @@ Deno.serve(async (req) => {
   const recipientId = authedUserId === coach_id ? client_id : coach_id;
 
   // Check recipient push settings
-  const settingsRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(recipientId)}&select=push_enabled,pushover_user_key`);
-  const settings: { push_enabled: boolean; pushover_user_key: string | null }[] = await settingsRes.json().catch(() => []);
+  const settingsRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(recipientId)}&select=push_enabled,pushover_user_key,use_pushover`);
+  const settings: { push_enabled: boolean; pushover_user_key: string | null; use_pushover: boolean | null }[] = await settingsRes.json().catch(() => []);
 
   if (!settings[0]?.push_enabled) {
     return new Response(JSON.stringify({ skipped: true }), {
@@ -96,24 +96,26 @@ Deno.serve(async (req) => {
   const title   = isSupport ? 'Zane · Support' : (threadName ? `Zane · ${threadName}` : 'Zane · New message');
   const message = (preview ?? (isSupport ? 'New support ticket message' : 'New message from your coach')).split('\n')[0].slice(0, 100);
 
-  // Pushover (if configured)
-  if (settings[0].pushover_user_key) {
-    const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+  // Pushover INSTEAD of Web Push when the recipient chose that channel, the
+  // same rule the reminder functions follow. This used to send both whenever a
+  // key existed, so a Pushover user got every coaching message twice.
+  const viaPushover = !!settings[0].use_pushover && !!settings[0].pushover_user_key;
+  if (viaPushover) {
+    const token = Deno.env.get('PUSHOVER_TOKEN') ?? '';
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, user: settings[0].pushover_user_key, title, message }),
     });
     console.log(`[coaching-notify] pushover ${r.status}: ${await r.text()}`);
+  } else {
+    const base = Deno.env.get('SUPABASE_URL') ?? '';
+    await fetch(`${base}/functions/v1/web-push`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: recipientId, title, message }),
+    }).catch(e => console.error('[coaching-notify] web-push error:', e));
   }
-
-  // Web Push
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  await fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: recipientId, title, message }),
-  }).catch(e => console.error('[coaching-notify] web-push error:', e));
 
   return new Response(JSON.stringify({ sent: true }), {
     status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

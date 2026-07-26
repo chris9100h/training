@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="Zane" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<!-- React/ReactDOM/Babel (unpkg) and Font Awesome/html2canvas (cdnjs) — opens
+<!-- React/ReactDOM/Babel (unpkg) and Font Awesome/html2canvas (cdnjs), opens
      the connection while the HTML head is still parsing instead of waiting
      for the parser to reach each <script>/<link> tag below. -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin />
@@ -91,7 +91,7 @@
        fixed on paper's old off-white. A light flood on dark-mode's small
        axis labels reads as a glaring, illegible blob instead of a halo. */
     --chart-text-lift-color: #f9fafb;
-    /* Surface tints — cream-on-dark defaults; overridden in light mode */
+    /* Surface tints, cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
     --surface-tint-md:   rgba(236,228,208,0.04);
@@ -369,7 +369,7 @@
   }
 
   /* Same hell palette as hellGlow, but rendered as a soft radial smoulder that
-     fades to transparent before the edges — so it reads as fire glowing from
+     fades to transparent before the edges, so it reads as fire glowing from
      within a row rather than a printed-on box with an outline. Used behind the
      5/3/1 AMRAP top set once its ramp sets are logged. */
   @keyframes hellPulse {
@@ -409,7 +409,7 @@
   @media (prefers-reduced-motion: reduce) { .meso-ember { animation: none; opacity: var(--ember-op, 0.24); } }
 
   /* Drag-to-reorder (plan days · day exercises). Imperatively driven by
-     UI.useDragReorder — the ghost is a clone of the picked-up row that
+     UI.useDragReorder, the ghost is a clone of the picked-up row that
      tracks the finger, the drop-line marks where it will land. */
   body.reorder-dragging, body.reorder-dragging * { cursor: grabbing !important; }
   .reorder-source { opacity: 0.32 !important; transition: opacity .12s ease; }
@@ -431,7 +431,7 @@
     box-shadow: 0 0 8px rgba(var(--accent-rgb),0.6);
   }
 
-  /* Dumbbell knurling — diagonal hash marks like grip texture */
+  /* Dumbbell knurling, diagonal hash marks like grip texture */
   .knurl {
     height: 3px;
     flex-shrink: 0;
@@ -473,7 +473,7 @@
 </div>
 <script>
 
-// Known-benign global noise — never actionable here, and blocking the whole
+// Known-benign global noise, never actionable here, and blocking the whole
 // screen for it does real harm: browser extensions (crypto wallets like
 // Brave's own built-in wallet, translators, etc.) inject their own scripts
 // into every page and can throw on their own internal state, which
@@ -500,7 +500,7 @@ var earlyMountPoll = setInterval(function() {
 }, 500);
 
 // Shared by every path that shows this overlay (below, plus the "React did
-// not mount" and BOOT-failure fallbacks further down) — a stale/broken
+// not mount" and BOOT-failure fallbacks further down), a stale/broken
 // precompile cache is a common real cause, and "Dismiss" alone wouldn't fix
 // that, only hide the symptom.
 function makeClearCacheButton() {
@@ -510,7 +510,7 @@ function makeClearCacheButton() {
   btn.onclick = async function() {
     btn.textContent = 'Clearing…';
     if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
-    // Also nuke the IndexedDB precompile cache — a poisoned record there bricks
+    // Also nuke the IndexedDB precompile cache, a poisoned record there bricks
     // boot just as badly as a bad Cache Storage entry, and clearing only caches
     // would leave the app permanently broken with no recovery path.
     if ('indexedDB' in window) {
@@ -525,21 +525,21 @@ function makeClearCacheButton() {
     // file is an uncached network fetch), see that setTimeout for why.
     try { sessionStorage.setItem('zane-cold-boot', '1'); } catch (e) {}
     // reload(true)'s "force" argument is a removed, no-op legacy API in
-    // modern browsers — a plain reload here can still be served stale by
+    // modern browsers, a plain reload here can still be served stale by
     // the browser's own HTTP cache (a layer clearing CacheStorage/IndexedDB
     // never touches), via whichever service worker is still active. A
     // unique ?_v= query string guarantees no HTTP cache entry exists for
     // this exact URL, and sw.js's fetch handler already treats any ?_v=
     // request as always-network. Mirrors LB.clearCachesAndReload in
-    // store.js (this file can't call into LB — it runs before store.js loads).
+    // store.js (this file can't call into LB, it runs before store.js loads).
     window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
   };
   return btn;
 }
 
 // Shows the overlay with a "Clear cache & reload" button always available
-// (in case a stale/broken cache is the actual cause) and — only once the
-// app has actually mounted, so there's something usable to dismiss to — a
+// (in case a stale/broken cache is the actual cause) and, only once the
+// app has actually mounted, so there's something usable to dismiss to, a
 // lighter Dismiss button too.
 function showErrOverlay() {
   var d = document.getElementById('err');
@@ -560,7 +560,7 @@ function showErrOverlay() {
 window.onerror = function(msg, src, line, col, err) {
   if (typeof msg === 'string' && BENIGN_NOISE.test(msg)) return;
   // Cross-origin/extension-injected scripts report as a bare "Script error."
-  // with no location at all — the browser deliberately strips all detail for
+  // with no location at all, the browser deliberately strips all detail for
   // these, so it's never actionable and is most often a browser extension
   // throwing on its own injected script, not a bug in this app.
   if (msg === 'Script error.' && !src && !line) return;
@@ -572,7 +572,7 @@ window.onunhandledrejection = function(e) {
   showErrOverlay().textContent += '[PROMISE] ' + reason + '\n\n';
 };
 // Fallback: if React never mounts in time, show diagnostic info.
-// If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
+// If a new SW is waiting, auto-send SKIP_WAITING and reload, this breaks
 // the deadlock where a broken SW serves bad files and React never mounts,
 // which means the update banner never shows and the new SW never activates.
 // "Clear cache & reload" (this file's own button, and LB.clearCachesAndReload
@@ -586,7 +586,7 @@ var coldBoot = false;
 try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; sessionStorage.removeItem('zane-cold-boot'); } catch (e) {}
 setTimeout(async function() {
   if (document.getElementById('root').children.length) return;
-  // If a new SW is waiting, skip it immediately and reload — breaks the deadlock
+  // If a new SW is waiting, skip it immediately and reload, breaks the deadlock
   // where a broken SW serves bad files so React never mounts and the update
   // banner never appears.
   try {
@@ -983,7 +983,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 // iOS standalone PWA viewport guard.
 // Focusing a native input (e.g. the email/password fields on login, or an input
 // inside a bottom sheet) shrinks the visualViewport. WebKit can then leave our
-// position:fixed #root inset/shifted below the safe area — black bands top and
+// position:fixed #root inset/shifted below the safe area, black bands top and
 // bottom that persist after the keyboard closes (most visible after a
 // logout→login). When nothing is focused (keyboard closed) re-pin the page to
 // the top so #root snaps back to full-screen. Guarded so it never fights the
@@ -1001,12 +1001,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   window.addEventListener('focusout', function () { setTimeout(repin, 50); });
 })();
 </script>
-<!-- React 18 — production builds: ~10x smaller and faster to parse than the
+<!-- React 18, production builds: ~10x smaller and faster to parse than the
      development builds, with no dev-mode runtime overhead. -->
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-<!-- Plain JS (no JSX) — run directly, no transpile needed. -->
+<!-- Plain JS (no JSX), run directly, no transpile needed. -->
 <script src="src/supabase.js"></script>
 <script src="src/store.js"></script>
 <script src="src/whatsnew.js"></script>
@@ -1015,11 +1015,11 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 <script src="src/programs-db.js"></script>
 
 <!-- ────────────────────────────────────────────────────────────────────────
-     Precompile loader — boots the app without re-running Babel every start.
+     Precompile loader, boots the app without re-running Babel every start.
 
      The screens are authored in JSX. Previously every cold start downloaded
      Babel Standalone (~3 MB) and re-transpiled ~1.7 MB of JSX on the main
-     thread — several blocking seconds on a phone. Instead we transpile each
+     thread, several blocking seconds on a phone. Instead we transpile each
      file once, cache the resulting JS in IndexedDB keyed by a content hash,
      and on later starts execute the cached JS directly. Babel is fetched
      lazily and only when a file is new or changed (cache miss). On any
@@ -1029,7 +1029,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
      The `env` preset targets `{ esmodules: true }` (modern evergreen
      browsers) instead of the unset default (which downlevels all the way to
      ES5). Measured on the actual app sources, that's a ~5x drop in transpile
-     time — by far the biggest cost on a cache-miss boot — and is safe here
+     time, by far the biggest cost on a cache-miss boot, and is safe here
      because the app already requires IndexedDB + Service Worker + fetch, so
      nothing older ever runs it anyway.
 
@@ -1063,14 +1063,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   var BABEL_URL = 'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js';
   // Same classic-script scope as the legacy <script type="text/babel"> setup,
   // but env targets modern evergreen browsers instead of the (much slower)
-  // ES5-downleveling default — see comment above. Bump the suffix if these
+  // ES5-downleveling default, see comment above. Bump the suffix if these
   // options change so previously cached output is invalidated.
   var PRESETS = ['react', ['env', { targets: { esmodules: true } }]];
   var PRESET_TAG = 'react+env-esm.script.v2';
   var DB_NAME = 'zane-precompile';
   var STORE = 'modules';
 
-  // cyrb53 — fast non-crypto content hash. Invalidates cached output whenever a
+  // cyrb53, fast non-crypto content hash. Invalidates cached output whenever a
   // source file changes; no secure context or async crypto required.
   function hash(str) {
     var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -1200,7 +1200,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 
   function boot() {
     // Guard against rare environments where IndexedDB.open() hangs (some iOS
-    // PWA states) — after the timeout we just proceed cache-less via Babel.
+    // PWA states), after the timeout we just proceed cache-less via Babel.
     // openedDb is tracked separately from dbPromise's resolved value so it's
     // still reachable in the close() call below even down the fallback() path.
     var openedDb = null;
@@ -1211,7 +1211,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     var fetchAll = Promise.all(SOURCES.map(fetchTextRetry));
 
     // Speculative warmup: an empty (or unavailable) precompile cache means
-    // this is effectively a first boot — every file below will miss and need
+    // this is effectively a first boot, every file below will miss and need
     // Babel anyway, so start downloading it now, in parallel with the JSX
     // fetch, instead of only after fetchAll resolves and the per-file cache
     // lookups confirm the miss (saves a full network round-trip on the

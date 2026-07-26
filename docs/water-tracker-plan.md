@@ -1,6 +1,8 @@
 # Water Tracker Integration Plan (Wasser Tracker -> Zane)
 
-Status: PROPOSAL, awaiting user approval. Nothing implemented yet.
+Status: SHIPPED. Implemented in migrations 0180/0183 with its own screen
+(`src/screens-water.jsx`) and route. This file is the historical planning
+document, not the reference: see `docs/database.md` and the code.
 Research base: full read of the Wasser Tracker (standalone PWA) + 6-agent map of the training repo.
 
 ## The one key insight (integration contract)

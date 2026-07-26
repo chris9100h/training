@@ -490,13 +490,18 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (!await withinQuota(userId, 'search', DAILY_SEARCH_LIMIT)) {
+  const body = await req.json().catch(() => ({}));
+
+  // Only a real SEARCH counts against the daily search quota. Counting every
+  // action meant one logged food burned up to three units ('search', then
+  // 'select', then 'cache'), and the favorites cache repair burned one per
+  // unrepaired favorite on every mount, so the limit the user is told about
+  // ("400 food searches") was reached at a fraction of that.
+  if (body?.action === 'search' && !await withinQuota(userId, 'search', DAILY_SEARCH_LIMIT)) {
     return new Response(JSON.stringify({ error: `That is ${DAILY_SEARCH_LIMIT} food searches today, well past normal use. The limit resets tomorrow.` }), {
       status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
-  const body = await req.json().catch(() => ({}));
 
   if (body?.action === 'search') {
     const query = typeof body.query === 'string' ? body.query.trim() : '';

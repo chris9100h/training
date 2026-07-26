@@ -326,6 +326,15 @@ async function testAsync(name, fn) {
     const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new');
   });
+  // With a base, "not in base" already means never confirmed synced. Applying
+  // the 2-day recency rule on top of that deleted exactly the sessions that a
+  // longer offline stretch (or a sync wedged on an unrelated failing row) had
+  // been unable to push.
+  test('mergeSessions keeps a never-synced OLD session when a base exists', () => {
+    const sess = { id: 'oldlocal', date: '2026-05-01', ended: 'x', entries: [] };
+    const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
+    assert.strictEqual(sessions.map(s => s.id).join(','), 'oldlocal', 'never-synced workouts must not expire from the cache');
+  });
   test('mergeSessions does NOT resurrect a session deleted locally (in base, not in cur, still on server)', () => {
     const sess = { id: 'del', date: '2026-06-09', ended: 'x', entries: [] };
     // fresh still has it (sync delete not yet propagated), cur doesn't (user deleted it), base has it

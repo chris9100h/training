@@ -1,4 +1,4 @@
-/* App screens — Login, Home — Haute Horlogerie redesign
+/* App screens, Login, Home, Haute Horlogerie redesign
    Logic identical to original (Supabase auth, cycle/weekday modes,
    in-progress overlay, future-slot retroactive logging).
 */
@@ -18,13 +18,13 @@ function FitText({ text, max, min, style }) {
     let raf, lastW = -1;
     // Measure the text at max size and scale down to fit the parent's width.
     // `force` bypasses the width-equality guard (used when only the font, not
-    // the width, changed — e.g. after web fonts load).
+    // the width, changed, e.g. after web fonts load).
     const measure = (force) => {
       const parent = el.parentElement;
       if (!parent) return;
       const avail = parent.clientWidth;
-      if (avail <= 0) return;            // not laid out yet — observer re-fires later
-      if (!force && avail === lastW) return; // width unchanged — nothing to do
+      if (avail <= 0) return;            // not laid out yet, observer re-fires later
+      if (!force && avail === lastW) return; // width unchanged, nothing to do
       lastW = avail;
       el.style.fontSize = max + 'px';
       const natural = el.scrollWidth;
@@ -35,7 +35,7 @@ function FitText({ text, max, min, style }) {
     // notification). Coalesce bursts into one measure.
     const schedule = (force) => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => measure(force)); };
     schedule(true);
-    // Re-fit when web fonts load — the first measurement may run against the
+    // Re-fit when web fonts load, the first measurement may run against the
     // fallback font (different metrics), yielding a wrong size.
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedule(true));
     // Observe the parent so we re-fit when its width becomes known (covers
@@ -149,7 +149,6 @@ function LoginScreen() {
     setLoading(true); setError('');
     try {
       await LB.signUp(email.trim(), password, name.trim(), unit);
-      localStorage.setItem('logbook-unit-prompted', '1');
     } catch (e) {
       setError(UI.authErrorMessage(e, 'Registration failed'));
       setLoading(false);
@@ -205,7 +204,7 @@ function LoginScreen() {
           </div>
         )}
 
-        {/* Tab switcher — hidden in forgot mode */}
+        {/* Tab switcher, hidden in forgot mode */}
         {!isForgot ? (
           <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, flexShrink: 0 }}>
             {['login', 'register'].map(m => (
@@ -405,11 +404,11 @@ function SetPasswordScreen({ onDone, isRecovery }) {
       }
 
       if (email) {
-        // Re-authenticate with the new password — verifies it was saved correctly
+        // Re-authenticate with the new password, verifies it was saved correctly
         // and replaces the one-time invite session with a permanent one.
         // The SIGNED_IN event in app.jsx will then call loadData().
         const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email, password });
-        if (signInErr) throw new Error('Password saved but login failed — please try logging in manually.');
+        if (signInErr) throw new Error('Password saved but login failed, please try logging in manually.');
         // Don't call setLoading(false): phase will switch and unmount this screen
       } else {
         onDone();
@@ -578,7 +577,7 @@ function CardioPROverlay({ pr, onDone }) {
   const du = LB.cardioDistUnit();
   const isBest = pr.tier === 'best';
   // detectCardioPRs' pace is decimal minutes/km (not seconds/km, which is
-  // LB.fmtPace's contract) — kept local rather than forced into that shape.
+  // LB.fmtPace's contract), kept local rather than forced into that shape.
   const fmtPace = (minPerKm) => {
     const perUnit = du === 'mi' ? minPerKm * LB.MI_TO_M / 1000 : minPerKm;
     let mins = Math.floor(perUnit);
@@ -637,7 +636,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
 
   const todayStr = LB.todayISO();
   // Defaults to the day the caller has selected (e.g. the home strip's
-  // currently-browsed day), not always today — otherwise navigating back to
+  // currently-browsed day), not always today, otherwise navigating back to
   // log a missed day's cardio would silently save it under today's date.
   const empty = () => ({ date: logDate || todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const [form, setForm] = useState(empty);
@@ -843,7 +842,7 @@ function fmtCardioClock(sec) {
 }
 
 // Live cardio stopwatch. The start time lives in localStorage so the count
-// survives a phone lock, a reload, or navigating away — elapsed is always
+// survives a phone lock, a reload, or navigating away, elapsed is always
 // derived from (now − start), never an incrementing counter.
 function CardioLiveSheet({ open, onFinish, onCancel }) {
   const [now, setNow] = useState(Date.now());
@@ -1037,12 +1036,12 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 }
 
 // Given a 1-indexed cycle number, returns the start Date of that cycle for a
-// Moved to store.js as LB.getCycleStartForNum — kept as thin wrapper for the
+// Moved to store.js as LB.getCycleStartForNum, kept as thin wrapper for the
 // one caller below until we can update the call site.
 const getCycleStartForNum = LB.getCycleStartForNum;
 
 // Walk backward from yesterday looking for planned training days with no
-// logged session — shared core for HomeScreen's recentBannerDay (single
+// logged session, shared core for HomeScreen's recentBannerDay (single
 // most-recent candidate; any skip record at all excludes a day) and
 // allMissedDays (full list further back; a '—' "soft skip" placeholder still
 // counts as missed). isSkipped lets each caller apply its own inclusion rule.
@@ -1092,7 +1091,7 @@ function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStar
 
 // Pull-to-open-Quick-Actions affordance, shown right below the home header.
 // A bold, accent-colored chevron stays visible at rest (pullDelta === 0) so
-// the gesture is discoverable without ever pulling — a returning user
+// the gesture is discoverable without ever pulling, a returning user
 // reported never finding Quick Actions at all since this used to collapse
 // to zero height/opacity when idle. It's also directly tappable (not just
 // a hint), growing into the full "QUICK ACTIONS"/"RELEASE" label once the
@@ -1219,7 +1218,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
-  // Flex plans have no calendar week — the strip is the rotation itself, so the
+  // Flex plans have no calendar week, the strip is the rotation itself, so the
   // Mon–Sun cycle-week overlay never applies.
   const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
@@ -1271,7 +1270,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // For versioned cycle plans with cycleOffset, "today's array index" in the strip
   // differs from dayIdx (plan position). Extracted + unit-tested in store.js; the
   // clamp uses the day count of the version active on today's cycle (what the
-  // strip renders), not sch.days — which holds the newest version and can be a
+  // strip renders), not sch.days, which holds the newest version and can be a
   // future-scheduled one with a different day count (that mismatch used to put
   // today's marker on the wrong cell).
   const todayStripIdx = LB.todayCycleStripIndex(sch, LB.todayISO(), dayIdx);
@@ -1293,7 +1292,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [cardioFinishOpen, setCardioFinishOpen] = useState(false);
   const [cardioFinishDuration, setCardioFinishDuration] = useState(null);
   const isPad = useIsPad();
-  // The not-logged Log handler awaits a seed fetch — guard against a double
+  // The not-logged Log handler awaits a seed fetch, guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
@@ -1302,7 +1301,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
   const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
-  const [realignSheet, setRealignSheet] = useState(null); // { scr, days } — "resume plan on which day?" after ending a break
+  const [realignSheet, setRealignSheet] = useState(null); // { scr, days }, "resume plan on which day?" after ending a break
   const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
   const [templatePreview, setTemplatePreview] = useState(null); // workoutTemplates row being previewed before start
   const [dayPreview, setDayPreview] = useState(null); // plan day being previewed before a bonus-session start
@@ -1594,7 +1593,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store.sessions]);
 
   const doneSession = useMemo(() => {
-    // Flex slots carry no calendar date — a past rotation slot maps back to the
+    // Flex slots carry no calendar date, a past rotation slot maps back to the
     // most recent session logged for that day so "going back" shows the workout.
     if (isFlex) {
       if (selectedSlot >= dayIdx || !activeDay?.id) return null;
@@ -1760,7 +1759,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const isSlotDone = useMemo(() => {
     if (isActiveRest) return false;
     // Flex: the next-up day is never "done", but earlier slots in the current
-    // rotation pass are — show their completed session when scrolling back.
+    // rotation pass are, show their completed session when scrolling back.
     if (isFlex) return selectedSlot < dayIdx && !!doneSession;
     if (weekdayMode) {
       const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
@@ -1807,7 +1806,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
   const handleClearStatus = () => {
-    // "Back to normal" is the primary way a break ends — offer to realign the
+    // "Back to normal" is the primary way a break ends, offer to realign the
     // cycle plan right here (maybeOfferRealign is defined below and resolved at
     // click time). handleSetStatus(null) carries the same hook for the
     // status-picker path.
@@ -1816,7 +1815,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (wasBreak) maybeOfferRealign();
   };
 
-  // After training while Sick mode is on, offer to end it — catches the common
+  // After training while Sick mode is on, offer to end it, catches the common
   // "forgot to toggle it off" case. Covers both strength and cardio sessions,
   // sick only (training on vacation is normal). Asks at most once per day,
   // whichever way the user answers.
@@ -1843,7 +1842,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   // Eagerly create the meso state as soon as a plan with mesocycle_weeks is
   // detected but has no corresponding state yet. This ensures the pending chip
-  // appears immediately after enabling meso — not only after the first training
+  // appears immediately after enabling meso, not only after the first training
   // session opens. The useEffectT in screens-train still handles the live
   // training case and re-creates if the week count changes.
   useEffect(() => {
@@ -1853,19 +1852,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // functional setStore updater) instead of the `sch`/`store` closed over
     // above. A plan edit that both changes the day structure (new version +
     // cycleOffset) AND flips mesocycle_weeks on commits via two back-to-back
-    // setStore calls in doSave() — aligning against the closure risks reading
+    // setStore calls in doSave(), aligning against the closure risks reading
     // a schedule snapshot that predates one of those commits, which silently
     // drops the cycleOffset and computes "today" instead of the true next D1.
     setStore(s => {
       const freshSch = s.schedules.find(x => x.id === schId);
       if (!LB.mesoActive(freshSch)) return s;
       const existing = (s.mesoStates || []).find(m => m.scheduleId === schId);
-      // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+      // Unbounded (autoregulate-only) plans have no mesocycle_weeks, normalize
       // through ?? null so this matches a persisted mesoState's null weeks (else
       // undefined === null is false and this guard would wipe+recreate the meso
       // on every run; mirrors the identical fix in screens-train.jsx).
       const targetWeeks = freshSch.mesocycle_weeks ?? null;
-      // Keep existing meso only if weeks match the current config — mirrors the
+      // Keep existing meso only if weeks match the current config, mirrors the
       // recreate guard in screens-train.jsx's session auto-start effect, so a
       // changed week count (or bounded ↔ unbounded) always starts fresh
       // regardless of which effect runs first.
@@ -1995,7 +1994,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const scheduleId = sch.id;
       const nextNum = (mesoSt.completions ?? 0) + 1; // the block being offered
       const wantMeso2 = await confirm(
-        `Your deload is done — nice recovery! Ready to kick off Meso ${nextNum}? Your earned weight boosts carry over and set counts reset to baseline.`,
+        `Your deload is done, nice recovery! Ready to kick off Meso ${nextNum}? Your earned weight boosts carry over and set counts reset to baseline.`,
         { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
       );
       if (wantMeso2) {
@@ -2083,7 +2082,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (deloadNudgeShown.current) return;
     if (store?.statusMode || store?.inProgress) return;
     if (!sch) return;
-    // A mesocycle is never interrupted by a deload — the deload comes AFTER the
+    // A mesocycle is never interrupted by a deload, the deload comes AFTER the
     // meso finishes (handleMesoComplete). While a meso is active on this plan,
     // suppress the generic 8-week auto-deload nudge so it can't fire mid-meso.
     if (sch.mesocycle_weeks) return;
@@ -2098,7 +2097,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     let shouldPrompt = false;
     let deloadCycleInfo = null; // { cyclePos, cycleLen } for next-cycle-start alignment
     let title = '8 cycles done! 🎉';
-    let body = "You've completed 8 full training cycles — that's serious dedication. A deload week now means you come back stronger. Want to start one?";
+    let body = "You've completed 8 full training cycles, that's serious dedication. A deload week now means you come back stronger. Want to start one?";
 
     if (LB.isFlexPlan(sch)) {
       const anchorTS = store?.deloadPromptDismissedAt ? new Date(store.deloadPromptDismissedAt) : new Date(0);
@@ -2110,7 +2109,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (count > 0 && count % goal === 0) {
         shouldPrompt = true;
         title = `${goal} sessions done! 🎉`;
-        body = `You've logged ${goal} training sessions — solid work. A deload week now means you come back stronger. Want to start one?`;
+        body = `You've logged ${goal} training sessions, solid work. A deload week now means you come back stronger. Want to start one?`;
       }
     } else if (LB.isWeekdayPlan(sch)) {
       const firstSession = (store?.sessions || []).filter(s => s.ended && s.date).map(s => s.date.slice(0, 10)).sort()[0] || null;
@@ -2126,7 +2125,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           if (lastWd >= 0 && LB.isoWd(todayD) === lastWd) {
             shouldPrompt = true;
             title = '8 weeks done! 🎉';
-            body = "You've completed 8 solid weeks of training — impressive consistency. A deload week now means you'll come back even stronger. Want to start one?";
+            body = "You've completed 8 solid weeks of training, impressive consistency. A deload week now means you'll come back even stronger. Want to start one?";
           }
         }
       }
@@ -2221,18 +2220,18 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // NOT pause during vacation/sick (unlike the meso week counter, which excludes
   // paused days), so coming back the rotation has drifted from where you left
   // off. When you END a vacation/sick period we ALWAYS open a small day-picker
-  // ("resume on which day?") right there — the natural moment, no passive
+  // ("resume on which day?") right there, the natural moment, no passive
   // polling. No drift check: even when nothing drifted, plenty of people like to
   // restart a rotation from day 1 after time off, so we just let them choose.
   // Tapping a day re-bases today onto it via LB.realignCycleForToday, which adds
   // a new plan version effective today (same "start at day K from this date"
-  // calculation as versioning a plan) — so the cycle NUMBER continues instead of
+  // calculation as versioning a plan), so the cycle NUMBER continues instead of
   // resetting to 1, and past dates keep their old rotation. Flex advances on
   // action (never drifts) and weekday plans are pinned to real weekdays, so both
   // are skipped.
   const resyncTodayAfterRealign = useRef(false);
   // A realign replaces the active schedule object (new versions[]), so `sch`
-  // changes reference and todayStripIdx recomputes — pull the selected slot back
+  // changes reference and todayStripIdx recomputes, pull the selected slot back
   // onto the corrected today so the card doesn't get stuck on "DAY X".
   useEffect(() => {
     if (!resyncTodayAfterRealign.current) return;
@@ -2248,12 +2247,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (LB.isFlexPlan(scr) || LB.isWeekdayPlan(scr)) return;
     const days = LB.getPlanDaysForDate(scr, LB.todayISO());
     if (!days.length) return;
-    // Always open the picker — the user decides which day to resume on (incl.
+    // Always open the picker, the user decides which day to resume on (incl.
     // starting over at day 1), even if the rotation didn't actually drift.
     setRealignSheet({ scr, days });
   };
 
-  // Tapping a day in the realign picker re-anchors today onto that day —
+  // Tapping a day in the realign picker re-anchors today onto that day,
   // cycleStartDate for unversioned plans, the active version's cycleOffset for
   // versioned ones (both handled by LB.realignCycleForToday).
   const applyRealign = (targetIdx) => {
@@ -2297,7 +2296,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const [first] = findMissedTrainingDays(sch, {
       weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
       sessions: store.sessions, skipsMap, maxDaysAgo: 30,
-      isSkipped: sk => !!sk, // any skip record at all — already actioned, edit via calendar card
+      isSkipped: sk => !!sk, // any skip record at all, already actioned, edit via calendar card
       statusModeFor: statusPeriodModeFor,
     });
     return first || null;
@@ -2345,15 +2344,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
 
   // Seeded, meso-adjusted, server-history-merged entries for a set of plan
-  // items — the one seeding pipeline every session-start path (normal,
+  // items, the one seeding pipeline every session-start path (normal,
   // bonus, backlog, recent-banner "Log", not-logged-modal "Log session")
   // shares, so none of them can silently diverge from the others (a missed
   // meso adjustment, or progression math that drifts out of sync).
   const buildSessionEntries = async (items, dayId) => {
-    // Seeds/progression consume the recent history synchronously — when an
+    // Seeds/progression consume the recent history synchronously, when an
     // exercise's last sessions are outside the boot window, fetch them from
     // the server first (fetchSeedEntries resolves instantly when the local
-    // window suffices, and never rejects — offline falls back to local data).
+    // window suffices, and never rejects, offline falls back to local data).
     const seedRefs = await LB.fetchSeedEntries(store, items, dayId, userId);
     // Resolve meso state once (it internally reads localStorage) instead of
     // once per item below.
@@ -2420,7 +2419,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       // Load-only autoregulate plans never apply set deltas (weight is tuned,
-      // set count stays authored) — this also neutralizes any deltas left over
+      // set count stays authored), this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
       const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       // A declined boost is withheld exactly like an un-earned one (falls through
@@ -2448,7 +2447,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const startSession = async () => {
     if (!activeDay || isActiveRest) return;
-    // buildSessionEntries awaits a seed fetch — guard against a double tap
+    // buildSessionEntries awaits a seed fetch, guard against a double tap
     // creating two sessions inside that window (same as the backlog/bonus starts).
     if (loggingRef.current) return;
     loggingRef.current = true;
@@ -2463,7 +2462,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // for a cycle/weekday plan a FUTURE slot (training ahead of schedule) also
     // dates to today. Only a past slot (backfilling a missed day) keeps its own
     // date. Without this, starting a forward slot stamped the session with the
-    // slot's future date — see Mike's "trained Jul 9" ticket.
+    // slot's future date, see Mike's "trained Jul 9" ticket.
     const sessionDateISO = (isFlex || isFutureSlot) ? LB.todayISO() : LB.fmtISO(sessionDate);
     loggingRef.current = false;
     // No warmup ramp for bodyweight (no meaningful load to ramp), cardio (not
@@ -2485,7 +2484,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     });
   };
 
-  // Flex: skip the current next-up day — advance the rotation by one without
+  // Flex: skip the current next-up day, advance the rotation by one without
   // logging anything (no dated skip row; flex has no calendar to mark).
   const flexSkip = () => {
     if (!dayCount) return;
@@ -2495,7 +2494,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   // Shared by every session-start path: the ones with a weighted first
   // exercise route through here (via setWarmupPromptData) instead of each
-  // reimplementing the warmup ramp — previously bonus/backlog/catch-up
+  // reimplementing the warmup ramp, previously bonus/backlog/catch-up
   // session starts each skipped this prompt entirely, so those sessions
   // never got the 30/60/100% warmup ramp a normal session gets.
   const confirmStart = (withWarmup) => {
@@ -2551,7 +2550,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   };
   const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
   // Pointer-event equivalents for mouse/trackpad (desktop + iPad with Magic Keyboard).
-  // Skip touch pointers — those are already handled by the Touch events above.
+  // Skip touch pointers, those are already handled by the Touch events above.
   const onPointerDownPull = (e) => {
     if (e.pointerType === 'touch' || quickActionsOpen) return;
     swipeRef.current = { y: e.clientY, x: e.clientX };
@@ -2620,13 +2619,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     } catch (e) {
       console.error('status period write failed', e);
       setStore(s => ({ ...s, ...prevStatus }));
-      alert('Could not update your status. Please try again.');
+      UI.alert('Could not update your status. Please try again.');
       return;
     }
     if (coachingId && modeChanged) {
       try {
-        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
-                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+        const body = mode === 'sick'     ? 'Status: Sick, taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation, back soon!'
                    : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
         await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
@@ -2785,14 +2784,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
+      {/* Background watermark, VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
           ? { width: '92%', maxWidth: 360, opacity: watermarkOpacity, objectFit: 'contain' }
           : defaultLogoStyle} />
       </div>
 
-      {/* No-plan fallback — rendered inline so all sheets below stay mounted */}
+      {/* No-plan fallback, rendered inline so all sheets below stay mounted */}
       {!sch && (
         <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <TopBar
@@ -2805,13 +2804,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
           <div style={{ padding: 22 }}>
             {hasPlans
-              ? <Empty title="No active plan" sub="You have plans ready — just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
+              ? <Empty title="No active plan" sub="You have plans ready, just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
               : <Empty title="No plan yet" sub="Create a training plan to get started." action={<Btn onClick={() => go({ name: 'plan', openNewPlan: true })}>Create plan</Btn>} icon={ICON_CALENDAR} />}
           </div>
         </div>
       )}
 
-      {/* Plan content — header + body, only when a plan is active */}
+      {/* Plan content, header + body, only when a plan is active */}
       {sch && <>
       <div style={{
         flexShrink: 0,
@@ -2832,7 +2831,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <i
                   className="fa-solid fa-dumbbell"
                   onClick={isProblem ? onRetrySync : undefined}
-                  title={isProblem ? 'Not synced — tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                  title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
                   style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
                 />
               );
@@ -2866,7 +2865,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
-      {/* Pull-down indicator — right below plan header */}
+      {/* Pull-down indicator, right below plan header */}
       <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
 
       {/* In-progress banner */}
@@ -2886,7 +2885,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               {activeSession.dayName}
             </span>
             <button onClick={async () => {
-              // Capture the id before awaiting — a cross-device sync could swap
+              // Capture the id before awaiting, a cross-device sync could swap
               // the in-progress session while the confirm dialog is open.
               const cancelId = store.inProgress;
               if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
@@ -2909,7 +2908,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1 }}>
 
-        {/* Period navigation — flex has no calendar weeks, just a static label */}
+        {/* Period navigation, flex has no calendar weeks, just a static label */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           {!isFlex && (
             <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
@@ -2925,7 +2924,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
             {sch.mesocycle_weeks ? (() => {
-              // A deload following the meso is a recovery week — show DELOAD, not
+              // A deload following the meso is a recovery week, show DELOAD, not
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
@@ -2942,7 +2941,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const mesoLabel = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
               const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
               if (week == null) {
-                // Pending — meso hasn't started yet; show start date if known
+                // Pending, meso hasn't started yet; show start date if known
                 const startLabel = m?.startDate
                   ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                   : 'D1';
@@ -2952,7 +2951,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   </span>
                 );
               }
-              // RIR taper can be off per plan — then show just the week counter,
+              // RIR taper can be off per plan, then show just the week counter,
               // no RIR suffix.
               const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
@@ -3101,7 +3100,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           })}
         </div>
 
-        {/* cycle week view — indicator bar showing cycle boundaries */}
+        {/* cycle week view, indicator bar showing cycle boundaries */}
         {cycleBarSegments && (
           <div style={{ flexShrink: 0, display: 'flex', gap: 4, marginTop: -4 }}>
             {cycleBarSegments.map((seg, i) => {
@@ -3130,7 +3129,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           </div>
         )}
 
-        {/* day card — flex:1 so it fills */}
+        {/* day card, flex:1 so it fills */}
         {isActiveRest ? ((activeDay && activeDay.name !== 'REST' && !selectedDayStatusMode) ? (
           // A named training day with no exercises is not a real rest day, it is
           // just unbuilt. Showing "RECOVER." here is the top source of confusion
@@ -3222,7 +3221,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               </div>
             )}
 
-            {/* CTAs — above exercise list so the action is always immediately visible */}
+            {/* CTAs, above exercise list so the action is always immediately visible */}
             {isSlotDone ? (
               <Frame
                 onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
@@ -3356,7 +3355,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
       )}
 
-      {/* Cardio plan widget — targets for the selected day in the strip */}
+      {/* Cardio plan widget, targets for the selected day in the strip */}
       {window.Screens?.TodayCardioWidget && (
         <window.Screens.TodayCardioWidget
           store={store}
@@ -3475,7 +3474,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {confirmEl}
       </>}{/* end {sch && ...} plan content */}
 
-      {/* Quick actions sheet — triggered by swipe-down */}
+      {/* Quick actions sheet, triggered by swipe-down */}
       <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions" titleColor="var(--accent)">
         {(() => {
           const actionBtn = (onClick, icon, label, sub) => (
@@ -3498,7 +3497,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           return (
             <div>
               {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'fa-calendar-day', 'Daily Log', 'Weight, macros, water & steps')}
-              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'fa-dumbbell', 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
+              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'fa-dumbbell', 'Workout', sch ? 'From plan or freestyle' : 'Open training, add exercises on the fly')}
               {allMissedDays.length > 0 && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
@@ -3603,7 +3602,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             }}>
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
-                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule — you choose at the end whether it counts</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule, you choose at the end whether it counts</div>
               </div>
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
             </button>
@@ -3615,7 +3614,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — empty or from a template</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session, empty or from a template</div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
           </button>
@@ -3632,7 +3631,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Empty session</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Start blank — add exercises on the fly</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Start blank, add exercises on the fly</div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
           </button>
@@ -3669,7 +3668,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
       </Sheet>
 
-      {/* Bonus day picker — training days from the active schedule */}
+      {/* Bonus day picker, training days from the active schedule */}
       <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
           You choose at the end whether this replaces a scheduled day or counts as extra.

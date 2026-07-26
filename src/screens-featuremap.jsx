@@ -259,7 +259,7 @@ function FeatureMapScreen({ store, go }) {
       if (error) throw error;
       setOv(m => ({ ...m, [card_id]: row }));
       return true;
-    } catch (e) { alert('Could not save: ' + (e.message || 'unknown error')); return false; }
+    } catch (e) { UI.alert('Could not save: ' + (e.message || 'unknown error')); return false; }
     finally { setBusy(false); }
   };
   const removeOverride = async (card_id) => {
@@ -270,7 +270,7 @@ function FeatureMapScreen({ store, go }) {
       if (error) throw error;
       setOv(m => { const n = { ...m }; delete n[card_id]; return n; });
       return true;
-    } catch (e) { alert('Could not save: ' + (e.message || 'unknown error')); return false; }
+    } catch (e) { UI.alert('Could not save: ' + (e.message || 'unknown error')); return false; }
     finally { setBusy(false); }
   };
 
@@ -316,7 +316,7 @@ function FeatureMapScreen({ store, go }) {
       if (upserts.length) { const { error } = await LB.supabase.from('zane_feature_map').upsert(upserts, { onConflict: 'card_id' }); if (error) throw error; }
       if (deletes.length) { const { error } = await LB.supabase.from('zane_feature_map').delete().in('card_id', deletes); if (error) throw error; }
       setOv(next);
-    } catch (e) { alert('Could not save the new order: ' + (e.message || 'unknown error')); }
+    } catch (e) { UI.alert('Could not save the new order: ' + (e.message || 'unknown error')); }
     finally { setBusy(false); }
   };
 
@@ -355,7 +355,7 @@ function FeatureMapScreen({ store, go }) {
       if (error) throw error;
       setPub({ ...ov }); // published now mirrors the draft -> zero unpublished changes
       setPubSheet(false);
-    } catch (e) { alert('Could not publish: ' + (e.message || 'unknown error')); }
+    } catch (e) { UI.alert('Could not publish: ' + (e.message || 'unknown error')); }
     finally { setBusy(false); }
   };
   // Reset the whole draft back to the published state.
@@ -366,7 +366,7 @@ function FeatureMapScreen({ store, go }) {
       if (error) throw error;
       setOv({ ...pub }); // draft resets to published
       setPubSheet(false);
-    } catch (e) { alert('Could not discard: ' + (e.message || 'unknown error')); }
+    } catch (e) { UI.alert('Could not discard: ' + (e.message || 'unknown error')); }
     finally { setBusy(false); }
   };
   // Revert one card's content + hidden to the published state (keeps its order;

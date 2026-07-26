@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+  const token = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 
   let {
     message = 'Rest over — keep going! 💪',

@@ -1,4 +1,4 @@
-/* Logbook store — Supabase backend */
+/* Logbook store, Supabase backend */
 
 const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
@@ -67,6 +67,25 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, 
 // denials, constraint violations all come back as a resolved { error }), so
 // without this a failed write looks identical to success. Wrapping every
 // write that feeds the sync diff is what makes flushSync's retry path real.
+// zane_food_logs carries two real FKs: food_id into the shared zane_foods
+// cache (written fire-and-forget by an edge function) and recipe_id into
+// zane_food_recipes. A single row whose parent never landed fails the whole
+// upsert with 23503, and since the flush is one Promise.all over every table,
+// that one row takes sessions, sets and health down with it on every retry,
+// forever, with no repair path. Both ids are advisory: every macro is
+// denormalized onto the row itself. So on 23503 retry without them rather
+// than letting one dangling reference wedge the entire sync loop.
+// Returns the same { data, error } shape the builder does, so unwrap() still
+// decides success or failure.
+async function foodLogUpsertWithFkFallback(rows) {
+  const res = await _supabase.from('zane_food_logs').upsert(rows);
+  if (!res?.error || res.error.code !== '23503') return res;
+  const noFood = rows.map(r => ({ ...r, food_id: null }));
+  const retry = await _supabase.from('zane_food_logs').upsert(noFood);
+  if (!retry?.error || retry.error.code !== '23503') return retry;
+  return await _supabase.from('zane_food_logs').upsert(noFood.map(r => ({ ...r, recipe_id: null })));
+}
+
 async function unwrap(builder) {
   const res = await builder;
   if (res && res.error) {
@@ -76,7 +95,7 @@ async function unwrap(builder) {
 }
 
 // POST to an edge function authenticated as the signed-in user. The functions
-// reject the bare anon key (security hardening) — identity and push target are
+// reject the bare anon key (security hardening), identity and push target are
 // derived server-side from the caller's JWT. Never rejects; resolves with the
 // Response, or null when there is no session / the request failed.
 async function fnFetch(url, body) {
@@ -93,7 +112,7 @@ async function fnFetch(url, body) {
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
-// Local calendar date as YYYY-MM-DD. Never use toISOString() here — that
+// Local calendar date as YYYY-MM-DD. Never use toISOString() here, that
 // returns the UTC date, which is yesterday between midnight and UTC-offset
 // o'clock (and tomorrow in negative-offset timezones from the evening on).
 function todayISO() {
@@ -254,8 +273,14 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_cardio_plans').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_schedule_backups').delete().eq('user_id', userId)),
   ];
+  // zane_recipe_shares has RLS with no policies, so it is only reachable
+  // through an RPC. Without this, every old ?share=<token> link kept serving
+  // the recipe snapshot (and the sharer's display name) after a full account
+  // wipe. Same carve-out as push subscriptions: a RESTORE reuses this function
+  // and must not kill links the user already handed out.
+  if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_my_recipe_shares')));
   // Push subscriptions are device-scoped and are never re-uploaded by
-  // importFromBackup, so a restore (which reuses this fn) must NOT drop them —
+  // importFromBackup, so a restore (which reuses this fn) must NOT drop them,
   // that would silently unsubscribe the device from Web Push. Only the
   // explicit "delete all data" flow wipes them.
   if (!keepPush) {
@@ -294,22 +319,55 @@ function validateBackup(b) {
 // so they inherit the same offline-resilient retry/cache path as sessions. UI
 // mutates store.skips via setStore; no imperative per-skip writes.
 
+// settings.unit has three values, but only two weight axes: 'mixed' is
+// kg weight plus mi distance, so on the WEIGHT side it is plain kg (see
+// window.__UNIT in app.jsx). Anything deciding whether weights need
+// converting must compare axes, never the raw setting, or a 'mixed' user
+// restoring a kg backup gets every weight multiplied by 2.20462.
+function weightAxisUnit(u) { return u === 'lbs' ? 'lbs' : 'kg'; }
+
 async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
-  // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs' } | null
-  // Validate before the destructive delete — never half-apply a bad file.
+  // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs'|'mixed' } | null
+  // Validate before the destructive delete, never half-apply a bad file.
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
 
   const sett = backup.settings ?? {};
+  // Every stored weight has to move with the unit, not just sets[].kg: a
+  // half-converted restore leaves increments, training maxes and the body
+  // weight history reading as the OLD unit while the sets read as the new one.
+  const convKg = unitConvert
+    ? v => (typeof v === 'number' && isFinite(v) ? Math.round(v * unitConvert.multiplier * 100) / 100 : v)
+    : v => v;
+  // { equipment: { increment, maxKg } } plus the plateInventoryKg /
+  // plateInventoryLbs arrays, which are already unit-specific by key and must
+  // NOT be scaled.
+  const convEquipmentConfig = cfg => {
+    if (!unitConvert || !cfg || typeof cfg !== 'object') return cfg ?? null;
+    const out = {};
+    for (const k in cfg) {
+      const v = cfg[k];
+      if (!v || typeof v !== 'object' || Array.isArray(v)) { out[k] = v; continue; }
+      out[k] = { ...v, ...(v.increment != null ? { increment: convKg(v.increment) } : {}), ...(v.maxKg != null ? { maxKg: convKg(v.maxKg) } : {}) };
+    }
+    return out;
+  };
+  // meso weight boosts/declines are { exId_dayId: kgDelta } maps.
+  const convKgMap = obj => {
+    if (!unitConvert || !obj || typeof obj !== 'object') return obj;
+    const out = {};
+    for (const k in obj) out[k] = convKg(obj[k]);
+    return out;
+  };
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
 
   const idRemap = {};
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), user_id: userId };
   });
-  // Exercises got fresh ids above — everything that references an exId must be
+  // Exercises got fresh ids above, everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
   // { exId: v } maps; remapExDayKeyed: { exId_dayId: v } maps (uid() has no '_',
   // so the first underscore splits exId from the dayId suffix, kept verbatim).
@@ -362,11 +420,11 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     tempo_concentric: sett.tempoConcentric ?? null,
     smart_progression: sett.smartProgression ?? false,
     progression_range_top: sett.progressionRangeTop ?? null,
-    equipment_config: sett.equipmentConfig ?? null,
+    equipment_config: convEquipmentConfig(sett.equipmentConfig),
     weight_fill_down: sett.weightFillDown ?? true,
     net_carbs: sett.netCarbs ?? false,
     plan_mode: sett.planMode ?? false,
-    show_warmup_in_summary: sett.showWarmupInSummary ?? false,
+    show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
@@ -468,6 +526,21 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         const pd = { ...s.program_data };
         if (pd.mainLifts) pd.mainLifts = remapExKeyed(pd.mainLifts);
         if (pd.tmHistory) pd.tmHistory = remapExKeyed(pd.tmHistory);
+        // Training maxes are stored weights: without this a converted restore
+        // keeps computing every 5/3/1 working set off the old unit's TM.
+        if (unitConvert) {
+          if (pd.mainLifts) {
+            const ml = {};
+            for (const k in pd.mainLifts) { const l = pd.mainLifts[k]; ml[k] = (l && typeof l === 'object') ? { ...l, tm: convKg(l.tm) } : l; }
+            pd.mainLifts = ml;
+          }
+          if (pd.tmHistory) {
+            const th = {};
+            for (const k in pd.tmHistory) { const h = pd.tmHistory[k]; th[k] = Array.isArray(h) ? h.map(x => (x && typeof x === 'object') ? { ...x, tm: convKg(x.tm) } : x) : h; }
+            pd.tmHistory = th;
+          }
+          if (pd.unit) pd.unit = unitConvert.targetUnit === 'lbs' ? 'lbs' : 'kg';
+        }
         delete pd.bumpedCycle;
         return { program_data: pd };
       })() : {}),
@@ -489,9 +562,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) {
     try {
-      const convertKg = unitConvert
-        ? kg => kg != null ? Math.round(kg * unitConvert.multiplier * 100) / 100 : null
-        : kg => kg;
+      const convertKg = kg => (kg != null ? convKg(kg) : null);
       const sessionsForEntries = importSessions.map(s => ({
         ...s,
         entries: (s.entries || []).map(e => ({
@@ -534,7 +605,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_daily_logs').upsert(
       backup.dailyLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date,
-        weight: l.weight ?? null, steps: l.steps ?? null,
+        weight: convKg(l.weight ?? null), steps: l.steps ?? null,
         calories: l.calories ?? null, protein: l.protein ?? null,
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
@@ -693,7 +764,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   }
   if (backup.mesoStates?.length) {
     prog('Uploading mesocycle states…');
-    // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
+    // id is deterministic (userId + '_' + scheduleId), regenerate for this user.
     // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
     // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts/affinity: exId)
     // must be remapped onto the fresh exercise ids or they dangle.
@@ -702,8 +773,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
         weeks: m.weeks, start_date: m.startDate ?? null,
         start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
-        deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
-        weight_boost_declines: remapExDayKeyed(m.weightBoostDeclines),
+        deltas: remapExDayKeyed(m.deltas), weight_boosts: convKgMap(remapExDayKeyed(m.weightBoosts)),
+        weight_boost_declines: convKgMap(remapExDayKeyed(m.weightBoostDeclines)),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         affinity: remapExKeyed(m.affinity),
@@ -733,6 +804,13 @@ async function exportBackup(store, userId) {
 
   const fetches = [
     _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx'),
+    // store.foodLogs is windowed to FOOD_HISTORY_WINDOW_DAYS at boot, but the
+    // import deletes EVERY zane_food_logs row before restoring. Passing the
+    // windowed collection through would silently drop every food log older
+    // than the window on the next restore, so refetch the full history here
+    // (same reasoning as the session entries above).
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+      .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -743,11 +821,12 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
-  // Import is delete-then-restore — a silent partial fetch would produce an
+  // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
   if (entriesRes.error) throw entriesRes.error;
+  if (foodLogsRes.error) throw foodLogsRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -768,6 +847,8 @@ async function exportBackup(store, userId) {
       ...s,
       entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
     })),
+    // Full history, not the boot window that sits in store.foodLogs.
+    foodLogs: (foodLogsRes.data || []).map(mapFoodLogRow),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
       notes: notesRes?.data || [],
@@ -903,7 +984,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
-    // date list) — the legacy entries JSONB is no longer selected.
+    // date list), the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
@@ -921,7 +1002,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // outside the boot window. Passing p_user_id covers coach loads too.
     _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
     _supabase.rpc('get_session_stats', { p_user_id: userId }),
-    // Coaching data — only for own store load, not when a coach loads a client
+    // Coaching data, only for own store load, not when a coach loads a client
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
@@ -929,23 +1010,23 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .is('read_at', null)
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
-    // Real coaching row (for check-in requests) — exclude self-coaching and support rows.
+    // Real coaching row (for check-in requests), exclude self-coaching and support rows.
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
-    // Cardio quick-logs — all records for the user (typically < a few hundred rows)
+    // Cardio quick-logs, all records for the user (typically < a few hundred rows)
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
-    // Cardio training plans — manual weekly targets or progressive goal plans
+    // Cardio training plans, manual weekly targets or progressive goal plans
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    // Daily health logs (weight / steps / macros / water) — one row per day,
+    // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
-    // Sick/vacation history periods — used for missed-workout stats and training adherence.
+    // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
-    // Support tickets — user's own ticket list, newest activity first
+    // Support tickets, user's own ticket list, newest activity first
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
-    // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
+    // Blood glucose readings, multiple per day, value always in mmol/L (migration 0101)
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Blood pressure readings: multiple per day, systolic/diastolic in mmHg (migration 0173)
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -953,7 +1034,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
+    // Mesocycle state per plan, replaces localStorage logbook-meso-state (migration 0120)
     _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
@@ -996,17 +1077,17 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes] = await Promise.all(queries);
 
-  // A failed request (offline, RLS, server error) also yields no data — bail
+  // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
   // new user and re-seeding starter data over an existing account.
   if (profileRes.error) throw profileRes.error;
   // Same for sessions/entries: a silent partial failure would look like an
   // empty history and make the reload merge delete cached sessions (or boot a
-  // windowed session list without its sets). Fail loudly instead — the
+  // windowed session list without its sets). Fail loudly instead, the
   // background refresh keeps the cache, the first load shows the retry screen.
   if (sessRes.error) throw sessRes.error;
   if (entriesRes.error) throw entriesRes.error;
-  // Settings feed the orphan-cleanup (in_progress_session_id) — a silent failure
+  // Settings feed the orphan-cleanup (in_progress_session_id), a silent failure
   // leaves sett={} and would delete the active in-progress session. Fail loudly.
   if (settRes.error) throw settRes.error;
   // Collection queries feed the store and the cache-first boot merge / sync diff.
@@ -1027,7 +1108,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   if (waterLogsRes.error) throw waterLogsRes.error;
   if (foodLogsRes.error) throw foodLogsRes.error;
-  // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
+  // Coaching queries are null on coach loads (skipped), guard with optional chaining.
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
   if (unreadNotesRes?.error) throw unreadNotesRes.error;
@@ -1039,10 +1120,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
-  // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
+  // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
   // on these or such a user can't boot; degrade the banner instead.
 
-  // First login after email confirmation — profile not yet created (skip for coach loads)
+  // First login after email confirmation, profile not yet created (skip for coach loads)
   if (!profileRes.data && !isCoachLoad) {
     // guard against infinite recursion if setupNewUser silently fails (e.g. RLS)
     if (_depth > 0) throw new Error('User profile setup failed');
@@ -1052,7 +1133,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     try {
       await setupNewUser(userId, name, unit);
     } catch (setupErr) {
-      // Profile creation failed (e.g. auth user was deleted externally) — sign out cleanly
+      // Profile creation failed (e.g. auth user was deleted externally), sign out cleanly
       await _supabase.auth.signOut();
       throw new Error('Account not found. Please register again.');
     }
@@ -1063,7 +1144,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
 
   // Sessions with no ended timestamp that aren't the current in-progress
   // session are orphans (app crashed / closed mid-session). Delete them now.
-  // Skip for coach loads — we must not clean up a client's in-progress session.
+  // Skip for coach loads, we must not clean up a client's in-progress session.
   const orphanIds = isCoachLoad ? [] : (sessRes.data || [])
     .filter(s => s.ended === null && s.id !== sett.in_progress_session_id)
     .map(s => s.id);
@@ -1072,7 +1153,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
 
   // getSession() reads the session straight from local storage (no network);
-  // getUser() revalidates the token against the Auth server — a full round-trip
+  // getUser() revalidates the token against the Auth server, a full round-trip
   // serialized AFTER the whole query batch, just to read the email (which the
   // cached session already carries). On the no-cache boot path this sat directly
   // on the critical path to `ready`.
@@ -1086,7 +1167,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     entriesBySession[e.session_id].push(e);
   }
 
-  // An in-progress session that predates the boot window (rare — auto-close
+  // An in-progress session that predates the boot window (rare, auto-close
   // ends stale sessions) still needs its sets so training can resume.
   const inProgId = sett.in_progress_session_id;
   const inProgRow = inProgId ? (sessRes.data || []).find(s => s.id === inProgId) : null;
@@ -1096,7 +1177,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (data?.length) entriesBySession[inProgId] = data;
   }
 
-  // Server aggregates. Tolerate RPC errors (e.g. migration not applied yet) —
+  // Server aggregates. Tolerate RPC errors (e.g. migration not applied yet),
   // the maps just stay empty and the client falls back to windowed data.
   const statsBySession = {};
   for (const r of (sessionStatsRes?.data || [])) statsBySession[r.session_id] = r;
@@ -1165,7 +1246,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       planStartDate: p.plan_start_date ?? null,
       createdAt: p.created_at,
     })),
-    // Daily health logs (tolerate RPC/table errors before the migration runs —
+    // Daily health logs (tolerate RPC/table errors before the migration runs,
     // an empty list just means the Health tab shows no history yet).
     dailyLogs: (dailyLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -1256,7 +1337,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // loads / a load error → {} (harmless: the boot merge then keeps any local
     // draft, so a hiccup never drops in-progress work).
     planDrafts: Object.fromEntries((planDraftsRes?.data || []).map(r => [r.schedule_id, { draft: r.draft, updatedAt: r.updated_at }])),
-    // All-time best e1RM per exercise (server aggregate, cached in the store —
+    // All-time best e1RM per exercise (server aggregate, cached in the store,
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
     exerciseBests,
@@ -1393,7 +1474,7 @@ async function autoArchiveMissedDays(userId, state) {
     const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
     const dateKey = d.toISOString().slice(0, 10);
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
-    // Version-aware — a hand-rolled copy of this used to ignore a schedule's
+    // Version-aware, a hand-rolled copy of this used to ignore a schedule's
     // versioned days (validFrom), so a future plan change threw off which
     // day layout auto-archiving compared against.
     const trainingDay = plannedTrainingDay(state, dateKey);
@@ -1401,7 +1482,7 @@ async function autoArchiveMissedDays(userId, state) {
     missed.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
   }
 
-  // Keep the most recent missed day in the banner — archive everything else
+  // Keep the most recent missed day in the banner, archive everything else
   if (missed.length <= 1) return;
   const toCreate = missed.slice(1);
 
@@ -1411,8 +1492,8 @@ async function autoArchiveMissedDays(userId, state) {
     skip_reason: '—', skipped_at: nowISO,
   }));
   // Add the archived skips to the returned state and fire the INSERT WITHOUT
-  // awaiting it. This pass used to block loadFromSupabase's resolution — the
-  // no-cache path to `ready` — on a network write. The rows are deterministic
+  // awaiting it. This pass used to block loadFromSupabase's resolution, the
+  // no-cache path to `ready`, on a network write. The rows are deterministic
   // by (date, day) and this pass reruns on every boot, so a failed write is
   // simply recreated next launch; nothing is lost by not awaiting. Matches the
   // pre-existing best-effort semantics (the old code only console.error'd on
@@ -1450,13 +1531,13 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   const allEntries = [];
   const allSets = [];
   // Rows for entries/sets removed since the previous sync (removeExercise,
-  // "− REMOVE SET") — never upserted again, so without an explicit delete
+  // "− REMOVE SET"), never upserted again, so without an explicit delete
   // they'd stay orphaned server-side and resurface on the next re-fetch
   // (boot merge, fetchSessionEntries, the coach spectator view).
   const entryIdsToDelete = [];
   const setIdsToDelete = [];
 
-  // Normalize set fields for comparison — guards against null vs undefined and missing
+  // Normalize set fields for comparison, guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
                         s.timeSec ?? null,
@@ -1554,7 +1635,7 @@ function sessionToRow(s, userId) {
   // zane_session_entries / zane_sets tables are the single source of truth, and
   // the reporting RPCs read from them (migration 0058). The legacy JSONB column
   // keeps its default '[]' on insert and is left untouched on update.
-  // agg* are read-only server aggregates attached at load time — never synced.
+  // agg* are read-only server aggregates attached at load time, never synced.
   // progressionBumps has no zane_sessions column (deliberately no schema
   // change, see progressionSuggestion): it stays purely in the local cache
   // (saveToLocal/mergeSessions), same treatment as currentExIdx/restStart/
@@ -1583,6 +1664,11 @@ function sessionToRow(s, userId) {
 async function syncStore(prev, next, userId) {
   if (!prev || !next || !userId) return;
   const ops = [];
+  // Writes that a row in `ops` can reference by FK. Everything in `ops` runs
+  // concurrently, so a parent that lands in the same diff as its child has to
+  // be committed first (same reasoning as the sessions -> entries -> sets
+  // ordering at the end of this function).
+  const preOps = [];
 
   if (prev.exercises !== next.exercises) {
     const upsert = next.exercises.filter(e => {
@@ -1636,7 +1722,7 @@ async function syncStore(prev, next, userId) {
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
       ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-      // Sync the relational tables for EVERY changed session — including brand-new
+      // Sync the relational tables for EVERY changed session, including brand-new
       // ones. Since the JSONB dual-write was dropped (migration 0058), the
       // relational rows are the only copy the spectator/overview RPCs can read;
       // skipping creation here left a live session with only its completed sets
@@ -1685,7 +1771,7 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodLogs !== next.foodLogs) {
     const { upsert, removed } = diffCollectionById(prev.foodLogs, next.foodLogs);
-    if (upsert.length) ops.push(_supabase.from('zane_food_logs').upsert(upsert.map(l => ({
+    if (upsert.length) ops.push(foodLogUpsertWithFkFallback(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
       food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
       quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
@@ -1742,7 +1828,10 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodRecipes !== next.foodRecipes) {
     const { upsert, removed } = diffCollectionById(prev.foodRecipes, next.foodRecipes);
-    if (upsert.length) ops.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
+    // preOps, not ops: zane_food_logs.recipe_id is a real FK into this table
+    // and every op in `ops` fires concurrently, so a brand new recipe plus a
+    // log of it in the same diff could hit the log upsert first and 23503.
+    if (upsert.length) preOps.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
       id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
       updated_at: r.updatedAt ?? new Date().toISOString(),
     }))));
@@ -1789,7 +1878,7 @@ async function syncStore(prev, next, userId) {
     });
     const removed = (prev.mesoStates || []).filter(m => !(next.mesoStates || []).find(x => x.id === m.id));
     // Batch RPC only overwrites when the incoming updated_at is newer than
-    // what's stored — two devices training the same mesocycle plan don't
+    // what's stored, two devices training the same mesocycle plan don't
     // silently clobber each other's deltas/jointFlags/weightBoosts on a plain
     // last-write-wins upsert. See migration 0122.
     if (upsert.length) ops.push(_supabase.rpc('sync_meso_states_batch', { p_states: upsert.map(m => ({
@@ -1834,7 +1923,7 @@ async function syncStore(prev, next, userId) {
     });
     const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
     // Batch RPC resolves conflicts on (user_id, date) keeping the existing id,
-    // and guards against stale (older updated_at) writes — so two devices
+    // and guards against stale (older updated_at) writes, so two devices
     // editing the same day no longer collide on UNIQUE(user_id, date) and a
     // stale offline edit can't clobber a newer one. See migration 0096.
     if (upsert.length) ops.push(_supabase.rpc('sync_daily_logs_batch', { p_logs: upsert.map(l => ({
@@ -1850,7 +1939,18 @@ async function syncStore(prev, next, userId) {
       daily_coach_fields: l.coachFields ?? null,
       updated_at: l.updatedAt ?? new Date().toISOString(),
     })) }));
-    if (removed.length) ops.push(_supabase.from('zane_daily_logs').delete().in('id', removed.map(l => l.id)));
+    // Delete by (user_id, date), not by id: the rows are written through
+    // sync_daily_logs_batch, whose conflict target is (user_id, date), so the
+    // server row for a date can carry a DIFFERENT id than the local one (a
+    // pre-RPC multi-device write). Deleting by id then matched nothing and
+    // reported success, and the deleted day came back on the next boot.
+    if (removed.length) {
+      // Only dates that are really gone: a row whose id changed but whose date
+      // still exists locally is an edit, not a deletion.
+      const keptDates = new Set((next.dailyLogs || []).map(l => l.date));
+      const goneDates = [...new Set(removed.map(l => l.date).filter(d => d && !keptDates.has(d)))];
+      if (goneDates.length) ops.push(_supabase.from('zane_daily_logs').delete().eq('user_id', userId).in('date', goneDates));
+    }
   }
 
   if (prev.user?.name !== next.user?.name && next.user?.name) {
@@ -2019,6 +2119,7 @@ async function syncStore(prev, next, userId) {
   // unwrap() turns a failed write (network/RLS/constraint) into a thrown
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
+  if (preOps.length) await Promise.all(preOps.map(unwrap));
   await Promise.all(ops.map(unwrap));
   // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
@@ -2044,7 +2145,7 @@ function computeNextReminderAt(state) {
   for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
     const d = new Date(today); d.setDate(today.getDate() + ahead);
     const dateStr = d.toISOString().slice(0, 10);
-    // Version-aware — see plannedTrainingDay; a hand-rolled copy of this used
+    // Version-aware, see plannedTrainingDay; a hand-rolled copy of this used
     // to resolve weekday plans against sch.days directly, ignoring a plan
     // change scheduled with a future validFrom date. Returns null for every
     // date on a cycle plan with no cycleStartDate / a flex plan on a date
@@ -2137,7 +2238,7 @@ function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
 
-// Parse a stored ISO date string ('YYYY-MM-DD' or full ISO) as noon local time —
+// Parse a stored ISO date string ('YYYY-MM-DD' or full ISO) as noon local time,
 // avoids the DST/midnight TZ shifts that break "same calendar day" lookups.
 function parseDate(s) {
   if (!s) return null;
@@ -2161,7 +2262,7 @@ function fmtDuration(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
+// Effective reps for a set, for unilateral sets, the weaker side is the bottleneck.
 function effReps(st) {
   if (st.repsL != null || st.repsR != null) {
     return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
@@ -2221,7 +2322,7 @@ function isDecline(curr, prev) {
 // optionally excluding a session (e.g. the live one) and optionally restricted
 // to sessions with a matching dayId. Returns 0 when there's no history.
 // Since boot only loads a recent window of sets, the local scan is combined
-// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests) —
+// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests),
 // but only when dayId is null, because the aggregate is day-agnostic.
 function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
@@ -2282,7 +2383,7 @@ function bestTimeForExercise(state, exId, excludeSessionId = null, dayId = null)
 }
 
 // Re-fetch the all-time best-e1RM aggregate (once per session start / training
-// mount). Resolves with the fresh map, or null when offline / on error — the
+// mount). Resolves with the fresh map, or null when offline / on error, the
 // caller keeps the cached map in that case.
 async function refreshExerciseBests(userId) {
   try {
@@ -2312,11 +2413,11 @@ async function fetchTopExercises(userId, limit) {
 }
 
 // Total volume (kg) of all completed working sets in a session (warm-ups excluded).
-// For ended sessions we don't require done:true — a kbApply race can leave sets as
+// For ended sessions we don't require done:true, a kbApply race can leave sets as
 // done:false in Supabase even though the user actually performed them.
-// Ended sessions outside the boot window carry no entries — fall back to the
+// Ended sessions outside the boot window carry no entries, fall back to the
 // server aggregate (get_session_stats) attached at load time.
-// Volume for a single session entry (one exercise) — same working-set filter
+// Volume for a single session entry (one exercise), same working-set filter
 // totalVolume uses, factored out so per-exercise volume (e.g. a session
 // compare view) doesn't duplicate the filter logic.
 // exercise + bodyweightKg let assisted exercises count real volume: their load
@@ -2374,7 +2475,7 @@ function doneSetCount(session) {
     }).length, 0);
 }
 
-// Index of the latest exercise whose entry has at least one completed set —
+// Index of the latest exercise whose entry has at least one completed set,
 // used by the Spectator screen to highlight the active row from polled session data.
 function inferCurrentExIdx(entries) {
   if (!entries?.length) return 0;
@@ -2384,7 +2485,7 @@ function inferCurrentExIdx(entries) {
   return 0;
 }
 
-// Blended remaining-time estimate for a live session — used by Spectator
+// Blended remaining-time estimate for a live session, used by Spectator
 // and the Active Users overview in Settings.
 // Early in the session, historical pace dominates; as more sets land,
 // the current-session pace gradually takes over.
@@ -2542,13 +2643,13 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
         : { kg: dl(baseKg), reps: seedReps, done: false };
     }
     if (progressionEnabled(store, it.repsMax, it.progressionOffset) && prev) {
-      // Only a Range item's own repsMax caps the +1 nudge — the user
+      // Only a Range item's own repsMax caps the +1 nudge, the user
       // explicitly drew that boundary, so the seeded value should respect
       // it (one lagging set otherwise keeps the suggestion from firing
       // while a synced set climbs past the range forever). The global
       // default / a custom progressionOffset ceiling is just an internal
       // trigger threshold, not a user-drawn boundary, so it stays
-      // uncapped — matches classic Smart Progression's long-standing
+      // uncapped, matches classic Smart Progression's long-standing
       // behavior of nudging reps up every session regardless.
       // The cap only limits the +1 nudge, never the floor: if last session
       // already went past repsMax (e.g. 13 reps on an 8-12 range, taken to
@@ -2621,7 +2722,7 @@ function bestEntryFromSetLists(perSession) {
       if (bestReps == null || r > bestReps) { bestReps = r; best = cand; }
     }
     // Time-based sets carry no kg/reps to compare, so `best` stays the most
-    // recent set — pass its duration through as the reference / seed.
+    // recent set, pass its duration through as the reference / seed.
     if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, done: false, skipped: false, warmup: false };
     return (best.repsL != null || best.repsR != null)
       ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
@@ -2632,7 +2733,7 @@ function bestEntryFromSetLists(perSession) {
 
 // Seed/progression reference: per working-set position, the BEST set performed at
 // the CURRENT working weight within the recent window. A single weak session can
-// no longer drag a suggestion below proven capability — the reference is the best
+// no longer drag a suggestion below proven capability, the reference is the best
 // recent performance, not merely the last one. Returns the same { entry: { sets } }
 // shape as lastSessionForExercise so buildSeedSets and progressionSuggestion
 // consume it unchanged. Compares reps only at the same weight (a heavier session
@@ -2640,7 +2741,7 @@ function bestEntryFromSetLists(perSession) {
 function bestRecentEntry(state, exId, dayId = null, window = 3, occ = 0) {
   const recent = recentSessionsForExercise(state, exId, dayId, window, occ);
   if (!recent.length) return null;
-  // Only warm-ups are stripped — warm-ups are always a contiguous prefix, so
+  // Only warm-ups are stripped, warm-ups are always a contiguous prefix, so
   // dropping them still leaves working-set position i aligned across
   // sessions. A skipped set must stay in place instead: dropping it too would
   // shift every later set one slot to the left, misaligning bestEntryFromSetLists'
@@ -2662,11 +2763,11 @@ async function fetchExerciseHistory(exId, dayId, limit, userId) {
 }
 
 // Seed references for starting/logging a session. The local window already
-// covers exercises trained recently — only exercises with fewer than `window`
+// covers exercises trained recently, only exercises with fewer than `window`
 // local sessions ask the server (get_exercise_history), so the common case
 // stays synchronous-fast and fully offline-capable. Server rows are merged
 // with local ones (a just-ended session may not be synced yet) and reduced via
-// bestEntryFromSetLists. Returns { exId: { entry: { sets } } } — only for
+// bestEntryFromSetLists. Returns { exId: { entry: { sets } } }, only for
 // exercises where the server added anything; callers fall back to
 // bestRecentEntry for the rest. Never rejects.
 async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
@@ -2690,7 +2791,7 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
       // Keep skipped sets in place (only warm-ups are stripped) so working-set
-      // position stays aligned across sessions — see bestRecentEntry above.
+      // position stays aligned across sessions, see bestRecentEntry above.
       const ref = bestEntryFromSetLists(
         merged.slice(0, window).map(r => (r.sets || []).filter(s => !s.warmup))
       );
@@ -2902,7 +3003,7 @@ function splitDayCount(presetKey) {
 // Single source of truth for the new-plan shape (snake_case passthrough columns;
 // only the local-only `mode` is stripped before upsert). The wizard appends the
 // result to store.schedules and navigates to the editor. The zane_meso_states
-// row is NOT created here — the home/train effects auto-start it once the plan
+// row is NOT created here, the home/train effects auto-start it once the plan
 // is activated.
 //   type        : 'cycle' | 'weekday' | 'flex'
 //   presetKey   : a SPLIT_PRESETS key or 'custom'
@@ -2915,7 +3016,7 @@ function splitDayCount(presetKey) {
 //   mesocycleAutoregulate : true → same autoregulation engine, no bounded week
 //     count and no RIR taper at all. Mutually exclusive with mesoWeeks in the
 //     UI (the wizard/editor only ever set one), but harmless if both were ever
-//     true — LB.mesoActive is an OR, mesoWeeks still wins for bounded-only UI.
+//     true, LB.mesoActive is an OR, mesoWeeks still wins for bounded-only UI.
 //   mesocycleAutoregulateMode : 'load' → an autoregulate plan tunes weight only
 //     (sets stay fixed). Default (undefined/'both') tunes both; only persisted
 //     when 'load'. Only meaningful together with mesocycleAutoregulate.
@@ -2967,7 +3068,7 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
     sch.mesocycle_weeks = mesoWeeks;
     if (mesoStartRir != null) sch.mesocycle_start_rir = mesoStartRir;
     if (mesoEndRir != null) sch.mesocycle_end_rir = mesoEndRir;
-    // Only persist the explicit "off" — default (undefined/true) leaves the DB
+    // Only persist the explicit "off", default (undefined/true) leaves the DB
     // default and reads as enabled everywhere.
     if (mesoRirEnabled === false) sch.mesocycle_rir_enabled = false;
   }
@@ -2983,16 +3084,16 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
 
 // Instantiate a pre-built program (a window.SYSTEM_PROGRAMS entry) into an
 // editable flex-mesocycle plan. Pure: returns { schedule, newExercises } and
-// mutates nothing — the caller appends both in one setStore and navigates to the
+// mutates nothing, the caller appends both in one setStore and navigates to the
 // editor, exactly like PlanWizard.create().
 // Each program item references a system-catalog exercise BY NAME. We resolve each
 // to one of the USER's own exercises: reuse a same-named one if it exists, else
-// materialize an editable copy via systemExerciseToRow — the same name-dedup
+// materialize an editable copy via systemExerciseToRow, the same name-dedup
 // ExercisePicker.finalizePick uses, so plans never hold sys_ ids and history for
 // an exercise the user already owns never splits. A name repeated across days
 // resolves to a single materialized row. Days are fed to buildPlanSkeleton as
 // customDays with type 'flex' (advance on a logged session, sessions_per_week =
-// day count, no fixed weekdays — the beginner-friendly "how many days can you"
+// day count, no fixed weekdays, the beginner-friendly "how many days can you"
 // model).
 function instantiateProgram(state, program) {
   const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
@@ -3004,7 +3105,7 @@ function instantiateProgram(state, program) {
     const existing = userByName.get(key);
     if (existing) return existing;
     const sys = sysByName.get(key);
-    if (!sys) return null; // unknown name — guarded (a store.test.cjs check keeps the catalog honest)
+    if (!sys) return null; // unknown name, guarded (a store.test.cjs check keeps the catalog honest)
     const row = systemExerciseToRow(sys);
     newExercises.push(row);
     userByName.set(key, row.id);
@@ -3306,7 +3407,7 @@ function resolve531CycleEnd(pd, bumps, cycleIdx) {
 }
 
 // From an AMRAP-implied 1RM: the "fair" Training Max (90% of it) and whether
-// that sits at least one normal bump above the current TM — i.e. the top set
+// that sits at least one normal bump above the current TM, i.e. the top set
 // says you could carry more than the plan is handing you. { tm, higher }.
 function suggest531Tm(est1rm, currentTm, kind, unit) {
   if (!est1rm || est1rm <= 0) return { tm: null, higher: false };
@@ -3325,7 +3426,7 @@ function mesoRirEnabled(sch) {
 
 // Whether the mesocycle autoregulation engine (feedback-driven volume/load
 // tuning) is on at all, bounded block or not. mesocycle_weeks alone still
-// means "and it's ALSO a bounded block with a week count" — callers that need
+// means "and it's ALSO a bounded block with a week count", callers that need
 // that specifically (RIR eligibility, the completion/deload-offer flow, the
 // generic auto-deload-nudge suppression) stay keyed on mesocycle_weeks /
 // mesoState.weeks != null directly, not on this.
@@ -3394,7 +3495,7 @@ function getCycleNumForDate(schedule, dateStr) {
     const daysLen = (v.days || []).length;
     if (!daysLen) continue;
     // A version can start mid-cycle (the "start with day K" version-change
-    // option) — cycleOffset shifts the whole days-since-validFrom axis the
+    // option), cycleOffset shifts the whole days-since-validFrom axis the
     // same way getCyclePosForDate already does, so the cycle count lines up
     // with the actual rotation position instead of always assuming the
     // version began at day 0 of a fresh cycle.
@@ -3435,7 +3536,7 @@ function getCycleStartForNum(schedule, cycleNum) {
       const cyclesInVersion = Math.floor((daysInVersion - 1 + offset) / daysLen) + 1;
       if (totalPriorCycles + cyclesInVersion >= cycleNum) {
         // For a version's first cycle, `offset` can push the computed start
-        // before validFrom — but no real date before validFrom is actually
+        // before validFrom, but no real date before validFrom is actually
         // governed by this version's cycle numbering (those dates belong to
         // the previous version), so getCycleNumForDate would misattribute
         // that date back to the wrong version and break the inverse
@@ -3473,7 +3574,7 @@ function getCyclePosForDate(schedule, dateStr) {
   return (((daysDiff + (oldest.cycleOffset || 0)) % daysLen) + daysLen) % daysLen;
 }
 
-// Index in schedule.versions (newest-first) of the version active on dateStr —
+// Index in schedule.versions (newest-first) of the version active on dateStr,
 // the newest version whose validFrom is on or before dateStr. Returns the oldest
 // version's index for dates before the plan started, or -1 if unversioned.
 function getActiveVersionIdx(schedule, dateStr) {
@@ -3488,7 +3589,7 @@ function getActiveVersionIdx(schedule, dateStr) {
 // One version per date: keep only the first entry for each validFrom. Callers
 // put the authoritative/newest entry first, so a same-date save replaces the
 // previous version for that date instead of stacking a duplicate. Always
-// returns newest-first — getActiveVersionIdx's first-match-wins loop assumes
+// returns newest-first, getActiveVersionIdx's first-match-wins loop assumes
 // that order, and not every caller remembered to re-sort after deduping.
 function dedupeVersionsByDate(versions) {
   const seen = new Set();
@@ -3514,7 +3615,7 @@ function withVersionedDays(schedule, versions) {
 }
 
 // Cycle position for a date-based (non-versioned, non-flex) plan, derived
-// from cycleStartDate — calendar days since start, wrapped to the plan's
+// from cycleStartDate, calendar days since start, wrapped to the plan's
 // length. Used to be duplicated within this same file (todaysDay/nextDay)
 // and reimplemented again in PlanViewerScreen.
 function cyclePosFromStartDate(startISO, daysLen, dateISO) {
@@ -3525,7 +3626,7 @@ function cyclePosFromStartDate(startISO, daysLen, dateISO) {
 }
 
 // Re-anchor a date-based cycle plan so `todayStr` lands on rotation position
-// `targetPos` — built on the SAME calculation as versioning a plan with a
+// `targetPos`, built on the SAME calculation as versioning a plan with a
 // "start at day K from this date" choice (doSave / doRestoreBackup in
 // screens-schedule.jsx): it adds a new plan version effective today whose
 // cycleOffset puts today on day `targetPos`. An unversioned plan is converted
@@ -3534,12 +3635,12 @@ function cyclePosFromStartDate(startISO, daysLen, dateISO) {
 //
 // Why a version boundary instead of just moving cycleStartDate / the active
 // version's cycleOffset:
-//   • The cycle NUMBER is preserved — it does NOT reset to 1. getCycleNumForDate
+//   • The cycle NUMBER is preserved, it does NOT reset to 1. getCycleNumForDate
 //     sums completed cycles across versions, so today continues the count (a
 //     fresh cycle at day K), never collapses to Cycle 1. A naive
 //     `cycleStartDate = today − targetPos` would drop floor(daysSince/len)+1 to
 //     1, which is demotivating.
-//   • History stays intact — past dates are still governed by the OLD version,
+//   • History stays intact, past dates are still governed by the OLD version,
 //     so their day-of-cycle (home strip when scrolling back, per-cycle
 //     setsPerMuscle, session labels) doesn't retroactively shift the way
 //     rewriting the single anchor would.
@@ -3557,7 +3658,7 @@ function realignCycleForToday(state, sch, todayStr, targetPos) {
   let versions;
   const existing = sch.versions || [];
   if (existing.length === 0) {
-    // First versioned change — anchor the current (unversioned) layout at its
+    // First versioned change, anchor the current (unversioned) layout at its
     // start date so cycles before today keep their numbering/positions.
     const anchorDate = state.cycleStartDate || todayStr;
     versions = [newVer, { validFrom: anchorDate, days: sch.days }];
@@ -3576,7 +3677,7 @@ function realignCycleForToday(state, sch, todayStr, targetPos) {
 // With a cycleOffset this differs from the plain plan position (dayIdx), so the
 // strip renders the version active on the shown cycle and marks the cell whose
 // date == today. The clamp MUST use the day count of the version active on that
-// cycle (what the strip renders), NOT sch.days — sch.days holds the NEWEST
+// cycle (what the strip renders), NOT sch.days, sch.days holds the NEWEST
 // version, which can be a future-scheduled version with a different day count.
 // Using sch.days there clipped today's index by the day-count delta and put the
 // "today" marker on the wrong (previous) cell after scheduling a shorter future
@@ -3659,14 +3760,14 @@ function nextDay(state) {
 // - Sessions the server no longer has are dropped (deleted on another device),
 //   except local-only ones that never reached the server (recent + not in the
 //   synced base) and the in-progress session. This works on the session level
-//   only — the metadata list is still complete, so "missing on the server" is
+//   only, the metadata list is still complete, so "missing on the server" is
 //   meaningful.
 // - The in-progress session keeps its LOCAL entries/restStart (authoritative).
 // - A fresh session without entries (outside the boot window) keeps the cached
-//   entries — windowing must never wipe history already on the device.
+//   entries, windowing must never wipe history already on the device.
 // When the server returns entries without technique/drops (race: flushSync hasn't
 // finished writing sets yet when a background loadFromSupabase runs), preserve the
-// richer local values. Matches by position (entry index, set index) — sets have no
+// richer local values. Matches by position (entry index, set index), sets have no
 // id in the store model. Also preserves in-memory-only cardio fields (isCardio,
 // cardioDone, cardioData) that are never stored in the DB.
 function mergeEntrySets(serverEntries, cachedEntries) {
@@ -3697,7 +3798,7 @@ function mergeEntrySets(serverEntries, cachedEntries) {
 // restores their cached entries into the store. Carry the last-synced entries
 // (from the persisted base) into the diff base for those windowed sessions so
 // the per-set diff sees them unchanged and doesn't re-upload every set with a
-// fresh updated_at each boot — which clobbers newer cross-device edits and grows
+// fresh updated_at each boot, which clobbers newer cross-device edits and grows
 // write load with account age (audit B1). A genuine offline edit still differs
 // from the carried base entries and is pushed as normal. Sessions the base
 // doesn't know (first boot / new) keep entries:[] and re-sync once, then heal.
@@ -3721,7 +3822,7 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     : null;
   const serverIds = new Set(freshSessions.map(s => s.id));
   // Index cur sessions by id once (O(n)) instead of a linear .find per fresh
-  // session below, which made the merge O(fresh x cur) — quadratic in account
+  // session below, which made the merge O(fresh x cur), quadratic in account
   // age (hundreds of thousands of iterations for a multi-year daily user, run
   // synchronously right after `ready` where it janks the first interaction).
   const curById = new Map((curSessions || []).map(s => [s.id, s]));
@@ -3731,7 +3832,7 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     // The server's `ended` is authoritative: if another device (or the
     // auto-close cron) already finished this session while this device was
     // offline, a stale local inProgressId must never resurrect it as still
-    // active — that would overwrite the server's finished entries with the
+    // active, that would overwrite the server's finished entries with the
     // stale local (incomplete) cache and push them right back on next sync.
     const isActive = s.id === inProgressId && s.ended == null;
     const hasServerEntries = (s.entries || []).length > 0;
@@ -3760,11 +3861,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       ...(mergedEntries ? { entries: mergedEntries } : {}),
     };
   });
-  // Keep sessions the server hasn't stored yet — i.e. created on this device
+  // Keep sessions the server hasn't stored yet, i.e. created on this device
   // and never confirmed synced. A session that IS in the synced base but gone
   // from fresh was deleted on another device: keeping it would make this
   // device push it right back (resurrection). Without a base (legacy cache)
-  // fall back to the recency rule alone — the safe direction, since dropping
+  // fall back to the recency rule alone, the safe direction, since dropping
   // a never-synced session would lose data. Only recent ended sessions
   // qualify; the in-progress session is always kept regardless of its date
   // (other ended=null sessions are orphans).
@@ -3773,7 +3874,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
   const localOnly = (curSessions || []).filter(x =>
     !serverIds.has(x.id) &&
     (x.id === inProgressId ||
-      ((x.date || '') >= cutoffISO && x.ended != null && !baseIds?.has(x.id)))
+      // With a base, "not in base" already means never confirmed synced, and
+      // the recency rule on top of it only ever deletes data: a session that
+      // could not reach the server for more than two days (offline trip, or a
+      // sync wedged on an unrelated failing row) is exactly the one that must
+      // survive. Only the legacy no-base cache still needs the date rule,
+      // where it is the safe direction.
+      ((baseIds ? !baseIds.has(x.id) : (x.date || '') >= cutoffISO) && x.ended != null))
   );
   const inProgressServerSession = freshSessions.find(s => s.id === inProgressId);
   const activeExists = !!(inProgressId && (
@@ -3913,12 +4020,12 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
 
 // Whether Smart Progression is active for a given exercise entry/item.
 // Precedence: an explicit per-exercise progressionOffset of 0 always wins
-// (even for a Range item — you can still turn progression off for e.g.
+// (even for a Range item, you can still turn progression off for e.g.
 // lateral raises while keeping the range as a plain display target) >
 // a Range ceiling (plannedRepsMax) is on by default > a positive
 // progressionOffset override is on > the global smartProgression setting.
 // progressionOffset === 0 is a meaningful, distinct value from
-// null/undefined — never coerce it away with `||`, only `!= null`/`===` checks.
+// null/undefined, never coerce it away with `||`, only `!= null`/`===` checks.
 function progressionEnabled(store, plannedRepsMax, progressionOffset) {
   if (progressionOffset === 0) return false;
   if (plannedRepsMax != null) return true;
@@ -3967,13 +4074,18 @@ function equipmentCfgFor(store, ex) {
 // A caller may pass a pre-computed catCfg (from equipmentCfgFor) to avoid
 // resolving the same equipment-config lookup twice when it also needs
 // catCfg.maxKg.
+// fallback omitted: the smallest sensible jump in the user's own unit. 2.5 is
+// the metric plate pair; suggesting "+2.5 lbs" to an lbs lifter is not a jump
+// anyone can load (the 5/3/1 path already picked per unit, the Smart
+// Progression callers passed a hardcoded 2.5).
 function incrementForExercise(store, ex, fallback, catCfg = equipmentCfgFor(store, ex)) {
   if (ex?.progression_increment > 0) return ex.progression_increment;
-  return catCfg.increment > 0 ? catCfg.increment : fallback;
+  const fb = fallback != null ? fallback : (weightAxisUnit(store?.settings?.unit) === 'lbs' ? 5 : 2.5);
+  return catCfg.increment > 0 ? catCfg.increment : fb;
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-// refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
+// refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries),
 // used when the exercise's recent history lives outside the boot window.
 function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset, occ = 0) {
   if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
@@ -3981,31 +4093,31 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
 
   const ex = findExercise(store, exId);
   const catCfg = equipmentCfgFor(store, ex);
-  const increment = incrementForExercise(store, ex, 2.5, catCfg);
+  const increment = incrementForExercise(store, ex, null, catCfg);
   const maxKg = catCfg.maxKg ?? null;
 
   // Anchor on the best recent performance at the current weight, not just the
-  // last session — so a weak week doesn't block an earned weight jump. occ keeps
+  // last session, so a weak week doesn't block an earned weight jump. occ keeps
   // a repeated exercise's Nth slot anchored on its own history (see bestRecentEntry).
   const ref = refOverride ?? bestRecentEntry(store, exId, dayId, 3, occ);
   if (!ref) return null;
 
   // Index by true working-set position (warm-ups stripped, nothing else) so
-  // plannedRepsPerSet[i] lines up correctly — filtering skipped sets out
+  // plannedRepsPerSet[i] lines up correctly, filtering skipped sets out
   // before indexing (as this used to) shifts every later set's target one
   // slot left/right whenever an earlier set in the reference was skipped.
   const workingSets = (ref.entry.sets || []).filter(s => !s.warmup);
   if (!workingSets.some(s => !s.skipped && s.kg != null)) return null;
 
   const allHitTop = workingSets.every((s, i) => {
-    if (s.skipped || s.kg == null) return true; // no data at this position — neither confirms nor blocks progression
+    if (s.skipped || s.kg == null) return true; // no data at this position, neither confirms nor blocks progression
     const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
     const baseReps = perSet ?? plannedReps;
     // A Range-mode exercise's own repsMax is the ceiling to hit, replacing
     // the global range add-on for that exercise (but only when repsPerSet
-    // isn't itself in play — Range and Per Set are mutually exclusive).
+    // isn't itself in play, Range and Per Set are mutually exclusive).
     const ceiling = progressionCeilingFor(store, baseReps, perSet ? null : plannedRepsMax, progressionOffset);
     return (effReps(s) ?? 0) >= ceiling;
   });
@@ -4127,8 +4239,12 @@ async function reloadCoachingState(userId) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
       .is('read_at', null)
       .neq('author_id', userId),
-    _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
-    _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
+    // not.like support_% on BOTH: a user with a real coach AND an open support
+    // ticket matches two rows, and maybeSingle() then returns PGRST116 with no
+    // data. The error was ignored, so checkinEnabled silently fell back to
+    // true and a coach-paused check-in toggle jumped back on.
+    _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
+    _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').not('id', 'like', 'support_%').maybeSingle(),
   ]);
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
@@ -4244,7 +4360,7 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   });
   if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
-  // Skip for self-coaching — there's no "other party" to notify. The author is
+  // Skip for self-coaching, there's no "other party" to notify. The author is
   // derived server-side from the JWT, so it can't be spoofed.
   if (!coachingId.startsWith('self_')) {
     const preview = body || (attachments && attachments.length ? '📷 Image' : '');
@@ -4253,10 +4369,10 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   return id;
 }
 
-// Support-ticket notes must never surface in the coaching unread banner —
+// Support-ticket notes must never surface in the coaching unread banner,
 // they have their own badge/inbox in Settings. Single source of truth so the
 // banner's count/preview and the group deciding whether to render it can
-// never disagree on which notes count (they did — see git history).
+// never disagree on which notes count (they did, see git history).
 function unreadCoachingNotes(store) {
   return (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
 }
@@ -4395,7 +4511,7 @@ async function requestCheckin(coachingId, userId) {
 function checkinWeekStart() {
   const today = new Date();
   // Check-ins cover Mon–Sun. Sunday is the LAST day of its week, not a fresh
-  // start — treating it as day 0 (like plain getDay() does) flipped this to
+  // start, treating it as day 0 (like plain getDay() does) flipped this to
   // the not-yet-finished current week a full day early, before that Sunday's
   // own daily log (macros/steps) even exists. isoWd(today)+1 keeps Sunday
   // counted as day 7 of its own week, so the "due" week only advances once
@@ -4466,7 +4582,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
       if (f.unit) return `${v} ${f.unit}`;
       return String(v);
     };
-    // Build the note from the schema: section headings, real labels, in order —
+    // Build the note from the schema: section headings, real labels, in order,
     // renamed/custom fields read exactly as the coach defined them.
     const seen = new Set();
     (schema || []).forEach(section => {
@@ -4479,7 +4595,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
       });
       if (secLines.length) lines.push('', section.label.toUpperCase(), ...secLines);
     });
-    // Any submitted keys not covered by the schema (e.g. a removed field) —
+    // Any submitted keys not covered by the schema (e.g. a removed field),
     // kept so nothing the client entered is ever silently dropped.
     const leftover = Object.entries(responses).filter(([k, v]) => !seen.has(k) && v != null && v !== '');
     if (leftover.length) lines.push('', 'OTHER', ...leftover.map(([k, v]) => `  ${k.replace(/_/g, ' ')}: ${v}`));
@@ -4564,7 +4680,7 @@ async function deleteCheckin(checkinId, userId) {
   if (error) throw error;
 }
 
-// ─── Cardio distance/pace — single source for the whole app ─────────────────
+// ─── Cardio distance/pace, single source for the whole app ─────────────────
 // Every screen that touches cardio distance used to reimplement this from
 // scratch (comma-decimal parsing, the km/mi factor, display precision), and
 // they'd already drifted: some skipped the comma-normalization (silently
@@ -4586,7 +4702,7 @@ function distToM(val, unit) {
   if (isNaN(n)) return null;
   return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
 }
-// Bare number string (no unit suffix) — for UIs that show the unit separately.
+// Bare number string (no unit suffix), for UIs that show the unit separately.
 function mToDisplay(meters, unit, decimals = 2) {
   if (meters == null) return '';
   return unit === 'mi' ? (meters / MI_TO_M).toFixed(decimals) : (meters / 1000).toFixed(decimals);
@@ -4648,7 +4764,7 @@ function cardioWeekPrefill(cardioLogs, weekStart) {
   let pace = null;
   if (withDist.length) {
     const pMin = withDist.reduce((s, l) => s + l.durationMinutes, 0);
-    // The actual cardio distance-unit setting — NOT settings.unit (weight),
+    // The actual cardio distance-unit setting, NOT settings.unit (weight),
     // which this used to be keyed off, silently treating "mixed"-unit users
     // (kg weights + mi distances) as km and skewing their pace by ~1.6x.
     const distUnit = cardioDistUnit() === 'mi' ? MI_TO_M : 1000;
@@ -4672,7 +4788,7 @@ function cardioWeekPrefill(cardioLogs, weekStart) {
 // logs OF THE SAME ACTIVITY TYPE and reports, per metric, whether it's an
 // all-time best or an improvement over the most recent prior log. Mirrors the
 // strength NEW BEST / IMPROVEMENT tiers. Returns null when nothing was beaten
-// (incl. the first-ever log of a type — no baseline to beat).
+// (incl. the first-ever log of a type, no baseline to beat).
 //   metrics: pace (min/km, lower better; needs distance+duration),
 //            distance (higher better; needs distance), duration (higher better)
 function detectCardioPRs(log, allLogs) {
@@ -4682,7 +4798,7 @@ function detectCardioPRs(log, allLogs) {
   const prior = (allLogs || []).filter(l => l.id !== log.id && norm(l.type) === ty);
   if (!prior.length) return null;
 
-  // Most-recent prior log (by date, then createdAt) — the "last time" baseline.
+  // Most-recent prior log (by date, then createdAt), the "last time" baseline.
   const last = [...prior].sort((a, b) =>
     String(b.date || '').localeCompare(String(a.date || '')) ||
     String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
@@ -4714,7 +4830,7 @@ function detectCardioPRs(log, allLogs) {
 // ─── DAILY HEALTH LOGS ─────────────────────────────────────────────────────
 
 // A day counts as a TRAINING day for macro purposes only if a session was
-// actually logged (ended) on that date — a planned-but-skipped day is a rest
+// actually logged (ended) on that date, a planned-but-skipped day is a rest
 // day ("you have to earn your macros"). Pass store.sessions.
 function isLoggedTrainingDay(sessions, dateISO) {
   const d = (dateISO || '').slice(0, 10);
@@ -4737,7 +4853,7 @@ function plannedTrainingDay(state, dateStr) {
     return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
   }
   if (isFlexPlan(sch)) {
-    // Flex plans have no calendar mapping — position only advances by action
+    // Flex plans have no calendar mapping, position only advances by action
     // (cycleIndex, mirroring todaysDay), so there's no planned day for any
     // date other than today.
     if (ds !== todayISO()) return null;
@@ -4794,7 +4910,7 @@ function isTrainingDayForDate(state, dateStr) {
 
 // Pick the {protein, carbs, fat, calories} target for a given day type out of a
 // macro-target object (works for both coaching macros and the user's personal
-// macroTargets — same field names). Returns null when no macro is set for that
+// macroTargets, same field names). Returns null when no macro is set for that
 // day type.
 function dayTargetFromMacros(m, isTraining) {
   if (!m) return null;
@@ -4809,7 +4925,7 @@ function dayTargetFromMacros(m, isTraining) {
 // Macro adherence as a 0–100 %, defined as the calorie-weighted average of
 // per-macro closeness scores. Per macro: clamp(1 − |actual − target| / target,
 // 0, 1). Each macro's weight = its caloric share of the target day (protein/
-// carbs × 4 kcal/g, fat × 9 kcal/g) — so a small fat target counts less than
+// carbs × 4 kcal/g, fat × 9 kcal/g), so a small fat target counts less than
 // a large carb target, proportionally to its caloric significance.
 // Returns null unless all three macros AND their targets are present.
 function macroAdherence(actual, target) {
@@ -5090,9 +5206,13 @@ function effectiveMacroTargets(personal, coachingMacros) {
 
 // Compute the persisted adherence + target snapshot for a daily log at save
 // time, so a later target change never rewrites history. Returns
-// { adherence, targetsSnap } — both null when targets/macros are incomplete.
-function dailyLogAdherence(log, targets, isTraining) {
-  const dayTarget = dayTargetFromMacros(targets, isTraining);
+// { adherence, targetsSnap }, both null when targets/macros are incomplete.
+// dayTargetOverride: score against a target the day already carries instead of
+// today's. targetsSnap is documented as a SAVE-TIME snapshot, so a reconciler
+// re-scoring an old day must not silently re-measure it against targets the
+// user set later (see the food reconciler in screens-health.jsx).
+function dailyLogAdherence(log, targets, isTraining, dayTargetOverride = null) {
+  const dayTarget = dayTargetOverride || dayTargetFromMacros(targets, isTraining);
   if (!dayTarget) return { adherence: null, targetsSnap: null };
   // A meal-of-choice day is deliberately unscored: it is planned around one
   // off-plan meal that absorbs whatever is left, so a percentage against the
@@ -5325,6 +5445,22 @@ async function closeStatusPeriod(userId, endedAt = null) {
 async function updateStatusPeriodStart(userId, startedAt) {
   await unwrap(_supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null));
 }
+// The three helpers above all address "the period that is currently open",
+// which is right for editing today's status and wrong for editing a past day:
+// a Normal tap on a day inside an already CLOSED period would end or delete
+// the running Sick period instead. These address one specific row.
+async function closeStatusPeriodById(userId, periodId, endedAt) {
+  await unwrap(_supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).eq('id', periodId));
+}
+async function deleteStatusPeriodById(userId, periodId) {
+  await unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId).eq('id', periodId));
+}
+async function updateStatusPeriodStartById(userId, periodId, startedAt) {
+  await unwrap(_supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).eq('id', periodId));
+}
+async function updateStatusPeriodMode(userId, periodId, mode) {
+  await unwrap(_supabase.from('zane_status_periods').update({ mode }).eq('user_id', userId).eq('id', periodId));
+}
 
 // End the active sick/vacation status. Last status day = yesterday, so a session
 // logged today already counts as a normal training day. Mutates via setStore and
@@ -5353,7 +5489,7 @@ async function clearStatusMode(userId, store, setStore) {
 // ─── DELOAD ─────────────────────────────────────────────────────────────────
 
 // Planned deload length for the active plan: one cycle (date-based), one week
-// (weekday), or — for flex — null (the deload ends by session count, not days).
+// (weekday), or, for flex, null (the deload ends by session count, not days).
 function deloadPlanDays(store) {
   const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
   if (!sch) return 7;
@@ -5367,8 +5503,8 @@ function deloadFlexGoal(sch) {
   return sch?.sessions_per_week || (sch?.days || []).filter(d => (d.items || []).length).length || 3;
 }
 
-// True once the active deload has run its course (one cycle / week elapsed, or —
-// for flex — the weekly session goal of deload sessions has been logged). Shared
+// True once the active deload has run its course (one cycle / week elapsed, or,
+// for flex, the weekly session goal of deload sessions has been logged). Shared
 // by the Plan-tab button (remaining display) and the app.jsx auto-end check.
 function deloadElapsed(store, now = new Date()) {
   if (store.statusMode !== 'deload' || !store.statusModeSince) return false;
@@ -5383,7 +5519,7 @@ function deloadElapsed(store, now = new Date()) {
   return elapsed >= days;
 }
 
-// Days remaining in the current deload (null for flex — counts sessions, not days).
+// Days remaining in the current deload (null for flex, counts sessions, not days).
 function deloadDaysRemaining(store, now = new Date()) {
   if (store.statusMode !== 'deload' || !store.statusModeSince) return null;
   const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
@@ -5397,7 +5533,7 @@ function deloadDaysRemaining(store, now = new Date()) {
 
 // Start a deload: switch status mode to 'deload' and open a status period.
 // Mirrors the optimistic setStore + write pattern of the home status toggle.
-// sinceISO: optional ISO string to use as statusModeSince instead of now — used
+// sinceISO: optional ISO string to use as statusModeSince instead of now, used
 // by the nudge to align the deload window to the start of the next cycle so it
 // covers exactly one full cycle of training (not a partial one starting mid-cycle).
 async function startDeload(userId, store, setStore, sinceISO = null) {
@@ -5413,7 +5549,7 @@ async function startDeload(userId, store, setStore, sinceISO = null) {
   if (coachingId) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
-      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload week — training light to recover.', userId, threadId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload week, training light to recover.', userId, threadId);
     } catch (_) {}
   }
 }
@@ -5497,7 +5633,7 @@ async function refreshHealthLogs(userId) {
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
 // growth turn for a muscle group's exercises this session, and returns the
 // growthCounts map updated to reflect that decision. Pure and side-effect
-// free — call it fresh (with the latest growthCounts) both to decide the
+// free, call it fresh (with the latest growthCounts) both to decide the
 // recipient and, separately, inside the actual saveMesoState write, so a
 // rare double-invocation of the caller can never silently lose a grant by
 // writing a value computed from stale state.
@@ -5505,11 +5641,11 @@ async function refreshHealthLogs(userId) {
 // - keys: exId_dayId keys of the muscle group's exercises this session, in
 //   day order (keys[0] = the muscle group's main/first lift).
 // - growthCounts: the meso state's full current rotation map (not just this
-//   group) — read-only, never mutated.
+//   group), read-only, never mutated.
 // - prevGrantedTo: the key this same answer-record previously granted this
 //   session (or null for a fresh answer). Its earlier +1 is arithmetically
 //   un-done first so editing an already-answered question within the same
-//   session never double-counts — see commitContrib's identical idempotent-
+//   session never double-counts, see commitContrib's identical idempotent-
 //   diff intent for `deltas`.
 // - No ceiling: growth is never capped by how much an exercise has already
 //   grown. A lifter who keeps saying "not enough" keeps getting more; an
@@ -5517,11 +5653,11 @@ async function refreshHealthLogs(userId) {
 //   (pickDeclineRecipient) instead of a hard limit. Whichever exercise in the
 //   group has the fewest growth grants so far always wins (ties toward
 //   keys[0], i.e. the main lift); a key never seen in growthCounts before (a
-//   mid-meso exercise swap-in) is seeded at the group's current running max —
+//   mid-meso exercise swap-in) is seeded at the group's current running max,
 //   computed BEFORE undoing prevGrantedTo, so undoing our own prior grant
-//   can't transiently understate the group's true established max — so it
+//   can't transiently understate the group's true established max, so it
 //   can't cut ahead of an established lift.
-// - Returns { recipientKey, growthCounts } — recipientKey is null only if
+// - Returns { recipientKey, growthCounts }, recipientKey is null only if
 //   keys is empty.
 function pickGrowthRecipient(keys, growthCounts, prevGrantedTo) {
   const gc = { ...(growthCounts || {}) };
@@ -5539,7 +5675,7 @@ function pickGrowthRecipient(keys, growthCounts, prevGrantedTo) {
   return { recipientKey, growthCounts: gc };
 }
 
-// Un-does a single previously-granted growthCounts key by 1 (floor 0) — used
+// Un-does a single previously-granted growthCounts key by 1 (floor 0), used
 // when an edited volume answer no longer grants anyone (e.g. changed away
 // from "not_enough" this session).
 function retractGrowthGrant(growthCounts, grantedKey) {
@@ -5551,7 +5687,7 @@ function retractGrowthGrant(growthCounts, grantedKey) {
 
 // The mirror image of pickGrowthRecipient for the single-exercise DECLINE
 // signals ("pushed my limits" / "still sore"). Growth rotates fairly, so
-// decline must move too — hard-wiring −1 onto the main lift (keys[0]) alone
+// decline must move too, hard-wiring −1 onto the main lift (keys[0]) alone
 // let the group diverge: the main lift sank to its 1-set floor while grown
 // secondaries sat at the +4 ceiling, and once floored the signal did nothing.
 // Instead the −1 goes to whichever exercise of the group is currently the
@@ -5561,7 +5697,7 @@ function retractGrowthGrant(growthCounts, grantedKey) {
 //   day order (keys[0] = the main/first lift).
 // - deltas: the meso state's full current set-adjustment map (read-only).
 // - prevContrib: this answer-record's ENTIRE previous contribution (record.
-//   contrib) — undone first so an edit re-decides from the true pre-answer
+//   contrib), undone first so an edit re-decides from the true pre-answer
 //   deltas (handles a "too much" → "pushed" edit that had set several −1s,
 //   not just one), keeping repeated confirmations of the same answer stable.
 // - Highest effective delta wins; ties resolve toward keys[0] (main lift), so
@@ -5688,7 +5824,7 @@ function reshapeSetsUnilateral(sets, toUni) {
 }
 
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
-// session's seed) must be RE-EARNED every session — min reps hit + joint fine
+// session's seed) must be RE-EARNED every session, min reps hit + joint fine
 // + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
 // exercises trained THIS session and the boosts actually earned this session,
 // return the new full boosts map: every key belonging to this session is
@@ -5696,7 +5832,7 @@ function reshapeSetsUnilateral(sets, toUni) {
 // OTHER training days are left untouched (they carry their own last-earned
 // boost until their own next session). Previously computeMesoGains merged the
 // earned map over the old one without ever clearing, so a boost earned once
-// kept getting re-applied every session regardless of feedback — the whole
+// kept getting re-applied every session regardless of feedback, the whole
 // per-session joint/pump/volume gating was effectively decorative for weight.
 // Pure and side-effect free so it can be unit-tested and called safely.
 function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
@@ -6368,7 +6504,7 @@ function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, no
 // fast-forward it:
 //   • deload + sick days are always excluded (no meso training happens);
 //   • vacation allows training, so a vacation day is excluded ONLY if nothing
-//     was trained that day — trained vacation days count normally.
+//     was trained that day, trained vacation days count normally.
 // trainedDates is a Set of 'YYYY-MM-DD' on which an ended, non-deload session
 // for this plan was logged. Pure/testable. The flex path handles this natively
 // (it counts trained non-deload sessions), so this only feeds the date/weekday
@@ -6396,7 +6532,7 @@ function mesoPausedDays(statusPeriods, trainedDates, mesoStartISO, todayISO) {
 
 // RIR target for a given meso week: linear taper from startRir (week 1) down to
 // endRir (final week). endRir may be NEGATIVE (beyond failure → auto lengthened
-// partials) — no floor at 0, so the negative tail survives. Defaults 3 → 0
+// partials), no floor at 0, so the negative tail survives. Defaults 3 → 0
 // reproduce the original fixed taper exactly. Pure/testable.
 function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
   if (!weeks || weeks <= 1) return endRir;
@@ -7285,7 +7421,7 @@ function timeAgo(iso, { capDays } = {}) {
 
 // "today"/"yesterday"/"Nd ago" from a pre-computed day difference (today=0).
 // rollup additionally steps up to "Nw ago" past a week and a short
-// month/year past a month — the schedule backup picker wants that, the
+// month/year past a month, the schedule backup picker wants that, the
 // Home/Library "last trained" labels just want the day count.
 function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
   if (diffDays === 0) return 'today';
@@ -7297,13 +7433,13 @@ function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
 
 // Cache-first reload merge for an ID-keyed collection: for ids on both
 // sides, keep the local row only if it carries an unsynced offline edit
-// (present in the persisted sync base AND different from it there) —
+// (present in the persisted sync base AND different from it there),
 // otherwise the server row wins. delIds, if given, drops rows the caller
 // already knows were deleted. app.jsx used to hand-roll this identically in
 // two places (softRefresh and loadData's reconciliation), the second with
 // the delIds filter the first didn't need. Local-only/server-only handling
 // (never-synced rows, resurrection guards) stays with each caller since it
-// varies per collection — this covers just the shared id-matched half.
+// varies per collection, this covers just the shared id-matched half.
 function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   const curMap = new Map((curRows || []).map(r => [r.id, r]));
   const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
@@ -7344,7 +7480,7 @@ function mergePlanDrafts(freshDrafts, curDrafts, baseDrafts) {
 }
 
 // Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
-// carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
+// carbs contribute max(0, C − fiber)×4, clamped so it matches the displayed
 // net-carb value when fiber exceeds carbs. Returns null when no macro is set.
 function caloriesFromMacros(p, c, f, fiber) {
   if (p == null && c == null && f == null) return null;
@@ -7383,27 +7519,27 @@ function supersetLabel(memberCount) {
 
 // Normalizes a set's intensity-technique data into one shape every renderer
 // (chip JSX, plain-text summaries) can consume. Used to be reimplemented ad
-// hoc in 7+ places — each new technique or field (e.g. the recent "partials
+// hoc in 7+ places, each new technique or field (e.g. the recent "partials
 // finisher") needed hand-editing every one of them, and two of them
 // (screens-coaching-client.jsx's two fmtSetChip copies) already carried a
 // comment admitting they were kept in sync by hand ("same gap, same fix").
 //   kind: 'drop'|'myorep'|'myorep_match'|'amrap_variations'|'lengthened_partial'|null
 //   badge: display label for the technique, null for a plain set
 //   connector: '→' (drop/AMRAP) | '↺' (myo) | null
-//   rounds: [{kg, reps, label?}] — populated for chain techniques (falls back
+//   rounds: [{kg, reps, label?}], populated for chain techniques (falls back
 //     to a single round built from st.kg/st.reps when drops is empty,
 //     matching every prior caller's own fallback); empty for
 //     lengthened_partial/plain sets, which use kg/reps directly
-//   totalReps: sum of round reps — only meaningful for myo variants, else null
+//   totalReps: sum of round reps, only meaningful for myo variants, else null
 //   partials: the finisher count on the last round (chain techniques) or
 //     lengthened_partial's own count; 0 when none
 //   anyVaried: true if any AMRAP Variations round's label diverges from
-//     exName — callers use this to decide whether to show round labels at all
+//     exName, callers use this to decide whether to show round labels at all
 function techniqueRounds(st, { exName } = {}) {
   const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, stretch: null, anyVaried: false };
   if (!st || !st.technique) return empty;
   // A weighted stretch (DC-style timed hold at a set weight) rides along as a
-  // finisher on the LAST round of any technique, just like partials — or a plain
+  // finisher on the LAST round of any technique, just like partials, or a plain
   // set carrying only a stretch uses technique 'weighted_stretch'. It lives in
   // drops: the last array round for chain techniques, or the drops OBJECT for the
   // standalone / lengthened_partial forms. Shape: { kg, timeSec } (kg may be null).
@@ -7423,7 +7559,7 @@ function techniqueRounds(st, { exName } = {}) {
     kind: st.technique,
     badge: BADGES[st.technique],
     connector: isMyo ? '↺' : '→',
-    // Finishers (partials count, weighted stretch) ride PER ROUND now — any
+    // Finishers (partials count, weighted stretch) ride PER ROUND now, any
     // drop/mini/round can carry its own, not just the last. Top-level
     // partials/stretch stay as the LAST round's, for older single-finisher callers.
     rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label, partials: d.partials || 0, stretch: d.stretch || null })),
@@ -7453,7 +7589,7 @@ async function detectCacheVersion() {
 
 // Wipes both cache layers a stale deploy can hide behind: the SW's
 // CacheStorage entries AND the IndexedDB precompile cache (zane-precompile,
-// see index.html's loader) — a stale record in the latter alone keeps
+// see index.html's loader), a stale record in the latter alone keeps
 // serving old transpiled JS even after CacheStorage is cleared, since it's
 // keyed by content hash and never touched by a plain cache wipe. Mirrors
 // index.html's own makeClearCacheButton, which can't call into LB (runs
@@ -7474,14 +7610,14 @@ async function clearPrecompileCaches() {
 
 // Clears both cache layers above, then reloads via a cache-busted URL.
 // window.location.reload(true)'s "force" argument is a removed, no-op
-// legacy API in modern browsers — a plain reload after clearing caches is
+// legacy API in modern browsers, a plain reload after clearing caches is
 // still served by whichever service worker is CURRENTLY active (an update
 // may be waiting but not yet activated), and that worker's own network
 // fallback fetch can still be answered by the browser's HTTP cache, a
 // layer entirely below CacheStorage that clearing it never touches. A
 // unique ?_v= query string guarantees no HTTP cache entry exists for this
 // exact URL, and sw.js's fetch handler already treats any ?_v= request as
-// always-network (see the version-check probe in checkSwUpdate) — so this
+// always-network (see the version-check probe in checkSwUpdate), so this
 // reliably gets the same fresh result an actual SW update does.
 async function clearCachesAndReload() {
   await clearPrecompileCaches();
@@ -7519,7 +7655,7 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
@@ -7529,6 +7665,7 @@ window.LB = {
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
+  closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, pushMealPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,

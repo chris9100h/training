@@ -1,4 +1,4 @@
-/* Health screen — daily weight / steps / macros logging + dashboard charts.
+/* Health screen, daily weight / steps / macros logging + dashboard charts.
    Optional tab (settings → showHealthTab). Daily logs live in store.dailyLogs
    and sync through the same diff model as cardio logs (UI mutates via setStore;
    store.js syncStore writes them). Adherence is computed + persisted at save
@@ -51,7 +51,7 @@ const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null 
 
 const caloriesFromMacros = LB.caloriesFromMacros;
 
-// Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
+// Windowed series builder for the charts, pure, so HealthScreen (dailyLogs)
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
 // `windowOverride` (optional {start,end}) lets a caller replace the default
@@ -80,7 +80,7 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   return { from, to, data };
 }
 
-// Period overview (Mon-anchored week or rolling 1M/3M window) — pure, shared
+// Period overview (Mon-anchored week or rolling 1M/3M window), pure, shared
 // by HealthScreen and HealthClientLogs. planningState is whatever
 // LB.plannedTrainingDay needs (store, or clientStore || {}).
 function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf, today, selectedDate }) {
@@ -615,7 +615,7 @@ function HealthBarChart({ series, from, to, format, target, color = 'var(--accen
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
   // Inset both ends by half a bar (+gap) so the first/last bars never bleed
-  // into the y-axis labels or right edge — matters most in the 1W view.
+  // into the y-axis labels or right edge, matters most in the 1W view.
   const inset = bw / 2 + 3;
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -668,7 +668,7 @@ function HealthMacroChart({ series, from, to }) {
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
   // Inset both ends by half a bar (+gap) so the first/last bars never bleed
-  // into the y-axis labels or right edge — matters most in the 1W view.
+  // into the y-axis labels or right edge, matters most in the 1W view.
   const inset = bw / 2 + 3;
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -939,6 +939,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
   };
 
+  // Glucose, blood pressure and body temperature are written straight to
+  // Supabase and are NOT part of the syncStore diff, so a failed write has no
+  // offline retry behind it: the optimistic row is rolled back and the reading
+  // is simply gone. Rolling back silently made that look like the entry was
+  // never typed. Always say so.
+  const warnWriteFailed = async (what) => {
+    await confirm(`Could not save your ${what}. Check your connection and enter it again.`, { title: 'Not saved', ok: 'OK', cancel: null });
+  };
+
   const saveBp = async () => {
     if (savingBp) return;
     const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
@@ -955,13 +964,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
         setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
         const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
-        if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
+        if (error) { if (origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) })); await warnWriteFailed('blood pressure reading'); }
       } else {
         const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
         setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
         setAddingBp(false); setBpForm(emptyBp);
         const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
-        if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+        if (error) { setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('blood pressure reading'); }
       }
     } finally {
       setSavingBp(false);
@@ -973,7 +982,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.bloodPressureLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_blood_pressure_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   const saveTemp = async () => {
@@ -993,13 +1002,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
         setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
         const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
-        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); }
+        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); await warnWriteFailed('temperature reading'); }
       } else {
         const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
         setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
         setAddingTemp(false); setTempForm(emptyTemp);
         const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
-        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; await warnWriteFailed('temperature reading'); }
       }
       // Fever nudge: only for a reading logged against TODAY (status is a
       // "right now" concept, see dayMode above), only once (skip if already
@@ -1026,12 +1035,17 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.bodyTempLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_body_temp_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   const saveGlucose = async () => {
     const mmol = glucoseFromInput(glForm.value, glUnit);
-    if (mmol == null) return;
+    // Same "Invalid reading" feedback the BP and temperature forms in this very
+    // sheet give: a silent return looked like the Save button was dead.
+    if (mmol == null) {
+      await confirm('Enter a valid glucose value.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
     // Normalize the free-text time to zero-padded HH:MM (so entries sort
     // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
     const normTime = (s) => {
@@ -1048,13 +1062,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
       setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
       const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
-      if (error && origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) }));
+      if (error) { if (origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) })); await warnWriteFailed('glucose reading'); }
     } else {
       const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
       setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
       setAddingGlucose(false); setGlForm(emptyGl);
       const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
-      if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+      if (error) { setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('glucose reading'); }
     }
   };
 
@@ -1063,7 +1077,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const orig = (store.glucoseLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
     const { error } = await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
-    if (error && orig) setStore(s => ({ ...s, glucoseLogs: [orig, ...(s.glucoseLogs || [])] }));
+    if (error) { if (orig) setStore(s => ({ ...s, glucoseLogs: [orig, ...(s.glucoseLogs || [])] })); await warnWriteFailed('deletion'); }
   };
 
   useEffectH(() => {
@@ -1073,7 +1087,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
-    // macros alone would produce — so it keeps auto-updating live as macros
+    // macros alone would produce, so it keeps auto-updating live as macros
     // are edited again. A genuine manual override (saved value differs from
     // the macro-derived one) is preserved instead of being silently dropped.
     const existingAutoCals = existing
@@ -2459,7 +2473,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, wUnit)}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl) : null, UI.waterSummaryUnit())}
+        {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl, wUnit) : null, UI.waterSummaryUnit(wUnit))}
         {stat('Calories', log?.calories != null ? log.calories : null)}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
@@ -2600,7 +2614,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           ? cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)
           : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
-        {cell('Water', water != null ? UI.waterSummaryValue(water) : null, UI.waterSummaryUnit())}
+        {cell('Water', water != null ? UI.waterSummaryValue(water, wUnit) : null, UI.waterSummaryUnit(wUnit))}
         {cell('Calories', r(calories))}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
@@ -2642,7 +2656,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const jsDow = anchorDate.getDay();
   const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  // A day counts as "logged" (gold marker) only if it carries real content — a
+  // A day counts as "logged" (gold marker) only if it carries real content, a
   // flex day-type-only override log (just targetsSnap.dayType) must not light up.
   const hasLogContent = l => l && (
     l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
@@ -2705,7 +2719,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== selectedDate)] }));
   };
   const sunday = days[6];
-  // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
+  // Month label for the week, spans two months at a boundary (e.g. "MAY – JUN").
   const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
   const monthLabel = mLabel(monday) === mLabel(sunday)
     ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
@@ -2714,7 +2728,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   return (
     <div style={{ flexShrink: 0, padding: '4px 16px 12px' }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6, paddingLeft: 2 }}>{monthLabel}</div>
-      {/* Day cells — same card style as the home screen day strip */}
+      {/* Day cells, same card style as the home screen day strip */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         {days.map((d, i) => {
           const sel = d === selectedDate;
@@ -2738,7 +2752,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
-              {/* Day-type indicator — ALWAYS shown: dumbbell = training, dot = rest.
+              {/* Day-type indicator, ALWAYS shown: dumbbell = training, dot = rest.
                  Logged status is conveyed by the gold cell bg/border + the small
                  check below. */}
               <div style={{ height: 13, marginTop: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -2757,7 +2771,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           );
         })}
       </div>
-      {/* Calendar picker + LOG button — calendar is an overlaid <input> for iOS compat */}
+      {/* Calendar picker + LOG button, calendar is an overlaid <input> for iOS compat */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
           <button style={{
@@ -3244,11 +3258,66 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // the user hasn't set personal targets). asClient or self-coaching row.
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
 
+  // Edits a period that is already closed, i.e. history. Never touches
+  // statusMode/statusModeSince (those describe TODAY) and never touches the
+  // open period. mode null on the first day of the period deletes it, on a
+  // later day it shortens it to end the day before; a different mode rewrites
+  // the period's mode.
+  const editHistoricStatusPeriod = async (period, mode, dayStr) => {
+    const prevPeriods = store.statusPeriods;
+    const firstDay = (period.startedAt || '').slice(0, 10);
+    const removes = mode === null && dayStr <= firstDay;
+    const newEndedAt = (() => {
+      const d = new Date(dayStr + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString();
+    })();
+    setStore(s => ({
+      ...s,
+      statusPeriods: removes
+        ? (s.statusPeriods || []).filter(p => p.id !== period.id)
+        : (s.statusPeriods || []).map(p => p.id !== period.id ? p : (mode === null ? { ...p, endedAt: newEndedAt } : { ...p, mode })),
+    }));
+    try {
+      if (removes) await LB.deleteStatusPeriodById(userId, period.id);
+      else if (mode === null) await LB.closeStatusPeriodById(userId, period.id, newEndedAt);
+      else await LB.updateStatusPeriodMode(userId, period.id, mode);
+    } catch (e) {
+      console.error('historic status period write failed', e);
+      setStore(s => ({ ...s, statusPeriods: prevPeriods }));
+      UI.alert('Could not update that day. Please try again.');
+    }
+  };
+
   const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
     const startedAt = startDateStr
       ? new Date(startDateStr + 'T12:00:00').toISOString()
       : new Date().toISOString();
+    // Editing a PAST day is a different operation from changing today's
+    // status. Every write below addresses "the period that is currently open",
+    // so tapping Normal on a day that belongs to an already closed period used
+    // to delete or shorten the RUNNING Sick/Vacation period instead, silently
+    // and without an undo. Route a past day to the period that actually covers
+    // it, addressed by id, and leave statusMode alone unless that period is
+    // the open one.
+    const todayStr = LB.todayISO();
+    if (startDateStr && startDateStr < todayStr) {
+      const covering = (store.statusPeriods || []).find(p => {
+        const from = (p.startedAt || '').slice(0, 10);
+        const to = p.endedAt ? p.endedAt.slice(0, 10) : null;
+        return from <= startDateStr && (!to || startDateStr <= to);
+      });
+      const isOpen = !!covering && !covering.endedAt;
+      // Inside the open period the existing "since / normal from" semantics are
+      // exactly right, so only the historical case needs the new path.
+      if (covering && !isOpen) {
+        await editHistoricStatusPeriod(covering, mode, startDateStr);
+        return;
+      }
+      if (!covering && mode && (store.statusPeriods || []).some(p => !p.endedAt)) {
+        UI.alert('You already have an open status period. End that one first, then mark this day.');
+        return;
+      }
+    }
     // "Normal from day X" = the period ended the day BEFORE X (X is the first normal day).
     // Applies whether X is a past day or today.
     const closedAt = mode === null
@@ -3286,13 +3355,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     } catch (e) {
       console.error('status period write failed', e);
       setStore(s => ({ ...s, ...prevStatus }));
-      alert('Could not update your status. Please try again.');
+      UI.alert('Could not update your status. Please try again.');
       return;
     }
     if (coachingId && modeChanged) {
       try {
-        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
-                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+        const body = mode === 'sick'     ? 'Status: Sick, taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation, back soon!'
                    : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
         await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
@@ -3390,9 +3459,16 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           return period?.mode || null;
         })();
         const isTraining = LB.isTrainingDayForDate(s, log.date);
+        // A day that was already scored keeps the target it was scored
+        // against: targetsSnap is a save-time snapshot by contract. Without
+        // this, editing the macro targets today re-scored the whole logged
+        // history against the new numbers, so past adherence (and every coach
+        // view and check-in built on it) changed retroactively.
+        const snap = log.targetsSnap;
+        const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
         let { adherence, targetsSnap } = dayMode
           ? { adherence: null, targetsSnap: null }
-          : LB.dailyLogAdherence(log, effectiveTargets, isTraining);
+          : LB.dailyLogAdherence(log, effectiveTargets, isTraining, storedTarget);
         if (!dayMode && flexActive && !targetsSnap) {
           const dt = log.targetsSnap?.dayType;
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
@@ -3419,7 +3495,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   //    logged session (incl. a freestyle session on a rest day) is really a
   //    training day, so its target/adherence should follow.
   // The two sets are disjoint (training+no-session vs rest+session), so a rewrite
-  // always flips the day out of both conditions — no oscillation. Adherence is
+  // always flips the day out of both conditions, no oscillation. Adherence is
   // recomputed against the new target; the dayType is corrected even when macro
   // targets are absent (keeps the health strip/indicator honest).
   const flexActive = useMemoH(
@@ -3432,33 +3508,41 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
     const trainingTarget = LB.dayTargetFromMacros(effectiveTargets, true);
     const restTarget = LB.dayTargetFromMacros(effectiveTargets, false);
-    let changed = false;
-    const nextLogs = (store.dailyLogs || []).map(l => {
-      if (l.date >= today) return l;
-      const dt = l.targetsSnap?.dayType;
-      const hasSession = sessionDates.has(l.date);
-      let newType = null;
-      if (dt === 'training' && !hasSession && (flexActive || !!LB.plannedTrainingDay(store, l.date))) newType = 'rest';
-      else if (dt === 'rest' && hasSession) newType = 'training';
-      if (!newType) return l;
-      const target = newType === 'training' ? trainingTarget : restTarget;
-      // Same hole as setFlexDayType: this rewrote a score onto days that
-      // must not carry one. The flag is on the row so dailyLogAdherence
-      // sees it; status has to be asked for.
-      const unscored = l.mealOfChoice || !!LB.statusModeForDate(store, l.date);
-      const adherence = (target && !unscored)
-        ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
-      const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
-      changed = true;
-      return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+    // Built inside the updater, not from the render closure: this used to map
+    // over the `store.dailyLogs` captured at render and hand the result to
+    // setStore wholesale, which threw away any dailyLogs update queued in the
+    // same commit (the food reconciler above queues exactly that).
+    setStore(s => {
+      let changed = false;
+      const nextLogs = (s.dailyLogs || []).map(l => {
+        if (l.date >= today) return l;
+        const dt = l.targetsSnap?.dayType;
+        const hasSession = sessionDates.has(l.date);
+        let newType = null;
+        if (dt === 'training' && !hasSession && (flexActive || !!LB.plannedTrainingDay(s, l.date))) newType = 'rest';
+        else if (dt === 'rest' && hasSession) newType = 'training';
+        if (!newType) return l;
+        const target = newType === 'training' ? trainingTarget : restTarget;
+        // Same hole as setFlexDayType: this rewrote a score onto days that
+        // must not carry one. The flag is on the row so dailyLogAdherence
+        // sees it; status has to be asked for.
+        const unscored = l.mealOfChoice || !!LB.statusModeForDate(s, l.date);
+        // Unlike the food reconciler this genuinely needs the CURRENT targets:
+        // the day type itself changed, and the old snapshot only holds the
+        // target for the type that turned out to be wrong.
+        const adherence = (target && !unscored)
+          ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
+        const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
+        changed = true;
+        return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+      });
+      return changed ? { ...s, dailyLogs: nextLogs } : s;
     });
-    if (!changed) return;
-    setStore(s => ({ ...s, dailyLogs: nextLogs }));
   }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
-  // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
+  // window doesn't leave most of the chart empty, 80 of 90 days fills the chart.
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
 
   const windowDays = tfDays(tf);
@@ -3473,7 +3557,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
   const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
 
-  // Cardio chart series — minutes summed per day from store.cardioLogs.
+  // Cardio chart series, minutes summed per day from store.cardioLogs.
   const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays, weekWindow), [store.cardioLogs, tf, selectedDate]);
 
   // Historical avg macro target for the chart window (from persisted targetsSnap).
@@ -3520,13 +3604,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
-      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      // Refill the visible slots in place instead of appending the invisible
+      // ids at the end. Flushing them to the back permanently reordered every
+      // card that merely had no data yet (or was hidden in settings), so
+      // showing it again put it at the bottom rather than where it was.
+      let vi = 0;
+      const next = prev.map(id => (isCardVisible(id) ? moved[vi++] : id));
       try { localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
       return next;
     });
   };
 
-  // Period overview — adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
+  // Period overview, adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
   const weekStats = useMemoH(() => computeHealthWeekStats({
     logs: dailyLogs, sessions: store.sessions, cardioLogs: store.cardioLogs,
     planningState: store, tf, today, selectedDate,
@@ -3758,7 +3847,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <div ref={captureRef}>
         <HealthDateStrip store={store} setStore={setStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} targets={effectiveTargets} />
 
-        {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
+        {/* max-width cap so charts don't blow up on iPad. Reorderable cards,
            drag the grip to reorder; order persists per device. Week/Today span
            both columns; the rest sit in a 2-col grid (fullWidthCardIds above). */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
@@ -3834,14 +3923,18 @@ function HealthClientLogs({ clientStore }) {
     if (from === to) return;
     setCardOrder(prev => {
       // ReorderList reports from/to as indices into the VISIBLE cards it
-      // rendered, not the full order array — glucose/weekly are routinely
+      // rendered, not the full order array, glucose/weekly are routinely
       // absent for new coaching clients, so splicing prev directly (as this
       // used to) reordered the wrong card whenever any card was hidden.
       const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
-      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      // Refill the visible slots in place, see the client-side twin: appending
+      // the invisible ids permanently pushed every temporarily empty card to
+      // the bottom.
+      let vi = 0;
+      const next = prev.map(id => (isCardVisible(id) ? moved[vi++] : id));
       try { localStorage.setItem(COACH_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
       return next;
     });
@@ -4123,7 +4216,7 @@ function ExportSheet({ open, onClose, store, userId }) {
         try {
           byDate = await LB.fetchFoodLogsForDates(userId, missing);
         } catch (e) {
-          alert('Could not load the full date range. Please try again.');
+          UI.alert('Could not load the full date range. Please try again.');
           return;
         }
         extra = Object.values(byDate || {}).flat();
@@ -4175,9 +4268,20 @@ function ExportSheet({ open, onClose, store, userId }) {
 
       // Transposed: column A = metric label, columns B… = one per date (ascending).
       // Row 1 = date header row (A1 empty).
-      const dates = logs.map(l => l.date);
+      // The date axis is the union of daily logs, cardio and sessions, not the
+      // daily logs alone: a day with a workout or a run but no daily-log row
+      // (nothing weighed, no macros typed) used to vanish from the export
+      // entirely, so the training and cardio columns silently under-reported.
       const byDate = {};
       logs.forEach(l => { byDate[l.date] = l; });
+      const dates = [...new Set([
+        ...logs.map(l => l.date),
+        ...Object.keys(cardio).filter(d => d >= from && d <= to),
+        ...Object.keys(sessions).filter(d => d >= from && d <= to),
+      ])].sort();
+      // Metric fns read l.<field>, so days without a daily log need a stub row
+      // rather than undefined.
+      dates.forEach(d => { if (!byDate[d]) byDate[d] = { date: d }; });
 
       const metrics = [
         { label: `Weight (${unit})`, fn: l => l.weight },

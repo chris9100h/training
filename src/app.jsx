@@ -1,11 +1,16 @@
-/* Main App — auth + routing */
+/* Main App, auth + routing */
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
-// What's New — changelog entries live in src/whatsnew.js (window.WHATS_NEW, an
+// What's New, changelog entries live in src/whatsnew.js (window.WHATS_NEW, an
 // array, newest first). On 'ready' after an update we show every entry the user
 // hasn't seen yet, bundled into one card. Tracked per device by the newest id.
 const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
+
+// How long markIntentionalSignOut() stays armed. A deliberate sign-out fires
+// SIGNED_OUT within a moment; anything later is a different, involuntary event
+// and must not be allowed to wipe the local pending diff.
+const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 
 // Entries newer than the last-seen id. New users / first run after the feature
 // shipped (no stored id) get just the latest, not the whole back catalogue.
@@ -67,7 +72,7 @@ class ErrorBoundary extends React.Component {
             </div>
             <button
               onClick={() => { this.setState({ error: null }); this.props.onGoHome?.(); }}
-              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none' }}
+              style={{ background: UI.gold, color: 'var(--accent-ink)', border: 'none', borderRadius: 4, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none' }}
             >
               Back to home
             </button>
@@ -117,7 +122,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
           Session auto-ended
         </div>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended{durationMinutes != null ? <> — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded</> : ''}.
+          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended{durationMinutes != null ? <>, <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded</> : ''}.
         </div>
         <button onClick={onDismiss} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
@@ -276,7 +281,7 @@ function ErrorScreen({ onRetry }) {
           Check your connection and try again.
         </div>
         <button onClick={onRetry} style={{
-          background: UI.gold, color: '#0a0a0a',
+          background: UI.gold, color: 'var(--accent-ink)',
           border: 'none', borderRadius: 4,
           padding: '8px 18px', fontSize: 13, fontWeight: 600,
           fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none',
@@ -320,17 +325,17 @@ function App() {
       return localStorage.getItem(PENDING_SHARE_KEY);
     } catch (_) { return null; }
   });
-  const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
+  const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
-  const intentionalSignOut        = useRefA(false); // set right before a user-initiated LB.signOut() call
+  const intentionalSignOut        = useRefA(null);  // ms timestamp, set right before a user-initiated LB.signOut() call
   const swReg                     = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
-  const localDirty                = useRefA(false); // true if user changed store after cache load
+  const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
@@ -367,13 +372,27 @@ function App() {
     if (phase !== 'ready' || !userId || !store) return;
     const cardioExes = (store.exercises || []).filter(e => e.movement_type === 'cardio');
     if (cardioExes.length <= 1) return;
-    const usedIds = new Set(
-      (store.sessions || []).flatMap(s => (s.entries || []).map(e => e.exId))
-    );
-    const keep = cardioExes.find(e => usedIds.has(e.id)) || cardioExes[0];
-    const toDelete = cardioExes.filter(e => e.id !== keep.id).map(e => e.id);
-    LB.supabase.from('zane_exercises').delete().in('id', toDelete).then(() => {});
-    setStore(s => s ? { ...s, exercises: s.exercises.filter(e => !toDelete.includes(e.id)) } : s);
+    const ids = cardioExes.map(e => e.id);
+    // Which of the duplicates history actually points at has to come from the
+    // SERVER, not from store.sessions: entries are only loaded for the boot
+    // window, so an older reference reads as "unused" here and the dedup then
+    // keeps cardioExes[0] (usually the freshly seeded row) and deletes the one
+    // every logged cardio entry references.
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await LB.supabase.from('zane_session_entries').select('ex_id').eq('user_id', userId).in('ex_id', ids);
+      // Deleting on a failed lookup could drop the referenced row. Leaving the
+      // duplicate is harmless in comparison, the next boot retries.
+      if (error || cancelled || userIdRef.current !== userId) return;
+      const usedIds = new Set((data || []).map(r => r.ex_id));
+      const keep = cardioExes.find(e => usedIds.has(e.id)) || cardioExes[0];
+      const toDelete = cardioExes.filter(e => e.id !== keep.id && !usedIds.has(e.id)).map(e => e.id);
+      if (!toDelete.length) return;
+      const del = await LB.supabase.from('zane_exercises').delete().in('id', toDelete);
+      if (del.error || cancelled) return;
+      setStore(s => s ? { ...s, exercises: s.exercises.filter(e => !toDelete.includes(e.id)) } : s);
+    })();
+    return () => { cancelled = true; };
   }, [phase, userId]); // runs once on ready; store is captured from that render
 
   // One-time repair for a meal-of-choice entry confirmed before
@@ -381,7 +400,7 @@ function App() {
   // quantity_g is NOT NULL on zane_food_logs, so a local row still carrying
   // quantityG: null has been failing its sync on every retry since, forever,
   // wedging syncBase so every OTHER pending change behind it in the same
-  // batch fails too — the standing "not synced" state this fixes. No row
+  // batch fails too, the standing "not synced" state this fixes. No row
   // shaped like this was ever valid server-side (the constraint would have
   // rejected it), so patching it locally to the same 100 fallback the fix
   // now uses is always safe. Runs at the app level, not inside the Food
@@ -413,7 +432,7 @@ function App() {
   // Report the active SW cache version to Supabase (so an admin can spot a
   // user stuck on a stale cache without asking them to check Settings).
   // Re-checked at boot, on every foreground and right when the cache
-  // actually rotates (controllerchange) — a single boot-time check isn't
+  // actually rotates (controllerchange), a single boot-time check isn't
   // enough since most users leave the PWA open for days without reloading.
   const reportSwVersion = useCallbackA(() => {
     LB.detectCacheVersion().then(version => {
@@ -424,7 +443,7 @@ function App() {
   }, [setStore]);
 
   // On a genuinely cold boot (fresh install/incognito), the SW can finish
-  // activating — and this effect can fire — before login/data-load has
+  // activating, and this effect can fire, before login/data-load has
   // populated the store, so the setStore call above silently no-ops on a
   // null store with no retry. Flush the already-detected version the moment
   // the store actually becomes available.
@@ -453,23 +472,37 @@ function App() {
           const serverTempIds     = new Set((fresh.bodyTempLogs || []).map(l => l.id));
           const serverWaterIds    = new Set((fresh.waterLogs || []).map(l => l.id));
           const serverFoodIds     = new Set((fresh.foodLogs || []).map(l => l.id));
-          // Daily logs are one-per-date: also drop a local row whose date the
-          // server already has (a divergent id from a pre-RPC multi-device write).
-          const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
-          const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id));
-          const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
-          const localOnlyBp      = (s.bloodPressureLogs || []).filter(l => !serverBpIds.has(l.id));
-          const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id));
-          const localOnlyWater   = (s.waterLogs || []).filter(l => !serverWaterIds.has(l.id));
-          const localOnlyFood    = (s.foodLogs || []).filter(l => !serverFoodIds.has(l.id));
           // For ids on both sides keep the local row when it carries an unsynced
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
           const base = syncBase.current;
+          // "local-only" must mean NEVER SYNCED, exactly like the boot merge:
+          // a row that IS in the confirmed base but gone from the server was
+          // deleted on another device, and re-adding it here resurrects it and
+          // pushes it straight back. Without this test the hourly
+          // collapse_water_logs cron also double-counted yesterday's water
+          // (the collapsed raw rows came back next to their summary row).
+          const baseIdSet = (baseRows) => (baseRows ? new Set(baseRows.map(r => r.id)) : null);
+          const baseDailyIds   = baseIdSet(base?.dailyLogs);
+          const baseCardioIds  = baseIdSet(base?.cardioLogs);
+          const baseGlucoseIds = baseIdSet(base?.glucoseLogs);
+          const baseBpIds      = baseIdSet(base?.bloodPressureLogs);
+          const baseTempIds    = baseIdSet(base?.bodyTempLogs);
+          const baseWaterIds   = baseIdSet(base?.waterLogs);
+          const baseFoodIds    = baseIdSet(base?.foodLogs);
+          // Daily logs are one-per-date: also drop a local row whose date the
+          // server already has (a divergent id from a pre-RPC multi-device write).
+          const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date) && !baseDailyIds?.has(l.id));
+          const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id) && !baseCardioIds?.has(l.id));
+          const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id) && !baseGlucoseIds?.has(l.id));
+          const localOnlyBp      = (s.bloodPressureLogs || []).filter(l => !serverBpIds.has(l.id) && !baseBpIds?.has(l.id));
+          const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id) && !baseTempIds?.has(l.id));
+          const localOnlyWater   = (s.waterLogs || []).filter(l => !serverWaterIds.has(l.id) && !baseWaterIds?.has(l.id));
+          const localOnlyFood    = (s.foodLogs || []).filter(l => !serverFoodIds.has(l.id) && !baseFoodIds?.has(l.id));
           // Locally-deleted-but-unsynced rows (in base, gone from local): filter
           // them out of fresh so the background refresh doesn't resurrect a log
           // the user just deleted before the delete reached the server (audit
-          // B3 — the boot merge already does this; softRefresh was missing it).
+          // B3, the boot merge already does this; softRefresh was missing it).
           const delDel = (baseRows, curRows) => {
             if (!baseRows) return null;
             const curIds = new Set((curRows || []).map(r => r.id));
@@ -490,7 +523,7 @@ function App() {
           const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
           const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
           // refreshHealthLogs re-maps every row into a fresh object, so these
-          // merged arrays are new references even when nothing actually changed —
+          // merged arrays are new references even when nothing actually changed,
           // which forced a full re-render of the active screen on EVERY
           // foreground (the reported reactivation stutter). Bail out when content
           // is unchanged, and keep each unchanged collection's previous reference
@@ -558,7 +591,7 @@ function App() {
   // TTL on the push only governs *undelivered* messages; notifications that
   // were shown while you were away keep piling up in the OS notification center
   // otherwise. Returning to the app (visibilitychange) is the moment to clear
-  // them — it covers the "just logged a set" case and stale coaching pushes.
+  // them, it covers the "just logged a set" case and stale coaching pushes.
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     const clearDelivered = () => {
@@ -594,14 +627,14 @@ function App() {
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
-    // Only reload when the user explicitly clicked "Update now" — but every
+    // Only reload when the user explicitly clicked "Update now", but every
     // tab (not just the one that triggered it) gets this event the instant
     // the new SW takes control and rotates the cache, so it's the most
     // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
       reportSwVersion();
       // Persist the applied version only now that the new SW has actually taken
-      // control — not on the click — so an update that never activates (tab
+      // control, not on the click, so an update that never activates (tab
       // closed, SKIP_WAITING lost) keeps being re-offered after a cold start.
       if (intentionalUpdate.current && pendingSwVersion.current) {
         try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
@@ -615,7 +648,7 @@ function App() {
   const applyUpdate = useCallbackA(async () => {
     // A force-update broadcast (admin_force_update) isn't tied to an actual
     // SW change, so there's no "wait for activation" step to persist it
-    // after — clicking Update always leads to a fresh reload one way or
+    // after, clicking Update always leads to a fresh reload one way or
     // another (real SW takeover or the clearCachesAndReload fallback below),
     // so mark it seen right away.
     if (pendingForceNonce.current) {
@@ -627,14 +660,14 @@ function App() {
     // Don't delete caches when we successfully hand off to a real worker
     // below: the new SW's install already populated its CACHE, and its
     // activate handler deletes every other (old) cache. Wiping all caches
-    // here too — including the freshly-installed one — would force a full
+    // here too, including the freshly-installed one, would force a full
     // network refetch and break offline right after an update.
 
     // Prefer the worker we already tracked; fall back to live reg state
     let worker = waitingWorker.current ?? swReg.current?.waiting;
 
     if (!worker && swReg.current) {
-      // New SW might still be installing — wait up to 6 s for it to reach waiting
+      // New SW might still be installing, wait up to 6 s for it to reach waiting
       const installing = swReg.current.installing;
       if (installing) {
         worker = await new Promise(resolve => {
@@ -654,16 +687,16 @@ function App() {
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
     } else {
-      // No installed/waiting worker turned up in time — our own faster
+      // No installed/waiting worker turned up in time, our own faster
       // text-based update check (checkSwUpdate) can show the banner before
       // the browser's native SW update/install has caught up, or install
       // may still be running past the 6s wait above. A bare reload here
       // would hit the OLD SW's stale-while-revalidate fetch handler and
-      // instantly re-serve the cached (old) app — the update button would
+      // instantly re-serve the cached (old) app, the update button would
       // look like it does nothing. Wipe the cache first, exactly like the
       // "Reload App" quick action does, so the reload is guaranteed to
       // actually fetch fresh code instead of silently staying on the old one.
-      // Persist the version we're about to fetch fresh — otherwise
+      // Persist the version we're about to fetch fresh, otherwise
       // checkSwUpdate sees the same "new" version again right after reload
       // and re-shows the banner, forever (confirmed: this caused an
       // infinite update-banner loop whenever this fallback path was taken).
@@ -697,7 +730,7 @@ function App() {
           else setSyncStatus('synced');
         } else {
           // syncStore now throws on a real write failure (see unwrap). Surface
-          // it and schedule a retry — the 'online' listener also retries.
+          // it and schedule a retry, the 'online' listener also retries.
           setSyncStatus('error');
           clearTimeout(retryTimer.current);
           retryTimer.current = setTimeout(() => flushSync(uid), 15000);
@@ -731,13 +764,20 @@ function App() {
   }, []);
 
   // Arms the SIGNED_OUT handler below to actually wipe local storage. Must be
-  // called synchronously right before every deliberate LB.signOut() — without
+  // called synchronously right before every deliberate LB.signOut(), without
   // it, SIGNED_OUT is treated as involuntary (failed refresh, revoked/expired
   // session, dead network) and the local cache/pending diff is preserved.
-  const markIntentionalSignOut = useCallbackA(() => { intentionalSignOut.current = true; }, []);
+  const markIntentionalSignOut = useCallbackA(() => { intentionalSignOut.current = Date.now(); }, []);
 
   const loadData = async (uid) => {
-    localDirty.current = false;
+    // Generation stamp: SIGNED_OUT and every newer loadData bump this, and
+    // nothing below writes to the store, the diff base or the local cache
+    // unless it is still the newest load for the CURRENT user. Without it a
+    // slow loadFromSupabase(A) resolving after user B signed in on the same
+    // page session merged A's exercises, plans and history into B's store and
+    // persisted the mix into B's local cache.
+    const seq = ++loadSeq.current;
+    const isStale = () => seq !== loadSeq.current || uid !== userIdRef.current;
     const cached = LB.loadFromLocal(uid);
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
@@ -750,13 +790,14 @@ function App() {
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
+          if (isStale()) return;
           const cur = prevStore.current;
-          // fresh is the pristine server state — use it as the sync diff base.
+          // fresh is the pristine server state, use it as the sync diff base.
           // BUT sessions outside the history window come back with entries:[]
           // (their sets aren't loaded), while the cache-first merge below
           // restores their cached entries into the store. If the diff base kept
           // entries:[] for them, every boot would diff the restored entries as
-          // "new" and re-upload all their sets stamped now() — clobbering newer
+          // "new" and re-upload all their sets stamped now(), clobbering newer
           // cross-device edits and growing write load with account age (audit
           // B1). Carry the last-synced entries (from the persisted base) into
           // the diff base so _syncEntryRelational's per-set diff sees them
@@ -768,8 +809,8 @@ function App() {
           LB.saveBase(diffBase, uid);
           let merged = fresh;
           if (cur) {
-            // Use `in` (not `??`) so an explicit local null — "session just
-            // ended on this device" — wins over the stale server value instead
+            // Use `in` (not `??`) so an explicit local null, "session just
+            // ended on this device", wins over the stale server value instead
             // of being treated as missing and resurrecting the old session.
             const inProgressId = ('inProgress' in cur) ? cur.inProgress : fresh.inProgress;
             // Session merge lives in store.js (LB.mergeSessions) so the
@@ -777,7 +818,7 @@ function App() {
             // drop" logic works on the (complete) metadata list, while cached
             // entries of sessions outside the boot window are preserved.
             // The persisted base tells apart "never reached the server" (keep
-            // + re-sync) from "deleted on another device" (drop — keeping it
+            // + re-sync) from "deleted on another device" (drop, keeping it
             // would push it right back).
             const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId, base?.sessions);
             // Same resurrection guard for the other ID-merged collections:
@@ -826,7 +867,7 @@ function App() {
             const baseMealPlanIds = base ? new Set((base.foodMealPlans || []).map(p => p.id)) : null;
             const localOnlyMealPlans = (cur.foodMealPlans || []).filter(x => !serverMealPlanIds.has(x.id) && !baseMealPlanIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
-            // exercises/schedules — previously missing here entirely, so a
+            // exercises/schedules, previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
             // first sync completed was silently discarded on the next merge.
             const serverTplIds = new Set((fresh.workoutTemplates || []).map(t => t.id));
@@ -875,7 +916,7 @@ function App() {
             const delCardioPlanIds = baseCardioPlanIds ? new Set([...baseCardioPlanIds].filter(id => !curCardioPlanIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
             // so for ids present on both sides we compare updatedAt and keep
-            // whichever is newer — this protects an in-flight local session's
+            // whichever is newer, this protects an in-flight local session's
             // not-yet-synced feedback deltas from being clobbered by a boot
             // refresh that raced ahead. Ids present on only one side still
             // need the same base-membership resurrection guard as every
@@ -895,7 +936,7 @@ function App() {
               return cT >= fT ? c : f;
             }).filter(Boolean);
             // For ids present on BOTH sides, keep the server row unless the
-            // local row carries an unsynced offline edit — i.e. the id is in
+            // local row carries an unsynced offline edit, i.e. the id is in
             // the persisted base AND local differs from base. Without this a
             // row edited offline would be reverted to the server value and then
             // re-synced back as the old value. Conservative: no base membership
@@ -930,7 +971,7 @@ function App() {
             // fields, just the scalar), so a coach's push-and-activate on the
             // server isn't reverted by a stale local value, and vice versa.
             const mealPlanPosSrc = (!base || cur.activeMealTemplateId !== base.activeMealTemplateId) ? cur : fresh;
-            // Scalar state: the local cache is authoritative — it always holds
+            // Scalar state: the local cache is authoritative, it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
             // Water tracker config is an exception: it must propagate across
@@ -946,16 +987,38 @@ function App() {
             // too: confirming "Bottle empty?" on one device must reset the
             // progress ring and show the emptied bottle under "Other drinks
             // today" on every device, the same as any other water stat.
-            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl', 'waterBottlesToday', 'waterBottlesDate'];
-            const mergedSettings = { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) };
-            for (const k of WATER_SYNC_KEYS) {
+            // This used to be the other way round: the local cache won for
+            // every key except the water ones, even though the diff base was
+            // just set to the pristine server state. The post-boot flush then
+            // read the stale local value as a local change and upserted it
+            // over the fresher server one, so macro targets, meal windows,
+            // hidden health cards, rest defaults, planMode or a coach-pushed
+            // meal plan set on one device were silently reverted by the next
+            // boot of another device. The base-aware rule the water keys and
+            // the plan-position tuple already used is the right default for
+            // ALL settings: keep this device's value only if this device
+            // actually changed it since the last confirmed sync.
+            //
+            // Device-scoped settings are the exception: they describe THIS
+            // device, are mirrored in localStorage, and must never be taken
+            // from whatever device synced last.
+            const DEVICE_ONLY_SETTINGS = ['darkMode', 'accentColor', 'swVersion', 'cycleWeekView', 'pushEnabled'];
+            const mergedSettings = { ...fresh.settings, ...cur.settings };
+            const settingKeys = new Set([...Object.keys(fresh.settings || {}), ...Object.keys(cur.settings || {})]);
+            for (const k of settingKeys) {
+              if (DEVICE_ONLY_SETTINGS.includes(k)) continue;
               const localUnsynced = !base || JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);
               if (!localUnsynced) mergedSettings[k] = fresh.settings?.[k];
             }
+            // No base (legacy cache) means the rule above cannot tell a local
+            // edit from a stale value, so keep the old special case: a
+            // server-side unit of null (admin reset / never chosen) wins, and
+            // the unit picker re-fires.
+            if (!base && fresh.settings.unit == null) mergedSettings.unit = null;
             merged = {
               ...fresh,
               // Local cache is authoritative for scalar settings (preserves
-              // offline edits) — except a server-side unit of null (admin reset
+              // offline edits), except a server-side unit of null (admin reset
               // / not chosen) must win so the picker re-fires, since the cache
               // still holds the old kg/lbs value; and the water config above.
               settings: mergedSettings,
@@ -979,9 +1042,16 @@ function App() {
               foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
               foodTemplateDays: [...localOnlyTemplateDays, ...mergeById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds)],
               foodMealPlans: [...localOnlyMealPlans, ...mergeById(fresh.foodMealPlans, cur.foodMealPlans, base?.foodMealPlans, delMealPlanIds)],
-              workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
-              checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
-              cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
+              // mergeById, not a bare server-wins filter: for an id present on
+              // both sides these three used to take the server row outright,
+              // so an offline rename or edit of an EXISTING template or cardio
+              // plan was dropped by the background load and never re-pushed
+              // (the diff base is the server state by then). Every sibling
+              // collection above already goes through mergeById for exactly
+              // this reason.
+              workoutTemplates: [...localOnlyTemplates, ...mergeById(fresh.workoutTemplates || [], cur.workoutTemplates, base?.workoutTemplates, delTplIds)],
+              checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...mergeById(fresh.checkinSchemaTemplates || [], cur.checkinSchemaTemplates, base?.checkinSchemaTemplates, delCheckinTplIds)],
+              cardioPlans: [...localOnlyCardioPlans, ...mergeById(fresh.cardioPlans || [], cur.cardioPlans, base?.cardioPlans, delCardioPlanIds)],
               mesoStates,
               planDrafts,
             };
@@ -990,13 +1060,15 @@ function App() {
           prevStore.current = merged;
           setStore(merged);
         })
-        .catch(console.error);
+        .catch(err => { if (!isStale()) console.error(err); });
     } else {
       setPhase('loading');
       try {
         const loaded = await LB.loadFromSupabase(uid);
+        // Same guard as the cached path: this await can outlive the account.
+        if (isStale()) return;
         if (!loaded.user.approved) { setPhase('pending'); return; }
-        // PASSWORD_RECOVERY event may have fired while we were fetching — don't override the reset screen
+        // PASSWORD_RECOVERY event may have fired while we were fetching, don't override the reset screen
         if (recoveryInProgress.current) return;
         prevStore.current = loaded;
         syncBase.current = loaded;
@@ -1004,6 +1076,7 @@ function App() {
         setStore(loaded);
         setPhase('ready');
       } catch (e) {
+        if (isStale()) return;
         console.error('loadFromSupabase failed', e);
         setPhase('error');
       }
@@ -1019,7 +1092,7 @@ function App() {
           else loadData(session.user.id);
         }
         // Offline with no restorable session: show the error screen, not the
-        // login screen — you can't sign in offline, and a retry recovers.
+        // login screen, you can't sign in offline, and a retry recovers.
         else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
         // Re-arm the onboarding check for the freshly signed-in user. The ref is
@@ -1029,6 +1102,7 @@ function App() {
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
         recoveryInProgress.current = false; // clear so loadData can complete after a password reset
+        intentionalSignOut.current = null;  // a sign-out that never completed must not arm the next one
         // Cancel any pending retry from the previous account so it can't fire
         // with the old uid after an in-session account switch, and drop its
         // stale pending state.
@@ -1039,7 +1113,7 @@ function App() {
         else loadData(session.user.id);
       } else if (event === 'PASSWORD_RECOVERY') {
         // Supabase fires this (in addition to or instead of SIGNED_IN) when a
-        // recovery link is clicked — handle it explicitly so the reset screen
+        // recovery link is clicked, handle it explicitly so the reset screen
         // always appears regardless of whether the implicit-flow hash is present.
         recoveryInProgress.current = true;
         isRecoveryFlow.current = true;
@@ -1052,14 +1126,20 @@ function App() {
         // Only a deliberate LB.signOut() (Settings → Sign out / Delete all
         // data / pending-approval sign-out, each of which calls
         // markIntentionalSignOut() first) may wipe the local pending diff.
-        // Any other SIGNED_OUT — offline, a flaky refresh, a revoked or
-        // expired session — is involuntary: wiping here would delete
+        // Any other SIGNED_OUT, offline, a flaky refresh, a revoked or
+        // expired session, is involuntary: wiping here would delete
         // unsynced edits with no way to retry them once the next login pulls
         // a clean server state back down. (Confirmed: a workout logged
         // during a broken refresh cycle was lost exactly this way when the
         // user was told to just log back in.)
-        if (!intentionalSignOut.current) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
-        intentionalSignOut.current = false;
+        // The latch is a TIMESTAMP, not a flag: if the LB.signOut() it was
+        // armed for never produced a SIGNED_OUT (GoTrue 5xx, dead network),
+        // a plain boolean stayed true for the rest of the page session and
+        // handed the wipe to the next involuntary sign-out instead.
+        const armedAt = intentionalSignOut.current;
+        const armed = !!armedAt && (Date.now() - armedAt) < INTENTIONAL_SIGNOUT_TTL_MS;
+        intentionalSignOut.current = null;
+        if (!armed) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
         LB.clearLocal(userIdRef.current);
         clearTimeout(retryTimer.current);
         setStore(null);
@@ -1068,7 +1148,9 @@ function App() {
         syncBase.current = null;
         pendingStore.current = null;
         syncing.current = false;
-        localDirty.current = false;
+        // Invalidate any in-flight loadData: its result belongs to the account
+        // that just went away and must never merge into the next one.
+        loadSeq.current++;
         setRoute({ name: 'home' });
         setPhase('unauthed');
       }
@@ -1076,7 +1158,7 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Auto-close notification — fully decoupled from the login/load path. It runs
+  // Auto-close notification, fully decoupled from the login/load path. It runs
   // only once the app is already 'ready', as an isolated query OUTSIDE the
   // onAuthStateChange flow, so it never contends for the auth lock and can never
   // block or fail login. If the query fails or hangs, login is unaffected.
@@ -1090,7 +1172,7 @@ function App() {
         if (n) {
           setAutoCloseNotify(n);
           // Fire-and-forget clear. The PostgREST builder is a thenable that only
-          // implements `then` — `.catch()` doesn't reliably trigger the request,
+          // implements `then`, `.catch()` doesn't reliably trigger the request,
           // so use `.then(resolve, reject)` (the codebase pattern) to actually
           // send the UPDATE. Without this the notification is never cleared and
           // re-appears on every load.
@@ -1101,7 +1183,7 @@ function App() {
     return () => { cancelled = true; };
   }, [phase, userId]);
 
-  // What's New — the first time the app is 'ready' after an update, show every
+  // What's New, the first time the app is 'ready' after an update, show every
   // changelog entry the user hasn't seen yet (bundled into one card), so anyone
   // returning after several releases catches up on all of them at once.
   useEffectA(() => {
@@ -1119,8 +1201,8 @@ function App() {
 
   // Onboarding: show welcome prompt to new users (no completed sessions).
   // Users who already trained get the flag set silently. While the unit is
-  // still unchosen (null) we defer — the unit picker (separate effect below)
-  // takes precedence so the two don't stack — and re-fire once it's set.
+  // still unchosen (null) we defer, the unit picker (separate effect below)
+  // takes precedence so the two don't stack, and re-fire once it's set.
   useEffectA(() => {
     if (phase !== 'ready' || !store || onboardingChecked.current) return;
     if (store.settings?.unit == null) return; // wait until unit chosen; don't mark checked
@@ -1144,7 +1226,7 @@ function App() {
     }
   }, [phase, store]);
 
-  // Unit picker: opens whenever the stored unit is null — a fresh user, or a
+  // Unit picker: opens whenever the stored unit is null, a fresh user, or a
   // user an admin reset (kg → null) to re-ask. Ungated by onboardingChecked so
   // a reset re-prompts even long-onboarded users. Setting the unit closes it.
   useEffectA(() => {
@@ -1154,7 +1236,7 @@ function App() {
   // Detect an admin-side unit reset on a session that's already open. The
   // cache-first merge keeps the locally cached unit, so a server-side flip to
   // null wouldn't surface on its own. Re-fetch the unit on foreground (like the
-  // SW-update check) and clear it locally when the server says null — the
+  // SW-update check) and clear it locally when the server says null, the
   // picker effect above then fires. Stops polling once the unit is null.
   useEffectA(() => {
     if (phase !== 'ready' || !userId || store?.settings?.unit == null || unitPicked.current) return;
@@ -1176,7 +1258,7 @@ function App() {
   }, [phase, userId, store?.settings?.unit]);
 
   // While the account is pending approval, re-check on every foreground (and a
-  // light poll) — same idea as the SW-update banner. A PWA resumes on the stale
+  // light poll), same idea as the SW-update banner. A PWA resumes on the stale
   // pending screen otherwise: the 30-min background reload above doesn't cover a
   // quick approval, so the user would sit on "Waiting for approval" even after
   // being approved. We poll the cheap `approved` flag and only escalate to a
@@ -1203,7 +1285,7 @@ function App() {
   }, [phase, userId]);
 
 
-  // was removed — the local store is the single source of truth for a session.)
+  // was removed, the local store is the single source of truth for a session.)
   //
   // activeCoachClients feeds the two coach-status realtime listeners below
   // (client training-status / check-in pushes) added to the same channel.
@@ -1287,7 +1369,17 @@ function App() {
           return;
         }
         LB.reloadCoachingState(userId).then(coaching => {
-          setStore(s => s ? { ...s, coaching } : s);
+          // reloadCoachingState rebuilds the relationship data only. Two
+          // fields on store.coaching come from the 60s status poll instead
+          // (anyClientLive, pendingCheckinsCount), and that poll skips its own
+          // setStore while the values look unchanged, so replacing the object
+          // wholesale dropped the live dot and the check-in badge until the
+          // next real change.
+          setStore(s => s ? { ...s, coaching: {
+            ...coaching,
+            anyClientLive: s.coaching?.anyClientLive,
+            pendingCheckinsCount: s.coaching?.pendingCheckinsCount,
+          } } : s);
         }).catch(() => {});
       },
       activeCoachClients,
@@ -1300,7 +1392,6 @@ function App() {
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
-    if (prevStore.current !== store) localDirty.current = true;
     prevStore.current = store;
     pendingStore.current = store;
     if (!LB.saveToLocal(store, userId)) setStorageFull(true);
@@ -1313,7 +1404,7 @@ function App() {
   // from the network (bypassing the SW cache via ?_v=) and compares the CACHE
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
-  // Skipped entirely while on the training screen — never risk nudging
+  // Skipped entirely while on the training screen, never risk nudging
   // someone mid-workout, even indirectly (a background swReg.update() can
   // still be surprising). This means a user who lives almost entirely on
   // 'train' can go a long time without a successful check; that tradeoff is
@@ -1323,7 +1414,7 @@ function App() {
   const checkSwUpdate = useCallbackA(() => {
     if (routeRef.current?.name === 'train') return;
     // Resolve sw.js relative to the SW scope (or page URL before registration
-    // settles) — works on both github.io/training/ and the zane-wo.com root.
+    // settles), works on both github.io/training/ and the zane-wo.com root.
     const swUrl = new URL('sw.js', swReg.current?.scope || window.location.href);
     fetch(`${swUrl}?_v=${Date.now()}`)
       .then(r => r.text())
@@ -1335,7 +1426,7 @@ function App() {
         // terminates PWA, clears in-memory state) still detect stale caches.
         // An in-memory ref would always start null after a cold start, making
         // the first fetch a no-op that "consumes" the update without showing
-        // the banner — the user would never see it.
+        // the banner, the user would never see it.
         let stored = null;
         try { stored = localStorage.getItem('logbook-sw-version'); } catch (_) {}
         if (!stored) {
@@ -1346,7 +1437,7 @@ function App() {
           return;
         }
         if (v !== stored) {
-          // An update is available. Do NOT advance the stored version here —
+          // An update is available. Do NOT advance the stored version here,
           // only applyUpdate persists it. Otherwise after an iOS cold start
           // (in-memory state wiped) stored would already equal v and the
           // update would never be re-offered.
@@ -1360,14 +1451,14 @@ function App() {
 
   // Lets the admin push the update banner to everyone without an sw.js cache
   // bump (see admin_force_update). Same "first sighting = baseline, no
-  // banner" pattern as checkSwUpdate above — a brand-new device must never
+  // banner" pattern as checkSwUpdate above, a brand-new device must never
   // see a false "update available" for a nonce it's never seen before.
-  // Deliberately runs regardless of route (including 'train') — this is the
+  // Deliberately runs regardless of route (including 'train'), this is the
   // one deliberate, admin-triggered broadcast, so it's allowed to reach a
   // training user promptly. checkSwUpdate above keeps the route guard so
   // routine version bumps never even risk nudging someone mid-workout.
   const checkForceUpdate = useCallbackA(() => {
-    // Skip pre-login: anon has no EXECUTE on this RPC by design (correct —
+    // Skip pre-login: anon has no EXECUTE on this RPC by design (correct,
     // verified live, matches schema.sql), so polling before phase is 'ready'
     // just logs a guaranteed permission-denied server-side for no reason.
     // Nobody's watching for a force-update broadcast before they're signed in.
@@ -1430,6 +1521,15 @@ function App() {
     store?.cycleStartDate,
     store?.lastAdvancedDate,
     store?.inProgress,
+    // computeNextReminderAt walks the active plan's days and the logged
+    // sessions to find the next training day, so editing the plan (moving a
+    // day, adding a rest day) or logging a workout changes the answer. Without
+    // these the stored reminder kept pointing at the old day until one of the
+    // scalars above happened to change.
+    store?.schedules,
+    store?.sessions,
+    store?.cycleIndex,
+    store?.weekPlanStartDate,
   ]);
 
   // Live client training status + check-in status, driving the coaching
@@ -1472,17 +1572,10 @@ function App() {
   // Also clears WhatsNew so it doesn't block the tour overlay (z-index).
   window.__startTour = (tourKey) => { setWhatsNew(null); setOnboardingState({ phase: 'tour', tourKey }); };
 
-  // helper for in-sheet "+ new exercise"
-  window.__createExercise = (name) => {
-    const id = LB.uid();
-    setStore(s => ({ ...s, exercises: [...s.exercises, { id, name: name.trim(), tags: [] }] }));
-    return id;
-  };
-
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
-  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => { intentionalSignOut.current = true; LB.signOut(); }} />;
+  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => { markIntentionalSignOut(); LB.signOut(); }} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
@@ -1536,9 +1629,8 @@ function App() {
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setForceShowUpdateBanner(true)} />; break;
     case 'featuremap':        screen = <window.Screens.FeatureMapScreen {...props} />; break;
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
-    case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
+    case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
-    case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
     case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
@@ -1555,7 +1647,7 @@ function App() {
   if (_u === 'mixed' || _u === 'lbs') LB.setCardioDistUnit('mi');
   else if (_u === 'kg') LB.setCardioDistUnit('km');
 
-  // Deload overlay flag — buildSeedSets reads this to pre-fill loads at ~50%.
+  // Deload overlay flag, buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';
 
   // Two layout variants: the iPad sidebar layout (only on tab routes) and the
@@ -1581,7 +1673,7 @@ function App() {
 
   // Overlays live OUTSIDE the layout variants at a stable tree position so they
   // never remount when navigation flips the layout on iPad. Remounting
-  // OnboardingTour mid-tour would reset its step counter — that was the
+  // OnboardingTour mid-tour would reset its step counter, that was the
   // "3/10 → 4/10 → snaps back to 1/10" bug when the tour navigated from the
   // plan tab (sidebar layout) to schedule-new (full-bleed layout).
   return (

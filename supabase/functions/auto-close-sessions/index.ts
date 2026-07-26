@@ -44,6 +44,15 @@ Deno.serve(async (req) => {
 
     // All open sessions including day_name and date for the notification
     const sessRes = await dbFetch('zane_sessions?ended=is.null&select=id,user_id,started_at,day_name,date');
+    // The `.catch(() => [])` fallbacks below only cover a malformed BODY. On a
+    // non-2xx PostgREST reply the body parses fine as an error OBJECT, so the
+    // fallback never fires and the loop iterates an object, throwing a
+    // TypeError that run().catch() swallows. Check the status, like
+    // water-reminder already does.
+    if (!sessRes.ok) {
+      console.error(`[auto-close] sessions query failed: ${sessRes.status} ${await sessRes.text().catch(() => '')}`);
+      return { closed: 0, deleted: 0 };
+    }
     const sessions: { id: string; user_id: string; started_at: string; day_name: string; date: string }[] = await sessRes.json().catch(() => []);
 
     let closed = 0, deleted = 0;
@@ -51,7 +60,7 @@ Deno.serve(async (req) => {
     for (const sess of sessions) {
       // User settings
       const settRes = await dbFetch(
-        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,in_progress_session_id`
+        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id`
       );
       const [sett] = await settRes.json().catch(() => [null]);
       const timeoutMin: number = sett?.session_timeout_minutes ?? 90;
@@ -129,10 +138,16 @@ Deno.serve(async (req) => {
           const msg = durationMinutes != null
             ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
             : `Session auto-ended after ${timeoutMin} min of inactivity.`;
-          if (sett.pushover_user_key) {
+          // Pushover INSTEAD of Web Push when the user chose that channel, the
+          // same rule the three reminder functions follow. This used to send
+          // both whenever a key existed, so a Pushover user got every
+          // auto-close twice.
+          const viaPushover = !!sett.use_pushover && !!sett.pushover_user_key;
+          if (viaPushover) {
             await sendPushover(sett.pushover_user_key, sess.user_id, msg);
+          } else {
+            await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
           }
-          await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
         }
         closed++;
       }

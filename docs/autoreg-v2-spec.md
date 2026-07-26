@@ -1,8 +1,9 @@
 # Autoregulation v2: Volume-Landmarks, Readiness & selbst-getaktete Blöcke
 
-Status: **Entwurf / Spec.** Noch kein Code. Diese Datei ist die Bauanleitung und
-der Diskussionsstand, nicht die Referenz. Wenn gebaut, wandert das Verbindliche
-nach `docs/internals.md` bzw. `docs/database.md`.
+Status: **umgesetzt.** Die Engine liegt in `src/store.js` und ist in Train,
+Home und Lib verdrahtet. Diese Datei ist damit ein historisches Planungsdokument
+(Bauanleitung und Diskussionsstand), **nicht** die Referenz: verbindlich sind
+`docs/internals.md`, `docs/database.md` und der Code.
 
 ## 0. Ziel & Leitprinzip
 

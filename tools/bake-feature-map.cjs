@@ -165,11 +165,27 @@ async function main() {
 
   const swPath = path.join(root, 'sw.js');
   const sw = fs.readFileSync(swPath, 'utf8');
-  const bumped = sw.replace(/const CACHE = 'zane-v(\d+)\.(\d+)';/, (_, maj, min) => `const CACHE = 'zane-v${maj}.${parseInt(min, 10) + 1}';`);
+  let newVer = null;
+  const bumped = sw.replace(/const CACHE = 'zane-v(\d+)\.(\d+)';/, (_, maj, min) => {
+    newVer = `${maj}.${parseInt(min, 10) + 1}`;
+    return `const CACHE = 'zane-v${newVer}';`;
+  });
   if (bumped === sw) throw new Error('Could not find the CACHE version line in sw.js to bump.');
   fs.writeFileSync(swPath, bumped);
 
-  console.log(`Baked ${cards.length} cards into src/feature-map-db.js (version ${version}) and bumped the SW cache.`);
+  // The public pages live outside the service worker and pin their sources
+  // with ?v=. Bumping sw.js without them fails tools/check-cache-version.cjs
+  // on the very push this workflow makes, AND leaves features.html serving the
+  // pre-bake catalog. Bump them in the same commit.
+  const touchedPages = [];
+  for (const page of fs.readdirSync(root).filter(f => f.endsWith('.html') && f !== 'index.html')) {
+    const p = path.join(root, page);
+    const html = fs.readFileSync(p, 'utf8');
+    const next = html.replace(/(src="[^"]+\?v=)[0-9.]+(")/g, (_, a, b) => `${a}${newVer}${b}`);
+    if (next !== html) { fs.writeFileSync(p, next); touchedPages.push(page); }
+  }
+
+  console.log(`Baked ${cards.length} cards into src/feature-map-db.js (version ${version}), bumped the SW cache to zane-v${newVer}${touchedPages.length ? ` and the ?v= busters in ${touchedPages.join(', ')}` : ''}.`);
 }
 
 if (require.main === module) main().catch(e => { console.error(e.message || e); process.exit(1); });

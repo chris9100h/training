@@ -1,4 +1,4 @@
-/* Coaching screens — client view (CoachClientScreen + overview/plan/sessions
+/* Coaching screens, client view (CoachClientScreen + overview/plan/sessions
    tabs + charts). Shares globals (React aliases, helpers, isImprovement/
    isDecline) with screens-coaching-core.jsx, loaded first. */
 
@@ -140,10 +140,10 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               </span>
             </div>
           )}
-          {/* Live training banner (not for self — no point watching yourself) */}
+          {/* Live training banner (not for self, no point watching yourself) */}
           {clientStore.inProgress && !isSelf && (
             <div
-              onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
+              onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName, back: { name: 'coaching-client', coachingId, clientId, clientName, backRoute, isSelf } })}
               style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.16)`, borderBottom: `var(--hair-width) solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
             >
               <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
@@ -170,7 +170,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 function cyclePosFn(clientStore, date) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return 0;
-  // Flex plans advance per logged action, never by calendar date — the position
+  // Flex plans advance per logged action, never by calendar date, the position
   // is the action-advanced cycleIndex, independent of `date` (date extrapolation
   // is meaningless for flex and drifts when the client rests).
   if (LB.isFlexPlan(activeSch)) {
@@ -194,7 +194,7 @@ function cyclePosFn(clientStore, date) {
   return (((clientStore.cycleIndex || 0) - daysAgo) % cycleLen + cycleLen) % cycleLen;
 }
 
-// Format a Date to "YYYY-MM-DD" using local time — avoids UTC off-by-one issues.
+// Format a Date to "YYYY-MM-DD" using local time, avoids UTC off-by-one issues.
 function localDateKey(d) { return LB.fmtISO(d); }
 
 function getTodayDay(clientStore) {
@@ -233,7 +233,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const isFlex = LB.isFlexPlan(activeSch);
   const flexGoal = activeSch.sessions_per_week || null;
 
-  // When versions exist, the oldest entry's validFrom is the plan's true origin date —
+  // When versions exist, the oldest entry's validFrom is the plan's true origin date,
   // use it instead of the (potentially reset) cycleStartDate / weekPlanStartDate.
   const oldestVersion = activeSch.versions?.length
     ? activeSch.versions[activeSch.versions.length - 1]
@@ -250,17 +250,17 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     (!planActivationStr || !s.date || s.date.slice(0, 10) >= planActivationStr)
   );
 
-  // Session date set — both stored date field and local-time of ended timestamp.
+  // Session date set, both stored date field and local-time of ended timestamp.
   const sessionDates = new Set();
   planSessions.forEach(s => {
     if (s.date) sessionDates.add(s.date.slice(0, 10));
     sessionDates.add(localDateKey(new Date(s.ended)));
   });
 
-  // Determine the Monday from which adherence starts — don't penalize weeks before the plan was active.
+  // Determine the Monday from which adherence starts, don't penalize weeks before the plan was active.
   // Use weekPlanStartDate / cycleStartDate when set; fall back to earliest session.
   let planStartMonday = null;
-  let planStartDateStr = null; // actual plan start date — days before this are ignored even within the first week
+  let planStartDateStr = null; // actual plan start date, days before this are ignored even within the first week
   const activationDateStr = oldestVersion?.validFrom
     ?? (isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate);
   if (activationDateStr) {
@@ -295,7 +295,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
     let planned = 0, done = 0;
 
-    // Flex plans have no fixed training days — adherence is sessions trained
+    // Flex plans have no fixed training days, adherence is sessions trained
     // this week against the weekly frequency goal, regardless of which days.
     if (isFlex) {
       const weekEnd = new Date(monday); weekEnd.setDate(monday.getDate() + 7);
@@ -594,7 +594,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                 )}
                 {(() => {
                   const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
-                  // Shared with ClientSessionsTab via LB.techniqueRounds — both
+                  // Shared with ClientSessionsTab via LB.techniqueRounds, both
                   // used to reimplement this from scratch (comment used to say
                   // "same gap, same fix", i.e. two independent copies to keep
                   // in sync by hand).
@@ -625,7 +625,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId, entriesArr.slice(0, i).filter(x => x.exId === e.exId).length) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
                     // If any set in the row carries a technique badge, every set
-                    // needs equal reserved space above its chip — otherwise a
+                    // needs equal reserved space above its chip, otherwise a
                     // plain set's chip sits noticeably higher than a badged
                     // neighbor's (its chip is pushed down by the badge above).
                     const workingSets = (e.sets || []).filter(s => !s.warmup);
@@ -635,7 +635,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                       : null;
                     // Both the badge line AND the AMRAP label-chain caption need
                     // reserving on every set in the row once ANY sibling has one
-                    // — otherwise that sibling's chip still sits lower than the
+                    //, otherwise that sibling's chip still sits lower than the
                     // others (only the badge row was reserved before).
                     const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
                     const badgeBoxStyle = {
@@ -915,7 +915,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   const isFlex = activeSch && LB.isFlexPlan(activeSch);
   const byGroup = {};
   ended.forEach((s, i) => {
-    // Flex plans advance per logged action, never by calendar date — group by
+    // Flex plans advance per logged action, never by calendar date, group by
     // cycleLen-session runs (chronological) so rest days don't drift the grouping.
     // `date` holds the run's first session date for the label; key is zero-padded
     // so the run index sorts lexically.
@@ -1135,7 +1135,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
     if (!await confirm(`Activate "${planName}" for ${name}? They'll be notified of the change.`, { title: 'Activate plan?', ok: 'Activate' })) return;
     try {
       const oldPlanName = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId)?.name;
-      // The update resolves with { error } instead of throwing — check it, or a
+      // The update resolves with { error } instead of throwing, check it, or a
       // failed activation would still flip the UI and send a misleading note.
       const { error } = await LB.supabase.from('zane_user_settings')
         .update({ active_schedule_id: scheduleId })
@@ -1149,7 +1149,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         : `Your plan has been set to "${planName}". If you have any questions, feel free to ask.`;
       const threadId = await LB.getOrCreateCoachingThread(coachingId, threadName, userId);
       await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName, body, userId, threadId);
-    } catch (e) { alert(e.message); }
+    } catch (e) { UI.alert(e.message); }
   };
 
   const exportPlan = (sch) => {
@@ -1174,7 +1174,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
     reader.onload = async (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (data.type !== 'zane-plan' || !data.schedule) { alert('Invalid plan file.'); return; }
+        if (data.type !== 'zane-plan' || !data.schedule) { UI.alert('Invalid plan file.'); return; }
         const idMap = {};
         const newExercises = [];
         (data.exercises || []).forEach(ex => {
@@ -1213,7 +1213,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         }
         if (newExercises.length) {
           const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
-          if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
+          if (exErr) { UI.alert(`Import failed: ${exErr.message}`); return; }
         }
         // Insert the FULL schedule (mesocycle_*, program_*, is_flex,
         // sessions_per_week, versions), minus the local-only `mode` field, so the
@@ -1229,13 +1229,13 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         const schRow = { ...sch };
         delete schRow.mode;
         const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
-        if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
+        if (schErr) { UI.alert(`Import failed: ${schErr.message}`); return; }
         setClientStore(s => ({
           ...s,
           exercises: [...(s.exercises || []), ...newExercises],
           schedules: [...(s.schedules || []), sch],
         }));
-      } catch (_) { alert('Could not read plan file.'); }
+      } catch (_) { UI.alert('Could not read plan file.'); }
     };
     reader.readAsText(file);
   };
@@ -1623,7 +1623,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
   const sessions = (clientStore.sessions || []).filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 
-  // Client sessions outside the boot window carry no entries — lazy-load the
+  // Client sessions outside the boot window carry no entries, lazy-load the
   // selected one (clientStore is a read-only copy, so plain local state).
   useEffectC(() => {
     if (!selected || (selected.entries || []).length || !(selected.aggExercises > 0)) return;
@@ -1654,7 +1654,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
       await LB.addCoachingNote(coachingId, 'session', selected.id, selected.dayName, noteBody.trim(), userId, threadId);
       setNoteBody('');
       setNoteOpen(false);
-    } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
+    } catch (e) { UI.alert(e.message); } finally { setNoteSaving(false); }
   };
 
   // ── Inline exercise history panel ──────────────────────────────────
@@ -1709,10 +1709,10 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId, entriesArr.slice(0, i).filter(x => x.exId === e.exId).length) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
             // This compact coach/self-coaching view had no intensity-technique
-            // awareness at all — a drop-set/myo-rep/lengthened-partial set just
+            // awareness at all, a drop-set/myo-rep/lengthened-partial set just
             // showed its main kg×reps (drops[0] mirrors the top-level fields)
             // with the rest of the technique's data silently invisible.
-            // Shared with ClientOverviewTab via LB.techniqueRounds — see there.
+            // Shared with ClientOverviewTab via LB.techniqueRounds, see there.
             const fmtSetChip = (s) => {
               if (s.skipped && !s.done) return 'skipped';
               if (s.timeSec != null) return LB.fmtDuration(s.timeSec); // time-based set: one duration, no kg x reps
@@ -1733,7 +1733,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             };
             const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
             // If any set in the row carries a technique badge, every set needs
-            // equal reserved space above its chip — otherwise a plain set's
+            // equal reserved space above its chip, otherwise a plain set's
             // chip sits noticeably higher than a badged neighbor's.
             const workingSets = (e.sets || []).filter(s => !s.warmup);
             const anyLabelInRow = workingSets.some(s => techniqueLabel(s));
@@ -1741,7 +1741,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               ? (s.drops || []).map(d => d.label || e.name).join(' → ')
               : null;
             // Both the badge line AND the AMRAP label-chain caption need
-            // reserving on every set in the row once ANY sibling has one —
+            // reserving on every set in the row once ANY sibling has one,
             // otherwise that sibling's chip still sits lower than the others
             // (only the badge row was reserved before).
             const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);

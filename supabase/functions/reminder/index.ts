@@ -4,7 +4,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-const PUSHOVER_TOKEN = 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
+const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -34,6 +35,10 @@ async function sendReminders() {
   const r = await dbFetch(
     'zane_user_settings?reminder_enabled=eq.true&next_reminder_at=not.is.null&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,next_reminder_at'
   );
+  // A non-2xx PostgREST reply still parses as JSON (an error object), so the
+  // .catch fallback never fires and the loop below would iterate an object.
+  // Same guard water-reminder already has.
+  if (!r.ok) { console.error(`[reminder] settings query failed: ${r.status} ${await r.text().catch(() => '')}`); return; }
   const rows: { user_id: string; pushover_user_key: string | null; use_pushover: boolean | null; next_reminder_at: string }[] = await r.json().catch(() => []);
 
   const now = Date.now();

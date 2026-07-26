@@ -121,7 +121,13 @@ for (const [t, cols] of [...schemaTables.entries()].sort()) {
     continue;
   }
   for (const c of [...cols].sort()) {
-    if (!sec.includes('`' + c + '`') && !sec.includes(c)) {
+    // Backticked name, or the name as a WHOLE WORD. The old fallback was a
+    // free substring test (`sec.includes(c)`), which passed on any accidental
+    // occurrence: a short column like `fat` matched inside `sat_fat`, inside
+    // an unrelated identifier, or inside German prose, so the check was
+    // effectively blind for exactly the columns most likely to be forgotten.
+    const wholeWord = new RegExp(`(^|[^a-z0-9_])${c}([^a-z0-9_]|$)`, 'm');
+    if (!sec.includes('`' + c + '`') && !wholeWord.test(sec)) {
       errors.push(`column ${t}.${c} is not mentioned in its docs/database.md section`);
     }
   }

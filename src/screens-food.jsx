@@ -97,6 +97,20 @@ async function ensureFoodCached(pendingFoodOrItem) {
   }
   return true;
 }
+// Label-scanner provider: one per-device setting (localStorage key
+// logbook-label-scanner-provider) read by TWO components that can be mounted
+// at the same time (FoodScreen and the ingredient picker's search tab). Each
+// held its own useState seeded once at mount, so toggling in one left the
+// other on the old provider for the rest of the session. Route every read and
+// write through here and broadcast the change.
+function fdReadScannerProvider() {
+  try { return localStorage.getItem('logbook-label-scanner-provider') || 'grok'; }
+  catch (_) { return 'grok'; }
+}
+function fdWriteScannerProvider(v) {
+  try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
+}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -333,10 +347,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }
     });
     if (!toRequest.length) return;
+    // Give up for the rest of the day once a repair round fails. Nothing is
+    // marked repaired on failure, so an outage (or the daily API quota, where
+    // every attempt is itself a quota hit) had this retrying the same failing
+    // batch on every single mount of this screen.
+    const ATTEMPT_KEY = 'logbook-food-fav-cache-attempt';
+    const todayStr = LB.todayISO();
+    try { if (localStorage.getItem(ATTEMPT_KEY) === todayStr) return; } catch (_) {}
     Promise.all(toRequest.map(f => LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1)).then(res => ({ foodId: f.foodId, ok: !!(res && res.ok) })))).then(results => {
       let changed = false;
       results.forEach(r => { if (r.ok) { repaired.add(r.foodId); changed = true; } });
       if (changed) { try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {} }
+      if (results.some(r => !r.ok)) { try { localStorage.setItem(ATTEMPT_KEY, todayStr); } catch (_) {} }
     });
   }, []);
 
@@ -437,7 +459,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // long-standing default) or 'claude' (scan-label-claude), same request/
   // response contract either way. Per-device only, not a synced setting:
   // this is a comparison toggle, not a user-facing preference.
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -1184,8 +1211,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // dates still present in store.foodLogs, so a day that just dropped to
     // zero entries would otherwise keep showing a stale adherence % from
     // when it still had entries.
+    // Clearing targetsSnap on an emptied day used to throw away the flex
+    // plan's Training|Rest override, which lives in targetsSnap.dayType and is
+    // the user's explicit choice for that day, not derived data. The Health
+    // tab's own save() and its food reconciler both preserve exactly this.
+    const keptDayType = existing?.targetsSnap?.dayType;
+    const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: null }) }
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
       : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
@@ -1535,7 +1568,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
       if (!selected.length) return s;
       const now = new Date().toISOString();
-      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned }));
+      const clones = selected.map(l => ({
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned,
+        // Same rule "Repeat yesterday" follows: a copy is its own entry and
+        // must not inherit the split/merge batch (its "undo split" would act
+        // on another day) or the template-slot marker (auto-fill would treat
+        // that slot as already filled on the target day and skip it).
+        splitBatch: null, templateSlotId: null,
+      }));
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
@@ -2103,7 +2143,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // ensureFoodCached call above), so starring then logging the same food
     // in one sheet visit, in either order, only ever fires one cache
     // request instead of one from each call site.
-    if (entry.foodId) ensureFoodCached(pendingFood).then(() => setPendingFood(f => (f ? { ...f, fromCache: true } : f)));
+    //
+    // food_id is a real FK into zane_foods. If the cache row never lands, the
+    // sync upsert fails with 23503, and because the flush is one Promise.all
+    // over every table that failure takes sessions, sets and health down with
+    // it on every retry. Nothing repairs it either: the re-cache effect below
+    // deliberately skips foodIds that are already logged. So drop the id when
+    // the cache write failed. The macros are denormalized onto the row and the
+    // FK is purely informational, so the entry itself stays intact.
+    if (entry.foodId) {
+      ensureFoodCached(pendingFood).then(cached => {
+        if (cached) { setPendingFood(f => (f ? { ...f, fromCache: true } : f)); return; }
+        setStaged(list => list.map(e => (e.id === entry.id ? { ...e, foodId: null } : e)));
+      });
+    }
     closeQtySheet();
   }
 
@@ -2525,6 +2578,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {mocWeek.count > 0 && !isMealOfChoice && (
           <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 16 }}>
             That would be your {mocWeek.count + 1}. this week. Your call, the app only counts.
+          </div>
+        )}
+        {/* Once the meal is CONFIRMED it is an ordinary logged entry, and Save
+            here only rewrites the day marker: the entry's own time and name
+            stay as they were. Saying so beats silently ignoring half of what
+            this sheet lets you edit. */}
+        {isMealOfChoice && mocEntry && (
+          <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 12 }}>
+            This meal is already logged. Editing the time or name here only changes the day marker, edit the entry itself in the timeline.
           </div>
         )}
         <Btn onClick={() => { setMealOfChoice(true, mocSheet?.name, mocSheet?.hour ?? mocDefaultHour); setMocSheet(null); }} style={{ width: '100%' }}>
@@ -3604,7 +3666,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
             ))}
           </div>
         </div>
@@ -3623,7 +3685,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           can go above the recipe's own portion count too. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
-          <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
+          {/* Always share the LIVE recipe. When this sheet is opened from an
+              already-logged entry (openEditRecipeEntry) the prompt holds a
+              rescaled reconstruction of the entry's snapshot, which has no
+              calories, foodId, brand or source. Sharing that upserted it over
+              the existing share row under the SAME token, so a link already
+              sent to someone else silently degraded. */}
+          <button onClick={() => openShareRecipe((store.foodRecipes || []).find(r => r.id === recipeLogPrompt.recipe.id) || recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
           </button>
         )}
@@ -3950,7 +4018,12 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
-  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
+  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setPickerLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
   const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
@@ -4051,6 +4124,54 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setStore(s => ({ ...s, foodMealPlans: [copy, ...(s.foodMealPlans || [])], foodTemplateSlots: [...(s.foodTemplateSlots || []), ...slotCopies] }));
     setManageOpen(false);
     setViewedPlanId(newId);
+  }
+  // The other half of exportPlan. Without it the export wrote a file format
+  // nothing could read back, unlike the training plan, which has both halves.
+  // Same validation shape the training plan importer uses (type tag first,
+  // then the array it needs), because this creates real rows.
+  function importPlan() {
+    // input.click() must stay synchronous inside the user gesture (iOS Safari).
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      let payload;
+      try { payload = JSON.parse(await file.text()); }
+      catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK', cancel: null }); return; }
+      if (!payload || payload.type !== 'zane-meal-plan' || !Array.isArray(payload.slots)) {
+        await confirm('That file is not a Zane meal plan export.', { title: 'Invalid file', ok: 'OK', cancel: null });
+        return;
+      }
+      const id = LB.uid();
+      const now = new Date().toISOString();
+      const asTemplate = isCoach && planSubTab === 'templates';
+      const name = (typeof payload.name === 'string' && payload.name.trim()) ? payload.name.trim() : 'Imported meal plan';
+      // Slots are fully denormalized in the export, so they only need fresh
+      // ids and the new plan's id. Anything else in the file is ignored.
+      const slots = payload.slots
+        .filter(sl => sl && typeof sl === 'object')
+        .map((sl, i) => ({
+          ...sl, id: LB.uid(), mealPlanId: id, createdAt: now,
+          hour: Number.isFinite(+sl.hour) ? +sl.hour : 12,
+          sortIdx: Number.isFinite(+sl.sortIdx) ? +sl.sortIdx : i,
+        }));
+      setStore(st => {
+        const list = st.foodMealPlans || [];
+        const plan = { id, name, archived: false, isTemplate: asTemplate, coachId: null, createdAt: now, updatedAt: now };
+        const makeActive = !asTemplate && (!st.activeMealTemplateId || !list.some(p => p.id === st.activeMealTemplateId && !p.archived && !p.isTemplate));
+        return {
+          ...st,
+          foodMealPlans: [plan, ...list],
+          foodTemplateSlots: [...(st.foodTemplateSlots || []), ...slots],
+          ...(makeActive ? { activeMealTemplateId: id } : {}),
+        };
+      });
+      setManageOpen(false);
+      setViewedPlanId(id);
+    };
+    input.click();
   }
   // Self-contained JSON: each slot already carries its own denormalized food/
   // recipe snapshot (docs/database.md), so there's nothing to look up, unlike
@@ -4631,7 +4752,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
+              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
             ))}
           </div>
         </div>
@@ -4699,6 +4820,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             </Btn>
             <Btn kind="ghost" onClick={() => exportPlan(viewedPlan)} style={{ width: '100%' }}>
               <i className="fa-solid fa-file-export" style={{ marginRight: 8 }} /> Export (JSON)
+            </Btn>
+            <Btn kind="ghost" onClick={importPlan} style={{ width: '100%' }}>
+              <i className="fa-solid fa-file-import" style={{ marginRight: 8 }} /> Import (JSON)
             </Btn>
             <Btn kind="ghost" onClick={() => deletePlan(viewedPlan)} style={{ width: '100%', color: UI.danger }}>
               <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
@@ -5142,8 +5266,15 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   }
 
   const recentPicks = useMemoFd(() => {
+    // Sort by (date, time) first, exactly like recentFoodsAll: store.foodLogs
+    // is not in date order (a backdated entry gets prepended), so the
+    // first-seen-wins walk below picked essentially arbitrary "recent" foods.
+    const sorted = [...(store.foodLogs || [])].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (a.time || '') < (b.time || '') ? 1 : (a.time || '') > (b.time || '') ? -1 : 0;
+    });
     const seen = new Set(); const out = [];
-    for (const l of (store.foodLogs || [])) {
+    for (const l of sorted) {
       const key = l.foodId || `custom:${l.foodName}`;
       if (seen.has(key)) continue;
       seen.add(key); out.push(l);

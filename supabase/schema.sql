@@ -1077,6 +1077,7 @@ AS $function$
   left join zane_profiles p on p.id = c.coach_id
   where c.client_id = auth.uid()
     and c.coach_id <> c.client_id
+    and c.id not like 'support_%'
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coaching_clients()
@@ -1091,6 +1092,7 @@ AS $function$
   LEFT JOIN zane_profiles p ON p.id = c.client_id
   WHERE c.coach_id = auth.uid()
     AND c.coach_id <> c.client_id
+    AND c.id NOT LIKE 'support_%'
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_clients_status()
@@ -1104,7 +1106,8 @@ AS $function$
   inner join zane_coaching zc on zc.client_id = us.user_id
   where zc.coach_id = auth.uid()
     and zc.coach_id <> zc.client_id
-    and zc.status = 'active';
+    and zc.status = 'active'
+    and zc.id not like 'support_%';
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
@@ -1608,9 +1611,22 @@ begin
   if new.status is distinct from old.status and (select auth.uid()) <> old.client_id then
     raise exception 'only the client may change coaching status';
   end if;
+  -- Migration 0213: coach-owned configuration, readable by the client but not
+  -- writable (the client UPDATE policy cannot be column-restricted by RLS).
+  if (select auth.uid()) <> old.coach_id then
+    if new.checkin_enabled  is distinct from old.checkin_enabled
+       or new.checkin_schema   is distinct from old.checkin_schema
+       or new.support_status   is distinct from old.support_status
+       or new.support_category is distinct from old.support_category
+       or new.created_at       is distinct from old.created_at then
+      raise exception 'only the coach may change the coaching configuration';
+    end if;
+  end if;
   return new;
 end;
 $function$;
+-- Migration 0213: trigger-only, like its two siblings.
+REVOKE EXECUTE ON FUNCTION public.zane_coaching_guard_update() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS zane_coaching_guard_update ON public.zane_coaching;
 CREATE TRIGGER zane_coaching_guard_update
@@ -1687,6 +1703,17 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_sets
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_user_settings;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_user_settings
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+-- Migration 0213: the coach-writable meal-plan tables (0197/0199/0200) repeat
+-- the same shape and were missing the guard.
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_meal_plans;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_meal_plans
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_template_slots;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_template_slots
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_recipes;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_recipes
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- Migration 0125 grant changes:
@@ -2238,6 +2265,11 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM PUBLIC;
+-- Migration 0213: REVOKE FROM PUBLIC alone did NOT take it away from
+-- authenticated (an ALTER DEFAULT PRIVILEGES rule grants EXECUTE on every new
+-- function directly to that role, see the bump_api_usage note in 0208).
+REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM anon;
 
 -- ── Food tracker (migration 0186) ───────────────────────────────────────────────
 -- zane_foods: shared/global reference cache (Open Food Facts + USDA FoodData
@@ -2538,6 +2570,25 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.get_recipe_share(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_recipe_share(text) TO authenticated;
+
+-- Migration 0213: the table has no policies, so "delete all my data" could not
+-- reach it and old share links outlived the account wipe.
+CREATE OR REPLACE FUNCTION public.delete_my_recipe_shares()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  DELETE FROM zane_recipe_shares WHERE user_id = v_uid;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_my_recipe_shares() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.delete_my_recipe_shares() TO authenticated;
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the

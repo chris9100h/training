@@ -168,7 +168,7 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Skip Remaining Sets',
-    body: "The footer bar at the bottom has a 'Skip remaining sets' button. Tap it to mark all incomplete sets of the current exercise as skipped and move on to the next.",
+    body: "The footer bar at the bottom has a Skip button, labelled 'remaining sets'. Tap it to mark all incomplete sets of the current exercise as skipped and move on to the next.",
     visual: 'trainSkip',
   },
   {
@@ -406,7 +406,7 @@ window.TOURS.customize = [
   {
     target: null,
     title: 'Appearance',
-    body: 'Pick an accent color and a theme: Dark, OLED black, or a light cream. Your unit preference (Metric, Imperial, or Mixed) lives here too. It only relabels displayed weights, your logged numbers never get converted.',
+    body: 'Pick an accent color and a theme: Dark, OLED black, a light cream, or Paper. Your unit preference (Metric, Imperial, or Mixed) lives here too. It only relabels displayed weights, your logged numbers never get converted.',
     visual: 'customAppearance',
   },
   {
@@ -913,7 +913,7 @@ function TourVisualTrainKeyboard() {
             {k === null ? <i className="fa-solid fa-dumbbell" style={{ fontSize: 11, color: UI.inkSoft }} /> : k}
           </div>
         ))}
-        {/* CONFIRM — tall accent button spanning rows 1–4, column 4 */}
+        {/* CONFIRM, tall accent button spanning rows 1–4, column 4 */}
         <div style={{ gridRow: '1 / 5', gridColumn: 4, background: 'var(--accent)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="fa-solid fa-check" style={{ fontSize: 15, color: 'var(--accent-ink)' }} />
         </div>
@@ -1029,7 +1029,7 @@ function TourVisualTrainNotes() {
       </div>
       <div style={{ padding: '10px 12px', background: `rgba(var(--accent-rgb),0.13)`, borderRadius: 6, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.2)` }}>
         <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: 'var(--accent)', marginBottom: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Note</div>
-        <div style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, lineHeight: 1.5 }}>Elbows at 45° — pause 1s at chest</div>
+        <div style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, lineHeight: 1.5 }}>Elbows at 45°, pause 1s at chest</div>
       </div>
     </div>
   );
@@ -1058,15 +1058,16 @@ function TourVisualTrainSkip() {
         <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase' }}>Leg Press</span>
         <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>0 / 3 sets done</div>
       </div>
+      {/* Mirrors the REAL training footer: a Check set button and a two-line
+          Skip button. The old mockup invented an EXERCISES button that does not
+          exist there and labelled the skip control differently from the app. */}
       <div style={{ background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 4, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-          <i className="fa-solid fa-list" style={{ fontSize: 9, color: UI.inkFaint }} />
-          <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, fontWeight: 700, letterSpacing: '0.07em' }}>EXERCISES</span>
+        <div style={{ flex: 2, textAlign: 'center', padding: '6px 10px', borderRadius: 6, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, fontWeight: 700, letterSpacing: '0.07em' }}>
+          Check set
         </div>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 4, background: `rgba(var(--accent-rgb),0.18)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.16)` }}>
-          <i className="fa-solid fa-forward-step" style={{ fontSize: 9, color: 'var(--accent)' }} />
-          <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.07em' }}>SKIP REMAINING</span>
+        <div style={{ flex: 1, textAlign: 'center', padding: '4px 8px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.18)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.16)` }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.07em' }}>Skip</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: 'var(--accent)', opacity: 0.7 }}>remaining sets</div>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1599,7 +1600,8 @@ function TourVisualCustomAppearance() {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        {['Dark', 'Black', 'Light'].map((t, i) => (
+        {/* Same labels and count the Appearance sheet actually offers. */}
+        {['Dark', 'OLED', 'Light', 'Paper'].map((t, i) => (
           <div key={t} style={{ flex: 1, textAlign: 'center', padding: '7px 0', borderRadius: 4, background: i === 0 ? 'var(--accent)' : UI.bgInset, color: i === 0 ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600 }}>{t}</div>
         ))}
       </div>
@@ -1625,7 +1627,7 @@ function TourVisualCustomEquipment() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, padding: '9px 12px', display: 'flex', alignItems: 'center' }}>
-        <span style={{ flex: 1, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft }}>Barbell — increment</span>
+        <span style={{ flex: 1, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft }}>Barbell, increment</span>
         <span className="num" style={{ fontSize: 12, color: UI.ink }}>{`2.5 ${UI.unit()}`}</span>
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center', paddingTop: 2 }}>
@@ -1789,7 +1791,7 @@ function TourVisualCoachNotes() {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      {bubble(`Bench felt strong this week — added 2.5 ${UI.unit()}.`, false)}
+      {bubble(`Bench felt strong this week, added 2.5 ${UI.unit()}.`, false)}
       {bubble('Nice. Hold the same load next session, then we deload.', true)}
     </div>
   );
@@ -2256,7 +2258,7 @@ function TourVisualWorkoutIntro() {
       {sets.map(r => (
         <div key={r.s} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: r.s < 3 ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
           <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost, width: 12 }}>{r.s}</span>
-          <span className="num" style={{ fontSize: 13, color: UI.ink }}>60<span style={{ fontSize: 9, color: UI.inkGhost }}> kg</span></span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>60<span style={{ fontSize: 9, color: UI.inkGhost }}> {UI.unit()}</span></span>
           <span className="num" style={{ fontSize: 13, color: UI.ink }}>8<span style={{ fontSize: 9, color: UI.inkGhost }}> reps</span></span>
           <div style={{ marginLeft: 'auto', width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${r.done ? 'var(--accent)' : UI.hairStrong}`, background: r.done ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {r.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: 'var(--accent-ink)' }} />}
@@ -2272,7 +2274,7 @@ function TourVisualHealthIntro() {
     <div style={{ display: 'flex', gap: 8 }}>
       <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
         <div style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', color: UI.inkFaint }}>WEIGHT</div>
-        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>82.4<span style={{ fontSize: 10, color: UI.inkGhost }}> kg</span></div>
+        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>82.4<span style={{ fontSize: 10, color: UI.inkGhost }}> {UI.unit()}</span></div>
         <svg width="100%" height="20" viewBox="0 0 80 20" preserveAspectRatio="none" style={{ marginTop: 4, display: 'block' }}><polyline points="0,15 20,12 40,13 60,8 80,6" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </div>
       <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
@@ -2306,7 +2308,9 @@ function TourVisualHealthOverview() {
 }
 
 function TourVisualHealthLogDay() {
-  const rows = [['Weight', '82.4', 'kg'], ['Steps', '8,210', ''], ['Water', '2.4', 'L']];
+  // UI.unit(), not a literal: the tour slides otherwise told an lbs user
+  // their example lifter weighs "82.4 kg" while every other slide used lbs.
+  const rows = [['Weight', '82.4', UI.unit()], ['Steps', '8,210', ''], ['Water', '2.4', UI.waterSummaryUnit()]];
   return (
     <div style={{ background: UI.bgCard, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
       <div style={{ padding: '7px 12px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
@@ -2521,7 +2525,7 @@ function TourCrashCard({ onClose }) {
 
 // Flashy fullscreen "guide complete" celebration shown as the LAST step. It
 // closes itself on a 3s timer (no button / onDone-via-tap dependency) and also
-// on a tap anywhere — so reaching it always ends the tour, even if individual
+// on a tap anywhere, so reaching it always ends the tour, even if individual
 // buttons misbehave. Kept deliberately simple (no heavy mockup) so its render
 // can't hang.
 function TourCompleteScreen({ title, onDone }) {
@@ -2556,7 +2560,7 @@ function TourCompleteScreen({ title, onDone }) {
         {title || 'Guide Complete'}
       </div>
       <div style={{ fontFamily: UI.fontUi, fontSize: 14.5, color: 'rgba(10,8,5,0.78)', fontWeight: 600, letterSpacing: '0.03em', maxWidth: 300, lineHeight: 1.5 }}>
-        You're all set — go crush your next session.
+        You're all set, go crush your next session.
       </div>
     </div>
   );

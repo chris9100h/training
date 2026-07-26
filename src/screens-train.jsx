@@ -1,4 +1,4 @@
-/* Training mode — Hero Set redesign. All session/persistence logic identical
+/* Training mode, Hero Set redesign. All session/persistence logic identical
    to original (Supabase sync, push-over scheduling, plan-diff prompt,
    swap-exercise sheet, rest timer, abandon flow).
 */
@@ -32,10 +32,10 @@ function primaryMuscleForExercise(ex) {
 }
 // Read meso state: compares the store (DB-loaded, cross-device) copy against
 // the per-plan localStorage cache (in-session writes that haven't been
-// flushed to the store yet — see saveMesoState) and returns whichever is
+// flushed to the store yet, see saveMesoState) and returns whichever is
 // actually newer by updatedAt. A store entry can be stale relative to
 // localStorage right after an app reload/crash mid-session, before the
-// session's feedback answers were ever flushed — always trusting the store
+// session's feedback answers were ever flushed, always trusting the store
 // would silently discard those answers.
 function getMesoState(scheduleId, mesoStates) {
   if (!scheduleId) return null;
@@ -58,7 +58,7 @@ function getMesoState(scheduleId, mesoStates) {
   const chosen = storageT > storeT ? fromStorage : fromStore;
   const other = chosen === fromStore ? fromStorage : fromStore;
   // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
-  // store copy can lack it while the localStorage cache still has it — carry it
+  // store copy can lack it while the localStorage cache still has it, carry it
   // over so the flex meso-week anchor survives a reload on the same device.
   if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
   return chosen;
@@ -71,7 +71,7 @@ function saveMesoStateToStorage(s) {
 }
 // Which soreness/joint/volume prompts have already been answered THIS
 // session, keyed by session id so a resumed session (app reload/crash mid-
-// session) doesn't re-ask a question that was already answered — the
+// session) doesn't re-ask a question that was already answered, the
 // in-memory Set trackers reset on every component mount, but a resumed
 // session reuses the same session.id. Also carries the session's gain
 // summary (mesoSessionSetGainsRef) so the post-session "Next session" sheet
@@ -121,12 +121,12 @@ function mesoCurrentWeek(mesoState, store) {
   // Flex plans: "which rotation slot are we on" still uses cycleIndex (it also
   // advances on a skip, which is correct for plan position). But the meso
   // week/RIR target represents accumulated training fatigue, so it must only
-  // advance on actually-trained sessions — counting raw cycleIndex deltas
+  // advance on actually-trained sessions, counting raw cycleIndex deltas
   // would let a run of skips fast-forward the RIR target with zero training.
   if (sch && sch.days?.length > 0 && LB.isFlexPlan(sch)) {
     const startIdx = mesoState.startCycleIndex ?? 0;
     const currentIdx = store.cycleIndex || 0;
-    if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
+    if (currentIdx < startIdx) return null; // pending, waiting for next rotation start
     // Count trained sessions since the block began. Prefer the precise
     // startedAt timestamp over the date-only startDate: without it, sessions
     // from a PREVIOUS block logged earlier the SAME day the new block starts
@@ -160,7 +160,7 @@ function mesoCurrentWeek(mesoState, store) {
   const rawDays = Math.round((today - start) / 86400000);
   // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
   // break can't fast-forward the meso week / RIR target the way raw calendar
-  // arithmetic would — mirrors the flex path's "only training advances the
+  // arithmetic would, mirrors the flex path's "only training advances the
   // meso" principle. Trained vacation days still count (they're not paused).
   const trainedDates = new Set(
     (store?.sessions || [])
@@ -173,12 +173,12 @@ function mesoCurrentWeek(mesoState, store) {
   const week = Math.max(1, Math.floor(days / cycleLen) + 1);
   return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
 }
-// mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable —
+// mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable,
 // linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
 // negative (beyond failure → auto lengthened partials, see mesoPartials).
 // Apply an already-resolved meso state's set-delta to a plan item before
 // building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
-// (can't cut below one set) but otherwise uncapped — repeated "not enough
+// (can't cut below one set) but otherwise uncapped, repeated "not enough
 // volume" answers keep growing a lift indefinitely, and an over-grown lift
 // self-corrects via the decline signal instead of a hard ceiling; no-ops if
 // no meso or no delta. Split out from applyMesoSetDelta so callers resolving
@@ -195,14 +195,6 @@ function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
   return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
 }
-// Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
-// Called at session start; boosts are overwritten at next session end by computeMesoGains.
-function getMesoWeightBoosts(scheduleId, mesoStates) {
-  const m = getMesoState(scheduleId, mesoStates);
-  if (!m || !m.weightBoosts) return null;
-  return m.weightBoosts;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
@@ -257,7 +249,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive, 
 }
 
 // Read-only value cell fed by the in-app keypad. Rendered as a <div>, never an
-// <input>, so iOS never attaches its AutoFill / QuickType accessory bar — these
+// <input>, so iOS never attaches its AutoFill / QuickType accessory bar, these
 // fields take no native text entry (tapping opens the custom keyboard), so a
 // native control is never needed and only invites the autofill suggestion pill.
 function KbCell({ text, placeholder, style, disabled, onActivate, onDisabledTap }) {
@@ -375,10 +367,10 @@ function FinisherSummary({ drops, labelFor }) {
 // Drop Set / Myo-Rep(-Match) / AMRAP Variations chains edit inside their own
 // sheet (IntensityChainSheet, see the Sheet rendered near the Intensity
 // picker below) rather than inline in the exercise list. The sheet's header
-// is a plain flex item (not position:sticky — see IntensityChainSheet) sitting
+// is a plain flex item (not position:sticky, see IntensityChainSheet) sitting
 // outside the rows' own scrollbox, so bringing the row actually being typed
 // into into view is just a plain scrollIntoView within that small, bounded
-// scrollbox — no margin needed, since there's no overlapping sticky header
+// scrollbox, no margin needed, since there's no overlapping sticky header
 // in this scroll context to hide behind.
 function scrollChainRowIntoView(rowAttr, idx) {
   const row = document.querySelector(`[${rowAttr}="${idx}"]`);
@@ -457,7 +449,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
         ))}
       </div>
 
-      {/* Weight input — large, centered */}
+      {/* Weight input, large, centered */}
       <div style={{ position: 'relative', textAlign: 'center', marginBottom: 6 }}>
         <KbCell
           text={raw}
@@ -524,7 +516,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
       {correctionDelta !== null && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
-            CAN'T REACH EXACTLY — {correctionDelta} {UI.unit().toUpperCase()} MISSING
+            CAN'T REACH EXACTLY, {correctionDelta} {UI.unit().toUpperCase()} MISSING
           </span>
           <button onClick={() => setRaw(String(correctedTotal).replace('.', ','))} style={{
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
@@ -539,7 +531,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
         </div>
       )}
 
-      {/* Inline numpad — avoids native keyboard / floating cursor */}
+      {/* Inline numpad, avoids native keyboard / floating cursor */}
       <div className="knurl" style={{ marginTop: 20 }} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 16 }}>
         {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
@@ -588,7 +580,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
-      {/* knurled top edge — same grip-texture seam the rest of the kit uses,
+      {/* knurled top edge, same grip-texture seam the rest of the kit uses,
           in place of a flat hairline, so the keypad reads as a distinct
           physical piece instead of just fading into the screen above it. */}
       <div className="knurl" style={{ position: 'absolute', top: 0, left: 0, right: 0 }} />
@@ -645,11 +637,11 @@ function reorderSessionEntries(entries, currentIdx, from, to) {
   return { entries: next, currentExIdx: idx };
 }
 
-// A superset/giant-set's members must stay array-adjacent — the "⟷"
+// A superset/giant-set's members must stay array-adjacent, the "⟷"
 // connector and finishSetNavigation's round-matching both assume it. Used to
 // reject a chip drag that would split an existing group apart (linking a NEW
 // group, e.g. linkExistingSuperset, calls reorderSessionEntries directly and
-// is exempt — it's establishing the very grouping this checks for).
+// is exempt, it's establishing the very grouping this checks for).
 function groupsContiguous(entries) {
   const seen = new Set();
   let i = 0;
@@ -682,7 +674,7 @@ function SessionClock({ startedAt, style }) {
 // call sites (header chip, rest modal, warmup overlay) render a differently
 // styled number + progress bar of the SAME rest state; `variant` selects the
 // look. The parent owns the interactive wrappers and the expiry LOGIC
-// (restExpired via setTimeout) — this leaf is display only.
+// (restExpired via setTimeout), this leaf is display only.
 function RestGauge({ restStart, restDef, variant }) {
   const [, tick] = useStateT(0);
   useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
@@ -757,7 +749,7 @@ function TimeCountdown({ startedAt, total }) {
 
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
-  // Redirect from an effect — never call go() during render, and never return
+  // Redirect from an effect, never call go() during render, and never return
   // before the hooks below. The inner component mounts only when the session
   // exists, so its hook order stays stable even if the session disappears
   // mid-workout (abandon, delete, cross-device sync).
@@ -770,7 +762,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
   // sessions finished on other devices since boot). Offline keeps the cached
-  // map — bestE1rmForExercise also folds in locally windowed sessions.
+  // map, bestE1rmForExercise also folds in locally windowed sessions.
   useEffectT(() => {
     let on = true;
     LB.refreshExerciseBests(userId).then(bests => {
@@ -854,14 +846,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!LB.mesoActive(_sch) || !session.scheduleId) return;
     const schId = session.scheduleId;
     // Compute the new meso object PURELY (outside setStore) so it's guaranteed
-    // available for the localStorage / component-state writes below — a
+    // available for the localStorage / component-state writes below, a
     // functional updater may run lazily, so we can't rely on it having assigned
     // an outer variable by the time we read it. The effect runs once on mount,
     // so the `store` closure is the freshest snapshot we need.
     const freshSch = store.schedules.find(x => x.id === schId);
     if (!LB.mesoActive(freshSch)) return;
     const existing = getMesoState(schId, store.mesoStates);
-    // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+    // Unbounded (autoregulate-only) plans have no mesocycle_weeks, normalize
     // through ?? null so this matches a persisted mesoState's null weeks. Without
     // it, freshSch.mesocycle_weeks is `undefined` while a loaded existing.weeks is
     // `null`, and undefined === null is false, so this guard would never match
@@ -902,7 +894,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       growthCounts: {},
       completions: existing?.completions ?? 0,
       // Precise block-start anchor for the flex week count (see
-      // mesoCurrentWeek) — client-side, mirrored to the localStorage cache;
+      // mesoCurrentWeek), client-side, mirrored to the localStorage cache;
       // absent mesos fall back to the date comparison.
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -922,7 +914,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const entry = session.entries[exIdx];
   // Memoized on the slices findExercise actually reads (exercises + exId) so the
   // 250ms `now` tick below no longer re-runs a linear scan of the whole library
-  // on every render — it only recomputes when the library or current exId change.
+  // on every render, it only recomputes when the library or current exId change.
   const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
 
   // Pinned exercise note: a note flagged note_pinned (migration 0167) pops up in a
@@ -953,7 +945,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
-  // the last 3 sessions, not merely the single most recent one) — the same
+  // the last 3 sessions, not merely the single most recent one), the same
   // reference buildSeedSets/progressionSuggestion use to seed this session's
   // targets at start, so the live outlier check and "Last time" display never
   // disagree with what was actually seeded.
@@ -967,7 +959,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Memoized on sessions (+ exId/dayId): bestRecentEntry filters and O(n log n)
   // sorts the ENTIRE session history, which previously reran on every 250ms tick.
   // The current (ended:null) session never affects it, so `entry` set logs don't
-  // need to invalidate — only a change to past sessions does.
+  // need to invalidate, only a change to past sessions does.
   // occ = which occurrence of this exercise the current slot is (0 = first), so a
   // twice-in-a-day exercise reads each slot's own history instead of both slots
   // sharing the first occurrence's "last time".
@@ -981,7 +973,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       .then(rows => {
         if (!on) return;
         // The server RPC doesn't know about is_deload and may return ~50%
-        // deload sessions — exclude them (same guard as fetchSeedEntries) so a
+        // deload sessions, exclude them (same guard as fetchSeedEntries) so a
         // deload load never becomes the "last time"/best/comparison baseline.
         const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
         const filtered = (rows || []).filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId));
@@ -996,7 +988,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }
         remoteBestE1rmRef.current[exId] = best;
         // Keep skipped sets in place (only warm-ups stripped) so working-set
-        // position stays aligned across sessions — see bestRecentEntry.
+        // position stays aligned across sessions, see bestRecentEntry.
         const ref = LB.bestEntryFromSetLists(filtered.slice(0, 3).map(r => (r.sets || []).filter(s => !s.warmup)));
         setRemoteLast(m => ({ ...m, [exId]: ref }));
       })
@@ -1057,7 +1049,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isCheckbox = logMode === 'checkbox';   // tick only, no numbers
   const isRepsOnly = logMode === 'reps';       // reps cell, no weight
   const isTime = logMode === 'time';           // countdown + duration, no weight
-  const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column" — keeps all existing kg/header/hero gates
+  const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column", keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
 
   // PR stamp: same three-way value dispatch as isNewBestSet below (time /
@@ -1142,7 +1134,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return target > 0 ? target : null;
   };
 
-  // Keep the reducer pure — no logging or Error().stack side effects inside
+  // Keep the reducer pure, no logging or Error().stack side effects inside
   // setStore (React may invoke updaters more than once). fn only runs for the
   // matching session, so a vanished session is a safe no-op.
   const updateSession = (fn) => {
@@ -1161,7 +1153,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (k !== setIdx) return st;
             // Unchecking (or editing a value on) a set that was completed via
             // an intensity technique (drop-set/myo-rep/lengthened partials)
-            // reopens it for editing — clear the stale technique/drops so a
+            // reopens it for editing, clear the stale technique/drops so a
             // later plain re-check doesn't carry forward data that no longer
             // matches what's actually on the set.
             const clearsTechnique = patch.done === false && st.technique && !('technique' in patch);
@@ -1171,19 +1163,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
-  const isImprovement = (st, prevSet) => {
-    if (!prevSet || st.kg == null || prevSet.kg == null) return false;
-    const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
-    if (repsA == null || repsB == null) return false;
-    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
-  };
-  const isDecline = (st, prevSet) => {
-    if (!prevSet || !st || st.skipped || prevSet.skipped) return false;
-    if (st.kg == null || prevSet.kg == null) return false;
-    const rA = LB.effReps(st); const rB = LB.effReps(prevSet);
-    if (rA == null || rB == null) return false;
-    return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
-  };
+  // Delegate to the shared rules instead of keeping a second, weaker copy:
+  // the local versions handled only kg x reps, so time sets (planks, hangs)
+  // and reps-only exercises never got an improvement or regression overlay
+  // here, while every other screen scored them correctly.
+  // `justCompleted` forces done for the set being evaluated at completion
+  // time: the state copy in hand can still be the pre-patch row, and the
+  // shared rules require done. Scans over earlier sets pass it through as is,
+  // so a skipped set is not counted as an improvement.
+  const isImprovement = (st, prevSet, justCompleted = false) =>
+    LB.isImprovement(justCompleted ? { ...st, done: true } : st, prevSet);
+  const isDecline = (st, prevSet, justCompleted = false) =>
+    LB.isDecline(justCompleted ? { ...st, done: true } : st, prevSet);
 
   // First undone/unskipped WORKING set of a (typically different) entry, with
   // the field its exercise type wants focused first. Warmups never match here:
@@ -1207,7 +1198,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return { setIdx: idx, field: noWeight ? repsField : 'kg' };
   };
   // Next undone/unskipped set of THIS SAME exercise (any type, including a
-  // following warmup) — used when navigation stays put, so the field type
+  // following warmup), used when navigation stays put, so the field type
   // mirrors this entry's own kg/reps shape rather than re-deriving it.
   const nextOwnFocus = (setsArr, afterIdx) => {
     if (isTime) return null; // time sets have no keyboard field to auto-focus
@@ -1226,12 +1217,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Single source of truth for "where does the screen go, and where does the
-  // keyboard focus land next" after ANY set is marked done — checkbox,
+  // keyboard focus land next" after ANY set is marked done, checkbox,
   // keyboard confirm, drop-set, myo-rep or lengthened partial all funnel
   // through this. Previously drop-set/myo-rep had no superset awareness at
   // all (a bare navigate(1) once their own sets were done, never a mid-round
   // partner jump), and the checkbox/keyboard paths each carried their own
-  // separate, non-superset-aware "next field" guess computed eagerly — which
+  // separate, non-superset-aware "next field" guess computed eagerly, which
   // could fire (via its own timer) after this function had already moved the
   // screen to a different exercise, focusing the wrong row there instead.
   // Routing every completion through here and only computing the focus
@@ -1240,7 +1231,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const finishSetNavigation = (setIdx, updatedSets, overlayHoldMs, advanceFocus) => {
     const group = entry.supersetGroup;
     // A skipped set is resolved (nothing left to log there) just like a done
-    // one — only "not done and not skipped" is still pending. Checking
+    // one, only "not done and not skipped" is still pending. Checking
     // `.done === false` alone would treat a partner's skipped set as still
     // pending, jumping to it mid-round for no reason and blocking the
     // round/group from ever reading as complete.
@@ -1409,7 +1400,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
-    // which supplies extraPatch with the chosen partials count — every other
+    // which supplies extraPatch with the chosen partials count, every other
     // entry point (checkbox is hidden for this row, "Check set", keyboard
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
@@ -1420,7 +1411,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === setIdx && !extraPatch) return;
     // Drop-set/myo-rep/AMRAP Variations only ever complete via their own
     // finish*Set function (which builds the whole patch itself and never
-    // calls completeSet) — a bare completeSet on their target set would mark
+    // calls completeSet), a bare completeSet on their target set would mark
     // it done with none of that data, so refuse outright rather than
     // silently corrupting it.
     if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
@@ -1440,7 +1431,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Reps: implausibly low/high vs pre-filled reference.
     // Weight: increment-based (calibrated per equipment config).
     // When both are off we show a combined message.
-    // Skipped during deload — loads are intentionally reduced, comparisons
+    // Skipped during deload, loads are intentionally reduced, comparisons
     // against the pre-deload reference would always fire as "too low".
     const _isDeloadSet = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
@@ -1480,7 +1471,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!isNoWeightReps && !LB.isAssisted(exercise)) {
         refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
         if (refKg != null && refKg > 0) {
-          increment = LB.incrementForExercise(store, exercise, 2.5);
+          increment = LB.incrementForExercise(store, exercise, null);
           loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
           if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
             const num = parseFloat((rawRef || '').replace(',', '.'));
@@ -1512,7 +1503,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       if (weightBad || repsBad) {
         kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-        setKbField(null); setKbRaw(''); setKbFresh(false);
+        setKbField(null); setKbRaw('');
         if (weightBad && repsBad) {
           setOutlierConfirm({ setIdx, kind: 'both', loggedKg, loggedReps, refKg, refReps });
         } else if (weightBad) {
@@ -1526,7 +1517,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // ────────────────────────────────────────────────────────────────────────
 
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-    setKbField(null); setKbRaw(''); setKbFresh(false);
+    setKbField(null); setKbRaw('');
     armKbShield();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
@@ -1569,7 +1560,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const prevSet = prevWorkingSetFor(setIdx);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
-    // During a deload the loads are deliberately light — suppress all
+    // During a deload the loads are deliberately light, suppress all
     // progression/PR/improvement/regression overlays so a planned easy week
     // never reads as a jump or a decline. Includes the 5/3/1 built-in week 4.
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
@@ -1590,7 +1581,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Mirror progressionSuggestion's fallback (store.js): that's what actually
       // seeds next session's weight, so the toast must fire under the same
       // condition, not silently stay quiet just because no increment was configured.
-      const increment = LB.incrementForExercise(store, exercise, 2.5, catCfg);
+      const increment = LB.incrementForExercise(store, exercise, null, catCfg);
       // Index by true working-set position (warm-ups stripped, nothing else)
       // so progressionTargetForSet(i) lines up correctly: filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
@@ -1599,7 +1590,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const workingSets = updatedSets.filter(s => !s.warmup);
       if (!workingSets.some(s => !s.skipped && s.kg != null)) return null;
       const allHitTop = workingSets.every((s, i) => {
-        if (s.skipped || s.kg == null) return true; // no data at this position — neither confirms nor blocks progression
+        if (s.skipped || s.kg == null) return true; // no data at this position, neither confirms nor blocks progression
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
         return reps >= (progressionTargetForSet(i) ?? 0);
       });
@@ -1613,7 +1604,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Overlay precedence (one per completed set): PROGRESSION UNLOCKED > NEW
     // BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set beats the
-    // all-time e1RM record for this exercise — independent of smart
+    // all-time e1RM record for this exercise, independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
     // overlayHoldMs is the delay before the shared navigation below swaps to
@@ -1654,13 +1645,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setNewBestSet(true);
         overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(completed, prevSet)) {
+      } else if (isImprovement(completed, prevSet, true)) {
         setImprovedSet(true);
         overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
-        if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
+        if (!anyImprovementBefore && isDecline(completed, prevSet, true) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
           overlayHoldMs = FLASH_NAV_DELAY_MS;
           setTimeout(() => setRegressionSet(false), 2500);
@@ -1674,7 +1665,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
-  // Improvement / regression / new-best overlay — shared by finishDropSet,
+  // Improvement / regression / new-best overlay, shared by finishDropSet,
   // finishMyoSet, and finishAv (three byte-identical copies before this).
   // completeSet keeps its own version since it additionally handles
   // PROGRESSION UNLOCKED precedence, which the technique finishers don't need.
@@ -1692,7 +1683,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(firstSet, prevSet)) {
+      } else if (isImprovement(firstSet, prevSet, true)) {
         setImprovedSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
@@ -1700,7 +1691,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
-        if (!anyImpBefore && isDecline(firstSet, prevSet) && store.settings?.showRegression !== false) {
+        if (!anyImpBefore && isDecline(firstSet, prevSet, true) && store.settings?.showRegression !== false) {
           setRegressionSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
@@ -1760,14 +1751,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const finishDropSet = async (rawDrops) => {
     // Silently drop any incomplete row (missing reps, or missing kg unless
-    // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
+    // no-weight-reps/bodyweight) instead of saving it, e.g. an ADD DROP
     // row added by accident and never filled in. Centralized here (not
     // just at the Sheet's own FINISH button) since checkSet() below can
     // also reach this directly.
     const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
     if (dropSetIdx == null) return;
     // A "drop set" with no actual drop beyond the top set isn't a drop set
-    // — the FINISH button stays tappable (not disabled) specifically so
+    //, the FINISH button stays tappable (not disabled) specifically so
     // this explains why instead of just doing nothing.
     if (drops.length < 2) {
       await confirm("You did a Drop Set... without a drop? Bold strategy. Add one, or just log this as a normal set.", { title: 'No Drop, No Drop Set', ok: 'Got it', cancel: null });
@@ -1786,6 +1777,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...st,
           kg: first.kg,
           reps: first.reps,
+          // Clear the unilateral seed: LB.effReps prefers repsL/repsR over
+          // reps, so leaving the seeded per-side values in place made volume,
+          // e1RM and PR detection score this set with the SEED reps instead of
+          // what was actually lifted. The session editor's own chain writer
+          // already nulls them.
+          repsL: null,
+          repsR: null,
           done: true,
           technique: 'drop',
           drops: finalDrops,
@@ -1795,7 +1793,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setFlashSet(dropSetIdx);
     setTimeout(() => setFlashSet(null), 1400);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
-    // Stamp the same ghost-click guards completeSet uses — without these, an
+    // Stamp the same ghost-click guards completeSet uses, without these, an
     // iOS ghost-click landing 200-400ms after this drop-set finished would
     // read as an intentional uncheck (no recent-completion timestamp to
     // block it against) and undo the set.
@@ -1805,7 +1803,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
        const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
-    // Rest timer + navigation — same superset-aware logic as completeSet, so
+    // Rest timer + navigation, same superset-aware logic as completeSet, so
     // a drop-set finishing a round correctly jumps to the partner instead of
     // the plain navigate(1) this used to do regardless of grouping.
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
@@ -1814,7 +1812,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const cancelMyo = () => {
     setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); mesoChainSeedRef.current = 0;    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-    setKbField(null); setKbRaw(''); setKbFresh(false);
+    setKbField(null); setKbRaw('');
   };
 
   // Appends a new myo mini-round (top level: called from both the keypad's
@@ -1840,7 +1838,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const finishMyoSet = async (rawDrops, technique) => {
     // Silently drop any incomplete mini-set instead of saving it (see
-    // finishDropSet) — still needs the activation plus at least one
+    // finishDropSet), still needs the activation plus at least one
     // completed mini-set to count as an actual myo-reps set. FINISH stays
     // tappable (not disabled) specifically so this can explain why instead
     // of just doing nothing.
@@ -1864,6 +1862,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...st,
           kg: first.kg,
           reps: first.reps,
+          // See finishDropSet: a stale unilateral seed would outrank `reps`
+          // in effReps and score the whole set wrong.
+          repsL: null,
+          repsR: null,
           done: true,
           technique,
           drops: finalDrops,
@@ -1879,18 +1881,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
     setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
-    // Same superset-aware navigation as completeSet/finishDropSet — a myo-rep
+    // Same superset-aware navigation as completeSet/finishDropSet, a myo-rep
     // finishing a round jumps to the partner instead of a plain navigate(1).
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
     finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
   };
 
   // Commits the set exactly like completeSet, plus the technique/partials
-  // count chosen via the stepper — both land in the same session update, so
+  // count chosen via the stepper, both land in the same session update, so
   // there's no window (crash, background, navigation) where the set is done
   // but the chosen partials count wasn't recorded yet.
   const finishLengthenedPartial = async (setIdx) => {
-    // Lengthened Partials with zero partials isn't lengthened partials — it's
+    // Lengthened Partials with zero partials isn't lengthened partials, it's
     // just the set (or, if a stretch was added, that's the standalone
     // Weighted Stretch technique). FINISH stays tappable even at 0 (see
     // finishDropSet) so this can explain why instead of silently tagging the
@@ -1915,7 +1917,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // finishDropSet).
     const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
     if (avSetIdx == null) return;
-    // AMRAP Variations with only the first round isn't a variation — FINISH
+    // AMRAP Variations with only the first round isn't a variation, FINISH
     // stays tappable (not disabled) specifically so this can explain why.
     if (drops.length < 2) {
       await confirm("AMRAP Variations with just one round? That's just an AMRAP. Add a variation, or log it as one.", { title: 'No Variation, No Variations', ok: 'Got it', cancel: null });
@@ -1934,6 +1936,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...st,
           kg: first.kg,
           reps: first.reps,
+          // See finishDropSet: a stale unilateral seed would outrank `reps`
+          // in effReps and score the whole set wrong.
+          repsL: null,
+          repsR: null,
           done: true,
           technique: 'amrap_variations',
           drops: finalDrops,
@@ -1955,11 +1961,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Drop Set / Myo-Rep(-Match) / AMRAP Variations share one editing sheet
-  // (IntensityChainSheet, rendered near the Intensity picker below) — at most
+  // (IntensityChainSheet, rendered near the Intensity picker below), at most
   // one is ever open at a time. "Dirty" means losing it on discard would
   // actually lose real work: more than the starting round, or a partials
   // count already set. A single un-added activation kg/reps tweak doesn't
-  // count — canceling never touches the underlying set's own kg/reps/done
+  // count, canceling never touches the underlying set's own kg/reps/done
   // (those are only written by finishDropSet/finishMyoSet/finishAv), so that
   // alone is always a lossless cancel.
   const activeChainDirty = () => {
@@ -1987,7 +1993,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!await confirmDiscardChain()) return;
     closeChainSheet();
   };
-  // Guards the training header's home button — otherwise it navigates away
+  // Guards the training header's home button, otherwise it navigates away
   // unconditionally, silently discarding an in-progress chain sheet along
   // with the rest of the (unmounted) training screen.
   const requestGoHome = async () => {
@@ -2002,8 +2008,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return {
         ...sess,
         // Superset/giant-set partners must keep matching working-set counts
-        // — finishSetNavigation's round-matching indexes every member's
-        // working sets by position — so add to every member, not just the
+        //, finishSetNavigation's round-matching indexes every member's
+        // working sets by position, so add to every member, not just the
         // one the user is looking at.
         entries: sess.entries.map((e, i) => {
           if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
@@ -2021,16 +2027,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
   };
 
-  const removeSet = async (setIdx) => {
-    if (!await confirm(`Remove set ${setIdx + 1}?`, { ok: 'Remove', danger: true })) return;
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.filter((_, k) => k !== setIdx) }
-        : e),
-    }));
-  };
-
   const removeLastSet = async () => {
     const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
     if (workingSets.length <= 1) return;
@@ -2039,7 +2035,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // count guard (else their 0 working sets would always block a removal).
     const members = (group ? session.entries.filter(e => e.supersetGroup === group) : [entry]).filter(e => !e.isCardio);
     // Superset/giant-set partners must keep matching working-set counts (see
-    // addSet) — refuse if any member is already down to its last working
+    // addSet), refuse if any member is already down to its last working
     // set, rather than let counts diverge.
     if (members.some(e => e.sets.filter(s => !s.warmup).length <= 1)) return;
     if (!await confirm(`Remove set ${workingSets.length}?`, { ok: 'Remove', danger: true })) return;
@@ -2075,20 +2071,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
-  const skipSet = () => {
-    const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
-    if (idx < 0) return;
-    updateSet(idx, { skipped: true });
-    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
-    if (willBeAllDone) navigate(1);
-  };
-
-  // Shared by cardio (log/skip) and "Check all sets" — both complete an
+  // Shared by cardio (log/skip) and "Check all sets", both complete an
   // entire entry in one shot rather than set-by-set like completeSet/
   // finishSetNavigation, so there's no per-round index to match against a
   // superset/giant-set partner. Jump to whichever partner still has open
   // work instead of blindly advancing past the whole group (schedule-defined
-  // supersets can include cardio — only mid-session linking excludes it).
+  // supersets can include cardio, only mid-session linking excludes it).
   // Returns false (does nothing) when the entry isn't grouped, so callers
   // keep their own standalone navigation/rest timing.
   const advanceIntoGroupOrPartner = (jumpDelayMs) => {
@@ -2195,7 +2183,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setTempoActive(true);
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
-    // Unlike playBeep's own try/catch, construction here was unguarded — a
+    // Unlike playBeep's own try/catch, construction here was unguarded, a
     // browser without AudioContext support (or one that throws on resume)
     // would leave tempoActive stuck true with no audio/visual cadence ever
     // starting.
@@ -2230,7 +2218,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
-      // Seal non-warmup sets that have values as done — guards against a sync
+      // Seal non-warmup sets that have values as done, guards against a sync
       // race where kbApply (done:false) lands in Supabase after completeSet
       // (done:true). Only seal exercises where at least one set is done; if no
       // set was ever confirmed the exercise was skipped/not started.
@@ -2251,7 +2239,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => {
       // Compute from fresh state `s` to avoid stale-closure reads off the outer `store`.
-      // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
+      // For freestyle sessions scheduleId is null so isWeekdayMode is always false,
       // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
       const activeSch = LB.todaysDay(s)?.schedule;
       const activeIsWeekday = LB.isWeekdayPlan(activeSch);
@@ -2265,7 +2253,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(s)?.day?.id);
       // If user chose "continue from picked day", jump cycle to that day's index + 1.
       const pickedSch = s.schedules?.find(sch2 => sch2.id === session.scheduleId);
-      // Look up the day in the *current version's* days, not the original base array —
+      // Look up the day in the *current version's* days, not the original base array,
       // after a prior rotation the original order no longer matches baseDays.
       const pickedBaseDays = (() => {
         if (!cycleFromPickedDay || !pickedSch) return null;
@@ -2325,7 +2313,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
       };
     });
-    // Skip the whole meso completion/gains flow for a deload session — a deload
+    // Skip the whole meso completion/gains flow for a deload session, a deload
     // is recovery, not a meso week. The meso week counter is frozen at the peak
     // (>= weeks) throughout the deload, so without this guard every deload
     // session finish would re-fire "Mesocycle complete!" and re-increment
@@ -2456,7 +2444,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!row) return;
     // Superset connectors ("⟷") are interspersed as siblings between grouped
     // chips, so :nth-child(exIdx+1) drifted from the real chip position as
-    // soon as any connector rendered before it — data-ex-idx addresses the
+    // soon as any connector rendered before it, data-ex-idx addresses the
     // chip directly regardless of how many connectors sit in between.
     const chip = row.querySelector(`[data-ex-idx="${exIdx}"]`);
     if (!chip) return;
@@ -2464,7 +2452,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     row.scrollLeft = target;
   }, [exIdx]);
 
-  // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
+  // chip drag-to-reorder, uses the shared horizontal drag hook from ui.jsx
   const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 600,
     onReorder: (from, to) => {
       updateSession(sess => {
@@ -2481,7 +2469,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     chipDragReorderRef(node);
   }, [chipDragReorderRef]);
 
-  // rest timer — persisted in session so navigation doesn't kill it
+  // rest timer, persisted in session so navigation doesn't kill it
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
   const [restDuration, setRestDuration] = useStateT(() => session.restDuration ?? null);
 
@@ -2494,7 +2482,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (store.settings?.pushEnabled) {
         const def = newDur ?? restDef;
         // Both push edge functions clamp delaySeconds to 3600 (MAX_DELAY)
-        // server-side — matching it here so a very long rest (repeated +30s
+        // server-side, matching it here so a very long rest (repeated +30s
         // extensions can add up) doesn't fire early against the server's
         // silent truncation while the client still thinks the full delay
         // was scheduled.
@@ -2615,7 +2603,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
-  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
+  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null, set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
   const [lpStretch, setLpStretch] = useStateT(null); // { kg, timeSec } | null: optional weighted-stretch finisher on top of the partials (squeeze out partials, then hold once the weight won't move), committed to drops.stretch alongside drops.partials on Finish
   const lpStretchRef = useRefT(null);
@@ -2625,7 +2613,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const wsStretchRef = useRefT(null); // mirror for the custom keypad handlers (they read refs, not stale closures)
   wsStretchRef.current = wsStretch;
   const [avSetIdx, setAvSetIdx] = useStateT(null);
-  const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
+  const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...], AMRAP Variations rounds
   const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
@@ -2637,7 +2625,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // persisted (a hard remount just stops it floating further; the value
   // itself survives fine since it already lives in the restored drops row).
   // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
-  // Lengthened Partials stepper on, so it arms each set exactly once — a user
+  // Lengthened Partials stepper on, so it arms each set exactly once, a user
   // who cancels the auto-prescribed partials on a set isn't re-nagged by a
   // re-firing effect.
   const mesoLpArmedRef = useRefT(new Set());
@@ -2656,7 +2644,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const plannedTechArmedRef = useRefT(new Set());
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
-  // mount (declaration order), so on mount state is still all-null — without
+  // mount (declaration order), so on mount state is still all-null, without
   // skipFirstClearRef, that first run would always wipe localStorage via the
   // else branch a split second before the restore effect gets to read it,
   // permanently defeating restoration across any navigate-away-and-back.
@@ -2698,8 +2686,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoTarget(st.myoTarget ?? null);
       }
       // The set only ever gets marked done via the dedicated FINISH button
-      // (which commits technique+drops in the same update), so — like
-      // drop/myo — there is nothing left to resume once the set is done.
+      // (which commits technique+drops in the same update), so, like
+      // drop/myo, there is nothing left to resume once the set is done.
       if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
         setLpTarget({ exIdx, setIdx: st.lpSetIdx });
         setLpCount(st.lpCount || 0);
@@ -2737,7 +2725,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const addAndJumpRef = useRefT(false); // set to true when adding via the finish-dialog button
-  const [supersetLinkData, setSupersetLinkData] = useStateT(null); // null | {} | { picking: true } — mirrors addSupersetData's shape
+  const [supersetLinkData, setSupersetLinkData] = useStateT(null); // null | {} | { picking: true }, mirrors addSupersetData's shape
   const [supersetNewPickerOpen, setSupersetNewPickerOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
@@ -2754,7 +2742,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const saveMesoState = (updater) => {
     setMesoStateLocal(prev => {
       const applied = typeof updater === 'function' ? updater(prev) : updater;
-      // Stamp updatedAt on every in-session write — getMesoState's "pick the
+      // Stamp updatedAt on every in-session write, getMesoState's "pick the
       // newer of store vs localStorage" comparison (and the sync RPC's
       // staleness guard) only works if the localStorage copy's updatedAt
       // actually advances past whatever it inherited at session start.
@@ -2798,19 +2786,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   // Memoized on everything mesoCurrentWeek reads (it filters all sessions twice
   // for meso plans) plus a per-day token so the date-based week still advances at
-  // midnight — without this it recomputed on every 250ms tick for meso users.
+  // midnight, without this it recomputed on every 250ms tick for meso users.
   const mesoWeek = useMemoT(() => (mesoState ? mesoCurrentWeek(mesoState, store) : null), [mesoState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods, LB.todayISO()]);
   const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
   const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
   const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
-  // RIR taper can be switched off per plan — then there's no weekly RIR target
+  // RIR taper can be switched off per plan, then there's no weekly RIR target
   // (null), which also suppresses the negative-RIR partials prescription below.
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null && LB.mesoRirEnabled(mesoSch)) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
   // Final meso week: set-count deltas (and the growth/decline rotation feeding
   // them) are frozen. A set change written now can never reach a later session
   // in this block AND is wiped by the Meso-2 baseline reset anyway, so
   // collecting it is pure waste. Weight boosts still accrue (they carry into
-  // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
+  // Meso 2), so the joint + pump/volume questions stay, they gate the boost,
   // while the soreness question (pure set-delta, no weight gate) is skipped.
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
   // Autoreg v2 P1: overreach detector over the loaded history (stateless, spec
@@ -3035,7 +3023,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     const nextNum = mesoNextNumRef.current;
     const wantMeso2 = await confirm(
-      `Start Meso ${nextNum} with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.`,
+      `Start Meso ${nextNum} with the same plan? Your earned weight boosts carry over, set counts reset to baseline so week 1 feels fresh again.`,
       { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
     );
     if (wantMeso2) {
@@ -3189,7 +3177,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointOpen, setMesoJointOpen] = useStateT(false);
   const [mesoJointExId, setMesoJointExId] = useStateT(null);
   const [mesoJointExName, setMesoJointExName] = useStateT(null);
-  const [mesoJointPendingNav, setMesoJointPendingNav] = useStateT(false);
   const [mesoJointMuscle, setMesoJointMuscle] = useStateT(null);
   const mesoJointExIdxRef = useRefT(null);
   const [mesoVolumeOpen, setMesoVolumeOpen] = useStateT(false);
@@ -3213,7 +3200,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Editing an already-answered question reopens the same sheet prefilled;
   // these track which subject (muscle/exId) is currently being re-answered
   // vs. freshly asked for the first time (both paths call the same commit
-  // handler — see handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer).
+  // handler, see handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer).
   const mesoEditingRef = useRefT({ soreness: null, joint: null, volume: null });
   const [mesoRecapOpen, setMesoRecapOpen] = useStateT(false);
   // Session feedback is two levels: the top sheet lists one button per
@@ -3276,7 +3263,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoPumpOkRef = useRefT(mesoBoostSetsInitRef.current.pumpOk);          // exIds whose pump was moderate/amazing
   const mesoWeightOkRef = useRefT(mesoBoostSetsInitRef.current.weightOk);      // exIds whose weight-feel answer allows the bump (every mode)
   // Load-only plans: muscles answered 'still sore' this session. There sets are
-  // frozen, so soreness instead HOLDS the weight (a recovery-based load brake) —
+  // frozen, so soreness instead HOLDS the weight (a recovery-based load brake),
   // this set blocks the boost for those muscles. Modeled as "block on sore" (not
   // "require ok") so a muscle whose soreness question was never asked (week 1)
   // still earns its boost, never a false hold. Rehydrated above so a reload keeps
@@ -3284,7 +3271,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoSoreBlockRef = useRefT(mesoBoostSetsInitRef.current.soreBlock);
   const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
   // Which question type currently "owns" the negative set-delta slot for a
-  // key (exId_dayId) this session — key -> 'soreness'|'joint'|'volume'. Two
+  // key (exId_dayId) this session, key -> 'soreness'|'joint'|'volume'. Two
   // independent negative signals on the same key never stack past -1; the
   // owner releases the slot if its own answer is edited away from negative,
   // letting another question claim it. See commitContrib.
@@ -3298,13 +3285,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Apply `newContrib` (key -> desired delta) as this question's current
   // contribution to mesoState.deltas, replacing whatever it contributed last
-  // time (tracked in `record.contrib`) via a diff — so an edited answer never
+  // time (tracked in `record.contrib`) via a diff, so an edited answer never
   // compounds with its own earlier answer. Negative amounts additionally
   // respect mesoNegativeDeltaKeysRef ownership (suppressed to 0 if another
   // question type already owns that key's negative slot this session).
   // `namesByKey` supplies { name } for the "Next session" recap ledger.
   const commitContrib = (record, questionType, newContrib, namesByKey) => {
-    // Frozen in the final week — no set delta is written and none is recorded
+    // Frozen in the final week, no set delta is written and none is recorded
     // for the recap (weight boosts, handled separately in computeMesoGains,
     // still accrue). All three feedback questions funnel through here, so this
     // one guard freezes the whole set-delta system for the last week.
@@ -3348,7 +3335,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // ── Meso feedback handlers ─────────────────────────────────────────────────
   // Soreness, joint, and volume answers are all editable for the rest of the
   // session (see the "Session feedback" recap sheet below): each handler is
-  // safe to call more than once for the same subject (muscle/exId) — the
+  // safe to call more than once for the same subject (muscle/exId), the
   // second call is an edit, not a fresh answer, and commitContrib() reconciles
   // the difference instead of stacking a second contribution.
   const handleSorenessAnswer = (answer, muscle) => {
@@ -3358,7 +3345,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     mesoEditingRef.current.soreness = null;
     if (!mesoState || !muscle) return;
     const record = mesoAnswersRef.current.soreness[muscle] || { muscle };
-    // Resolve the target previous session ONCE — an edit reuses the exact
+    // Resolve the target previous session ONCE, an edit reuses the exact
     // same candidate exercises rather than re-resolving (which could in
     // theory match a different session if training history changed).
     if (!record.resolved) {
@@ -3379,7 +3366,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     }
     record.answer = answer;
-    // Load-only: soreness doesn't touch set counts (those are frozen) — it
+    // Load-only: soreness doesn't touch set counts (those are frozen), it
     // holds the weight instead. Record/clear the block for this muscle and
     // stop; the growth/decline/commitContrib set-delta machinery below is a
     // no-op here anyway (commitContrib freezes on load-only).
@@ -3394,7 +3381,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const keys = [];
     record.targets.forEach(t => { namesByKey[t.key] = t.name; keys.push(t.key); });
 
-    // Soreness carryover is a recovery signal, so it moves volume BOTH ways —
+    // Soreness carryover is a recovery signal, so it moves volume BOTH ways,
     // symmetric with the pump/volume question, not a one-directional "reduce"
     // check (too little soreness is just as much an off-MRV signal as too much):
     //   • never / healed a while ago → recovered easily = probably training
@@ -3504,7 +3491,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       saveMesoState(m => ({ ...m, affinity: { ...(m.affinity || {}), [exId]: { v: affinity, streak: newStreak } } }));
     }
     // jointFlags is a persistent "causes joint pain" marker (survives across
-    // sessions) — flagBaseline captures whatever it already was BEFORE this
+    // sessions), flagBaseline captures whatever it already was BEFORE this
     // session touched it, captured once, so editing back and forth within
     // this session never erases a flag some earlier session legitimately set.
     if (record.flagBaseline === undefined) record.flagBaseline = !!mesoState.jointFlags?.[exId];
@@ -3531,12 +3518,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!muscle || askedVolumeRef.current.has(muscle)) return;
     const idx = session.entries.findIndex(e => e.exId === exId);
     // exId no longer exists in this session (swapped out / removed via
-    // doSwap/removeExercise since the original answer) — an edit reached via
+    // doSwap/removeExercise since the original answer), an edit reached via
     // the recap for a since-vanished exercise can't reason about "is this the
     // last exercise of the muscle group" from a position that no longer
     // exists, so skip the cascade entirely rather than falling back to
     // whatever exIdx the user happens to be viewing right now (that produced
-    // a wrong, premature, and — since askedVolumeRef is one-shot —
+    // a wrong, premature, and, since askedVolumeRef is one-shot,
     // irreversible trigger of the volume sheet for the wrong exercise set).
     if (idx < 0) return;
     mesoJointExIdxRef.current = idx;
@@ -3577,7 +3564,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // "Not enough" → rotates a +1 among the muscle group's exercises (see
     // LB.pickGrowthRecipient); "Pushed my limits" → -1 on the currently
-    // MOST-grown exercise (LB.pickDeclineRecipient — mirror of the growth
+    // MOST-grown exercise (LB.pickDeclineRecipient, mirror of the growth
     // rotation, so decline follows growth instead of always draining the main
     // lift into the floor); "Too much" → -1 on every exercise of the group.
     const namesByKey = {};
@@ -3589,7 +3576,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
 
     // Growth rotation for "not_enough": whichever exercise has the fewest
-    // growth grants so far this meso wins (ties toward the main lift) — see
+    // growth grants so far this meso wins (ties toward the main lift), see
     // LB.pickGrowthRecipient for the full rule, including how a mid-meso
     // exercise swap-in is seeded at the group max so it can't cut ahead of an
     // established lift. With only one exercise it always picks it. Growth has
@@ -3602,7 +3589,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // LB.pickGrowthRecipient is called twice on purpose: once here (using
     // `mesoState`) to decide `recipientKey` for the newContrib built below,
     // and again inside the saveMesoState updater (using the fresh `m`
-    // parameter) for the actual write — so a rare double-invocation of this
+    // parameter) for the actual write, so a rare double-invocation of this
     // handler before React re-renders can never silently lose a prior grant
     // by persisting a value computed from stale state. It's a pure,
     // deterministic function, so calling it twice with the same inputs is
@@ -3610,10 +3597,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     //
     // prevGrantedTo (which key, if any, this record's own last answer granted
     // a set to) is derived from record.contrib rather than a separately
-    // tracked field — commitContrib already guarantees exactly one key ever
+    // tracked field, commitContrib already guarantees exactly one key ever
     // holds a contrib of 1 for this question type, so there's nothing to keep
     // in sync by hand.
-    // Skip the whole growth/decline rotation in the final week — commitContrib
+    // Skip the whole growth/decline rotation in the final week, commitContrib
     // is frozen there, so bumping growthCounts would only drift the counter
     // (harmless since it resets at Meso 2, but pointless) with no delta to show
     // for it. A Load-only plan freezes set deltas every session for the same
@@ -3629,7 +3616,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
       saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
-      // Answer changed away from not_enough this session — undo the previous grant.
+      // Answer changed away from not_enough this session, undo the previous grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
 
@@ -3655,7 +3642,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Reopen an already-answered sheet prefilled with the current answer so the
-  // user can revise it — a mistap is no longer permanent. Only reachable from
+  // user can revise it, a mistap is no longer permanent. Only reachable from
   // the recap sheet (see mesoRecapGroups / the footer nav button below).
   const openSorenessEdit = (muscle) => {
     const record = mesoAnswersRef.current.soreness[muscle];
@@ -3838,7 +3825,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
     // may still EARN a weight boost. 'full' = normal.
     const signalWeight = deriveSignalWeight();
-    const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
@@ -3893,7 +3879,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
       const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, planReps, planRepsPerSet, planRepsMax);
 
-      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, null);
 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut
@@ -3940,7 +3926,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // other training days' boosts untouched. A deload session collects no
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
-    // mesoState here is the React state — already contains all feedback deltas from this session.
+    // mesoState here is the React state, already contains all feedback deltas from this session.
     // EARN persist: only a 'none' session (deload) keeps the old map untouched.
     // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
     // is real, spec 4.3); 'full' is the normal re-earn.
@@ -3965,7 +3951,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
     // true for EVERY session of the final week, and this runs per session-end, so
-    // guard on pendingMeso2 to increment completions exactly once per block — else
+    // guard on pendingMeso2 to increment completions exactly once per block, else
     // a second peak-week session (or a force-quit re-run) double-counts and the
     // offer misreads "Meso 3" instead of "Meso 2" (audit C2). pendingMeso2 clears
     // only when the user answers the offer, i.e. when the next block begins.
@@ -3998,11 +3984,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
-    if (mesoWeek == null) return; // pending period — meso not yet started
+    if (mesoWeek == null) return; // pending period, meso not yet started
     if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     // Load-only keeps asking soreness: there it holds the weight (recovery brake)
-    // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
+    // instead of adjusting sets, see handleSorenessAnswer / computeMesoGains.
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
@@ -4065,7 +4051,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
-    if (mesoWeek == null) return; // pending period — meso not yet started
+    if (mesoWeek == null) return; // pending period, meso not yet started
     // A second exercise becoming eligible while another's sheet is still open
     // must defer rather than reopen/overwrite it (same "defer + retry on
     // dependency change" pattern as the soreness effect above): mesoJointOpen
@@ -4151,7 +4137,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     };
     flash();
     // audio: two beeps + higher tone. Reuse the shared AudioContext created
-    // during a prior user gesture — a new one on a timer tick gets suspended by
+    // during a prior user gesture, a new one on a timer tick gets suspended by
     // iOS and never plays.
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -4174,7 +4160,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // (app was backgrounded) resume().then(play) would queue a STALE beep that
       // fires on the user's NEXT tap (the "beep only when I check the next set"
       // bug). Play only when the context is already running; otherwise best-effort
-      // resume for next time and skip this beep — the modal + gold flash already
+      // resume for next time and skip this beep, the modal + gold flash already
       // signal the rest is over, and a push fired while the app was backgrounded.
       if (ctx.state === 'running') play();
       else ctx.resume().catch(() => {});
@@ -4186,11 +4172,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   });
   const restExpiredRef = useRefT(restExpired); restExpiredRef.current = restExpired;
   // Reset the once-per-rest fire guard whenever a NEW rest begins (restStart /
-  // restDuration change) — deliberately NOT on resume, so a rest that already
+  // restDuration change), deliberately NOT on resume, so a rest that already
   // beeped can't beep again when the app is foregrounded later.
   useEffectT(() => { restFiredRef.current = false; }, [restStart, restDuration]);
   // iOS discards a setTimeout that was pending in a backgrounded WebView and
-  // never restores it — so after any background→foreground cycle the armed rest
+  // never restores it, so after any background→foreground cycle the armed rest
   // timer is simply dead (even with minutes left). Bump a nonce on every resume
   // so the arm effect below re-runs and re-arms with the correct remaining time
   // (or fires immediately if the rest finished while backgrounded). The old
@@ -4206,7 +4192,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (restStart == null) { setRestExpired(false); return; }
     const ms = restStart + activeRestDef * 1000 - Date.now();
     if (ms <= 0) {
-      // Past finish time when (re)armed — a genuine active→expired tap (−30s to
+      // Past finish time when (re)armed, a genuine active→expired tap (−30s to
       // 0) or a rest that elapsed while backgrounded. fireRestDone's
       // restFiredRef guard makes this idempotent, so a session that MOUNTS
       // already-expired (restExpired init true) or a second resume won't re-beep.
@@ -4219,11 +4205,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [restStart, restDuration, resumeNonce]); // + resumeNonce: re-arm after iOS kills the bg timer
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   // IntensityChainSheet needs the keyboard's actual rendered height (not a
-  // guessed constant — CustomKeyboard's real height varies with
+  // guessed constant, CustomKeyboard's real height varies with
   // env(safe-area-inset-bottom), so a hardcoded number was off by exactly
   // that amount and left the sheet overlapping the keyboard's top row).
   // useLayoutEffect (not useEffect) measures synchronously before paint, so
-  // the sheet renders at the right height on the very first frame — no
+  // the sheet renders at the right height on the very first frame, no
   // visible jump once the keyboard mounts.
   const [customKbHeight, setCustomKbHeight] = useStateT(0);
   useLayoutEffectT(() => {
@@ -4232,7 +4218,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (el) setCustomKbHeight(el.getBoundingClientRect().height);
   }, [kbField]);
   const [kbRaw, setKbRaw] = useStateT('');
-  const [kbFresh, setKbFresh] = useStateT(false);
   const kbFieldRef = useRefT(null);
   const kbRawRef = useRefT('');
   const kbFreshRef = useRefT(false);
@@ -4254,12 +4239,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
   // re-enter the onClick handler with s.done=true and undo the completion.
   const recentCompleteRef = useRefT({});
-  // Global timestamp of the most-recent completion across all sets — catches
+  // Global timestamp of the most-recent completion across all sets, catches
   // ghost-clicks that land on a *different* row than the one just completed
   // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
   const lastCompleteRef = useRefT(0);
 
-  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); }, [exIdx, sessionId]);
   useEffectT(() => {
     const pf = pendingFocusRef.current;
     if (!pf) return;
@@ -4272,7 +4257,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const cd = entry.cardioData;
     setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? LB.mToDisplay(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
-  // Intentionally NOT keyed on exIdx/entry — Paceguard (tempo) is meant to
+  // Intentionally NOT keyed on exIdx/entry, Paceguard (tempo) is meant to
   // keep running across exercise navigation once started, stopping only on
   // an explicit "Stop" tap or when the whole training screen unmounts
   // (session finished/abandoned). Do not add exIdx to these deps; that would
@@ -4280,7 +4265,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // opposite of what this feature is for.
   useEffectT(() => () => stopTempo(), []);
 
-  // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
+  // Log ALL document pointer/click events, captures ghost-clicks and shows where they land.
   useEffectT(() => {
     const onPD = e => {
       const isKb = !!e.target.closest('[data-keyboard]');
@@ -4391,7 +4376,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = true;
     setKbField({ setIdx, field });
     setKbRaw(val);
-    setKbFresh(true);
     setTimeout(() => {
       const el = document.querySelector(`[data-kb-row="${setIdx}"]`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -4408,7 +4392,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = true;
     setKbField({ setIdx: 'drop', dropIdx, field });
     setKbRaw(val);
-    setKbFresh(true);
     setTimeout(() => scrollChainRowIntoView('data-drop-row', dropIdx), 80);
   };
 
@@ -4422,7 +4405,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = true;
     setKbField({ setIdx: 'myo', dropIdx, field });
     setKbRaw(val);
-    setKbFresh(true);
     setTimeout(() => scrollChainRowIntoView('data-myo-row', dropIdx), 80);
   };
 
@@ -4436,7 +4418,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = true;
     setKbField({ setIdx: 'av', dropIdx, field });
     setKbRaw(val);
-    setKbFresh(true);
     setTimeout(() => scrollChainRowIntoView('data-av-row', dropIdx), 80);
   };
 
@@ -4470,7 +4451,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = true;
     setKbField({ setIdx: 'stretch', target, dropIdx, field });
     setKbRaw(val);
-    setKbFresh(true);
     // Every other activate* (activateKb, activateDropKb/Myo/Av) scrolls its
     // row into view once the custom keyboard opens (position:fixed, covers
     // a large chunk of the screen); this one didn't, so a stretch box tapped
@@ -4540,7 +4520,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             ...en,
             // Editing the weight of an already-committed intensity-technique
             // set (drop-set/myo-rep/lengthened partials) reopens it for
-            // editing — clear the stale technique/drops so it doesn't carry
+            // editing, clear the stale technique/drops so it doesn't carry
             // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
               si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
@@ -4568,7 +4548,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbRawRef.current = newRaw;
     kbFreshRef.current = false;
     setKbRaw(newRaw);
-    setKbFresh(false);
     _log(`TYPE '${char}' → '${newRaw}' (set${setIdx} ${field})`);
     kbApply(newRaw, field, setIdx);
   };
@@ -4584,7 +4563,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbRawRef.current = newRaw;
     kbFreshRef.current = false;
     setKbRaw(newRaw);
-    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
@@ -4595,7 +4573,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbRawRef.current = newRaw;
     kbFreshRef.current = false;
     setKbRaw(newRaw);
-    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
@@ -4720,7 +4697,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         activateStretchKb(target, dropIdx, 'sec');
       } else {
         kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-        setKbField(null); setKbRaw(''); setKbFresh(false);
+        setKbField(null); setKbRaw('');
         armKbShield();
       }
       return;
@@ -4736,7 +4713,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setTimeout(() => activateDropKb(dropIdx + 1, 'kg'), 50);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
+          setKbField(null); setKbRaw('');
           armKbShield();
         }
       }
@@ -4756,7 +4733,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setTimeout(() => activateMyo(newIdx, 'reps'), 80);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
+          setKbField(null); setKbRaw('');
           armKbShield();
         }
       }
@@ -4773,7 +4750,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setTimeout(() => activateAvKb(dropIdx + 1, 'kg'), 50);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
+          setKbField(null); setKbRaw('');
           armKbShield();
         }
       }
@@ -4855,7 +4832,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const doSwap = (ids) => {
     const newExId = Array.isArray(ids) ? ids[0] : ids;
-    // resolve the name from fresh state — a just-created exercise isn't in the
+    // resolve the name from fresh state, a just-created exercise isn't in the
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
     setStore(s => ({ ...s, sessions: swapEntrySessions(s, newExId) }));
     setSwapOpen(false);
@@ -4937,13 +4914,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (jump) addAndJumpRef.current = false;
       linkNewExercise(null, newExId, jump);
     } else {
-      // Defer insertion until the user picks a superset (or solo) —
+      // Defer insertion until the user picks a superset (or solo),
       // that choice determines where the new exercise is placed.
       setAddSupersetData({ newExId });
     }
   };
 
-  // First field to jump the keyboard to for a freshly-added exercise — 'kg' for
+  // First field to jump the keyboard to for a freshly-added exercise, 'kg' for
   // weight mode, the first rendered reps cell for reps mode, and null for
   // checkbox mode (nothing to type, so no keyboard).
   const firstFieldForExercise = (ex) => {
@@ -5075,7 +5052,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const target = sess.entries[targetIdx];
       if (!mother || !target || targetIdx === motherIdx) return sess;
       const group = mother.supersetGroup || LB.uid();
-      // Match the target's working-set count to the mother's — trim from the
+      // Match the target's working-set count to the mother's, trim from the
       // end (working sets are always seeded after any warmups) or pad by
       // cloning the last working set as a starting suggestion.
       const motherWorkingCount = mother.sets.filter(s => !s.warmup).length;
@@ -5108,7 +5085,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const removedGroup = sess.entries[exIdx]?.supersetGroup || null;
       let newEntries = sess.entries.filter((_, i) => i !== exIdx);
       // Removing one member can drop a superset/giant-set down to a single
-      // remaining exercise — a "group" of one is meaningless, so clear it
+      // remaining exercise, a "group" of one is meaningless, so clear it
       // rather than leave a stale supersetGroup nothing else shares.
       if (removedGroup) {
         const stillGrouped = newEntries.filter(e => e.supersetGroup === removedGroup);
@@ -5171,7 +5148,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const diffs = [];
 
-    // Ad-hoc additions — store position context so applyPlanAndFinish can insert them
+    // Ad-hoc additions, store position context so applyPlanAndFinish can insert them
     session.entries.forEach((e, sessionIdx) => {
       if (!e.addedDuringSession) return;
       // Find the nearest non-cardio entry before this one to use as insertion anchor
@@ -5209,7 +5186,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Superset link/unlink on matched (already-in-plan) exercises. Needed as
     // its own diff type because linking two exercises that were already
-    // plan-adjacent produces no swap/sets/reorder diff by itself — without
+    // plan-adjacent produces no swap/sets/reorder diff by itself, without
     // this, computePlanDiff() would return [] and confirmWithFeel's
     // `diffs.length > 0` check would skip the "Update plan?" step entirely,
     // silently dropping the new supersetGroup (the session's own entries
@@ -5242,13 +5219,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Reorder: detect exercises that were intentionally moved (not just shifted by
     // a neighbour's drag). Strategy: find the Longest Increasing Subsequence of
-    // session positions — those exercises kept their relative order and were NOT
+    // session positions, those exercises kept their relative order and were NOT
     // dragged. Everything outside the LIS was explicitly moved by the user.
     const matchedPairs = planItems
       .map((_, i) => matched[i] ? { planIdx: i, sessPos: sessionPlanEntries.indexOf(matched[i]) } : null)
       .filter(Boolean);
     if (matchedPairs.some((p, k) => k > 0 && p.sessPos < matchedPairs[k - 1].sessPos)) {
-      // O(n²) LIS with parent-tracking — fine for typical plan sizes (<20 items)
+      // O(n²) LIS with parent-tracking, fine for typical plan sizes (<20 items)
       const sp = matchedPairs.map(p => p.sessPos);
       const dp = new Array(sp.length).fill(1);
       const parent = new Array(sp.length).fill(-1);
@@ -5338,7 +5315,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             ? { ...item, exId: diff.newExId, sets: patch.sets ?? item.sets, reps: patch.reps ?? null, repsPerSet: patch.repsPerSet ?? null, repsMax: patch.repsMax ?? null, progressionOffset: patch.progressionOffset ?? null, plannedTechniques: patch.plannedTechniques ?? null }
             : { ...item, exId: diff.newExId };
         }
-        // Persist only the user-driven delta on top of the base plan — newSets
+        // Persist only the user-driven delta on top of the base plan, newSets
         // includes the meso set-delta, which applyMesoSetDelta re-adds next
         // session; writing newSets directly would compound it (base+2 → base+3).
         // Clamp to ≥1: mesoAdjustedPlanSets is the clamped count, so a deep cut
@@ -5578,7 +5555,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wCount = sets.filter(s => s.warmup).length;
     const curWarmup = wCount > 0 && !!sets[curIdx]?.warmup;
     if (curWarmup) return;
-    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null || wsTarget != null) return;
+    // lpTarget/wsTarget carry their own exIdx. Blocking on them regardless of
+    // which exercise they belong to meant that leaving an exercise with an
+    // open lengthened-partials or weighted-stretch editor (no FINISH, no
+    // CANCEL) silently disarmed planned techniques and meso LP for every
+    // REMAINING exercise of the session. Only the exercise that actually owns
+    // the open editor should be blocked.
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null) return;
+    if (lpTarget?.exIdx === exIdx || wsTarget?.exIdx === exIdx) return;
     const key = exIdx + '_' + curIdx;
 
     // Per-set planned technique: the current set's working-set index (warmups
@@ -5628,8 +5612,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Rendered in BOTH return paths (empty freestyle early return + main return),
   // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
   // highlight); the Confirm button commits it, so a mis-tap is correctable first.
+  // Dismissing commits the SAME default the resumed-session path stamps
+  // ('normal', or the re-entry ramp when it applies). The sheet used to be
+  // unleavable: no skip control, backdrop and X wired to a no-op, and Confirm
+  // disabled until something was picked, so an auto-opened prompt could trap
+  // the whole training screen. Leaving readiness null instead is not an
+  // option, every downstream meso prompt is gated on it being set.
+  const dismissReadiness = () => chooseReadiness(readinessReentry ? 'reentry' : 'normal');
   const readinessSheet = (
-    <Sheet open={readinessOpen} onClose={() => {}} title="How do you feel today?">
+    <Sheet open={readinessOpen} onClose={dismissReadiness} title="How do you feel today?">
       <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
         Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
       </div>
@@ -5659,6 +5650,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
       })}
       <Btn onClick={() => chooseReadiness(readinessSel)} disabled={readinessSel == null} style={{ width: '100%', marginTop: 12, opacity: readinessSel == null ? 0.4 : 1 }}>Confirm</Btn>
+      <button onClick={dismissReadiness} style={{
+        width: '100%', marginTop: 10, padding: '10px 0', background: 'transparent', border: 'none',
+        color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', textShadow: 'none',
+      }}>Not now</button>
     </Sheet>
   );
 
@@ -5666,7 +5661,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
     }
-    // Empty freestyle/bonus session — show exercise picker immediately
+    // Empty freestyle/bonus session, show exercise picker immediately
     return (
       <Screen scroll={false}>
         <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0', display: 'flex' }}>
@@ -5697,7 +5692,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Computed once per render and reused by the footer's feedback button, the
   // "Check set" shrink/compact logic, and the recap sheet itself.
   const mesoFeedbackGroups = mesoState ? mesoRecapGroups() : [];
-  const currentSetIdx = entrySets.findIndex(s => !s.done);
+  // Skipped sets are finished business, exactly like done ones: without the
+  // !s.skipped test, coming back to an exercise after "Skip remaining sets"
+  // put the hero card on a skipped set and let it be edited, while its own
+  // list row stayed locked and the footer button stayed disabled. Anything
+  // typed there never counted toward volume or PRs. Same predicate the three
+  // other "next open set" scans in this file use.
+  const currentSetIdx = entrySets.findIndex(s => !s.done && !s.skipped);
   const warmupCount = entrySets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
   const warmupSetsRemaining = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done);
@@ -5720,7 +5721,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (LB.current531Week(sch531, store.sessions) || 1) === 3;
   })();
   // Warmups are seeded only onto whichever entry the session-start builder
-  // picked (screens-home.jsx), normally entries[0] — but mid-session superset
+  // picked (screens-home.jsx), normally entries[0], but mid-session superset
   // linking can now move that entry away from position 0, so the WARMUP
   // COMPLETE screen below looks it up by content instead of assuming index 0.
   const warmupEntry = session.entries.find(e => (e.sets || []).some(s => s.warmup)) || session.entries[0];
@@ -5736,11 +5737,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // early return to keep the hook order stable; see the note there.)
 
   // Superset linking (Intensity sheet) is only offered before any working set
-  // in the CURRENT group has started — retroactively linking a partially-run
+  // in the CURRENT group has started, retroactively linking a partially-run
   // superset would insert the new exercise's round 0 after rounds the
   // existing pair already logged, confusing the round-index matching. Not
   // ungrouped entries: [entry] itself (linking makes a first pair). Two
-  // members: 'giant' (add a third — either mother or the 1st daughter can
+  // members: 'giant' (add a third, either mother or the 1st daughter can
   // initiate, both see this since the check is symmetric). Three members:
   // capped, button hidden entirely.
   const supersetGroupMembers = entry.supersetGroup
@@ -5756,7 +5757,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // "Add exercise" flow's link-target list: entries eligible to accept the
   // brand-new exercise as a groupmate. Unlike supersetCandidates above
-  // (which only offers ungrouped entries — growing the CURRENT entry's own
+  // (which only offers ungrouped entries, growing the CURRENT entry's own
   // group is handled separately there), a target here may already be paired,
   // since picking one of an existing pair's members is the only way this
   // flow can grow it into a giant set. Still excludes cardio, an
@@ -5778,7 +5779,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Every intensity technique (drop-set, myo-rep, lengthened partials) only
     // ever completes via its own dedicated FINISH button, which commits data
     // bulk-check has no way to supply (drop weights, myo minis, partials
-    // count) — leave that one set for the user to finish individually rather
+    // count), leave that one set for the user to finish individually rather
     // than silently marking it done with none of that data recorded.
     const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : wsTarget?.exIdx === exIdx ? wsTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
     updateSession(sess => ({
@@ -5798,7 +5799,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const skipWarmup = () => {
     updateSession(sess => {
-      // The warmup-carrying entry isn't necessarily at index 0 — superset
+      // The warmup-carrying entry isn't necessarily at index 0, superset
       // linking / reorder can move it. Find it by content, like warmupEntry.
       const wIdx = sess.entries.findIndex(e => (e.sets || []).some(s => s.warmup));
       return {
@@ -5994,7 +5995,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 }
                 const isKg = oc.kind === 'kg';
                 const u = isKg ? UI.unit() : '';
-                return `${entry.name} — ${oc.logged}${u} logged, ${oc.ref}${u} expected`;
+                return `${entry.name}, ${oc.logged}${u} logged, ${oc.ref}${u} expected`;
               })()}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
@@ -6075,7 +6076,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </button>
       </div>
 
-      {/* Pace bar — positional comparison vs same point in last session */}
+      {/* Pace bar, positional comparison vs same point in last session */}
       {paceBase && (() => {
         const { totalSetsDone, expectedSec } = paceBase;
         const elapsedSec = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
@@ -6107,7 +6108,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
       })()}
 
-      {/* Day name + exercise position — sync status floats centered between them
+      {/* Day name + exercise position, sync status floats centered between them
           (the global top-center overlay would cover the timers above). */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -6126,7 +6127,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </span>
       </div>
 
-      {/* Exercise chips — long-press to drag-reorder via UI.useDragReorderH */}
+      {/* Exercise chips, long-press to drag-reorder via UI.useDragReorderH */}
       <div ref={chipRowSetRef} data-reorder-list="true" style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.flatMap((e, i) => {
           const done = e.isCardio ? !!e.cardioDone : e.sets.every(s => s.done || s.skipped);
@@ -6358,7 +6359,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           })()}
         </div>
 
-        {/* HERO CURRENT SET — or CARDIO FORM */}
+        {/* HERO CURRENT SET, or CARDIO FORM */}
         {isCardio ? (
           entry.cardioDone ? (
             <Frame accent style={{ padding: 24, textAlign: 'center' }}>
@@ -6486,7 +6487,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
-              // further past failure (negative RIR) it goes — at -3 it's fully
+              // further past failure (negative RIR) it goes, at -3 it's fully
               // ablaze. neg = how many partials are prescribed (0..3).
               const neg = mesoRirVal < 0 ? -mesoRirVal : 0;
               const fire = neg > 0;
@@ -6515,7 +6516,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       misread as "negative reps in reserve". */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'rotate(-22deg)' }}>
                     {/* Fire mode adds the gloss line below, so the number is
-                        smaller there — rotating a full 72px headline + gloss
+                        smaller there, rotating a full 72px headline + gloss
                         overflows this short hero card and clips the gloss. The
                         plain single-line watermark keeps its bigger size. */}
                     <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
@@ -6588,7 +6589,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </div>
               </div>
 
-              {/* HUGE inputs — hidden for checkbox-only mobility exercises */}
+              {/* HUGE inputs, hidden for checkbox-only mobility exercises */}
               {!isNoWeightReps && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <KgInput
@@ -6681,7 +6682,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </BracketFrame>
         )}
 
-        {/* All sets list — hidden for cardio */}
+        {/* All sets list, hidden for cardio */}
         {!isCardio && <div style={{ paddingTop: 12 }}>
           {isNoWeightReps ? (
             <div style={{ height: 6 }} />
@@ -6711,7 +6712,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
-              // Hide warmup rows once training has started — they're done and tapping them would re-trigger the overlay
+              // Hide warmup rows once training has started, they're done and tapping them would re-trigger the overlay
               if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
               const prevSet = isWarmupRow ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[i - warmupCount];
@@ -6889,7 +6890,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
                             // These windows exist only to swallow iOS ghost-clicks, which land
                             // 200-400ms after the real one (see recentCompleteRef/lastCompleteRef
-                            // above) — 2000/3000ms was several seconds wider than that, so a
+                            // above), 2000/3000ms was several seconds wider than that, so a
                             // genuine, deliberate uncheck right after completing a set silently
                             // did nothing for up to 3 full seconds.
                             if (globalDelta < 400) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
@@ -6943,7 +6944,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const closeLpStretchKb = () => {
                       if (kbFieldRef.current?.setIdx === 'stretch' && kbFieldRef.current?.target === 'lp') {
                         kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-                        setKbField(null); setKbRaw(''); setKbFresh(false);
+                        setKbField(null); setKbRaw('');
                       }
                     };
                     return (
@@ -7001,9 +7002,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         )}
                         <div style={{ padding: '0 4px 10px' }}>
                           {/* missingData is a hard block (the underlying set
-                              itself has no kg/reps yet — nothing to finish
+                              itself has no kg/reps yet, nothing to finish
                               regardless of partials); lpCount === 0 only
-                              dims it — still tappable, so finishLengthenedPartial
+                              dims it, still tappable, so finishLengthenedPartial
                               can explain why instead of silently completing
                               a "lengthened partial" that had none. */}
                           <button onClick={() => finishLengthenedPartial(i)}
@@ -7035,7 +7036,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             // Close the custom keypad too if it's still open on this stretch.
                             if (kbFieldRef.current?.setIdx === 'stretch' && kbFieldRef.current?.target === 'ws') {
                               kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-                              setKbField(null); setKbRaw(''); setKbFresh(false);
+                              setKbField(null); setKbRaw('');
                             }
                           }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
@@ -7276,7 +7277,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           </div>
 
-          {/* Session note display — tap to edit */}
+          {/* Session note display, tap to edit */}
           {entry.note ? (
             <button onClick={() => setSessionNoteOpen(true)} style={{
               marginTop: 10, width: '100%', textAlign: 'left',
@@ -7319,7 +7320,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        {/* Session feedback — only takes a footer slot once there's something
+        {/* Session feedback, only takes a footer slot once there's something
             to revisit; Check set shrinks (and its label compacts) to make
             room rather than the row growing past its usual button count. */}
         {mesoFeedbackGroups.length > 0 && (
@@ -7411,7 +7412,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {session.isFreestyle && (() => {
             const elapsedMin = session.startedAt ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 0;
             const msg = elapsedMin < 10
-              ? "Really done already? The barbell's barely warm — how about one more exercise?"
+              ? "Really done already? The barbell's barely warm, how about one more exercise?"
               : elapsedMin < 20
               ? "A bit thin. One more exercise to round it out?"
               : elapsedMin < 30
@@ -7423,7 +7424,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : elapsedMin < 75
               ? "Good work. Ready to wrap it up?"
               : elapsedMin < 90
-              ? "Nice session. Almost at the 90-minute mark — finish strong?"
+              ? "Nice session. Almost at the 90-minute mark, finish strong?"
               : "Now THAT's a workout. You've earned this finish.";
             return <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>;
           })()}
@@ -7470,13 +7471,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
-              Replaces it — continue from {session.dayName}
+              Replaces it, continue from {session.dayName}
             </Btn>
             <Btn kind="ghost" onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
-              Replaces it — keep cycle on track
+              Replaces it, keep cycle on track
             </Btn>
             <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
-              Extra session — keep as bonus
+              Extra session, keep as bonus
             </Btn>
           </div>
         </>) : (<>
@@ -7497,7 +7498,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout, e.g. how the set felt.</div>
           </button>
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
@@ -7505,7 +7506,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent — shown every session. Settings, technique cues.</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent, shown every session. Settings, technique cues.</div>
           </button>
         </div>
       </Sheet>
@@ -7518,7 +7519,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}
         titleColor="var(--accent)" accent>
         {(() => {
-          // Exactly one intensity technique can be "in flight" at a time —
+          // Exactly one intensity technique can be "in flight" at a time,
           // picking one always clears any other left unfinished (e.g. the
           // user opened Intensity, picked Drop Set, then reopened Intensity
           // on the same still-unfinished set and picked Myo-Rep instead).
@@ -7624,14 +7625,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
                 </div>
               </button>
-              {/* AMRAP Variations — grip/variation swap is entirely optional
+              {/* AMRAP Variations, grip/variation swap is entirely optional
                   (the label input pre-fills with the exercise's own name), the
                   point is chasing reps back-to-back with no rest. */}
               <button onClick={startAv} style={btnBase(true)}>
                 <i className="fa-solid fa-shuffle" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>AMRAP VARIATIONS</div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>AMRAP each round, swap the grip — no rest, no mercy</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>AMRAP each round, swap the grip, no rest, no mercy</div>
                 </div>
               </button>
               {/* Myo-Rep row: two compact buttons matching DROP style */}
@@ -7746,25 +7747,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         })()}
       </Sheet>
 
-      {/* Drop Set / Myo-Rep(-Match) / AMRAP Variations editing sheet — exactly
+      {/* Drop Set / Myo-Rep(-Match) / AMRAP Variations editing sheet, exactly
           one chain is ever in flight (drop/myo/av start* clear the other
           two). Edited in its own sheet instead of inline in the set row so
           the header, the active weight/rep row, and the action buttons are
           always on screen together regardless of scroll position or chain
-          length — inline rendering inside the (potentially very long)
+          length, inline rendering inside the (potentially very long)
           exercise list made that impossible to guarantee reliably.
           keyboardHeight tells Sheet this app's custom numeric keypad is open
-          — it focuses no real <input>, so Sheet's own visualViewport-based
-          auto-detection never fires for it — so Sheet shrinks/scrolls itself
+         , it focuses no real <input>, so Sheet's own visualViewport-based
+          auto-detection never fires for it, so Sheet shrinks/scrolls itself
           to sit above it, exactly like it already does for native inputs.
           Each chain's own content below is a flex column (maxHeight:'inherit'
-          takes the Sheet panel's own computed max-height) — header and
+          takes the Sheet panel's own computed max-height), header and
           actions as flexShrink:0, rows as the flex:1-equivalent scrollable
           middle (overflowY:'auto', minHeight:0). Deliberately NOT
           position:sticky: a sticky header inside this panel's overflow:auto
           box reproduced a Safari/WebKit bug where it briefly rendered
           edge-to-edge (ignoring the panel's own padding) on a sheet's very
-          first open. The flex layout sidesteps that bug class entirely —
+          first open. The flex layout sidesteps that bug class entirely,
           the header is a genuinely separate, non-scrolling box, not
           scroll-positioned relative to anything. */}
       <Sheet
@@ -7827,7 +7828,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {(() => {
               // finishDropSet itself both silently drops any incomplete row
               // (accidentally added via ADD DROP, never filled in) and
-              // requires at least one actual drop beyond the top set — not
+              // requires at least one actual drop beyond the top set, not
               // disabling FINISH here on purpose, so tapping it while
               // "not ready" explains why via a warning instead of just
               // doing nothing.
@@ -7931,7 +7932,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // finishAv itself both silently drops any incomplete round
               // (accidentally added via ADD ROUND, never filled in) and
               // requires at least one actual variation round beyond the
-              // first — not disabling FINISH here on purpose, so tapping
+              // first, not disabling FINISH here on purpose, so tapping
               // it while "not ready" explains why via a warning instead of
               // just doing nothing.
               const canFinishAv = avDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
@@ -7969,7 +7970,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
           // finishMyoSet silently drops any incomplete mini-set itself
           // (accidentally added via ADD MYO, never filled in) rather than
-          // blocking FINISH on it — still needs the activation plus at
+          // blocking FINISH on it, still needs the activation plus at
           // least one completed mini-set to count as an actual myo-reps
           // set, not just a plain activation, so FINISH is disabled below
           // that.
@@ -8002,13 +8003,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                       }} />
                       {/* Glow as a separate, fixed-blur layer whose opacity fades in with
-                          progress — only what the compositor can move for free (opacity,
+                          progress, only what the compositor can move for free (opacity,
                           like the width bar's transform-free width) changes per render.
                           The old version recomputed the box-shadow's blur/spread radius
                           from myoProgress on every render, so its very first paint (this
                           technique's own progress can already be non-zero on mount, e.g.
                           activation reps carried over) had a genuinely different blur
-                          value than every later re-render — the one concrete difference
+                          value than every later re-render, the one concrete difference
                           between this content and Drop Set/AMRAP Variations/plain
                           Myo-Reps, none of which have any animated/blurred element. A
                           constant blur here removes that per-render recompute. */}
@@ -8042,7 +8043,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
                       }}>{isActiv ? 'ACT' : '↺'}</div>
                       <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
-                      {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
+                      {/* kg, editable for activation (myo only), read-only for match activation + all minis */}
                       {isActiv && myoTechnique === 'myorep' ? (
                         <KbCell
                           text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
@@ -8267,7 +8268,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* plan diff */}
-      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Session changes">
+      {/* Dismissing goes BACK to the finish flow, it does not silently pick a
+          side. This used to run the "Leave plan" branch: a backdrop tap ended
+          the session immediately and threw away both the offered plan update
+          and the rep-target wizard, the more destructive of the two choices,
+          with no way to get the prompt back. */}
+      <Sheet open={planDiffOpen} onClose={() => setPlanDiffOpen(false)} title="Session changes">
         <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. plan:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
@@ -8359,7 +8365,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* exercise add picker */}
       {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
 
-      {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
+      {/* superset modal, step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (
         <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise" titleColor="var(--accent)">
           {!addSupersetData.picking ? (
@@ -8556,7 +8562,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </>
       )}
 
-      {/* ── Post-warmup rest overlay — full-screen dramatic countdown ────────── */}
+      {/* ── Post-warmup rest overlay, full-screen dramatic countdown ────────── */}
       {postWarmupRest && (
         <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
@@ -8564,7 +8570,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: '0 32px',
         }}>
-          {/* Pulsing gold border ring — same as improvement overlay */}
+          {/* Pulsing gold border ring, same as improvement overlay */}
           <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 1.4s ease-in-out infinite', pointerEvents: 'none' }} />
 
           {/* Label */}
@@ -8626,7 +8632,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR')) ||
           (kbField?.setIdx === 'stretch' && kbField?.field === 'sec')
         }
-        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
+        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
         onSign={kbSignToggle}
         assisted={LB.isAssisted(exercise)}
@@ -8900,7 +8906,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
       })()}
 
-      {/* Meso changes — post-session set/weight adjustment summary */}
+      {/* Meso changes, post-session set/weight adjustment summary */}
       {mesoGainSheetOpen && (
         <Sheet open={mesoGainSheetOpen} onClose={() => {
           setMesoGainSheetOpen(false);
@@ -8996,7 +9002,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 }
 
 // Shared title style for the Drop Set/Myo-Reps/AMRAP Variations chain
-// sheet's header — matches the app's standard sheet-title treatment (same
+// sheet's header, matches the app's standard sheet-title treatment (same
 // font/weight as Sheet's own `title` prop) instead of the tiny micro-gold
 // label the header used before, so it reads as a real heading next to the
 // deliberately quiet CANCEL button beside it.

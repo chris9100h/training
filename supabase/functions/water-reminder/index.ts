@@ -15,7 +15,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-const PUSHOVER_TOKEN = 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
+const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const THRESHOLD_ML = 250;              // only nudge when this far behind the ramp
 const COOLDOWN_MS = 60 * 60 * 1000;    // at most one nudge per hour per user
 

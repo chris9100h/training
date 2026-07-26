@@ -33,14 +33,18 @@ jobs:
       - name: Commit & push if the catalog changed
         id: commit
         run: |
-          if git diff --quiet -- src/feature-map-db.js sw.js; then
+          # The public pages (*.html in the repo root, except index.html) pin
+          # their sources with ?v= and are bumped by the bake script in lockstep
+          # with sw.js, so they have to travel in the same commit or
+          # check-cache-version.cjs fails on this very push.
+          if git diff --quiet -- src/feature-map-db.js sw.js ':(glob)*.html'; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Nothing to commit (published layer was empty)."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/feature-map-db.js sw.js
+          git add src/feature-map-db.js sw.js ':(glob)*.html'
           git commit -m "Bake published feature map into the catalog"
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"

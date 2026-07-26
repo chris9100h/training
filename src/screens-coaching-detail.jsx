@@ -1,4 +1,4 @@
-/* Coaching screens — charts, check-in summaries, nutrition + plan editors.
+/* Coaching screens, charts, check-in summaries, nutrition + plan editors.
    Shares globals with screens-coaching-core.jsx (loaded first). */
 
 function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax, onClose }) {
@@ -10,7 +10,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
   const maxV = Math.max(...vals);
   const dom = UI.chartDomain(minV, maxV, { min: yMin, max: yMax });
   const n = entries.length;
-  // Thin out the X (date) labels so they don't overlap with many check-ins —
+  // Thin out the X (date) labels so they don't overlap with many check-ins,
   // show roughly 5 across, always including the last point.
   const labelStep = Math.max(1, Math.round(n / 5));
   const showLabel = i => i === n - 1 || i % labelStep === 0;
@@ -36,12 +36,17 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
 
   const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
+  const netChange = n >= 2 ? entries[n - 1].value - entries[0].value : 0;
+  const trendGood = invertColor ? netChange < 0 : netChange > 0;
+  const trendStroke = (n < 2 || netChange === 0) ? 'var(--accent)'
+    : trendGood ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)';
 
   // zIndex 400: same tier this popup always used (above ordinary Sheets/
   // the account-switcher, below the lightbox; also above CheckInSchemaBuilder's
   // own z-350 overlay, since this can open from its Preview step).
   const content = (
-    <Sheet open onClose={onClose} title={label} zIndex={400}>
+    <Sheet open onClose={onClose} zIndex={400}
+      title={icon ? <><i className={`fa-solid ${icon}`} style={{ fontSize: 15, color: UI.inkFaint, marginRight: 8 }} />{label}</> : label}>
       {n < 2 ? (
         <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
       ) : (
@@ -55,7 +60,11 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
           <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
           <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
           <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
-          <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {/* invertColor: on a "lower is better" field a rising line is bad
+              news. Both props used to be destructured and then ignored, so the
+              sheet drew every trend in the accent colour and dropped the icon
+              its caller passed. */}
+          <polyline points={pts} fill="none" stroke={trendStroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           {entries.map((e, i) => {
             const cx = xOf(i).toFixed(1);
             const cy = yOf(e.value).toFixed(1);
@@ -80,7 +89,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
 
 // ─── Shared check-in field helpers ────────────────────────────────────────────
 // Used by both the on-screen trend cards and the PNG export so they always stay
-// in lock-step with the (possibly customized) schema — no hardcoded field lists.
+// in lock-step with the (possibly customized) schema, no hardcoded field lists.
 
 // Map a stored choice response to its 1-based rank among the field's options
 // (text or numeric value; falls back to a legacy numeric value).
@@ -100,13 +109,13 @@ function checkinFieldYRange(field) {
   return {};
 }
 
-// Formats one check-in field's stored value for display — shared by the
+// Formats one check-in field's stored value for display, shared by the
 // trend chart (via checkinFieldFormat below) and the check-in detail card,
 // so the same stored number never shows two different values in two views.
 // weightUnit/distUnit describe the CLIENT's units; numbers are never
 // converted, only the label. `chart` only changes the handful of fields
 // where an axis label genuinely needs different precision than a readable
-// card row (steps, stepper fraction, choice fallback, pace value shape) —
+// card row (steps, stepper fraction, choice fallback, pace value shape),
 // everything else renders identically either way.
 function checkinFieldValue(field, v, { distUnit, weightUnit, chart = false } = {}) {
   if (field.unit === 'weight') return `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
@@ -131,7 +140,7 @@ function checkinFieldValue(field, v, { distUnit, weightUnit, chart = false } = {
   return chart ? String(Math.round(v * 10) / 10) : String(v);
 }
 
-// Chart-axis wrapper — curried so checkinChartMetrics can attach it as each
+// Chart-axis wrapper, curried so checkinChartMetrics can attach it as each
 // metric's `format` function.
 function checkinFieldFormat(field, distUnit, weightUnit) {
   return v => checkinFieldValue(field, v, { distUnit, weightUnit, chart: true });
@@ -154,7 +163,7 @@ function checkinChartMetrics(recent, schema, distUnit, weightUnit) {
   return metrics;
 }
 
-// Escape text before embedding it in hand-built SVG markup — coach-editable
+// Escape text before embedding it in hand-built SVG markup, coach-editable
 // labels/units/option names may contain & < > " ' which would otherwise break
 // the XML and silently drop the chart from the PNG.
 function escapeXml(s) {
@@ -327,7 +336,12 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
 
   const cardStyle = { flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 6, padding: '8px 10px', border: `var(--hair-width) solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 
-  const TrendCard = ({ label, icon, values, format, invertColor, sub, yMin, yMax }) => {
+  // deltaFormat: choice fields chart the OPTION RANK, so `format` maps a value
+  // back to an option label. Running the DIFFERENCE of two ranks through it
+  // printed an option name in the delta slot ("Improved" for a delta of 1),
+  // which reads as a value and means nothing. Those fields get a plain
+  // step count instead.
+  const TrendCard = ({ label, icon, values, format, deltaFormat, invertColor, sub, yMin, yMax }) => {
     const valid = values.filter(v => v != null);
     if (!valid.length) return null;
     const last = valid[valid.length - 1];
@@ -346,7 +360,7 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
           {delta != null && Math.abs(delta) > 0.001 && (
-            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '↑' : '↓'} {format(Math.abs(delta))}</span>
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '↑' : '↓'} {(deltaFormat || format)(Math.abs(delta))}</span>
           )}
         </div>
         {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
@@ -369,7 +383,7 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
 
   const distUnit = LB.cardioDistUnit();
 
-  // Keys shown as sub-labels on another card — don't render as standalone
+  // Keys shown as sub-labels on another card, don't render as standalone
   const SUB_KEYS = new Set();
 
   // Field chart helpers are shared module-level (also used by the PNG export).
@@ -416,7 +430,8 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
     const { yMin, yMax } = getYRange(field);
     return (
       <TrendCard key={field.key} label={field.label} icon={field.icon || 'fa-circle-dot'} values={vals}
-        format={fmt} invertColor={field.direction === 'lower_better'} yMin={yMin} yMax={yMax} />
+        format={fmt} deltaFormat={field.type === 'choice' ? (d => `${d} step${d === 1 ? '' : 's'}`) : undefined}
+        invertColor={field.direction === 'lower_better'} yMin={yMin} yMax={yMax} />
     );
   };
 
@@ -579,7 +594,7 @@ function CheckInFormPreview({ schema }) {
 
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
-// These four fields are always shown/removed as a group — the coach always wants all or none.
+// These four fields are always shown/removed as a group, the coach always wants all or none.
 var MACRO_GROUP_KEYS = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
 
 // Build a flat view for ReorderList where the 4 macro fields collapse into 1 group item.
@@ -699,7 +714,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   };
 
   // Keys are generated automatically from the label (readable slug, made unique
-  // within this form) — coaches never type or see them. Generated once at
+  // within this form), coaches never type or see them. Generated once at
   // creation and never changed afterwards, so historical responses keep theirs.
   const genFieldKey = (label) => {
     const used = new Set(draft.flatMap(s => (s.fields || []).map(f => f.key)));
@@ -784,7 +799,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
       const view = buildFieldView(flds);
       const macroFields = flds.filter(f => MACRO_GROUP_KEYS.has(f.key));
       // Apply the move on the view level, then reconstruct the fields array
-      // by looking up each view item's ORIGINAL field via its arrayIdx — not
+      // by looking up each view item's ORIGINAL field via its arrayIdx, not
       // by re-consuming non-macro fields in their old order, which silently
       // discarded every reorder (the moved item's new position was applied
       // to the view array, but the fields it mapped back to were still
@@ -808,13 +823,13 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   const handleSave = async () => {
     setSaving(true);
     try { await LB.saveCheckinSchema(coachingId, draft); onSave(draft); }
-    catch (e) { alert(e.message); setSaving(false); }
+    catch (e) { UI.alert(e.message); setSaving(false); }
   };
 
   const handleSaveForAll = async () => {
     setSaving(true);
     try { await onSaveForAll(draft); }
-    catch (e) { alert(e.message); setSaving(false); }
+    catch (e) { UI.alert(e.message); setSaving(false); }
   };
 
   // Local, synchronous store mutation (mirrors workoutTemplates: no network
@@ -864,7 +879,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
       setDraft(JSON.parse(JSON.stringify(CHECKIN_DEFAULT_SCHEMA)));
   };
 
-  // Default fields the coach has removed, grouped by their original section —
+  // Default fields the coach has removed, grouped by their original section,
   // lets them add individual defaults back (e.g. the cardio fields the prefill
   // depends on) without a full reset that wipes their customizations.
   const missingDefaultsBySection = () => {
@@ -1657,6 +1672,7 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
   // read directly via the coach-of-client RLS.
   const coachMealPlans = (store?.foodMealPlans || []).filter(p => !p.archived);
   const [clientMealPlans, setClientMealPlans] = useStateC(null);
+  const [clientMealPlansError, setClientMealPlansError] = useStateC(false);
   const [clientActiveMealId, setClientActiveMealId] = useStateC(null);
   const [mealPickerOpen, setMealPickerOpen] = useStateC(false);
   const [mealPushTarget, setMealPushTarget] = useStateC(null); // the coach plan chosen to push
@@ -1667,9 +1683,14 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
       LB.supabase.from('zane_food_meal_plans').select('id, name, archived, coach_id').eq('user_id', clientId).order('created_at', { ascending: false }),
       LB.supabase.from('zane_user_settings').select('active_meal_template_id').eq('user_id', clientId).maybeSingle(),
     ]).then(([plansRes, settRes]) => {
+      // A failed query used to render as "No meal plans yet", i.e. the coach
+      // was told the client had none whenever the request failed, and pushing
+      // a duplicate was the obvious next step.
+      if (plansRes.error) { setClientMealPlans([]); setClientMealPlansError(true); return; }
+      setClientMealPlansError(false);
       setClientMealPlans((plansRes.data || []).filter(p => !p.archived));
       setClientActiveMealId(settRes.data?.active_meal_template_id ?? null);
-    }).catch(() => { setClientMealPlans([]); });
+    }).catch(() => { setClientMealPlans([]); setClientMealPlansError(true); });
   };
   useEffectC(() => { loadClientMealPlans(); }, [clientId]);
   const doPushMeal = async (activateNow) => {
@@ -1686,13 +1707,13 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
       setMealPickerOpen(false);
       loadClientMealPlans();
     } catch (e) {
-      alert(e?.message || 'Push failed.');
+      UI.alert(e?.message || 'Push failed.');
     } finally {
       setMealPushBusy(false);
     }
   };
 
-  // Calories auto-computed via the shared formula (no fiber — this form has
+  // Calories auto-computed via the shared formula (no fiber, this form has
   // no net-carb concept); 0 is treated as "nothing entered yet", not a real value.
   const calcCals = (pro, car, fat) => {
     const total = LB.caloriesFromMacros(parseInt(pro) || 0, parseInt(car) || 0, parseInt(fat) || 0);
@@ -1745,12 +1766,12 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
         await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
       }
       reload();
-    } catch (e) { alert(e.message); }
+    } catch (e) { UI.alert(e.message); }
     finally { setSaving(false); }
   };
 
-  // Plain render helpers (not React components) — avoids remount-on-render keyboard bug
-  const inputStyle = { width: '100%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 36px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
+  // Plain render helpers (not React components), avoids remount-on-render keyboard bug
+  const inputStyle = { width: '100%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 36px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
   const unitStyle  = { position: 'absolute', right: 8, fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, pointerEvents: 'none' };
 
   const renderInput = (fieldKey, label, unit) => (
@@ -1833,7 +1854,11 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
         {clientMealPlans === null ? (
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>Loading…</div>
         ) : clientMealPlans.length === 0 ? (
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>No meal plans yet. Push one of yours to get {clientName || 'them'} started.</div>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+            {clientMealPlansError
+              ? "Couldn't load their meal plans. Check your connection and try again."
+              : `No meal plans yet. Push one of yours to get ${clientName || 'them'} started.`}
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {clientMealPlans.map(p => (
