@@ -3685,12 +3685,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           can go above the recipe's own portion count too. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
-          {/* Always share the LIVE recipe. When this sheet is opened from an
-              already-logged entry (openEditRecipeEntry) the prompt holds a
-              rescaled reconstruction of the entry's snapshot, which has no
-              calories, foodId, brand or source. Sharing that upserted it over
-              the existing share row under the SAME token, so a link already
-              sent to someone else silently degraded. */}
+          // Always share the LIVE recipe. When this sheet is opened from an
+          // already-logged entry (openEditRecipeEntry) the prompt holds a
+          // rescaled reconstruction of the entry's snapshot, which has no
+          // calories, foodId, brand or source. Sharing that upserted it over
+          // the existing share row under the SAME token, so a link already
+          // sent to someone else silently degraded.
           <button onClick={() => openShareRecipe((store.foodRecipes || []).find(r => r.id === recipeLogPrompt.recipe.id) || recipeLogPrompt.recipe)} aria-label="Share recipe" style={fdIconBtn(30, true)}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
           </button>
