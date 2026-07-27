@@ -5495,10 +5495,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
-              {(item.overridden || item.packageSizeG) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
+              {(item.overridden || item.packageSizeG || item.effectiveStockG != null) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
             </div>
-            {fdIsLowStock(item)
-              ? <div style={{ fontSize: 10, color: 'var(--warn)', fontFamily: UI.fontUi }}>{fdExactShoppingQty(item.effectiveStockG)} left</div>
+            {item.effectiveStockG != null
+              // Stock tracked: always shown, not just once low, otherwise
+              // setting an initial healthy count gives zero feedback
+              // anywhere on the list that it actually took (a real report:
+              // 2 packs against a 1-pack low-stock threshold saved fine,
+              // just showed nothing anywhere to confirm it).
+              ? <div style={{ fontSize: 10, color: fdIsLowStock(item) ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
+                  {fdExactShoppingQty(item.effectiveStockG)} {fdIsLowStock(item) ? 'left' : 'in stock'}
+                </div>
               : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>)}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
