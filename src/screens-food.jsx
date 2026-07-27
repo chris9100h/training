@@ -5580,8 +5580,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
     const hasEstimate = item.grams > 0 || item.fromProjection;
     const low = fdIsLowStock(item);
     const { headline, sub } = hasEstimate ? fdFormatShoppingQty(item.grams, item.packageSizeG) : { headline: null, sub: null };
+    // Dimming for `excluded` is a Shopping List concept (it's what the
+    // checkbox below toggles): skipped in inventoryMode, same reasoning as
+    // hiding the checkbox itself, a food excluded from the buy list is
+    // still just a normal tracked item here, nothing to visually mute.
     return (
-      <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: item.excluded ? 0.55 : 1 }}>
+      <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: (item.excluded && !inventoryMode) ? 0.55 : 1 }}>
         {!inventoryMode && (
           <FdCheckbox
             checked={!item.excluded}
