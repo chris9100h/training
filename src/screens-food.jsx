@@ -476,18 +476,18 @@ function fdRoundShoppingQty(grams) {
   return `${Math.round(grams / unit) * unit || unit}g`;
 }
 // Package-aware buy quantity. With no package size set, the plain rounded
-// estimate above, unchanged. With one, rounds UP to whole packages (you
-// can't buy half a pack) and shows the resulting exact total rather than
-// running it back through fdRoundShoppingQty, which is built for messy raw
-// estimates, not a number that's already an exact multiple of the package
-// size. `packs` is returned alongside so a row can caption "2 x 400g"; the
-// export text/html only ever use `qty`, a pack count would just be noise in
-// a line meant for pasting into Notes.
+// estimate above, unchanged, as `headline` with no `sub`. With one, the whole
+// point of setting it was to shop by pack count, not by weight, so `headline`
+// becomes "3 x 400g" (rounds UP, you can't buy half a pack) and the actual
+// gram total moves to `sub`, a small reference figure rather than the
+// headline number. Exports use `headline` too, "3 x 400g" reads as a normal
+// shopping-list line same as any plain amount.
 function fdFormatShoppingQty(grams, packageSizeG) {
-  if (!(packageSizeG > 0)) return { qty: fdRoundShoppingQty(grams), packs: null };
+  if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
   const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
   const buyGrams = packs * packageSizeG;
-  return { qty: buyGrams >= 1000 ? `${fdRound1(buyGrams / 1000)}kg` : `${buyGrams}g`, packs };
+  const total = buyGrams >= 1000 ? `${fdRound1(buyGrams / 1000)}kg` : `${buyGrams}g`;
+  return { headline: `${packs}× ${fdRoundShoppingQty(packageSizeG)}`, sub: total };
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
@@ -528,7 +528,7 @@ function fdSetShoppingPref(setStore, foodId, patch) {
 // displayName (not the raw foodName) so a renamed item exports under its
 // override too, that was the whole point of being able to rename it.
 function fdBuildShoppingExportText(list, withAmounts) {
-  return list.map(item => withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).qty}` : item.displayName).join('\n');
+  return list.map(item => withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).headline}` : item.displayName).join('\n');
 }
 // HTML twin of the text above, a real <ul><li> list rather than \n-joined
 // lines: a raw string's \n reads to Notes' paste parser as a soft line break
@@ -539,7 +539,7 @@ function fdBuildShoppingExportText(list, withAmounts) {
 // user's own override, any of which could contain '&'/'<'/'>' (e.g. "M&M's").
 function fdBuildShoppingExportHtml(list, withAmounts) {
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).qty}` : item.displayName)}</li>`).join('');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).headline}` : item.displayName)}</li>`).join('');
   return `<ul>${rows}</ul>`;
 }
 
@@ -5333,7 +5333,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   // real <button> elements can't nest without the browser silently breaking
   // the layout back out of the outer one.
   function renderShoppingRow(item) {
-    const { qty, packs } = fdFormatShoppingQty(item.grams, item.packageSizeG);
+    const { headline, sub } = fdFormatShoppingQty(item.grams, item.packageSizeG);
     return (
       <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: item.excluded ? 0.55 : 1 }}>
         <FdCheckbox
@@ -5353,8 +5353,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {item.fromProjection && <Pill gold>Plan</Pill>}
             <div style={{ textAlign: 'right' }}>
-              <div className="num" style={{ fontSize: 13, color: UI.ink }}>{qty}</div>
-              {packs != null && <div style={{ fontSize: 9, color: UI.inkFaint }}>{packs}&times; {fdRoundShoppingQty(item.packageSizeG)}</div>}
+              <div className="num" style={{ fontSize: 13, color: UI.ink }}>{headline}</div>
+              {sub && <div style={{ fontSize: 9, color: UI.inkFaint }}>{sub}</div>}
             </div>
           </div>
         </button>
@@ -5496,7 +5496,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
               {includedList.map(item => {
-                const { qty, packs } = fdFormatShoppingQty(item.grams, item.packageSizeG);
+                const { headline, sub } = fdFormatShoppingQty(item.grams, item.packageSizeG);
                 return (
                 // Translucent surface-tint fill (not fdQuickRowInner's opaque
                 // one), same reason the Food Log poster's entry cards use it:
@@ -5512,8 +5512,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                     {item.fromProjection && <Pill gold>Plan</Pill>}
                     <div style={{ textAlign: 'right' }}>
-                      <div className="num" style={{ fontSize: 13, color: UI.ink }}>{qty}</div>
-                      {packs != null && <div style={{ fontSize: 9, color: UI.inkFaint }}>{packs}&times; {fdRoundShoppingQty(item.packageSizeG)}</div>}
+                      <div className="num" style={{ fontSize: 13, color: UI.ink }}>{headline}</div>
+                      {sub && <div style={{ fontSize: 9, color: UI.inkFaint }}>{sub}</div>}
                     </div>
                   </div>
                 </div>
