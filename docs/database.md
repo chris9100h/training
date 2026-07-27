@@ -370,15 +370,15 @@ Per-Food-Präferenzen der Shopping List (Migration 0215/0216/0217), geräteüber
 
 ### Medications (Übersicht)
 
-Migration 0218. Persönlicher (optional coach-verwalteter) Tracker für Medikamente/Vitamine/Supplements, architektonisch am Food Tracker Plan Mode orientiert (Container → Items → Schedule → Log), aber mit eigenem Wochentags-Schedule (nicht an Trainings-/Rest-Tag gekoppelt) und eigener Inventory-Einheit (nicht immer Gramm). Vier Tabellen, jede unten mit eigenem Abschnitt: `zane_medication_plans`, `zane_medications`, `zane_medication_schedule_slots`, `zane_medication_logs`.
+Migration 0218 (Basis), Migration 0221 (Mehrfach-Plan-Zugehörigkeit). Persönlicher (optional coach-verwalteter) Tracker für Medikamente/Vitamine/Supplements, architektonisch am Food Tracker Plan Mode orientiert (Container → Items → Schedule → Log), aber mit eigenem Wochentags-Schedule (nicht an Trainings-/Rest-Tag gekoppelt) und eigener Inventory-Einheit (nicht immer Gramm). Fünf Tabellen, jede unten mit eigenem Abschnitt: `zane_medication_plans`, `zane_medications`, `zane_medication_plan_items`, `zane_medication_schedule_slots`, `zane_medication_logs`.
 
-**RLS (alle vier Tabellen identisch):** eigene Zeilen (`(select auth.uid()) = user_id`) plus volles Coach-of-Client SELECT/INSERT/UPDATE/DELETE über `zane_is_coach_of` (Migration 0199-Muster, `zane_food_meal_plans`/`zane_food_template_slots`). Der Coach sieht damit nicht nur selbst gepushte Pläne, sondern die komplette Medikation, den Schedule und die tatsächlich geloggte Einnahme eines Clients (Adherence). Migration 0218.
+**RLS (alle fünf Tabellen identisch):** eigene Zeilen (`(select auth.uid()) = user_id`) plus volles Coach-of-Client SELECT/INSERT/UPDATE/DELETE über `zane_is_coach_of` (Migration 0199-Muster, `zane_food_meal_plans`/`zane_food_template_slots`). Der Coach sieht damit nicht nur selbst gepushte Pläne, sondern die komplette Medikation, den Schedule und die tatsächlich geloggte Einnahme eines Clients (Adherence). Migration 0218/0221.
 
-**Push-Mechanismus:** `LB.pushMedicationPlanToClient` in `store.js`, 1:1 nach Vorbild von `pushMealPlanToClient` (Meal Plans): kopiert Plan + Medikamente + Schedule-Slots frisch in den Client-Account, postet eine Nachricht in einen eigenen "Medications"-Coaching-Thread.
+**Push-Mechanismus:** `LB.pushMedicationPlanToClient` in `store.js`, 1:1 nach Vorbild von `pushMealPlanToClient` (Meal Plans): kopiert Plan + Medikamente + deren Plan-Zugehörigkeit (`zane_medication_plan_items`) + Schedule-Slots frisch in den Client-Account, postet eine Nachricht in einen eigenen "Medications"-Coaching-Thread. Die Kopie ist immer `active: true`, unabhängig vom Active-Status des Coach-eigenen Plans (gleiche Begründung wie das erzwungene `medsEnabled: true` dort: ein gepushter Plan, den der eigene Toggle des Clients versteckt, wäre witzlos).
 
-**Reminder:** eigene Edge Function `medication-reminder` (pg_cron stündlich, Migration 0219), 1:1 nach Vorbild von `meal-reminder` (siehe `medication_reminder_enabled` weiter oben), prüft `zane_medication_logs` auf noch-`planned` Einträge und feuert nach 1h Grace Period.
+**Reminder:** eigene Edge Function `medication-reminder` (pg_cron stündlich, Migration 0219), 1:1 nach Vorbild von `meal-reminder` (siehe `medication_reminder_enabled` weiter oben), prüft `zane_medication_logs` auf noch-`planned` Einträge und feuert nach 1h Grace Period. Liest ausschließlich `zane_medication_logs` (schon materialisiert), nie die anderen vier Tabellen direkt, daher unberührt von Migration 0221.
 
-**Backup:** alle vier Tabellen sind Teil des User-Backups (eigene, personenbezogene Daten wie Food-Logs/-Pläne).
+**Backup:** alle fünf Tabellen sind Teil des User-Backups (eigene, personenbezogene Daten wie Food-Logs/-Pläne).
 
 ### `zane_medication_plans`
 
@@ -386,34 +386,46 @@ Benannter Container (z.B. "Vitamine", "Prep Cycle Q1"), siehe Medications-Übers
 
 - `id` (text, PK), `user_id` (uuid), `name` (text), `archived`/`is_template` (boolean, Default false), `coach_id` (uuid, nullable), `created_at`/`updated_at`
 - `is_template`/`coach_id` sind das Coach-Bucket-Flag wie bei `zane_food_meal_plans` (My Plans vs. Client Templates, ein Push kopiert Plan + Medikamente + deren Schedule-Slots in den Client-Account)
-- **Anders als Food**: kein einzelner Active-Pointer, mehrere Pläne laufen bewusst gleichzeitig (z.B. tägliche Vitamine parallel zu einem vom Coach verordneten Cycle), das trifft die Realität besser als ein Entweder-Oder
+- `active` (boolean, NOT NULL, Default true, Migration 0221): nur ein aktiver Plan feuert Doses (Timeline-Auto-Fill/Preview prüfen das über die Schedule-Slots, siehe deren `medication_plan_id` unten). **Anders als Food**: kein einzelner Active-Pointer, mehrere Pläne können gleichzeitig aktiv sein (z.B. tägliche Vitamine parallel zu einem vom Coach verordneten Cycle), das trifft die Realität besser als ein Entweder-Oder. Toggle in der Plan-Detail-Ansicht (`screens-medications.jsx`)
 - Store field: `store.medicationPlans`
-- RLS: siehe Medications-Übersicht. Migration 0218.
+- RLS: siehe Medications-Übersicht. Migration 0218, `active` Migration 0221.
 
 ### `zane_medications`
 
-Das getrackte Medikament selbst, siehe Medications-Übersicht oben.
+Das getrackte Medikament selbst (reine Identität + hergeleitetes Inventory), siehe Medications-Übersicht oben. Hat seit Migration 0221 **keinen** eigenen Plan-Verweis mehr: welche(n) Plan(e) ein Medikament angehört, steht ausschließlich in `zane_medication_plan_items` (many-to-many, siehe unten), damit dasselbe Medikament (ein gemeinsamer Bestand) in mehreren Plänen mit jeweils eigenem Schedule laufen kann.
 
-- `id` (text, PK), `user_id` (uuid), `medication_plan_id` (text, nullable, **weicher Verweis, kein FK**: gleicher Grund wie `meal_plan_id` bei `zane_food_template_slots`, ein Cascade könnte hier mit dem clientseitigen Sync-Diff kollidieren)
+- `id` (text, PK), `user_id` (uuid)
 - `name` (text), `brand` (text, nullable)
-- `category` (text, nullable): freier Text, keine DB-CHECK-Konstraint, das UI bietet Presets wie Vitamin/Supplement/Compound/Other an, eine neue Kategorie braucht also nie eine Migration
+- `category` (text, nullable): freier Text, keine DB-CHECK-Konstraint, das UI bietet Presets wie Vitamin/Compound/Peptide/Other an, eine neue Kategorie braucht also nie eine Migration
 - `unit_label` (text, NOT NULL, Default `'pills'`): die Zähleinheit, z.B. "pills"/"ml"/"drops", frei editierbar da Medikamente sehr unterschiedlich dosiert werden
 - `package_size`/`stock_baseline`/`stock_set_at` (numeric/numeric/timestamptz, alle nullable): gleiches hergeleitetes Inventory-Prinzip wie `zane_food_shopping_prefs` (aktueller Bestand = `stock_baseline` minus allem seit `stock_set_at` Geloggten, client-seitig zur Laufzeit berechnet, kein Live-Countdown-Feld)
 - `archived` (boolean, Default false), `created_at`/`updated_at`
 - Store field: `store.medications`
-- RLS: siehe Medications-Übersicht. Migration 0218.
+- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` entfernt in Migration 0221.
+
+### `zane_medication_plan_items`
+
+Reine Mitgliedschafts-Tabelle (Medikament ↔ Plan, many-to-many), keine Schedule-Info. Migration 0221.
+
+- `id` (text, PK), `user_id` (uuid), `created_at`
+- `medication_plan_id` (text, NOT NULL, **weicher Verweis, kein FK**: gleicher Grund wie zuvor bei `zane_medications.medication_plan_id`, ein Cascade könnte hier mit dem clientseitigen Sync-Diff kollidieren)
+- `medication_id` (text, NOT NULL, **FK → `zane_medications.id` ON DELETE CASCADE**: eine Mitgliedschafts-Zeile hat kein eigenständiges Leben ohne ihr Medikament, gleicher Grund wie `medication_id` bei `zane_medication_schedule_slots`)
+- `UNIQUE(medication_id, medication_plan_id)`: ein Medikament kann nicht doppelt demselben Plan hinzugefügt werden
+- Store field: `store.medicationPlanItems`
+- RLS: siehe Medications-Übersicht. Migration 0221, inkl. `zane_guard_user_id_immutable`-Trigger von Anfang an.
 
 ### `zane_medication_schedule_slots`
 
 Wiederkehrende Dosis, siehe Medications-Übersicht oben.
 
-- `id` (text, PK), `user_id` (uuid), `medication_id` (text, NOT NULL, **FK → `zane_medications.id` ON DELETE CASCADE**: ein Schedule-Slot hat kein eigenständiges Leben ohne sein Medikament, anders als der weiche `medication_plan_id`-Verweis bei `zane_medications`)
+- `id` (text, PK), `user_id` (uuid), `medication_id` (text, NOT NULL, **FK → `zane_medications.id` ON DELETE CASCADE**: ein Schedule-Slot hat kein eigenständiges Leben ohne sein Medikament)
+- `medication_plan_id` (text, nullable, **weicher Verweis, kein FK**, Migration 0221): welchem Plan-Mitgliedschaft dieser Slot zugeordnet ist, macht pro Plan einen eigenen Schedule fürs selbe Medikament möglich (z.B. eine andere Dosis/Zeit im Coach-Cycle-Plan als im eigenen Baseline-Plan). Ein Slot feuert nur, wenn sein Plan existiert **und** `active` ist (siehe oben), sonst gilt er als ruhend, ganz ohne eigenes Pause-Flag auf dem Slot selbst
 - `weekdays` (integer[], NOT NULL, Default `{0,1,2,3,4,5,6}`): welche Wochentage der Slot gilt, **0=Montag…6=Sonntag** wie `isoWd` in `store.js`, "jeden Tag" braucht also nur eine Zeile statt sieben
-- `hour` (integer, NOT NULL, Default 8, 0-23), `dose_qty` (numeric, NOT NULL), `active` (boolean, Default true: pausieren ohne Löschen)
+- `hour` (integer, NOT NULL, Default 8, 0-23), `dose_qty` (numeric, NOT NULL)
 - `start_date`/`end_date` (date, beide nullable): **optionale zeitliche Phase**, beide `null` (Default/Normalfall) heißt der Slot läuft unbegrenzt wie jeder normale Schedule; gesetzt begrenzt er den Slot auf ein Datumsfenster, so lassen sich echte gestaffelte Cycles abbilden (z.B. zwei Slots für dasselbe Medikament mit unterschiedlicher Dosis in unterschiedlichen Wochen), ganz ohne ein separates Phasen-System
 - `created_at`/`updated_at`
 - Store field: `store.medicationScheduleSlots`
-- RLS: siehe Medications-Übersicht. Migration 0218.
+- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` statt `active` seit Migration 0221 (das eigene Pause-Flag pro Slot wurde entfernt: als verwirrend empfunden, "aus dem Plan entfernen" ist jetzt der einzige Hebel).
 
 ### `zane_medication_logs`
 

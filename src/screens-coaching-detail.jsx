@@ -1927,6 +1927,11 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
   const coachMedPlans = (store?.medicationPlans || []).filter(p => !p.archived);
   const [clientMeds, setClientMeds] = useStateC(null);
   const [clientSlots, setClientSlots] = useStateC([]);
+  // Which plan(s) a medication belongs to (migration 0221, many-to-many):
+  // only fetched here to label a schedule line by plan when a medication
+  // spans more than one, not to gate anything on plan-active (this card has
+  // no due-date/Timeline logic, unlike the main screen's auto-fill).
+  const [clientPlans, setClientPlans] = useStateC([]);
   // Actually-taken doses (planned:false) from the last 14 days, RLS already
   // permits this (see migration 0218's stated rationale: a coach should see
   // "complete medication list, schedule and actual logged adherence", not
@@ -1943,18 +1948,20 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
     if (!clientId) return;
     const sinceISO = LB.fmtISO(new Date(Date.now() - 14 * 86400000));
     Promise.all([
-      LB.supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, medication_plan_id').eq('user_id', clientId).eq('archived', false),
-      LB.supabase.from('zane_medication_schedule_slots').select('id, medication_id, weekdays, hour, dose_qty, active').eq('user_id', clientId),
+      LB.supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size').eq('user_id', clientId).eq('archived', false),
+      LB.supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty').eq('user_id', clientId),
       LB.supabase.from('zane_medication_logs').select('medication_id, date, time').eq('user_id', clientId).eq('planned', false).gte('date', sinceISO).order('date', { ascending: false }).order('time', { ascending: false }),
-    ]).then(([medsRes, slotsRes, logsRes]) => {
+      LB.supabase.from('zane_medication_plans').select('id, name').eq('user_id', clientId),
+    ]).then(([medsRes, slotsRes, logsRes, plansRes]) => {
       // A failed query used to render as "nothing tracked", same trap
       // ClientNutritionTab's own comment calls out for meal plans.
-      if (medsRes.error || slotsRes.error || logsRes.error) { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientError(true); return; }
+      if (medsRes.error || slotsRes.error || logsRes.error || plansRes.error) { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientPlans([]); setClientError(true); return; }
       setClientError(false);
       setClientMeds(medsRes.data || []);
       setClientSlots(slotsRes.data || []);
       setClientLogs(logsRes.data || []);
-    }).catch(() => { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientError(true); });
+      setClientPlans(plansRes.data || []);
+    }).catch(() => { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientPlans([]); setClientError(true); });
   };
   useEffectC(() => { loadClientMeds(); }, [clientId]);
 
@@ -1962,11 +1969,12 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
     if (!pushTarget) return;
     setPushBusy(true);
     try {
-      const planMeds = (store?.medications || []).filter(m => m.medicationPlanId === pushTarget.id);
-      const medIds = new Set(planMeds.map(m => m.id));
+      const planItems = (store?.medicationPlanItems || []).filter(it => it.medicationPlanId === pushTarget.id);
+      const medIds = new Set(planItems.map(it => it.medicationId));
+      const planMeds = (store?.medications || []).filter(m => medIds.has(m.id));
       await LB.pushMedicationPlanToClient({
-        plan: pushTarget, medications: planMeds,
-        scheduleSlots: (store?.medicationScheduleSlots || []).filter(sl => medIds.has(sl.medicationId)),
+        plan: pushTarget, medications: planMeds, planItems,
+        scheduleSlots: (store?.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId === pushTarget.id),
         coachUserId: userId, coachingId, clientId,
       });
       setPushTarget(null);
@@ -1997,7 +2005,13 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
           {clientMeds.map(m => {
-            const slots = clientSlots.filter(sl => sl.medication_id === m.id && sl.active);
+            const slots = clientSlots.filter(sl => sl.medication_id === m.id);
+            // Only label each line by its plan when this medication's slots
+            // actually span more than one (migration 0221: a slot is scoped
+            // to one specific (medication, plan) pair), to avoid clutter in
+            // the common single-plan case.
+            const spansPlans = new Set(slots.map(sl => sl.medication_plan_id)).size > 1;
+            const planLabel = (planId) => spansPlans ? `${clientPlans.find(p => p.id === planId)?.name || 'Unknown plan'}: ` : '';
             // clientLogs is already ordered newest-first, so the first match
             // per medication is its most recently actually-taken dose.
             const lastTaken = clientLogs.find(l => l.medication_id === m.id);
@@ -2008,7 +2022,7 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
                   {m.category && <span className="micro" style={{ color: 'var(--accent)' }}>{m.category.toUpperCase()}</span>}
                 </div>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
-                  {slots.length ? slots.map(sl => `${wdLabel(sl.weekdays)} ${String(sl.hour).padStart(2, '0')}:00 · ${sl.dose_qty} ${m.unit_label || 'pills'}`).join('; ') : 'No schedule'}
+                  {slots.length ? slots.map(sl => `${planLabel(sl.medication_plan_id)}${wdLabel(sl.weekdays)} ${String(sl.hour).padStart(2, '0')}:00 · ${sl.dose_qty} ${m.unit_label || 'pills'}`).join('; ') : 'No schedule'}
                 </div>
                 <div style={{ fontSize: 11, color: lastTaken ? UI.inkSoft : 'var(--warn)', fontFamily: UI.fontUi, marginTop: 2 }}>
                   {lastTaken ? `Last taken ${lastTaken.date === LB.todayISO() ? 'today' : lastTaken.date} · ${lastTaken.time}` : 'Not logged in the last 14 days'}

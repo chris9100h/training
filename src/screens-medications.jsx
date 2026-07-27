@@ -6,17 +6,31 @@
    (unit_label, not always grams).
 
    Three tabs:
-   - Timeline: today's doses (auto-filled from active schedule slots, same
-     planned/logged distinction as food), plus logging an ad-hoc dose.
+   - Timeline: today's doses (auto-filled from active schedule slots of
+     active plans, same planned/logged distinction as food), plus logging an
+     ad-hoc dose.
    - Schedule: named plans (My Plans / Client Templates for a coach, like
-     FoodTemplateScreen). A plan is just a grouping a medication can
-     optionally belong to (medicationPlanId is a nullable soft reference,
-     see migration 0218); its own "Add medication" is a picker over already-
-     created, currently-unassigned medications ONLY, never a create form, so
-     removing a medication from a plan, or deleting the plan itself, never
-     destroys the medication, its schedule or its log history. A schedule
-     slot's own weekday/hour/dose fields (the "Add time" sub-sheet) are the
-     one place time itself is entered.
+     FoodTemplateScreen). A medication's membership in a plan is many-to-many
+     via zane_medication_plan_items (store.medicationPlanItems, migration
+     0221): the SAME medication (one shared identity/stock row) can sit in
+     several plans at once, each with its OWN schedule (a schedule slot is
+     scoped to one specific (medication, plan) pair via its own
+     medicationPlanId), so a coach-prescribed cycle plan can prescribe a
+     different dose/timing for a medication than the user's own separate
+     plan for that same product. A plan's own "Add medication" is a picker
+     over medications not already IN THIS plan (any medication is eligible,
+     whether or not it's already a member of some other plan), never a
+     create form, so removing a medication from a plan, or deleting the
+     plan itself, never destroys the medication, its OTHER plans'
+     schedules, or its log history, only this plan's own membership + this
+     plan's own schedule slots for it. A plan also has its own `active`
+     toggle (default on): only an active plan's schedule slots fire into
+     the Timeline, several plans can be active at once by design (no single
+     active pointer, see zane_medication_plans in docs/database.md). A
+     schedule slot's own weekday/hour/dose fields (the "Add time"
+     sub-sheet) are the one place time itself is entered; there is no
+     separate per-slot pause toggle (removed, found confusing): the only
+     way to stop a dose is removing the medication from that plan.
    - Inventory: two sub-tabs, mirroring the Food Shopping List's own
      Shopping List/Inventory split. Inventory is the stock/low-stock view
      (its own dedicated stockSheet is the only place stock is entered),
@@ -32,21 +46,20 @@
 
    Identity and schedule are strictly entry-point-specific, never mixed into
    one sheet: medSheet (Inventory > Medications) is name/brand/category/unit/
-   package size plus Remove-from-plan/Delete/Save, full stop, never stock
-   (Inventory tab's own stockSheet) and never a schedule section, even for an
-   already-saved medication. schedMed (a plan's own detail view, Schedule
-   tab) is the opposite: the medication's name as a read-only title plus its
-   schedule slots and "Add time", never an identity field. renderMedListRow's
-   mode option ('identity' default vs 'schedule') routes a tapped row to
-   whichever sheet its entry point calls for.
-
-   Multiple plans run concurrently on purpose (no active_*_id pointer like
-   food): daily vitamins alongside a coach-prescribed cycle is the normal
-   case, not an either/or. See zane_medication_plans in docs/database.md.
+   package size plus a list of current plan memberships (each individually
+   removable)/Delete/Save, full stop, never stock (Inventory tab's own
+   stockSheet) and never a schedule section, even for an already-saved
+   medication. schedMed (a plan's own detail view, Schedule tab) is the
+   opposite: the medication's name as a read-only title plus THIS plan's own
+   schedule slots for it and "Add time", never an identity field, never
+   another plan's slots for the same medication. renderMedListRow's mode
+   option ('identity' default vs 'schedule') plus its planId option (schedule
+   mode only) route a tapped row to whichever sheet, and whichever plan's
+   schedule, its entry point calls for.
 
    Coach access mirrors the Food Tracker's meal-plan push exactly
    (LB.pushMedicationPlanToClient, store.js): coach-of-client RLS gives full
-   read/write on all four tables, a coach VIEWS a client's medications via its
+   read/write on all five tables, a coach VIEWS a client's medications via its
    own direct query (ClientMedicationsTab, screens-coaching-detail.jsx), same
    split as ClientNutritionTab/pushMealPlanToClient. */
 
@@ -205,12 +218,15 @@ function mdIsLowStock(med, effectiveStock) {
   return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
 }
 
-// A schedule slot applies to `dateISO` if it's active, today's weekday is in
-// its list, and (when set) dateISO falls inside its optional start/end date
-// phase. Both bounds null (the default) means unbounded, identical to a plain
-// always-on schedule.
-function mdSlotAppliesOn(slot, dateISO, wd) {
-  if (!slot.active) return false;
+// A schedule slot applies to `dateISO` if its plan is active, today's
+// weekday is in its list, and (when set) dateISO falls inside its optional
+// start/end date phase. Both bounds null (the default) means unbounded,
+// identical to a plain always-on schedule. There is no per-slot pause flag
+// (removed, see the header comment): a slot with no plan, or whose plan
+// isn't in activePlanIds, is simply never due, exactly as if it didn't
+// exist, no separate "orphaned" handling needed.
+function mdSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
+  if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
   if (!(slot.weekdays || []).includes(wd)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
   if (slot.endDate && dateISO > slot.endDate) return false;
@@ -241,6 +257,7 @@ function mdMaterializeSlotEntry(med, slot, dateISO) {
 function mdAutoFillToday(store, setStore, todayISO) {
   const wd = LB.isoWd(new Date());
   const medsById = new Map((store.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
   const existingSlotIds = new Set(
     (store.medicationLogs || []).filter(l => l.date === todayISO && l.scheduleSlotId).map(l => l.scheduleSlotId)
   );
@@ -248,7 +265,7 @@ function mdAutoFillToday(store, setStore, todayISO) {
   (store.medicationScheduleSlots || []).forEach(slot => {
     const med = medsById.get(slot.medicationId);
     if (!med || existingSlotIds.has(slot.id)) return;
-    if (!mdSlotAppliesOn(slot, todayISO, wd)) return;
+    if (!mdSlotAppliesOn(slot, todayISO, wd, activePlanIds)) return;
     toAdd.push(mdMaterializeSlotEntry(med, slot, todayISO));
   });
   if (!toAdd.length) return;
@@ -303,6 +320,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const medicationPlans = store.medicationPlans || [];
   const scheduleSlots = store.medicationScheduleSlots || [];
   const medicationLogs = store.medicationLogs || [];
+  const medicationPlanItems = store.medicationPlanItems || [];
 
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
   const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
@@ -348,10 +366,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const wd = LB.isoWd(new Date(curDate + 'T12:00:00'));
     const existingSlotIds = new Set(curDateLogs.filter(e => e.scheduleSlotId).map(e => e.scheduleSlotId));
     const medsById = new Map(activeMedications.map(m => [m.id, m]));
+    const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
     scheduleSlots.forEach(slot => {
       const med = medsById.get(slot.medicationId);
       if (!med || existingSlotIds.has(slot.id)) return;
-      if (!mdSlotAppliesOn(slot, curDate, wd)) return;
+      if (!mdSlotAppliesOn(slot, curDate, wd, activePlanIds)) return;
       (map[slot.hour] = map[slot.hour] || []).push({
         id: `preview_${curDate}_${slot.id}`, medicationId: med.id, medicationName: med.name,
         time: `${String(slot.hour).padStart(2, '0')}:00`, doseQty: slot.doseQty, planned: true,
@@ -360,7 +379,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     });
     Object.keys(map).forEach(h => map[h].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
     return map;
-  }, [curDateLogs, curDate, activeMedications, scheduleSlots]);
+    // medicationPlans is a real dependency, not just an incidental read: an
+    // active/inactive toggle must immediately reflect here, otherwise
+    // pausing/resuming a plan would silently wait for some unrelated
+    // re-render before the Timeline's preview rows caught up.
+  }, [curDateLogs, curDate, activeMedications, scheduleSlots, medicationPlans]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
@@ -387,12 +410,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   // ─────────────────────────── Schedule tab ───────────────────────────
-  // Plans are just named groupings a medication can optionally belong to
-  // (medicationPlanId, nullable, see migration 0218's own "soft reference"
-  // comment): the Inventory tab's own Medications sub-tab is the actual
-  // create/edit/delete surface for the medication itself, independent of
-  // any plan, so removing one from a plan (or deleting the plan) never has
-  // to destroy it.
+  // Plans are named groupings a medication can belong to, many-to-many via
+  // zane_medication_plan_items (store.medicationPlanItems, migration 0221):
+  // the Inventory tab's own Medications sub-tab is the actual create/edit/
+  // delete surface for the medication itself, independent of any plan, so
+  // removing one from a plan (or deleting the plan) never has to destroy
+  // it, its other plans' memberships/schedules, or its log history.
   const [planSubTab, setPlanSubTab] = useStateMd('mine'); // 'mine' | 'templates', coach bucket only
   const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
   const plans = useMemoMd(() => medicationPlans.filter(p => !p.archived && inBucket(p)), [medicationPlans, isCoach, planSubTab]);
@@ -401,46 +424,59 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     if (viewedPlanId && !plans.some(p => p.id === viewedPlanId)) setViewedPlanId(null);
   }, [plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const viewedPlan = plans.find(p => p.id === viewedPlanId) || null;
+  const viewedPlanMedIds = useMemoMd(
+    () => new Set(medicationPlanItems.filter(it => it.medicationPlanId === viewedPlanId).map(it => it.medicationId)),
+    [medicationPlanItems, viewedPlanId],
+  );
   const viewedPlanMeds = useMemoMd(
-    () => medications.filter(m => !m.archived && m.medicationPlanId === viewedPlanId),
-    [medications, viewedPlanId],
+    () => medications.filter(m => !m.archived && viewedPlanMedIds.has(m.id)),
+    [medications, viewedPlanMedIds],
   );
 
-  // "Add medication" from within a plan: pick an existing unassigned
-  // medication to attach, or jump into medSheet to create a brand new one
-  // pre-assigned to this plan. Only ever offers UNASSIGNED medications,
-  // never ones already sitting in another plan: moving one across plans is
-  // a deliberate two-step action (remove from the old plan first, in its
-  // own medSheet), never a silent side effect of adding it here.
+  // "Add medication" from within a plan: pick an existing medication not
+  // already a member of THIS plan (any medication is eligible, whether or
+  // not it's already a member of some other plan, see the header comment),
+  // or jump into medSheet to create a brand new one. Attaching only ever
+  // inserts a membership row, it never creates the medication itself, so a
+  // plan's own "Add medication" is always a picker, never a create form.
   const [addToPlanOpen, setAddToPlanOpen] = useStateMd(false);
-  const unassignedMeds = useMemoMd(
-    () => activeMedications.filter(m => !m.medicationPlanId).sort((a, b) => a.name.localeCompare(b.name)),
-    [activeMedications],
+  const availableToAddMeds = useMemoMd(
+    () => activeMedications.filter(m => !viewedPlanMedIds.has(m.id)).sort((a, b) => a.name.localeCompare(b.name)),
+    [activeMedications, viewedPlanMedIds],
   );
   function attachMedicationToPlan(med) {
     setStore(s => ({
       ...s,
-      medications: (s.medications || []).map(m => m.id !== med.id ? m : { ...m, medicationPlanId: viewedPlanId, updatedAt: new Date().toISOString() }),
+      medicationPlanItems: [...(s.medicationPlanItems || []), { id: LB.uid(), medicationPlanId: viewedPlanId, medicationId: med.id, createdAt: new Date().toISOString() }],
     }));
   }
   // Shared row for a medication list: the plan-detail view opens the
-  // schedule-only sheet (mode: 'schedule'), the Medications tab opens the
-  // identity sheet (default) and additionally prefixes which plan (if any)
-  // it's currently in. Both show name + category + schedule summary.
-  function renderMedListRow(m, { showPlanTag, mode = 'identity' } = {}) {
-    const planName = m.medicationPlanId ? (medicationPlans.find(p => p.id === m.medicationPlanId)?.name || null) : null;
-    const activeSlots = scheduleSlots.filter(sl => sl.medicationId === m.id && sl.active);
-    const scheduleSummary = activeSlots.length
-      ? activeSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
+  // schedule-only sheet (mode: 'schedule', planId: the plan being viewed),
+  // the Medications tab opens the identity sheet (default) and additionally
+  // lists every plan it's currently a member of. Both show name + category
+  // + schedule summary, scoped to just this plan's slots in schedule mode
+  // (a medication's OTHER plans' doses would otherwise show up mixed in
+  // here), aggregated across all its slots in identity mode (a single
+  // useful-at-a-glance summary, since medSheet itself has no single "the"
+  // schedule to point at anymore).
+  function renderMedListRow(m, { showPlanTag, mode = 'identity', planId } = {}) {
+    const relevantSlots = mode === 'schedule'
+      ? scheduleSlots.filter(sl => sl.medicationId === m.id && sl.medicationPlanId === planId)
+      : scheduleSlots.filter(sl => sl.medicationId === m.id);
+    const scheduleSummary = relevantSlots.length
+      ? relevantSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
       : 'No schedule yet';
+    const memberPlanNames = showPlanTag
+      ? medicationPlanItems.filter(it => it.medicationId === m.id).map(it => medicationPlans.find(p => p.id === it.medicationPlanId)?.name).filter(Boolean)
+      : [];
     return (
-      <button key={m.id} onClick={() => mode === 'schedule' ? openSchedMed(m) : openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
+      <button key={m.id} onClick={() => mode === 'schedule' ? openSchedMed(m, planId) : openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={mdEntryName}>{m.name}</span>
           {m.category && <Pill gold>{mdCategoryLabel(m.category)}</Pill>}
         </div>
         <div style={mdEntryMeta}>
-          {showPlanTag && `${planName || 'Unassigned'} · `}{scheduleSummary}
+          {showPlanTag && `${memberPlanNames.length ? memberPlanNames.join(', ') : 'Not in a plan'} · `}{scheduleSummary}
         </div>
       </button>
     );
@@ -466,22 +502,32 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const asTemplate = isCoach && planSubTab === 'templates';
     setStore(s => ({
       ...s,
-      medicationPlans: [{ id, name: (name || '').trim() || 'Medications', archived: false, isTemplate: asTemplate, coachId: null, createdAt: nowISO, updatedAt: nowISO }, ...(s.medicationPlans || [])],
+      medicationPlans: [{ id, name: (name || '').trim() || 'Medications', archived: false, isTemplate: asTemplate, coachId: null, active: true, createdAt: nowISO, updatedAt: nowISO }, ...(s.medicationPlans || [])],
     }));
     setViewedPlanId(id);
   }
   function renamePlan(id, name) {
     setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
   }
+  // Only an active plan's schedule slots fire (mdSlotAppliesOn); several
+  // plans can be active at once, no single active pointer (see the header
+  // comment). A paused plan stays fully visible/editable, this never
+  // touches its medications or their memberships/slots, purely a switch.
+  function togglePlanActive(plan) {
+    setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === plan.id ? { ...p, active: !p.active, updatedAt: new Date().toISOString() } : p) }));
+  }
   async function deletePlan(plan) {
-    // Unassigns rather than deletes the medications in it: a plan is just a
-    // grouping, the medications (and their schedule/history) belong in the
-    // Medications tab regardless, same reasoning as removeMedicationFromPlan.
-    if (!await confirm(`Delete "${plan.name}"? Its medications stay in your Medications list, just unassigned from this plan.`, { title: 'Delete plan', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    // Only this plan's own membership rows and schedule slots go: a
+    // medication itself, its OTHER plans' memberships/schedules, and its
+    // log history are all untouched, same non-destructive reasoning as
+    // removeMedicationFromPlan (this is that same operation, just for
+    // every medication currently in the plan at once).
+    if (!await confirm(`Delete "${plan.name}"? Its medications stay in your Medications list (and any other plans they're in), just this plan's own schedule for them goes.`, { title: 'Delete plan', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({
       ...s,
       medicationPlans: (s.medicationPlans || []).filter(p => p.id !== plan.id),
-      medications: (s.medications || []).map(m => m.medicationPlanId !== plan.id ? m : { ...m, medicationPlanId: null, updatedAt: new Date().toISOString() }),
+      medicationPlanItems: (s.medicationPlanItems || []).filter(it => it.medicationPlanId !== plan.id),
+      medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId !== plan.id),
     }));
     setViewedPlanId(null);
   }
@@ -490,11 +536,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   // Medication identity + inventory edit sheet. draft.id === null means
-  // "creating a new medication", optionally pre-assigned to a plan
-  // (draft.planId, set only when opened from that plan's own "Add
-  // medication" picker below); null/unassigned when opened from the
-  // Medications tab, exactly as valid a state as any (medicationPlanId is a
-  // nullable soft reference, see migration 0218).
+  // "creating a new medication" (see the header comment: identity only,
+  // strictly no plan/schedule fields here); a saved medication's plan
+  // memberships are listed in medSheetMemberships below, each individually
+  // removable, never a single medicationPlanId.
   const [medSheet, setMedSheet] = useStateMd(null);
   const medSheetInitialSnap = useRefMd(null);
   // Identity fields only: medSheet never touches stock (that's the
@@ -509,10 +554,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
     });
   }
-  // A medication is only ever created unassigned (medicationPlanId: null):
-  // creating one lives exclusively in the Inventory tab's Medications
-  // sub-tab, a plan's own "Add medication" only ever attaches an existing
-  // one (see attachMedicationToPlan), never creates a fresh one.
+  // Every plan this medication currently belongs to, for medSheet's own
+  // membership list below (a medication can be in several plans at once,
+  // see the header comment).
+  const medSheetMemberships = useMemoMd(
+    () => medSheet?.id ? medicationPlanItems.filter(it => it.medicationId === medSheet.id) : [],
+    [medicationPlanItems, medSheet?.id],
+  );
+  // A medication is only ever created with zero plan memberships: creating
+  // one lives exclusively in the Inventory tab's Medications sub-tab, a
+  // plan's own "Add medication" only ever attaches an existing one (see
+  // attachMedicationToPlan), never creates a fresh one.
   function openMedSheet(med) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
@@ -547,7 +599,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       }));
     } else {
       const newMed = {
-        id: LB.uid(), medicationPlanId: null, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
+        id: LB.uid(), name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
         stockBaseline: null, stockSetAt: null, archived: false, createdAt: nowISO, updatedAt: nowISO,
       };
@@ -560,20 +612,27 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setStore(s => ({
       ...s,
       medications: (s.medications || []).filter(m => m.id !== med.id),
+      medicationPlanItems: (s.medicationPlanItems || []).filter(it => it.medicationId !== med.id),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.medicationId !== med.id),
     }));
     closeMedSheet();
   }
-  // Non-destructive counterpart to Delete: the medication, its schedule and
-  // its log history all stay exactly as they are, only its plan membership
-  // clears, so it reappears unassigned in the Medications tab instead of
-  // vanishing. No confirm needed, unlike Delete: nothing is actually lost.
-  function removeMedicationFromPlan(med) {
+  // Removes ONE plan membership (a medication can be in several, see the
+  // header comment): deletes that membership row and this plan's own
+  // schedule slots for this medication only, other plans' memberships/
+  // schedules for the same medication and all log history stay untouched.
+  // No longer "nothing is actually lost" like the old single-plan version:
+  // a plan-specific schedule genuinely goes with it now, so this needs a
+  // confirm like Delete does. Doesn't close medSheet: it now shows a list
+  // of memberships, removing one should leave the sheet open on the rest.
+  async function removeMedicationFromPlan(med, planId) {
+    const planName = medicationPlans.find(p => p.id === planId)?.name || 'this plan';
+    if (!await confirm(`Remove "${med.name}" from "${planName}"? Its schedule in this plan goes with it; the medication itself, any other plans it's in, and its log history all stay.`, { title: 'Remove from plan', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({
       ...s,
-      medications: (s.medications || []).map(m => m.id !== med.id ? m : { ...m, medicationPlanId: null, updatedAt: new Date().toISOString() }),
+      medicationPlanItems: (s.medicationPlanItems || []).filter(it => !(it.medicationId === med.id && it.medicationPlanId === planId)),
+      medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => !(sl.medicationId === med.id && sl.medicationPlanId === planId)),
     }));
-    closeMedSheet();
   }
 
   // Medication currently open for schedule editing only (name/unitLabel as
@@ -584,25 +643,31 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // medSheet/slotDraft/planNameDraft: it's just a "whose schedule am I
   // looking at" pointer, saveSlotDraft/deleteSlot below write straight to
   // the store per slot, there's nothing unsaved to lose on a stray tap.
-  const [schedMed, setSchedMed] = useStateMd(null); // { id, name, unitLabel } | null
-  function openSchedMed(med) { setSchedMed({ id: med.id, name: med.name, unitLabel: med.unitLabel }); }
+  const [schedMed, setSchedMed] = useStateMd(null); // { id, name, unitLabel, medicationPlanId } | null
+  function openSchedMed(med, planId) { setSchedMed({ id: med.id, name: med.name, unitLabel: med.unitLabel, medicationPlanId: planId }); }
   function closeSchedMed() { setSchedMed(null); }
-  // Schedule slots for the medication currently open in schedMed.
+  // Schedule slots for the medication currently open in schedMed, scoped to
+  // THIS plan only: a slot is scoped to one (medication, plan) pair, so a
+  // medication's slots under a different plan must never show up here.
   const schedMedSlots = useMemoMd(
-    () => schedMed?.id ? scheduleSlots.filter(sl => sl.medicationId === schedMed.id) : [],
-    [scheduleSlots, schedMed?.id],
+    () => schedMed?.id ? scheduleSlots.filter(sl => sl.medicationId === schedMed.id && sl.medicationPlanId === schedMed.medicationPlanId) : [],
+    [scheduleSlots, schedMed?.id, schedMed?.medicationPlanId],
   );
-  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, active, phaseOpen, startDate, endDate }
+  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
   function snapSlotDraft(d) {
-    return JSON.stringify({ weekdays: d.weekdays, hour: d.hour, doseQtyStr: d.doseQtyStr, active: d.active, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
+    return JSON.stringify({ weekdays: d.weekdays, hour: d.hour, doseQtyStr: d.doseQtyStr, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
   }
   function openSlotDraft(slot) {
     const next = slot ? {
       id: slot.id, weekdays: [...(slot.weekdays || [])], hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
-      active: slot.active, phaseOpen: !!(slot.startDate || slot.endDate), startDate: slot.startDate || '', endDate: slot.endDate || '',
+      phaseOpen: !!(slot.startDate || slot.endDate), startDate: slot.startDate || '', endDate: slot.endDate || '',
     } : {
-      id: null, weekdays: [...MD_WEEKDAYS_EVERY_DAY], hour: 8, doseQtyStr: '', active: true,
+      // Starts with NO days selected (was all 7): a blank slate reads more
+      // honestly as "pick what you actually mean" than a default that
+      // happens to already be right only for an every-day dose.
+      // selectAllWeekdays below is the one-tap shortcut for that common case.
+      id: null, weekdays: [], hour: 8, doseQtyStr: '',
       phaseOpen: false, startDate: '', endDate: '',
     };
     slotDraftInitialSnap.current = snapSlotDraft(next);
@@ -617,7 +682,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function saveSlotDraft() {
-    if (!schedMed?.id || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft || !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     const nowISO = new Date().toISOString();
@@ -631,14 +696,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       setStore(s => ({
         ...s,
         medicationScheduleSlots: (s.medicationScheduleSlots || []).map(sl => sl.id !== slotDraft.id ? sl : {
-          ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty, active: slotDraft.active,
+          ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty,
           startDate, endDate, updatedAt: nowISO,
         }),
       }));
     } else {
       const newSlot = {
-        id: LB.uid(), medicationId: schedMed.id, weekdays: slotDraft.weekdays, hour: slotDraft.hour,
-        doseQty, active: true, startDate, endDate, createdAt: nowISO, updatedAt: nowISO,
+        id: LB.uid(), medicationId: schedMed.id, medicationPlanId: schedMed.medicationPlanId,
+        weekdays: slotDraft.weekdays, hour: slotDraft.hour,
+        doseQty, startDate, endDate, createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medicationScheduleSlots: [...(s.medicationScheduleSlots || []), newSlot] }));
     }
@@ -653,6 +719,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       return { ...d, weekdays: has ? d.weekdays.filter(w => w !== wd) : [...d.weekdays, wd].sort((a, b) => a - b) };
     });
   }
+  function selectAllWeekdays() {
+    setSlotDraft(d => ({ ...d, weekdays: [...MD_WEEKDAYS_EVERY_DAY] }));
+  }
 
   // Coach: push a template plan (+ its medications + their schedule slots) to a client.
   const [pushPlan, setPushPlan] = useStateMd(null);
@@ -664,11 +733,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     if (!pushPlan || !pushTarget) return;
     setPushBusy(true);
     try {
-      const planMeds = medications.filter(m => m.medicationPlanId === pushPlan.id);
-      const medIds = new Set(planMeds.map(m => m.id));
+      const planItemsForPush = medicationPlanItems.filter(it => it.medicationPlanId === pushPlan.id);
+      const medIds = new Set(planItemsForPush.map(it => it.medicationId));
+      const planMeds = medications.filter(m => medIds.has(m.id));
       await LB.pushMedicationPlanToClient({
-        plan: pushPlan, medications: planMeds,
-        scheduleSlots: scheduleSlots.filter(sl => medIds.has(sl.medicationId)),
+        plan: pushPlan, medications: planMeds, planItems: planItemsForPush,
+        scheduleSlots: scheduleSlots.filter(sl => sl.medicationPlanId === pushPlan.id),
         coachUserId: userId, coachingId: pushTarget.id, clientId: pushTarget.clientId,
       });
       setPushTarget(null); setPushPlan(null);
@@ -879,15 +949,18 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {plans.map(p => (
-                    <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
-                      <span style={mdEntryName}>{p.name}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={mdEntryMeta}>{medications.filter(m => !m.archived && m.medicationPlanId === p.id).length}</span>
-                        <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
-                      </span>
-                    </button>
-                  ))}
+                  {plans.map(p => {
+                    const memberCount = medicationPlanItems.filter(it => it.medicationPlanId === p.id && activeMedications.some(m => m.id === it.medicationId)).length;
+                    return (
+                      <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
+                        <span style={mdEntryName}>{p.name}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={mdEntryMeta}>{!p.active && 'Paused · '}{memberCount}</span>
+                          <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -903,6 +976,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 </div>
               </div>
               <div className="display" style={{ fontSize: 20, color: UI.ink }}>{viewedPlan.name}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
+                <Toggle on={viewedPlan.active} onToggle={() => togglePlanActive(viewedPlan)} />
+                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                  {viewedPlan.active ? 'Active, doses fire on schedule' : "Paused, this plan's doses never fire"}
+                </span>
+              </div>
               <Btn onClick={() => setAddToPlanOpen(true)} style={{ width: '100%' }}>
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
               </Btn>
@@ -911,7 +990,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {viewedPlanMeds.map(m => renderMedListRow(m, { mode: 'schedule' }))}
+                  {viewedPlanMeds.map(m => renderMedListRow(m, { mode: 'schedule', planId: viewedPlanId }))}
                 </div>
               )}
             </>
@@ -968,11 +1047,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             ) : (
               <>
                 {/* The actual create/edit surface for a medication, entirely
-                    independent of any plan (see medicationPlanId's nullable
-                    "soft reference"). A plan's own "Add medication" only ever
-                    attaches one already created here, never creates it fresh
-                    tied to that plan, so removing one from a plan never has
-                    to destroy it. */}
+                    independent of any plan (membership is many-to-many via
+                    zane_medication_plan_items). A plan's own "Add medication"
+                    only ever attaches one already created here, never
+                    creates it fresh tied to that plan, so removing one from
+                    a plan never has to destroy it. */}
                 <Btn onClick={() => openMedSheet(null)} style={{ width: '100%' }}>
                   <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
                 </Btn>
@@ -1050,15 +1129,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Add an existing (unassigned) medication to the viewed plan.
-          Creating a new medication only ever happens in the Inventory tab's
-          Medications sub-tab, never from here (see openMedSheet). */}
+      {/* Add an existing medication (from anywhere, whether or not it's
+          already in some other plan too) to the viewed plan. Creating a new
+          medication only ever happens in the Inventory tab's Medications
+          sub-tab, never from here (see openMedSheet). */}
       <Sheet open={addToPlanOpen} onClose={() => setAddToPlanOpen(false)} title="Add medication" titleColor="var(--accent)">
-        {unassignedMeds.length === 0 ? (
-          <div style={mdEmptyHint}>No unassigned medications. Create one in the Medications tab first, or remove one from another plan (its own "Remove from plan" button).</div>
+        {availableToAddMeds.length === 0 ? (
+          <div style={mdEmptyHint}>Every medication you have is already in this plan. Create a new one in the Medications tab first.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {unassignedMeds.map(m => (
+            {availableToAddMeds.map(m => (
               <button key={m.id} onClick={() => { attachMedicationToPlan(m); setAddToPlanOpen(false); }} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
                 <span style={mdEntryName}>{m.name}</span>
                 <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
@@ -1099,10 +1179,22 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            {medSheet.id && medications.find(m => m.id === medSheet.id)?.medicationPlanId && (
-              <Btn kind="ghost" onClick={() => removeMedicationFromPlan(medications.find(m => m.id === medSheet.id))} style={{ width: '100%', marginBottom: 8 }}>
-                <i className="fa-solid fa-arrow-right-from-bracket" style={{ marginRight: 8 }} />Remove from plan
-              </Btn>
+            {medSheet.id && medSheetMemberships.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div className="micro" style={{ marginBottom: 8 }}>In these plans</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {medSheetMemberships.map(it => (
+                    <div key={it.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
+                        {medicationPlans.find(p => p.id === it.medicationPlanId)?.name || 'Unknown plan'}
+                      </div>
+                      <button onClick={() => removeMedicationFromPlan(medications.find(m => m.id === medSheet.id), it.medicationPlanId)} aria-label="Remove from plan" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}>
+                        <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               {medSheet.id && <Btn kind="ghost" onClick={() => deleteMedication(medications.find(m => m.id === medSheet.id))} style={{ flex: 1, color: UI.danger }}>Delete</Btn>}
@@ -1126,7 +1218,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             {schedMedSlots.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
                 {schedMedSlots.map(sl => (
-                  <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
+                  <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
                       {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
                       {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
@@ -1146,7 +1238,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <Sheet open={!!slotDraft} onClose={requestCloseSlotDraft} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
         {slotDraft && (
           <>
-            <div className="micro" style={{ marginBottom: 8 }}>Days</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div className="micro">Days</div>
+              <button onClick={selectAllWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+            </div>
             <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
               {MD_WEEKDAY_SHORT.map((label, wd) => (
                 <button key={wd} onClick={() => toggleWeekday(wd)} style={{
@@ -1180,14 +1275,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
                 </Field>
               </div>
-            )}
-            {slotDraft.id && (
-              <Field label="Active" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Toggle on={slotDraft.active} onToggle={() => setSlotDraft(d => ({ ...d, active: !d.active }))} />
-                  <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Paused times are kept but never fire</span>
-                </div>
-              </Field>
             )}
             <Btn onClick={saveSlotDraft} disabled={!slotDraft.weekdays.length || !mdNum(slotDraft.doseQtyStr)} style={{ width: '100%' }}>Save</Btn>
           </>

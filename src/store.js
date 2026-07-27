@@ -272,6 +272,17 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_plans').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_schedule_backups').delete().eq('user_id', userId)),
+    // Medications (migration 0218/0221): were missing here entirely before,
+    // so neither "delete all my data" nor a backup restore's wipe-first step
+    // actually cleared them. medication_plan_items/schedule_slots/logs all
+    // cascade off zane_medications being gone, but each is still listed
+    // explicitly, same as every other table above (this function has no
+    // cascade-only shortcuts elsewhere either).
+    unwrap(_supabase.from('zane_medication_plans').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medications').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medication_plan_items').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
   ];
   // zane_recipe_shares has RLS with no policies, so it is only reachable
   // through an RPC. Without this, every old ?share=<token> link kept serving
@@ -489,6 +500,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodShoppingPrefs?.length ? 1 : 0)
     + (backup.medicationPlans?.length ? 1 : 0)
     + (backup.medications?.length ? 1 : 0)
+    + (backup.medicationPlanItems?.length ? 1 : 0)
     + (backup.medicationScheduleSlots?.length ? 1 : 0)
     + (backup.medicationLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
@@ -705,7 +717,12 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_medication_plans').upsert(
       backup.medicationPlans.map(p => ({
         id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
-        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+        coach_id: p.coachId ?? null,
+        // Old backups (from before migration 0221) have no `active` key at
+        // all; missing must mean "was always active", not false, so this is
+        // the one field here needing an asymmetric default vs. `!!`.
+        active: p.active !== false,
+        updated_at: p.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -714,7 +731,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading medications…');
     await unwrap(_supabase.from('zane_medications').upsert(
       backup.medications.map(m => ({
-        id: m.id, user_id: userId, medication_plan_id: m.medicationPlanId ?? null, name: m.name,
+        id: m.id, user_id: userId, name: m.name,
         brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
         package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
@@ -723,12 +740,22 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     ));
     stepsDone++;
   }
+  if (backup.medicationPlanItems?.length) {
+    prog('Uploading medication plan memberships…');
+    await unwrap(_supabase.from('zane_medication_plan_items').upsert(
+      backup.medicationPlanItems.map(it => ({
+        id: it.id, user_id: userId, medication_plan_id: it.medicationPlanId, medication_id: it.medicationId,
+      }))
+    ));
+    stepsDone++;
+  }
   if (backup.medicationScheduleSlots?.length) {
     prog('Uploading medication schedule…');
     await unwrap(_supabase.from('zane_medication_schedule_slots').upsert(
       backup.medicationScheduleSlots.map(s => ({
-        id: s.id, user_id: userId, medication_id: s.medicationId, weekdays: s.weekdays || [],
-        hour: s.hour, dose_qty: s.doseQty, active: !!s.active,
+        id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
+        weekdays: s.weekdays || [],
+        hour: s.hour, dose_qty: s.doseQty,
         start_date: s.startDate ?? null, end_date: s.endDate ?? null,
         updated_at: s.updatedAt ?? new Date().toISOString(),
       }))
@@ -1148,13 +1175,15 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // for any of these either. A coach VIEWS a client's medications through
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
-    isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, medication_plan_id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, created_at, updated_at').eq('user_id', userId),
-    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, weekdays, hour, dose_qty, active, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
     isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Migration 0221: which medication belongs to which plan(s), many-to-many.
+    isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1162,7 +1191,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
-         foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes] = await Promise.all(queries);
+         foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes,
+         medicationPlanItemsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1213,12 +1243,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // exact failure mode two earlier incidents on this branch already hit,
   // for zane_food_shopping_prefs's own new columns). Logged, not thrown; the
   // mapping below already treats a missing .data as an empty array, so this
-  // load just comes back with nothing for these four collections and
+  // load just comes back with nothing for these five collections and
   // self-heals the next time it succeeds.
   if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
   if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
   if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
   if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
+  if (medicationPlanItemsRes?.error) console.warn('medication plan items load failed:', medicationPlanItemsRes.error);
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
@@ -1405,10 +1436,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     medicationPlans: (medicationPlansRes?.data || []).map(p => ({
       id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
-      coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
+      coachId: p.coach_id ?? null, active: !!p.active, createdAt: p.created_at, updatedAt: p.updated_at,
     })),
     medications: (medicationsRes?.data || []).map(m => ({
-      id: m.id, medicationPlanId: m.medication_plan_id ?? null, name: m.name, brand: m.brand ?? null,
+      id: m.id, name: m.name, brand: m.brand ?? null,
       category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
@@ -1416,15 +1447,20 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       createdAt: m.created_at, updatedAt: m.updated_at,
     })),
     medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
-      id: s.id, medicationId: s.medication_id, weekdays: s.weekdays || [],
+      id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
+      weekdays: s.weekdays || [],
       hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
-      active: !!s.active, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
       createdAt: s.created_at, updatedAt: s.updated_at,
     })),
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
       planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    })),
+    medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
+      id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
+      createdAt: it.created_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -2009,20 +2045,21 @@ async function syncStore(prev, next, userId) {
     const { upsert, removed } = diffCollectionById(prev.medicationPlans, next.medicationPlans);
     if (upsert.length) ops.push(_supabase.from('zane_medication_plans').upsert(upsert.map(p => ({
       id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
-      coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+      coach_id: p.coachId ?? null, active: !!p.active, updated_at: p.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medication_plans').delete().in('id', removed.map(p => p.id)));
   }
   if (prev.medications !== next.medications) {
     const { upsert, removed } = diffCollectionById(prev.medications, next.medications);
-    // preOps, not ops: zane_medication_schedule_slots.medication_id is a real,
-    // non-deferrable NOT NULL FK into this table (same hazard as
-    // zane_food_recipes above), and every op in `ops` fires concurrently, so
-    // a brand new medication plus a schedule slot for it in the same diff
-    // (exactly what pushMedicationPlanToClient does) could hit the slot
-    // upsert first and 23503.
+    // preOps, not ops: zane_medication_schedule_slots.medication_id AND
+    // zane_medication_plan_items.medication_id are real, non-deferrable NOT
+    // NULL FKs into this table (same hazard as zane_food_recipes above), and
+    // every op in `ops` fires concurrently, so a brand new medication plus a
+    // schedule slot and/or a plan-item membership row for it in the same
+    // diff (exactly what pushMedicationPlanToClient does) could hit either
+    // of those upserts first and 23503.
     if (upsert.length) preOps.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
-      id: m.id, user_id: userId, medication_plan_id: m.medicationPlanId ?? null, name: m.name,
+      id: m.id, user_id: userId, name: m.name,
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
       package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
@@ -2033,8 +2070,9 @@ async function syncStore(prev, next, userId) {
   if (prev.medicationScheduleSlots !== next.medicationScheduleSlots) {
     const { upsert, removed } = diffCollectionById(prev.medicationScheduleSlots, next.medicationScheduleSlots);
     if (upsert.length) ops.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
-      id: s.id, user_id: userId, medication_id: s.medicationId, weekdays: s.weekdays || [],
-      hour: s.hour, dose_qty: s.doseQty, active: !!s.active,
+      id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
+      weekdays: s.weekdays || [],
+      hour: s.hour, dose_qty: s.doseQty,
       start_date: s.startDate ?? null, end_date: s.endDate ?? null,
       updated_at: s.updatedAt ?? new Date().toISOString(),
     }))));
@@ -2048,6 +2086,16 @@ async function syncStore(prev, next, userId) {
       schedule_slot_id: l.scheduleSlotId ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));
+  }
+  if (prev.medicationPlanItems !== next.medicationPlanItems) {
+    const { upsert, removed } = diffCollectionById(prev.medicationPlanItems, next.medicationPlanItems);
+    // ops, not preOps: medication_plan_id is a soft reference (no FK), and
+    // the hazard on medication_id is already covered by zane_medications
+    // sitting in preOps above (resolved before any op in `ops` fires).
+    if (upsert.length) ops.push(_supabase.from('zane_medication_plan_items').upsert(upsert.map(it => ({
+      id: it.id, user_id: userId, medication_plan_id: it.medicationPlanId, medication_id: it.medicationId,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_plan_items').delete().in('id', removed.map(it => it.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -4424,18 +4472,21 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
 
 // Mirrors pushMealPlanToClient above almost exactly, one level deeper (plan ->
 // medications -> schedule slots, vs. food's plan -> slots): copies a
-// coach-authored template plan + its medications + their schedule slots
-// fresh into the client's account. No activateNow/active-pointer step, unlike
-// meal plans: medication plans have no single active slot, they're meant to
-// run alongside whatever else the client already has (see zane_medication_
-// plans in docs/database.md). Also flips the client's own medsEnabled on,
-// same reasoning as planMode above: a pushed plan the client's own feature
-// toggle hides would be pointless.
-async function pushMedicationPlanToClient({ plan, medications, scheduleSlots, coachUserId, coachingId, clientId }) {
+// coach-authored template plan + its medications + their plan membership +
+// their schedule slots fresh into the client's account. No activateNow/
+// active-pointer step, unlike meal plans: medication plans have no single
+// active slot, they're meant to run alongside whatever else the client
+// already has (see zane_medication_plans in docs/database.md). The copy is
+// always active regardless of the coach's own copy's active state (mirrors
+// the medsEnabled forcing below: the coach's own on/off state describes
+// their account, not the client's, a paused push would be pointless). Also
+// flips the client's own medsEnabled on, same reasoning as planMode above: a
+// pushed plan the client's own feature toggle hides would be pointless.
+async function pushMedicationPlanToClient({ plan, medications, planItems, scheduleSlots, coachUserId, coachingId, clientId }) {
   const clientData = await loadClientStore(clientId);
   const newPlanId = uid();
   const nowISO = new Date().toISOString();
-  const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
+  const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, active: true, createdAt: nowISO, updatedAt: nowISO };
   const medIdMap = {};
   const medCopies = (medications || []).map(m => {
     const nid = uid();
@@ -4446,19 +4497,27 @@ async function pushMedicationPlanToClient({ plan, medications, scheduleSlots, co
     // new id, so an inherited baseline would read back as real stock they
     // never had. The client sets their own via Inventory once they actually
     // have the medication in hand.
-    return { ...m, id: nid, medicationPlanId: newPlanId, stockBaseline: null, stockSetAt: null, createdAt: nowISO, updatedAt: nowISO };
+    return { ...m, id: nid, stockBaseline: null, stockSetAt: null, createdAt: nowISO, updatedAt: nowISO };
   });
-  // Only ever copies slots whose medication is actually part of this push
-  // (medIdMap has no entry otherwise), so a stray slot referencing a
-  // medication outside this plan can't leak into the client's account.
+  // Only ever copies memberships/slots whose medication is actually part of
+  // this push (medIdMap has no entry otherwise), so a stray membership/slot
+  // referencing a medication outside this plan can't leak into the client's
+  // account. Both ids are remapped on the slot: medicationId (as before) AND
+  // medicationPlanId, since a slot is now scoped to one specific
+  // (medication, plan) pair, this is what makes the copy's schedule actually
+  // land under the copied plan rather than orphaned/planless.
+  const planItemCopies = (planItems || [])
+    .filter(it => medIdMap[it.medicationId])
+    .map(it => ({ id: uid(), medicationPlanId: newPlanId, medicationId: medIdMap[it.medicationId], createdAt: nowISO }));
   const slotCopies = (scheduleSlots || [])
     .filter(s => medIdMap[s.medicationId])
-    .map(s => ({ ...s, id: uid(), medicationId: medIdMap[s.medicationId], createdAt: nowISO, updatedAt: nowISO }));
+    .map(s => ({ ...s, id: uid(), medicationId: medIdMap[s.medicationId], medicationPlanId: newPlanId, createdAt: nowISO, updatedAt: nowISO }));
   const withPlan = {
     ...clientData,
     settings: { ...clientData.settings, medsEnabled: true },
     medicationPlans: [...(clientData.medicationPlans || []), planCopy],
     medications: [...(clientData.medications || []), ...medCopies],
+    medicationPlanItems: [...(clientData.medicationPlanItems || []), ...planItemCopies],
     medicationScheduleSlots: [...(clientData.medicationScheduleSlots || []), ...slotCopies],
   };
   await syncStore(clientData, withPlan, clientId);
