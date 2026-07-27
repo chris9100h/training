@@ -452,6 +452,18 @@ function fdWriteShoppingDays(v) {
 function fdBuildShoppingExportText(list, withAmounts) {
   return list.map(item => withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName).join('\n');
 }
+// HTML twin of the text above, a real <ul><li> list rather than \n-joined
+// lines: a raw string's \n reads to Notes' paste parser as a soft line break
+// WITHIN one paragraph (still one checklist item), not a paragraph break, so
+// plain text alone can't reliably become one checklist row per food.
+// Explicit <li> boundaries remove that guesswork. Escaped because foodName
+// comes from OFF/USDA data or free-typed custom entries, either could
+// contain '&'/'<'/'>' (e.g. "M&M's").
+function fdBuildShoppingExportHtml(list, withAmounts) {
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName)}</li>`).join('');
+  return `<ul>${rows}</ul>`;
+}
 
 // Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
 // accent-bordered box when planned (not eaten yet), the same box filled with a
@@ -5181,16 +5193,32 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
-  // Always clipboard, deliberately not navigator.share: sharing straight to
-  // Notes hands it the raw text via the Share Extension, which (unlike a
-  // manual paste) does not go through Notes' own "split multi-line text
-  // into separate checklist items" logic and dumps everything into one
-  // item instead. A manual paste after copying reliably gets one checklist
-  // row per line, which was the whole point of this export.
+  // Always clipboard, deliberately not navigator.share (sharing straight to
+  // Notes goes through its Share Extension rather than a paste, one more
+  // difference from a manual copy/paste that isn't worth the ambiguity).
+  // Writes a real HTML <ul><li> list alongside the plain text: a raw
+  // \n-joined string doesn't reliably read as separate checklist rows to
+  // every paste target (Notes' parser cares about actual paragraph
+  // boundaries), an explicit list structure removes that guesswork. Falls
+  // back to plain-text-only if the richer multi-type write isn't supported.
   const [justCopied, setJustCopied] = useStateFd(null); // null | 'amounts' | 'names'
   async function doExport(withAmounts) {
     const text = fdBuildShoppingExportText(list, withAmounts);
-    try { await navigator.clipboard.writeText(text); } catch (_) { return; }
+    let copied = false;
+    if (typeof ClipboardItem !== 'undefined') {
+      try {
+        const html = fdBuildShoppingExportHtml(list, withAmounts);
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([html], { type: 'text/html' }),
+        })]);
+        copied = true;
+      } catch (_) { /* fall through to plain writeText below */ }
+    }
+    if (!copied) {
+      try { await navigator.clipboard.writeText(text); copied = true; } catch (_) {}
+    }
+    if (!copied) return;
     setJustCopied(withAmounts ? 'amounts' : 'names');
     setTimeout(() => { setExportOpen(false); setJustCopied(null); }, 900);
   }
