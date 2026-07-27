@@ -368,6 +368,66 @@ Per-Food-Präferenzen der Shopping List (Migration 0215/0216/0217), geräteüber
 - Store field: `store.foodShoppingPrefs`. Einfache eigene User-Collection wie `zane_food_favorites`, gleiches Collection-Sync-/Boot-Merge-Muster (`diffCollectionById`), kein Coach-Zugriff.
 - RLS: nur eigene Zeilen (`(select auth.uid()) = user_id`, initPlan-Caching von Anfang an, nicht erst nachträglich gefixt wie bei `zane_food_favorites`/`zane_food_recipes` in Migration 0192). Migration 0215, Stock-Felder Migration 0216, Identitäts-Snapshot Migration 0217.
 
+### Medications (Übersicht)
+
+Migration 0218. Persönlicher (optional coach-verwalteter) Tracker für Medikamente/Vitamine/Supplements, architektonisch am Food Tracker Plan Mode orientiert (Container → Items → Schedule → Log), aber mit eigenem Wochentags-Schedule (nicht an Trainings-/Rest-Tag gekoppelt) und eigener Inventory-Einheit (nicht immer Gramm). Vier Tabellen, jede unten mit eigenem Abschnitt: `zane_medication_plans`, `zane_medications`, `zane_medication_schedule_slots`, `zane_medication_logs`.
+
+**RLS (alle vier Tabellen identisch):** eigene Zeilen (`(select auth.uid()) = user_id`) plus volles Coach-of-Client SELECT/INSERT/UPDATE/DELETE über `zane_is_coach_of` (Migration 0199-Muster, `zane_food_meal_plans`/`zane_food_template_slots`). Der Coach sieht damit nicht nur selbst gepushte Pläne, sondern die komplette Medikation, den Schedule und die tatsächlich geloggte Einnahme eines Clients (Adherence). Migration 0218.
+
+**Push-Mechanismus:** `LB.pushMedicationPlanToClient` in `store.js`, 1:1 nach Vorbild von `pushMealPlanToClient` (Meal Plans): kopiert Plan + Medikamente + Schedule-Slots frisch in den Client-Account, postet eine Nachricht in einen eigenen "Medications"-Coaching-Thread.
+
+**Reminder:** eigene Edge Function `medication-reminder` (pg_cron stündlich, Migration 0219), 1:1 nach Vorbild von `meal-reminder` (siehe `medication_reminder_enabled` weiter oben), prüft `zane_medication_logs` auf noch-`planned` Einträge und feuert nach 1h Grace Period.
+
+**Backup:** alle vier Tabellen sind Teil des User-Backups (eigene, personenbezogene Daten wie Food-Logs/-Pläne).
+
+### `zane_medication_plans`
+
+Benannter Container (z.B. "Vitamine", "Prep Cycle Q1"), siehe Medications-Übersicht oben.
+
+- `id` (text, PK), `user_id` (uuid), `name` (text), `archived`/`is_template` (boolean, Default false), `coach_id` (uuid, nullable), `created_at`/`updated_at`
+- `is_template`/`coach_id` sind das Coach-Bucket-Flag wie bei `zane_food_meal_plans` (My Plans vs. Client Templates, ein Push kopiert Plan + Medikamente + deren Schedule-Slots in den Client-Account)
+- **Anders als Food**: kein einzelner Active-Pointer, mehrere Pläne laufen bewusst gleichzeitig (z.B. tägliche Vitamine parallel zu einem vom Coach verordneten Cycle), das trifft die Realität besser als ein Entweder-Oder
+- Store field: `store.medicationPlans`
+- RLS: siehe Medications-Übersicht. Migration 0218.
+
+### `zane_medications`
+
+Das getrackte Medikament selbst, siehe Medications-Übersicht oben.
+
+- `id` (text, PK), `user_id` (uuid), `medication_plan_id` (text, nullable, **weicher Verweis, kein FK**: gleicher Grund wie `meal_plan_id` bei `zane_food_template_slots`, ein Cascade könnte hier mit dem clientseitigen Sync-Diff kollidieren)
+- `name` (text), `brand` (text, nullable)
+- `category` (text, nullable): freier Text, keine DB-CHECK-Konstraint, das UI bietet Presets wie Vitamin/Supplement/Compound/Other an, eine neue Kategorie braucht also nie eine Migration
+- `unit_label` (text, NOT NULL, Default `'pills'`): die Zähleinheit, z.B. "pills"/"ml"/"drops", frei editierbar da Medikamente sehr unterschiedlich dosiert werden
+- `package_size`/`stock_baseline`/`stock_set_at` (numeric/numeric/timestamptz, alle nullable): gleiches hergeleitetes Inventory-Prinzip wie `zane_food_shopping_prefs` (aktueller Bestand = `stock_baseline` minus allem seit `stock_set_at` Geloggten, client-seitig zur Laufzeit berechnet, kein Live-Countdown-Feld)
+- `archived` (boolean, Default false), `created_at`/`updated_at`
+- Store field: `store.medications`
+- RLS: siehe Medications-Übersicht. Migration 0218.
+
+### `zane_medication_schedule_slots`
+
+Wiederkehrende Dosis, siehe Medications-Übersicht oben.
+
+- `id` (text, PK), `user_id` (uuid), `medication_id` (text, NOT NULL, **FK → `zane_medications.id` ON DELETE CASCADE**: ein Schedule-Slot hat kein eigenständiges Leben ohne sein Medikament, anders als der weiche `medication_plan_id`-Verweis bei `zane_medications`)
+- `weekdays` (integer[], NOT NULL, Default `{0,1,2,3,4,5,6}`): welche Wochentage der Slot gilt, **0=Montag…6=Sonntag** wie `isoWd` in `store.js`, "jeden Tag" braucht also nur eine Zeile statt sieben
+- `hour` (integer, NOT NULL, Default 8, 0-23), `dose_qty` (numeric, NOT NULL), `active` (boolean, Default true: pausieren ohne Löschen)
+- `start_date`/`end_date` (date, beide nullable): **optionale zeitliche Phase**, beide `null` (Default/Normalfall) heißt der Slot läuft unbegrenzt wie jeder normale Schedule; gesetzt begrenzt er den Slot auf ein Datumsfenster, so lassen sich echte gestaffelte Cycles abbilden (z.B. zwei Slots für dasselbe Medikament mit unterschiedlicher Dosis in unterschiedlichen Wochen), ganz ohne ein separates Phasen-System
+- `created_at`/`updated_at`
+- Store field: `store.medicationScheduleSlots`
+- RLS: siehe Medications-Übersicht. Migration 0218.
+
+### `zane_medication_logs`
+
+Die Einnahme-Timeline, spiegelt `zane_food_logs`, siehe Medications-Übersicht oben.
+
+- `id` (text, PK), `user_id` (uuid)
+- `medication_id` (text, nullable, FK → `zane_medications.id` **ON DELETE SET NULL**: Historie überlebt das Löschen des Medikaments, wie `zane_food_logs.food_id`), `medication_name` (text, NOT NULL, zum Schreibzeitpunkt kopiert)
+- `date` (text, YYYY-MM-DD lokal), `time` (text, HH:MM lokal), `dose_qty` (numeric, NOT NULL)
+- `planned` (boolean, NOT NULL, Default false): aus dem Schedule materialisiert vs. spontan geloggt, gleiche Bedeutung wie bei Food
+- `schedule_slot_id` (text, nullable, FK → `zane_medication_schedule_slots.id` ON DELETE SET NULL)
+- `created_at`
+- Store field: `store.medicationLogs`
+- RLS: siehe Medications-Übersicht. Migration 0218. Reminder-Cron liest diese Tabelle, Migration 0219.
+
 ### `zane_recipe_shares`
 
 Share-Links für Rezepte (Share-Button im Recipes-Tab des Food Trackers). Eine Zeile pro geteiltem Rezept, gekeyt über einen nicht erratbaren Token, der zugleich der Deep-Link ist (`…/?share=<token>`). `recipe` ist ein jsonb-**Snapshot** zum Zeitpunkt des Teilens (`{ name, portions, items }`, Shape wie bei `zane_food_recipes`): der Link funktioniert weiter, wenn der Sharer das Original später editiert oder löscht, und leakt umgekehrt keine späteren Änderungen. Erneutes Teilen desselben Rezepts refresht den Snapshot und liefert **denselben** Token (Upsert über `user_id`+`recipe_id`), Re-Shares stapeln also keine Zeilen.
@@ -455,6 +515,8 @@ Weitere Spalten:
 - `water_coffee_sizes` (jsonb, nullable, Store `waterCoffeeSizes`): nutzerkonfigurierbare Kaffee-Größen `[{ label, ml }]` für den Kaffee-Preset-Button (Größe + Milch-Flow); null = eingebaute Defaults. Migration 0181.
 - Water-Reminder (Migration 0182): `water_reminder_enabled` (boolean, default false, Store `waterReminderEnabled`): eigener An/Aus-Schalter für die "du liegst zurück"-Pushes (nutzt die bestehende Push-Infra, zusätzlich `push_enabled` nötig). `water_last_push_at` (timestamptz, nullable): Throttle, server-geschrieben von der `water-reminder` Edge Function (nicht im Backup, allowlisted). `tz_offset_minutes` (int, nullable, Store `tzOffsetMinutes`): UTC-Offset des Nutzers in Minuten, vom Client gesetzt, damit der Cron die lokale Soll-Kurve berechnen kann (nicht im Backup, allowlisted).
 - `meal_reminder_enabled` (boolean, NOT NULL, default false, Store `mealReminderEnabled`, Migration 0201): An/Aus-Schalter für Plan-Mode-Meal-Reminder (Toggle in Settings → Health unter „Meal planning", nur sichtbar wenn `plan_mode` an; zusätzlich `push_enabled` nötig). Die `meal-reminder` Edge Function (pg_cron stündlich `0 * * * *`, gated auf `meal_reminder_enabled` + `plan_mode` + `push_enabled`) prüft je Nutzer die heutigen noch-`planned` (nicht abgehakten) `zane_food_logs`-Einträge und feuert einen Push, sobald eine geplante Mahlzeit 1h nach ihrer Uhrzeit noch offen ist. Fire-once ohne Throttle-Spalte: das Prüffenster = Cron-Takt (1h), also feuert nur der Tick, in dem `now` die (Uhrzeit + 1h)-Schwelle überschreitet (nutzt `tz_offset_minutes` für die lokale Uhr). Slots liegen immer auf der vollen Stunde (`HH:00`), daher feuert eine Slot-Mahlzeit exakt zu ihrem +1h-Punkt; ein manuell geplanter Eintrag mit krummer Minute feuert am nächsten Stunden-Tick danach. Im Backup (User-Präferenz, wie `reminder_enabled`/`water_reminder_enabled`).
+- `meds_enabled` (boolean, NOT NULL, default false, Store `medsEnabled`, Migration 0218): Feature-Master-Switch für Medications (Toggle in Settings, off by default: „nicht jeder will was mit Medikamenten zu tun haben"). Aus: der 4. Slot im Health/Water/Food-TabBar-Zyklus (`ui.jsx`) ist nicht vorhanden, alles andere unverändert.
+- `medication_reminder_enabled` (boolean, NOT NULL, default false, Store `medicationReminderEnabled`, Migration 0218): An/Aus-Schalter für Medications-Dosis-Reminder (zusätzlich `meds_enabled` + `push_enabled` nötig). Die `medication-reminder` Edge Function (pg_cron stündlich `0 * * * *`, Migration 0219) ist 1:1 nach Vorbild von `meal-reminder` gebaut: prüft je Nutzer die heutigen noch-`planned` `zane_medication_logs`-Einträge und feuert einen Push, sobald eine geplante Dosis 1h nach ihrer Uhrzeit noch offen ist, gleiches Fire-once-ohne-Throttle-Prinzip (Prüffenster = Cron-Takt), da Schedule-Slots wie Meal-Slots auf der vollen Stunde liegen (`zane_medication_schedule_slots.hour`).
 - `show_health_tab` (boolean, default false): pinnt den Health-Tab. Store field `showHealthTab`.
 - `onboarding_completed` (boolean, default false): gesetzt nach Welcome-Tour oder erster Session. Store field `onboardingCompleted`.
 - `net_carbs` (boolean, default false): Health-Tab-Carb-Modus, Net-Carb-Tracking ergänzt ein Fiber-Feld. Store field `netCarbs`. Migration 0073.
