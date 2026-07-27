@@ -26,11 +26,19 @@
      sitting in front of it), with a Running Low section for anything
      that's dipped under its package size, and a Tracked/Not-tracked filter
      underneath. Medications is the actual create/edit/delete surface for a
-     medication's identity (name, brand, category, unit, package size)
-     ONLY, independent of any plan, same list as Inventory just presented
-     for editing rather than for stock: neither stock (Inventory tab's
-     stockSheet) nor schedule (Schedule tab, once the medication has a real
-     id) are ever entered here.
+     medication's identity (name, brand, category, unit, package size) ONLY,
+     independent of any plan, same list as Inventory just presented for
+     editing rather than for stock.
+
+   Identity and schedule are strictly entry-point-specific, never mixed into
+   one sheet: medSheet (Inventory > Medications) is name/brand/category/unit/
+   package size plus Remove-from-plan/Delete/Save, full stop, never stock
+   (Inventory tab's own stockSheet) and never a schedule section, even for an
+   already-saved medication. schedMed (a plan's own detail view, Schedule
+   tab) is the opposite: the medication's name as a read-only title plus its
+   schedule slots and "Add time", never an identity field. renderMedListRow's
+   mode option ('identity' default vs 'schedule') routes a tapped row to
+   whichever sheet its entry point calls for.
 
    Multiple plans run concurrently on purpose (no active_*_id pointer like
    food): daily vitamins alongside a coach-prescribed cycle is the normal
@@ -415,17 +423,18 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       medications: (s.medications || []).map(m => m.id !== med.id ? m : { ...m, medicationPlanId: viewedPlanId, updatedAt: new Date().toISOString() }),
     }));
   }
-  // Shared row for a medication list: the plan-detail view and the
-  // Medications tab both show name + category + schedule summary, the
-  // latter additionally prefixes which plan (if any) it's currently in.
-  function renderMedListRow(m, { showPlanTag } = {}) {
+  // Shared row for a medication list: the plan-detail view opens the
+  // schedule-only sheet (mode: 'schedule'), the Medications tab opens the
+  // identity sheet (default) and additionally prefixes which plan (if any)
+  // it's currently in. Both show name + category + schedule summary.
+  function renderMedListRow(m, { showPlanTag, mode = 'identity' } = {}) {
     const planName = m.medicationPlanId ? (medicationPlans.find(p => p.id === m.medicationPlanId)?.name || null) : null;
     const activeSlots = scheduleSlots.filter(sl => sl.medicationId === m.id && sl.active);
     const scheduleSummary = activeSlots.length
       ? activeSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
       : 'No schedule yet';
     return (
-      <button key={m.id} onClick={() => openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
+      <button key={m.id} onClick={() => mode === 'schedule' ? openSchedMed(m) : openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={mdEntryName}>{m.name}</span>
           {m.category && <Pill gold>{mdCategoryLabel(m.category)}</Pill>}
@@ -567,14 +576,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     closeMedSheet();
   }
 
-  // Schedule slots for the medication currently open in medSheet. Only
-  // reachable once medSheet.id is set (the Schedule section below is gated
-  // on it, see its own comment): a medication being created has no id yet
-  // to attach a slot to, and time is a Schedule-tab thing, not part of
-  // "creating a medication" in the first place.
-  const medSheetSlots = useMemoMd(
-    () => medSheet?.id ? scheduleSlots.filter(sl => sl.medicationId === medSheet.id) : [],
-    [scheduleSlots, medSheet?.id],
+  // Medication currently open for schedule editing only (name/unitLabel as
+  // read-only labels, see the schedMed Sheet further down): opened from a
+  // plan's own detail view via renderMedListRow's mode option, entirely
+  // separate from medSheet's identity editing above (see the header
+  // comment's split). Not a draft needing a backdrop-dismiss guard like
+  // medSheet/slotDraft/planNameDraft: it's just a "whose schedule am I
+  // looking at" pointer, saveSlotDraft/deleteSlot below write straight to
+  // the store per slot, there's nothing unsaved to lose on a stray tap.
+  const [schedMed, setSchedMed] = useStateMd(null); // { id, name, unitLabel } | null
+  function openSchedMed(med) { setSchedMed({ id: med.id, name: med.name, unitLabel: med.unitLabel }); }
+  function closeSchedMed() { setSchedMed(null); }
+  // Schedule slots for the medication currently open in schedMed.
+  const schedMedSlots = useMemoMd(
+    () => schedMed?.id ? scheduleSlots.filter(sl => sl.medicationId === schedMed.id) : [],
+    [scheduleSlots, schedMed?.id],
   );
   const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, active, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
@@ -601,7 +617,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function saveSlotDraft() {
-    if (!medSheet?.id || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!schedMed?.id || !slotDraft || !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     const nowISO = new Date().toISOString();
@@ -621,7 +637,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       }));
     } else {
       const newSlot = {
-        id: LB.uid(), medicationId: medSheet.id, weekdays: slotDraft.weekdays, hour: slotDraft.hour,
+        id: LB.uid(), medicationId: schedMed.id, weekdays: slotDraft.weekdays, hour: slotDraft.hour,
         doseQty, active: true, startDate, endDate, createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medicationScheduleSlots: [...(s.medicationScheduleSlots || []), newSlot] }));
@@ -895,7 +911,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {viewedPlanMeds.map(m => renderMedListRow(m))}
+                  {viewedPlanMeds.map(m => renderMedListRow(m, { mode: 'schedule' }))}
                 </div>
               )}
             </>
@@ -1052,14 +1068,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Edit / create a medication (identity + inventory + schedule) */}
-      {/* open is gated on !slotDraft too: the "Add/edit time" sheet below
-          stacks on top of this one while editing a schedule slot, hiding
-          this sheet (rather than leaving both mounted and open at once,
-          which left two same-labeled Save buttons live in the DOM
-          simultaneously) without losing medSheet's own state, closing the
-          slot sheet reveals this one again unchanged. */}
-      <Sheet open={!!medSheet && !slotDraft} onClose={requestCloseMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
+      {/* Edit / create a medication: identity only (name, brand, category,
+          unit, package size), see the header comment's split. Schedule
+          editing for an existing medication lives in the separate schedMed
+          Sheet below instead, never here. */}
+      <Sheet open={!!medSheet} onClose={requestCloseMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
         {medSheet && (
           <>
             <Field label="Name" style={{ marginBottom: 14 }}>
@@ -1086,30 +1099,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            {/* Time is a Schedule-tab thing, not part of creating a
-                medication: only an already-saved medication (real id) gets
-                this section at all, regardless of whether it's opened from
-                here or from a plan's own detail view. */}
-            {medSheet.id && (
-              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8 }}>Schedule</div>
-                {medSheetSlots.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                    {medSheetSlots.map(sl => (
-                      <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
-                          {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, medSheet.unitLabel)}
-                          {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
-                        </div>
-                        <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
-                        <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
-              </div>
-            )}
             {medSheet.id && medications.find(m => m.id === medSheet.id)?.medicationPlanId && (
               <Btn kind="ghost" onClick={() => removeMedicationFromPlan(medications.find(m => m.id === medSheet.id))} style={{ width: '100%', marginBottom: 8 }}>
                 <i className="fa-solid fa-arrow-right-from-bracket" style={{ marginRight: 8 }} />Remove from plan
@@ -1123,7 +1112,37 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Add/edit one schedule slot, nested within the medication sheet above */}
+      {/* View/edit a medication's schedule only, opened from a plan's own
+          detail view (renderMedListRow's mode: 'schedule'). The exact
+          counterpart to medSheet above: strictly time-only, never an
+          identity field, see the header comment's split. The medication's
+          name is a read-only title here, editing it lives exclusively in
+          medSheet (Inventory > Medications). No Save button of its own:
+          saveSlotDraft/deleteSlot below write straight to the store per
+          slot, there's nothing else here to persist. */}
+      <Sheet open={!!schedMed && !slotDraft} onClose={closeSchedMed} title={schedMed?.name || 'Schedule'} titleColor="var(--accent)">
+        {schedMed && (
+          <>
+            {schedMedSlots.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                {schedMedSlots.map(sl => (
+                  <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
+                      {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
+                      {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
+                    </div>
+                    <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
+                    <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
+          </>
+        )}
+      </Sheet>
+
+      {/* Add/edit one schedule slot, nested within the schedMed sheet above */}
       <Sheet open={!!slotDraft} onClose={requestCloseSlotDraft} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
         {slotDraft && (
           <>
@@ -1144,7 +1163,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
               <Stepper value={slotDraft.hour} step={1} min={0} max={23} suffix=":00" onChange={v => setSlotDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
             </div>
-            <Field label={`Dose (${medSheet?.unitLabel || 'pills'})`} style={{ marginBottom: 14 }}>
+            <Field label={`Dose (${schedMed?.unitLabel || 'pills'})`} style={{ marginBottom: 14 }}>
               <input value={slotDraft.doseQtyStr} onChange={e => setSlotDraft(d => ({ ...d, doseQtyStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 1" style={mdInputStyle} autoFocus />
             </Field>
