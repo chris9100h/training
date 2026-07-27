@@ -458,6 +458,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     water_bottle_ml: sett.waterBottleMl ?? 1500,
     water_reminder_enabled: sett.waterReminderEnabled ?? false,
     meal_reminder_enabled: sett.mealReminderEnabled ?? false,
+    meds_enabled: sett.medsEnabled ?? false,
+    medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -485,6 +487,10 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodTemplateSlots?.length ? 1 : 0)
     + (backup.foodMealPlans?.length ? 1 : 0)
     + (backup.foodShoppingPrefs?.length ? 1 : 0)
+    + (backup.medicationPlans?.length ? 1 : 0)
+    + (backup.medications?.length ? 1 : 0)
+    + (backup.medicationScheduleSlots?.length ? 1 : 0)
+    + (backup.medicationLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -690,6 +696,52 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
         food_name: p.foodName, brand: p.brand ?? null,
         updated_at: p.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.medicationPlans?.length) {
+    prog('Uploading medication plans…');
+    await unwrap(_supabase.from('zane_medication_plans').upsert(
+      backup.medicationPlans.map(p => ({
+        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.medications?.length) {
+    prog('Uploading medications…');
+    await unwrap(_supabase.from('zane_medications').upsert(
+      backup.medications.map(m => ({
+        id: m.id, user_id: userId, medication_plan_id: m.medicationPlanId ?? null, name: m.name,
+        brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
+        package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+        stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+        updated_at: m.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.medicationScheduleSlots?.length) {
+    prog('Uploading medication schedule…');
+    await unwrap(_supabase.from('zane_medication_schedule_slots').upsert(
+      backup.medicationScheduleSlots.map(s => ({
+        id: s.id, user_id: userId, medication_id: s.medicationId, weekdays: s.weekdays || [],
+        hour: s.hour, dose_qty: s.doseQty, active: !!s.active,
+        start_date: s.startDate ?? null, end_date: s.endDate ?? null,
+        updated_at: s.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.medicationLogs?.length) {
+    prog('Uploading medication logs…');
+    await unwrap(_supabase.from('zane_medication_logs').upsert(
+      backup.medicationLogs.map(l => ({
+        id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
+        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+        schedule_slot_id: l.scheduleSlotId ?? null,
       }))
     ));
     stepsDone++;
@@ -1089,6 +1141,20 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // snapshot, own store only like the rest of the Food Tracker's personal
     // collections above.
     isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
+    // Medications feature (migration 0218): own store only for the same
+    // reason as the meal-plan collections above, isCoachLoad's own narrow
+    // purpose (loadClientStore, only ever used to safely append a pushed
+    // plan via the diff-sync's empty-prev-never-deletes behavior) has no use
+    // for any of these either. A coach VIEWS a client's medications through
+    // its own direct RLS-backed query (mirrors ClientNutritionTab in
+    // screens-coaching-detail.jsx), not through this boot load.
+    isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, medication_plan_id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, weekdays, hour, dose_qty, active, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
+    // the timeline only ever needs recent history, materialized/older doses
+    // don't need to sit in memory forever.
+    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1096,7 +1162,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
-         foodShoppingPrefsRes] = await Promise.all(queries);
+         foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1140,6 +1206,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
   if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   if (foodShoppingPrefsRes?.error) throw foodShoppingPrefsRes.error;
+  if (medicationPlansRes?.error) throw medicationPlansRes.error;
+  if (medicationsRes?.error) throw medicationsRes.error;
+  if (medicationScheduleSlotsRes?.error) throw medicationScheduleSlotsRes.error;
+  if (medicationLogsRes?.error) throw medicationLogsRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
@@ -1324,6 +1394,29 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       stockSetAt: p.stock_set_at ?? null, foodName: p.food_name, brand: p.brand ?? null,
       createdAt: p.created_at, updatedAt: p.updated_at,
     })),
+    medicationPlans: (medicationPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
+      coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
+    })),
+    medications: (medicationsRes?.data || []).map(m => ({
+      id: m.id, medicationPlanId: m.medication_plan_id ?? null, name: m.name, brand: m.brand ?? null,
+      category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
+      packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
+      stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
+      createdAt: m.created_at, updatedAt: m.updated_at,
+    })),
+    medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
+      id: s.id, medicationId: s.medication_id, weekdays: s.weekdays || [],
+      hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
+      active: !!s.active, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      createdAt: s.created_at, updatedAt: s.updated_at,
+    })),
+    medicationLogs: (medicationLogsRes?.data || []).map(l => ({
+      id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
+      date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
@@ -1437,6 +1530,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         waterReminderEnabled: sett.water_reminder_enabled ?? false,
         mealReminderEnabled: sett.meal_reminder_enabled ?? false,
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
+        medsEnabled: sett.meds_enabled ?? false,
+        medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1901,6 +1996,45 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_food_shopping_prefs').delete().in('id', removed.map(p => p.id)));
   }
 
+  if (prev.medicationPlans !== next.medicationPlans) {
+    const { upsert, removed } = diffCollectionById(prev.medicationPlans, next.medicationPlans);
+    if (upsert.length) ops.push(_supabase.from('zane_medication_plans').upsert(upsert.map(p => ({
+      id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+      coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_plans').delete().in('id', removed.map(p => p.id)));
+  }
+  if (prev.medications !== next.medications) {
+    const { upsert, removed } = diffCollectionById(prev.medications, next.medications);
+    if (upsert.length) ops.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
+      id: m.id, user_id: userId, medication_plan_id: m.medicationPlanId ?? null, name: m.name,
+      brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
+      package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+      stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+      updated_at: m.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medications').delete().in('id', removed.map(m => m.id)));
+  }
+  if (prev.medicationScheduleSlots !== next.medicationScheduleSlots) {
+    const { upsert, removed } = diffCollectionById(prev.medicationScheduleSlots, next.medicationScheduleSlots);
+    if (upsert.length) ops.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
+      id: s.id, user_id: userId, medication_id: s.medicationId, weekdays: s.weekdays || [],
+      hour: s.hour, dose_qty: s.doseQty, active: !!s.active,
+      start_date: s.startDate ?? null, end_date: s.endDate ?? null,
+      updated_at: s.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_schedule_slots').delete().in('id', removed.map(s => s.id)));
+  }
+  if (prev.medicationLogs !== next.medicationLogs) {
+    const { upsert, removed } = diffCollectionById(prev.medicationLogs, next.medicationLogs);
+    if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
+      date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+      schedule_slot_id: l.scheduleSlotId ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));
+  }
+
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
     const upsert = (next.checkinSchemaTemplates || []).filter(t => {
       const p = (prev.checkinSchemaTemplates || []).find(x => x.id === t.id);
@@ -2065,6 +2199,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
     prev.settings?.mealReminderEnabled    !== next.settings?.mealReminderEnabled ||
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
+    prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
+    prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
@@ -2096,6 +2232,8 @@ async function syncStore(prev, next, userId) {
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
       meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
+      meds_enabled: next.settings?.medsEnabled ?? false,
+      medication_reminder_enabled: next.settings?.medicationReminderEnabled ?? false,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
@@ -4265,6 +4403,50 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
     await addCoachingNote(coachingId, 'general', null, null, body, coachUserId, threadId);
   } catch (noteErr) {
     console.warn('Meal plan pushed, but the coaching note could not be posted:', noteErr);
+  }
+  return newPlanId;
+}
+
+// Mirrors pushMealPlanToClient above almost exactly, one level deeper (plan ->
+// medications -> schedule slots, vs. food's plan -> slots): copies a
+// coach-authored template plan + its medications + their schedule slots
+// fresh into the client's account. No activateNow/active-pointer step, unlike
+// meal plans: medication plans have no single active slot, they're meant to
+// run alongside whatever else the client already has (see zane_medication_
+// plans in docs/database.md). Also flips the client's own medsEnabled on,
+// same reasoning as planMode above: a pushed plan the client's own feature
+// toggle hides would be pointless.
+async function pushMedicationPlanToClient({ plan, medications, scheduleSlots, coachUserId, coachingId, clientId }) {
+  const clientData = await loadClientStore(clientId);
+  const newPlanId = uid();
+  const nowISO = new Date().toISOString();
+  const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
+  const medIdMap = {};
+  const medCopies = (medications || []).map(m => {
+    const nid = uid();
+    medIdMap[m.id] = nid;
+    return { ...m, id: nid, medicationPlanId: newPlanId, createdAt: nowISO, updatedAt: nowISO };
+  });
+  // Only ever copies slots whose medication is actually part of this push
+  // (medIdMap has no entry otherwise), so a stray slot referencing a
+  // medication outside this plan can't leak into the client's account.
+  const slotCopies = (scheduleSlots || [])
+    .filter(s => medIdMap[s.medicationId])
+    .map(s => ({ ...s, id: uid(), medicationId: medIdMap[s.medicationId], createdAt: nowISO, updatedAt: nowISO }));
+  const withPlan = {
+    ...clientData,
+    settings: { ...clientData.settings, medsEnabled: true },
+    medicationPlans: [...(clientData.medicationPlans || []), planCopy],
+    medications: [...(clientData.medications || []), ...medCopies],
+    medicationScheduleSlots: [...(clientData.medicationScheduleSlots || []), ...slotCopies],
+  };
+  await syncStore(clientData, withPlan, clientId);
+  try {
+    const threadId = await getOrCreateCoachingThread(coachingId, 'Medications', coachUserId);
+    const body = `Pushed a new medication plan: ${plan.name}\n\nCheck Medications to see what's on it.`;
+    await addCoachingNote(coachingId, 'general', null, null, body, coachUserId, threadId);
+  } catch (noteErr) {
+    console.warn('Medication plan pushed, but the coaching note could not be posted:', noteErr);
   }
   return newPlanId;
 }
@@ -7711,7 +7893,7 @@ window.LB = {
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  loadClientStore, pushMealPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,
