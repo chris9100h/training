@@ -446,6 +446,12 @@ function fdReadShoppingDays() {
 function fdWriteShoppingDays(v) {
   try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
 }
+// One food per line, plain text (no bullets/markdown: Notes and every other
+// notes app render those as literal characters, not a real list), in the
+// same alphabetical order fdBuildShoppingList already sorted them in.
+function fdBuildShoppingExportText(list, withAmounts) {
+  return list.map(item => withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName).join('\n');
+}
 
 // Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
 // accent-bordered box when planned (not eaten yet), the same box filled with a
@@ -5164,6 +5170,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     setShoppingDays(n);
     fdWriteShoppingDays(n);
   }
+  const [exportOpen, setExportOpen] = useStateFd(false);
 
   // Gated on `open` so this doesn't recompute while the screen sits closed.
   // Deps cover everything fdBuildShoppingList reads, directly or through
@@ -5174,10 +5181,27 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
+  // Same share-with-clipboard-fallback pattern as the check-in text export
+  // (screens-coaching-tabs.jsx doExportText): navigator.share (which on iOS
+  // lists Notes as a target) when available, otherwise straight to the
+  // clipboard for a manual paste.
+  async function doExport(withAmounts) {
+    const text = fdBuildShoppingExportText(list, withAmounts);
+    if (navigator.share) { try { await navigator.share({ text }); } catch (_) {} }
+    else { try { await navigator.clipboard.writeText(text); } catch (_) {} }
+    setExportOpen(false);
+  }
+
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
-      <TopBar title="Shopping list" onBack={onClose} />
+      <TopBar title="Shopping list" onBack={onClose} right={
+        list.length > 0 && (
+          <button onClick={() => setExportOpen(true)} aria-label="Export list" style={fdTopAddBtn}>
+            <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
+          </button>
+        )
+      } />
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Card style={{ textAlign: 'center' }}>
           <div className="micro" style={{ marginBottom: 10 }}>Shopping for the next</div>
@@ -5205,6 +5229,20 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           </div>
         )}
       </div>
+      <Sheet open={exportOpen} onClose={() => setExportOpen(false)} title="Export list" titleColor="var(--accent)">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          <button onClick={() => doExport(true)} style={fdScanChoice}>
+            <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
+          </button>
+          <button onClick={() => doExport(false)} style={fdScanChoice}>
+            <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
+          </button>
+        </div>
+      </Sheet>
     </Screen>
   );
 }
