@@ -489,17 +489,19 @@ function fdExactShoppingQty(grams) {
 // Package-aware buy quantity. With no package size set, the plain rounded
 // estimate above, unchanged, as `headline` with no `sub`. With one, the whole
 // point of setting it was to shop by pack count, not by weight, so `headline`
-// becomes "3 x 400g" (rounds UP, you can't buy half a pack) and the actual
-// gram total moves to `sub`, a small reference figure rather than the
-// headline number. Both the package size and the resulting total are exact
-// values (not estimates), so they go through fdExactShoppingQty, never
-// fdRoundShoppingQty. Exports use `headline` too, "3 x 400g" reads as a
-// normal shopping-list line same as any plain amount.
+// becomes "3 x 400g" (rounds UP, you can't buy half a pack), an exact fact
+// about the product so it goes through fdExactShoppingQty, never
+// fdRoundShoppingQty. `sub` used to just restate packs x size in kg, purely
+// redundant with headline; it's the estimated need BEFORE rounding up to
+// whole packages now instead, so a user can see how much headroom buying
+// whole packages leaves them (still an estimate like the no-package-size
+// case, so fdRoundShoppingQty, not fdExactShoppingQty). Exports use
+// `headline` only, "3 x 400g" reads as a normal shopping-list line same as
+// any plain amount.
 function fdFormatShoppingQty(grams, packageSizeG) {
   if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
   const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
-  const buyGrams = packs * packageSizeG;
-  return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: fdExactShoppingQty(buyGrams) };
+  return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
