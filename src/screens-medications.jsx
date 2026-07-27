@@ -727,6 +727,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
                   background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
                   color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
+                  textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
                   WebkitTapHighlightColor: 'transparent',
                 }}>{label}</button>
               ))}
