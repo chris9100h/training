@@ -1363,30 +1363,43 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // real total is never inflated by something not yet eaten.
   const projectedTotals = useMemoFd(() => sumTotals(dayEntries), [dayEntries]);
 
+  const dayLog = useMemoFd(
+    () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
+    [store.dailyLogs, curDate]);
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
   // personal ones, and training/rest day pick different targets. null when
   // nothing is set, in which case the hero just shows a bare total, no ring.
   const macroTargets = useMemoFd(() => LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros), [store.settings?.macroTargets, coachingMacros]);
   const dayTarget = useMemoFd(() => {
+    // A day already scored keeps the target it was scored against, the same
+    // dayTargetOverride contract LB.dailyLogAdherence and the food
+    // reconciler effect (screens-health.jsx) already use: without this,
+    // scrolling back to an old day after a later macro change would show it
+    // measured against TODAY's numbers here, while the Health tab's card for
+    // that same day (which reads the frozen dailyLogs.adherence first)
+    // correctly kept showing the historical one. Today and future days have
+    // no snap yet, so they fall through to the live target as before.
+    const snap = dayLog?.targetsSnap;
+    const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
+    if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
     return LB.dayTargetFromMacros(macroTargets, isTraining);
-  }, [store, macroTargets, curDate]);
+  }, [store, macroTargets, curDate, dayLog]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
   // Same weighted-macro-distance formula HealthScreen's today card uses
   // (LB.macroAdherence), computed live off dayTotals rather than reading
-  // dailyLogs.adherence: that stored field only gets reconciled by an
-  // effect living in HealthScreen, which isn't mounted while viewing this
+  // dailyLogs.adherence directly: that stored field only gets reconciled by
+  // an effect living in HealthScreen, which isn't mounted while viewing this
   // screen, so it would show a stale number right after logging something
-  // here. null (hidden) when there's no macro target to score against.
-  // A meal-of-choice day is deliberately unscored (see LB.dailyLogAdherence),
-  // and this is the one adherence figure in the app that is recomputed live
-  // rather than read from the store, so it needs the rule applied a second
-  // time or the Food hero would show a percentage while the Health tab shows
-  // none for the same day.
-  const dayLog = useMemoFd(
-    () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
-    [store.dailyLogs, curDate]);
+  // here (dayTarget above already resolves to the correct historical target
+  // once one is stored, this only keeps the TOTALS live). null (hidden) when
+  // there's no macro target to score against. A meal-of-choice day is
+  // deliberately unscored (see LB.dailyLogAdherence), and this is the one
+  // adherence figure in the app that is recomputed live rather than read
+  // from the store, so it needs the rule applied a second time or the Food
+  // hero would show a percentage while the Health tab shows none for the
+  // same day.
   const isMealOfChoice = !!dayLog?.mealOfChoice;
   const dayAdherence = useMemoFd(
     () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,

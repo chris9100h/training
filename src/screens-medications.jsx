@@ -27,7 +27,7 @@
    own direct query (ClientMedicationsTab, screens-coaching-detail.jsx), same
    split as ClientNutritionTab/pushMealPlanToClient. */
 
-const { useState: useStateMd, useEffect: useEffectMd, useMemo: useMemoMd } = React;
+const { useState: useStateMd, useEffect: useEffectMd, useMemo: useMemoMd, useRef: useRefMd } = React;
 
 // Own copy of fdShiftDate (screens-food.jsx), same reasoning as MdCheckbox:
 // that one is private to the Food Tracker's own module scope.
@@ -124,8 +124,8 @@ function mdHourAddBtn(isNow) {
 // UI's own presets, a new category never needs a migration.
 const MED_CATEGORIES = [
   { id: 'vitamin', label: 'Vitamin' },
-  { id: 'supplement', label: 'Supplement' },
   { id: 'compound', label: 'Compound' },
+  { id: 'peptide', label: 'Peptide' },
   { id: 'other', label: 'Other' },
 ];
 // Index matches LB.isoWd (store.js: 0=Mon..6=Sun), the same weekday
@@ -386,16 +386,39 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // Medication identity + inventory edit sheet. draft.id === null means
   // "creating a new medication in viewedPlanId".
   const [medSheet, setMedSheet] = useStateMd(null);
+  const medSheetInitialSnap = useRefMd(null);
+  // Only the identity/stock fields, not medSheetSlots: an existing
+  // medication's schedule already writes straight to the store the moment
+  // you add/edit/delete a time (see saveSlotDraft/deleteSlot), so it's never
+  // "unsaved" here; pendingSlots (create mode only) is the one schedule
+  // piece that IS still only local, so it's included.
+  function snapMedSheet(d) {
+    return JSON.stringify({
+      name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel,
+      packageSizeStr: d.packageSizeStr, stockStr: d.stockStr, pendingSlots: d.pendingSlots || [],
+    });
+  }
   function openMedSheet(med) {
-    setMedSheet(med ? {
+    const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize ? String(med.packageSize) : '',
       stockStr: '',
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '', pendingSlots: [],
-    });
+    };
+    medSheetInitialSnap.current = snapMedSheet(next);
+    setMedSheet(next);
   }
   function closeMedSheet() { setMedSheet(null); }
+  // Backdrop tap used to drop the whole in-progress medication (name,
+  // package size, stock, and any schedule times already added via
+  // pendingSlots while still creating) silently, same trap screens-food.jsx's
+  // own meal-slot draft had (see requestCloseDraft there).
+  async function requestCloseMedSheet() {
+    if (medSheet && snapMedSheet(medSheet) !== medSheetInitialSnap.current
+      && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeMedSheet();
+  }
   function saveMedSheet() {
     if (!medSheet || !medSheet.name.trim()) return;
     const packageSize = mdNum(medSheet.packageSizeStr);
@@ -450,14 +473,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     [scheduleSlots, medSheet?.id, medSheet?.pendingSlots],
   );
   const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, active, phaseOpen, startDate, endDate }
+  const slotDraftInitialSnap = useRefMd(null);
+  function snapSlotDraft(d) {
+    return JSON.stringify({ weekdays: d.weekdays, hour: d.hour, doseQtyStr: d.doseQtyStr, active: d.active, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
+  }
   function openSlotDraft(slot) {
-    setSlotDraft(slot ? {
+    const next = slot ? {
       id: slot.id, weekdays: [...(slot.weekdays || [])], hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
       active: slot.active, phaseOpen: !!(slot.startDate || slot.endDate), startDate: slot.startDate || '', endDate: slot.endDate || '',
     } : {
       id: null, weekdays: [...MD_WEEKDAYS_EVERY_DAY], hour: 8, doseQtyStr: '', active: true,
       phaseOpen: false, startDate: '', endDate: '',
-    });
+    };
+    slotDraftInitialSnap.current = snapSlotDraft(next);
+    setSlotDraft(next);
+  }
+  // Same backdrop-dismiss protection as requestCloseMedSheet above, this
+  // sheet's own risk if anything is higher: weekdays + hour + dose + an
+  // optional phase range is more to retype than any single medSheet field.
+  async function requestCloseSlotDraft() {
+    if (slotDraft && snapSlotDraft(slotDraft) !== slotDraftInitialSnap.current
+      && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setSlotDraft(null);
   }
   function saveSlotDraft() {
     if (!medSheet || !slotDraft || !slotDraft.weekdays.length) return;
@@ -865,7 +902,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           which left two same-labeled Save buttons live in the DOM
           simultaneously) without losing medSheet's own state, closing the
           slot sheet reveals this one again unchanged. */}
-      <Sheet open={!!medSheet && !slotDraft} onClose={closeMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
+      <Sheet open={!!medSheet && !slotDraft} onClose={requestCloseMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
         {medSheet && (
           <>
             <Field label="Name" style={{ marginBottom: 14 }}>
@@ -933,7 +970,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       </Sheet>
 
       {/* Add/edit one schedule slot, nested within the medication sheet above */}
-      <Sheet open={!!slotDraft} onClose={() => setSlotDraft(null)} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
+      <Sheet open={!!slotDraft} onClose={requestCloseSlotDraft} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
         {slotDraft && (
           <>
             <div className="micro" style={{ marginBottom: 8 }}>Days</div>
