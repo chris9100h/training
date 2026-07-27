@@ -5182,8 +5182,6 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     setShoppingDays(n);
     fdWriteShoppingDays(n);
   }
-  const [exportOpen, setExportOpen] = useStateFd(false);
-
   // Gated on `open` so this doesn't recompute while the screen sits closed.
   // Deps cover everything fdBuildShoppingList reads, directly or through
   // LB.isTrainingDayForDate's own schedule/session lookups.
@@ -5193,15 +5191,25 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
-  // Always clipboard, deliberately not navigator.share (sharing straight to
-  // Notes goes through its Share Extension rather than a paste, one more
-  // difference from a manual copy/paste that isn't worth the ambiguity).
+  // Two-step sheet: pick content (amounts or not) first, then how to get it
+  // out (share or copy). exportContent doubles as the step tracker: null is
+  // step 1, set is step 2. Skips straight to copying when navigator.share
+  // isn't available at all, there's no real method choice to show then.
+  const [exportOpen, setExportOpen] = useStateFd(false);
+  const [exportContent, setExportContent] = useStateFd(null); // null | 'amounts' | 'names'
+  const [justCopied, setJustCopied] = useStateFd(false);
+  function openExport() { setExportContent(null); setJustCopied(false); setExportOpen(true); }
+  function closeExport() { setExportOpen(false); setExportContent(null); setJustCopied(false); }
+  function pickContent(withAmounts) {
+    if (typeof navigator.share !== 'function') { doExport(withAmounts); return; }
+    setExportContent(withAmounts ? 'amounts' : 'names');
+  }
+
   // Writes a real HTML <ul><li> list alongside the plain text: a raw
   // \n-joined string doesn't reliably read as separate checklist rows to
   // every paste target (Notes' parser cares about actual paragraph
   // boundaries), an explicit list structure removes that guesswork. Falls
   // back to plain-text-only if the richer multi-type write isn't supported.
-  const [justCopied, setJustCopied] = useStateFd(null); // null | 'amounts' | 'names'
   async function doExport(withAmounts) {
     const text = fdBuildShoppingExportText(list, withAmounts);
     let copied = false;
@@ -5219,8 +5227,8 @@ function ShoppingListScreen({ open, onClose, store, today }) {
       try { await navigator.clipboard.writeText(text); copied = true; } catch (_) {}
     }
     if (!copied) return;
-    setJustCopied(withAmounts ? 'amounts' : 'names');
-    setTimeout(() => { setExportOpen(false); setJustCopied(null); }, 900);
+    setJustCopied(true);
+    setTimeout(closeExport, 900);
   }
   // Separate from doExport on purpose: the Web Share API's `text` is always
   // plain (no HTML variant exists), so this can't carry the <ul><li> fix
@@ -5230,7 +5238,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   async function doShare(withAmounts) {
     const text = fdBuildShoppingExportText(list, withAmounts);
     try { await navigator.share({ text }); } catch (_) {}
-    setExportOpen(false);
+    closeExport();
   }
 
   if (!open) return null;
@@ -5238,7 +5246,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Shopping list" onBack={onClose} right={
         list.length > 0 && (
-          <button onClick={() => setExportOpen(true)} aria-label="Export list" style={fdTopAddBtn}>
+          <button onClick={openExport} aria-label="Export list" style={fdTopAddBtn}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
           </button>
         )
@@ -5270,40 +5278,42 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           </div>
         )}
       </div>
-      <Sheet open={exportOpen} onClose={() => setExportOpen(false)} title="Export list" titleColor="var(--accent)">
-        <div className="micro" style={{ marginBottom: 8 }}>Copy to clipboard</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-          <button onClick={() => doExport(true)} style={fdScanChoice}>
-            <i className={`fa-solid ${justCopied === 'amounts' ? 'fa-check' : 'fa-weight-hanging'}`} style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>{justCopied === 'amounts' ? 'Copied' : 'With amounts'}</span>
-            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
-          </button>
-          <button onClick={() => doExport(false)} style={fdScanChoice}>
-            <i className={`fa-solid ${justCopied === 'names' ? 'fa-check' : 'fa-list'}`} style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>{justCopied === 'names' ? 'Copied' : 'Names only'}</span>
-            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
-          One item per line. Paste it into Notes to keep every item as its own checkable line.
-        </div>
-        {typeof navigator.share === 'function' && (
+      <Sheet open={exportOpen} onClose={closeExport} title="Export list" titleColor="var(--accent)">
+        {justCopied ? (
+          // Own view rather than nested in the Copy button: pickContent's
+          // no-navigator.share fallback copies straight from step 1, never
+          // visiting the step-2 grid the button-level state lived in before.
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '20px 0' }}>
+            <i className="fa-solid fa-circle-check" style={{ fontSize: 28, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Copied</span>
+          </div>
+        ) : !exportContent ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            <button onClick={() => pickContent(true)} style={fdScanChoice}>
+              <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
+            </button>
+            <button onClick={() => pickContent(false)} style={fdScanChoice}>
+              <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
+            </button>
+          </div>
+        ) : (
           <>
-            <div className="micro" style={{ marginTop: 18, marginBottom: 8 }}>Share</div>
+            <div className="micro" style={{ marginBottom: 8 }}>Share or copy?</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-              <button onClick={() => doShare(true)} style={fdScanChoice}>
-                <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
-                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
-                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
+              <button onClick={() => doShare(exportContent === 'amounts')} style={fdScanChoice}>
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Share</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Messages, Mail, AirDrop…</span>
               </button>
-              <button onClick={() => doShare(false)} style={fdScanChoice}>
-                <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
-                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
-                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
+              <button onClick={() => doExport(exportContent === 'amounts')} style={fdScanChoice}>
+                <i className="fa-solid fa-copy" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Copy</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>One item per line, for Notes</span>
               </button>
-            </div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
-              Sends the list to Messages, Mail, or any other app via your share sheet.
             </div>
           </>
         )}
