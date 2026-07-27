@@ -2832,14 +2832,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </button>
           ) : tab === 'log' ? (
             // Day-level actions. Screenshot and multi-select need something to
-            // act on, but the overflow must not: declaring a meal-of-choice day
-            // is a morning decision, made before anything is logged.
+            // act on, but the overflow and shopping list must not: a
+            // meal-of-choice day is a morning decision made before anything is
+            // logged, and the shopping list is a standalone feature that
+            // draws on history/plan data, independent of today's entries.
             <div style={{ display: 'flex', gap: 8 }}>
               {dayEntries.length > 0 && (
                 <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
                   {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
                 </button>
               )}
+              <button onClick={() => setShoppingOpen(true)} aria-label="Shopping list" style={fdTopAddBtn}>
+                <i className="fa-solid fa-basket-shopping" style={{ fontSize: 13 }} />
+              </button>
               <button onClick={() => setDayMenu(true)} aria-label="Day options" style={fdTopAddBtn}>
                 <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
               </button>
@@ -3020,12 +3025,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
               </button>
             )}
-
-            <button onClick={() => setShoppingOpen(true)} style={{ ...fdTemplateBtn, marginTop: planMode ? 8 : 0 }}>
-              <i className="fa-solid fa-basket-shopping" style={{ fontSize: 13, color: 'var(--accent)' }} />
-              <span style={{ flex: 1, textAlign: 'left' }}>Shopping list</span>
-              <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
-            </button>
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
