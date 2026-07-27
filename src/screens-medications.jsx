@@ -910,7 +910,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
         {screenTab === 'inventory' && (
           <>
-            <SubTabBar tabs={[{ id: 'inventory', label: 'Inventory' }, { id: 'medications', label: 'Medications' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
+            <SubTabBar tabs={[{ id: 'medications', label: 'Medications' }, { id: 'inventory', label: 'Inventory' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
             {invSubTab === 'inventory' ? (
               <>
                 {freshLowStock.length > 0 && (
