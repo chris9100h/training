@@ -97,6 +97,19 @@ const mdEditBtn = {
   background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
   borderRadius: 4, padding: '5px 12px', cursor: 'pointer', color: UI.inkSoft,
 };
+// Small tag-pill badge, mirrors the recurring gold/neutral tag pattern in the
+// Training Plan list's own cards (screens-schedule.jsx), no shared helper
+// exists there either (each is hand-inlined), named here since Medications
+// only needs the one shape.
+function mdTagPill(gold) {
+  return {
+    fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700,
+    color: gold ? UI.gold : UI.inkSoft,
+    background: gold ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset,
+    border: `1px solid ${gold ? UI.goldSoft : UI.hairStrong}`,
+    borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em',
+  };
+}
 function mdSegBtn(active) {
   return {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
@@ -953,17 +966,31 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 <Empty title="No plans yet" sub="A plan groups medications you take for the same reason, vitamins, a cycle, whatever makes sense to you."
                   icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* Mirrors the Training Plan list's own active/plain card
+                      split (screens-schedule.jsx): an active plan gets the
+                      gold BracketFrame treatment, a paused one is a plain
+                      Frame, same visual language as the training screen's
+                      "is this the one that's actually running" signal. */}
                   {plans.map(p => {
-                    const memberCount = medicationPlanItems.filter(it => it.medicationPlanId === p.id && activeMedications.some(m => m.id === it.medicationId)).length;
+                    const planMeds = activeMedications.filter(m => medicationPlanItems.some(it => it.medicationPlanId === p.id && it.medicationId === m.id));
+                    const CardFrame = p.active ? BracketFrame : Frame;
                     return (
-                      <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
-                        <span style={mdEntryName}>{p.name}</span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={mdEntryMeta}>{!p.active && 'Paused · '}{memberCount}</span>
-                          <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
-                        </span>
-                      </button>
+                      <CardFrame key={p.id} {...(p.active ? { gold: true } : {})} onClick={() => setViewedPlanId(p.id)} style={{ cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <div className="display" style={{ fontSize: p.active ? 22 : 20, color: p.active ? UI.gold : UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                          {!p.active && <span style={mdTagPill(false)}>PAUSED</span>}
+                          {p.active && <Pill gold>active</Pill>}
+                        </div>
+                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>
+                          {planMeds.length} medication{planMeds.length === 1 ? '' : 's'}
+                        </div>
+                        {planMeds.length > 0 && (
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {planMeds.map(m => <Pill key={m.id} gold={p.active}>{m.name}</Pill>)}
+                          </div>
+                        )}
+                      </CardFrame>
                     );
                   })}
                 </div>
@@ -971,25 +998,46 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <button onClick={() => setViewedPlanId(null)} style={{ background: 'none', border: 'none', color: UI.inkSoft, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                  <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} /> Plans
+              {/* Header mirrors the Training Plan viewer's own TopBar shape
+                  (bordered back-chevron, subtitle+title, small text button
+                  top-right), hand-built here rather than nesting the real
+                  TopBar component: that one is `position: sticky, top: 0`,
+                  which would fight with the Medications screen's own outer
+                  TopBar for the same sticky slot once this content scrolls. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                <button onClick={() => setViewedPlanId(null)} aria-label="Back to plans" style={{ ...mdNavBtn(), color: UI.gold }}>
+                  <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
                 </button>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {isCoach && <button className="label" onClick={() => setCoachMenuOpen(true)} style={mdEditBtn}>Coach</button>}
-                  <button className="label" onClick={() => openPlanNameDraft({ id: viewedPlan.id, name: viewedPlan.name })} style={mdEditBtn}>Rename</button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="micro" style={{ marginBottom: 2 }}>{viewedPlanMeds.length} medication{viewedPlanMeds.length === 1 ? '' : 's'}</div>
+                  <div className="display" style={{ fontSize: 22, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{viewedPlan.name}</div>
                 </div>
+                <button className="label" onClick={() => openPlanNameDraft({ id: viewedPlan.id, name: viewedPlan.name })} style={{ ...mdEditBtn, flexShrink: 0 }}>Rename</button>
               </div>
-              <div className="display" style={{ fontSize: 20, color: UI.ink }}>{viewedPlan.name}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
-                <Toggle on={viewedPlan.active} onToggle={() => togglePlanActive(viewedPlan)} />
-                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
-                  {viewedPlan.active ? 'Active, doses fire on schedule' : "Paused, this plan's doses never fire"}
+              {/* Tappable status bar, mirrors the Training Plan viewer's own
+                  "● Active" bar (screens-schedule.jsx): same gold-filled/
+                  bordered look when active, but here it IS the toggle itself
+                  (several plans can be active at once, unlike Training's
+                  single active pointer, so this is a real on/off switch, not
+                  a read-only status). */}
+              <button onClick={() => togglePlanActive(viewedPlan)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                border: `1px solid ${viewedPlan.active ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
+                background: viewedPlan.active ? UI.goldFaint : 'transparent',
+                padding: '10px 14px', minHeight: 44, width: '100%', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: viewedPlan.active ? UI.gold : UI.inkFaint, flexShrink: 0 }} />
+                <span className="label" style={{ color: viewedPlan.active ? UI.gold : UI.inkFaint, marginBottom: 0 }}>
+                  {viewedPlan.active ? 'Active, doses fire on schedule' : "Paused, tap to activate"}
                 </span>
+              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn onClick={() => setAddToPlanOpen(true)} style={{ flex: 1 }}>
+                  <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
+                </Btn>
+                {isCoach && <Btn kind="ghost" onClick={() => setCoachMenuOpen(true)} style={{ flex: 1 }}>Coach</Btn>}
               </div>
-              <Btn onClick={() => setAddToPlanOpen(true)} style={{ width: '100%' }}>
-                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
-              </Btn>
               {!viewedPlanMeds.length ? (
                 <Empty title="Nothing in this plan yet" sub="Add a medication you've already created in the Medications tab."
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
