@@ -8,21 +8,24 @@
    Three tabs:
    - Timeline: today's doses (auto-filled from active schedule slots, same
      planned/logged distinction as food), plus logging an ad-hoc dose.
-   - Schedule: two sub-tabs. Medications is the actual create/edit/delete
-     surface for a medication (identity, unit, package size, its own
-     recurring weekly schedule slot(s)), independent of any plan
-     (medicationPlanId is a nullable soft reference, see migration 0218).
-     Plans (My Plans / Client Templates for a coach, like FoodTemplateScreen)
-     are just named groupings a medication can optionally belong to; a
-     plan's own "Add medication" only ever attaches an already-created one
-     (or creates a new one pre-assigned to it), so removing a medication
-     from a plan, or deleting the plan itself, never destroys the
-     medication, its schedule or its log history.
-   - Inventory: every non-archived medication (not just stock-tracked ones,
-     unlike the Shopping List's own Inventory tab: this domain's medication
-     list IS the inventory, there's no separate frequency-filtered "staple"
-     concept sitting in front of it), with a Running Low section for anything
-     that's dipped under its package size.
+   - Schedule: named plans (My Plans / Client Templates for a coach, like
+     FoodTemplateScreen). A plan is just a grouping a medication can
+     optionally belong to (medicationPlanId is a nullable soft reference,
+     see migration 0218); its own "Add medication" only ever attaches an
+     already-created one (or creates a new one pre-assigned to it), so
+     removing a medication from a plan, or deleting the plan itself, never
+     destroys the medication, its schedule or its log history.
+   - Inventory: two sub-tabs, mirroring the Food Shopping List's own
+     Shopping List/Inventory split. Inventory is the stock/low-stock view,
+     every non-archived medication (not just stock-tracked ones, unlike the
+     Shopping List's own Inventory tab: this domain's medication list IS the
+     inventory, there's no separate frequency-filtered "staple" concept
+     sitting in front of it), with a Running Low section for anything
+     that's dipped under its package size. Medications is the actual
+     create/edit/delete surface for a medication (identity, unit, package
+     size, its own recurring weekly schedule slot(s)), independent of any
+     plan, same list as Inventory just presented for editing rather than
+     for stock.
 
    Multiple plans run concurrently on purpose (no active_*_id pointer like
    food): daily vitamins alongside a coach-prescribed cycle is the normal
@@ -373,10 +376,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // ─────────────────────────── Schedule tab ───────────────────────────
   // Plans are just named groupings a medication can optionally belong to
   // (medicationPlanId, nullable, see migration 0218's own "soft reference"
-  // comment): the Medications sub-tab is the actual create/edit/delete
-  // surface for the medication itself, independent of any plan, so removing
-  // one from a plan (or deleting the plan) never has to destroy it.
-  const [scheduleSubTab, setScheduleSubTab] = useStateMd('plans'); // 'plans' | 'medications'
+  // comment): the Inventory tab's own Medications sub-tab is the actual
+  // create/edit/delete surface for the medication itself, independent of
+  // any plan, so removing one from a plan (or deleting the plan) never has
+  // to destroy it.
   const [planSubTab, setPlanSubTab] = useStateMd('mine'); // 'mine' | 'templates', coach bucket only
   const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
   const plans = useMemoMd(() => medicationPlans.filter(p => !p.archived && inBucket(p)), [medicationPlans, isCoach, planSubTab]);
@@ -685,6 +688,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // Every non-archived medication, tracked or not: unlike the Shopping
   // List's own Inventory tab, there's no separate staple/frequency filter in
   // front of this list, the medication catalog IS the inventory here.
+  // Its own Inventory/Medications sub-switch mirrors that same Shopping List
+  // screen's Shopping List/Inventory one: Inventory here is the stock/low-
+  // stock view (renderMedRow), Medications is the create/edit/delete surface
+  // for the medication itself (renderMedListRow), independent of any plan.
+  const [invSubTab, setInvSubTab] = useStateMd('inventory'); // 'inventory' | 'medications'
   const inventoryList = useMemoMd(
     () => [...activeMedications].sort((a, b) => a.name.localeCompare(b.name)),
     [activeMedications],
@@ -852,50 +860,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         {screenTab === 'schedule' && (
           !viewedPlan ? (
             <>
-              <SubTabBar tabs={[{ id: 'plans', label: 'Plans' }, { id: 'medications', label: 'Medications' }]} active={scheduleSubTab} onChange={setScheduleSubTab} style={{ padding: 0, marginBottom: 4 }} />
-              {scheduleSubTab === 'plans' ? (
-                <>
-                  {isCoach && <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} style={{ padding: 0, marginBottom: 4 }} />}
-                  <Btn onClick={() => openPlanNameDraft({ id: null, name: '' })} style={{ width: '100%' }}>
-                    <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New plan
-                  </Btn>
-                  {!plans.length ? (
-                    <Empty title="No plans yet" sub="A plan groups medications you take for the same reason, vitamins, a cycle, whatever makes sense to you."
-                      icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {plans.map(p => (
-                        <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
-                          <span style={mdEntryName}>{p.name}</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={mdEntryMeta}>{medications.filter(m => !m.archived && m.medicationPlanId === p.id).length}</span>
-                            <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
+              {isCoach && <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} style={{ padding: 0, marginBottom: 4 }} />}
+              <Btn onClick={() => openPlanNameDraft({ id: null, name: '' })} style={{ width: '100%' }}>
+                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New plan
+              </Btn>
+              {!plans.length ? (
+                <Empty title="No plans yet" sub="A plan groups medications you take for the same reason, vitamins, a cycle, whatever makes sense to you."
+                  icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
-                <>
-                  {/* The actual create/edit surface for a medication, entirely
-                      independent of any plan (see medicationPlanId's nullable
-                      "soft reference"). A plan's own "Add medication" only ever
-                      attaches one already created here, never creates it fresh
-                      tied to that plan, so removing one from a plan never has
-                      to destroy it. */}
-                  <Btn onClick={() => openMedSheet(null)} style={{ width: '100%' }}>
-                    <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
-                  </Btn>
-                  {!inventoryList.length ? (
-                    <Empty title="No medications yet" sub="Create one here, then add it to a plan (or several, one at a time) whenever you're ready."
-                      icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {inventoryList.map(m => renderMedListRow(m, { showPlanTag: true }))}
-                    </div>
-                  )}
-                </>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {plans.map(p => (
+                    <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
+                      <span style={mdEntryName}>{p.name}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={mdEntryMeta}>{medications.filter(m => !m.archived && m.medicationPlanId === p.id).length}</span>
+                        <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+                      </span>
+                    </button>
+                  ))}
+                </div>
               )}
             </>
           ) : (
@@ -927,35 +910,60 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
         {screenTab === 'inventory' && (
           <>
-            {freshLowStock.length > 0 && (
-              <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
-                <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
-                  {freshLowStock.length === 1 ? `${freshLowStock[0].name} is running low.` : `${freshLowStock.length} medications are running low.`}
-                </div>
-                <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
-                  <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
-                </button>
-              </div>
-            )}
-            {lowStockList.length > 0 && (
-              <div className="low-stock-glow" style={{ background: 'rgba(var(--warn-rgb),0.08)', border: '1px solid rgba(var(--warn-rgb),0.35)', borderRadius: 8, padding: '14px 14px 10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10 }}>
-                  <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 12, color: 'var(--warn)' }} />
-                  <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--warn)', fontFamily: UI.fontUi }}>Running Low</div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {lowStockList.map(renderMedRow)}
-                </div>
-              </div>
-            )}
-            {!inventoryList.length ? (
-              <Empty title="No medications yet" sub="Add one from the Schedule tab to start tracking it here."
-                icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+            <SubTabBar tabs={[{ id: 'inventory', label: 'Inventory' }, { id: 'medications', label: 'Medications' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
+            {invSubTab === 'inventory' ? (
+              <>
+                {freshLowStock.length > 0 && (
+                  <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+                      {freshLowStock.length === 1 ? `${freshLowStock[0].name} is running low.` : `${freshLowStock.length} medications are running low.`}
+                    </div>
+                    <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                      <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                    </button>
+                  </div>
+                )}
+                {lowStockList.length > 0 && (
+                  <div className="low-stock-glow" style={{ background: 'rgba(var(--warn-rgb),0.08)', border: '1px solid rgba(var(--warn-rgb),0.35)', borderRadius: 8, padding: '14px 14px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10 }}>
+                      <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 12, color: 'var(--warn)' }} />
+                      <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--warn)', fontFamily: UI.fontUi }}>Running Low</div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {lowStockList.map(renderMedRow)}
+                    </div>
+                  </div>
+                )}
+                {!inventoryList.length ? (
+                  <Empty title="No medications yet" sub="Add one in the Medications tab to start tracking it here."
+                    icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {inventoryList.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))).map(renderMedRow)}
+                  </div>
+                )}
+              </>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {inventoryList.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))).map(renderMedRow)}
-              </div>
+              <>
+                {/* The actual create/edit surface for a medication, entirely
+                    independent of any plan (see medicationPlanId's nullable
+                    "soft reference"). A plan's own "Add medication" only ever
+                    attaches one already created here, never creates it fresh
+                    tied to that plan, so removing one from a plan never has
+                    to destroy it. */}
+                <Btn onClick={() => openMedSheet(null)} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
+                </Btn>
+                {!inventoryList.length ? (
+                  <Empty title="No medications yet" sub="Create one here, then add it to a plan (or several, one at a time) whenever you're ready."
+                    icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {inventoryList.map(m => renderMedListRow(m, { showPlanTag: true }))}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
