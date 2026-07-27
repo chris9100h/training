@@ -681,6 +681,7 @@ function FdCheckbox({ checked, onToggle, disabled, label }) {
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
+        textShadow: checked ? 'none' : 'var(--text-lift)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}

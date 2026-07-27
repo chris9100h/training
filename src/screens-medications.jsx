@@ -260,6 +260,7 @@ function MdCheckbox({ checked, onToggle, label }) {
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
+        textShadow: checked ? 'none' : 'var(--text-lift)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -313,8 +314,30 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       const h = parseInt((e.time || '0:00').split(':')[0], 10) || 0;
       (map[h] = map[h] || []).push(e);
     });
+    // Preview rows: schedule slots due on curDate with no real log yet, e.g.
+    // a future day nobody's opened here before (mdAutoFillToday only ever
+    // materializes TODAY, see its own comment), or a past day auto-fill
+    // never ran for. Computed live from the schedule, never written to the
+    // store: editing/deleting the slot is reflected immediately, and
+    // nothing "logs" a dose that hasn't actually happened yet. Read-only
+    // (no checkbox/delete in the render below), the hour's own "+" is still
+    // there to log a real dose if the user wants one.
+    const wd = LB.isoWd(new Date(curDate + 'T12:00:00'));
+    const existingSlotIds = new Set(curDateLogs.filter(e => e.scheduleSlotId).map(e => e.scheduleSlotId));
+    const medsById = new Map(activeMedications.map(m => [m.id, m]));
+    scheduleSlots.forEach(slot => {
+      const med = medsById.get(slot.medicationId);
+      if (!med || existingSlotIds.has(slot.id)) return;
+      if (!mdSlotAppliesOn(slot, curDate, wd)) return;
+      (map[slot.hour] = map[slot.hour] || []).push({
+        id: `preview_${curDate}_${slot.id}`, medicationId: med.id, medicationName: med.name,
+        time: `${String(slot.hour).padStart(2, '0')}:00`, doseQty: slot.doseQty, planned: true,
+        scheduleSlotId: slot.id, isPreview: true,
+      });
+    });
+    Object.keys(map).forEach(h => map[h].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
     return map;
-  }, [curDateLogs]);
+  }, [curDateLogs, curDate, activeMedications, scheduleSlots]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
@@ -710,15 +733,19 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {filled ? es.map(entry => (
-                            <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: entry.planned ? 0.7 : 1 }}>
-                              <MdCheckbox checked={!entry.planned} onToggle={() => toggleTaken(entry)} label={entry.planned ? 'Mark as taken' : 'Mark as not taken'} />
+                            <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: entry.isPreview ? 0.6 : (entry.planned ? 0.7 : 1) }}>
+                              {entry.isPreview
+                                ? <div style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 4, border: `1.5px dashed ${UI.hairStrong}` }} />
+                                : <MdCheckbox checked={!entry.planned} onToggle={() => toggleTaken(entry)} label={entry.planned ? 'Mark as taken' : 'Mark as not taken'} />}
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={mdEntryName}>{entry.medicationName}</div>
-                                <div style={mdEntryMeta}>{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}</div>
+                                <div style={mdEntryMeta}>{entry.isPreview ? 'Scheduled · ' : ''}{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}</div>
                               </div>
-                              <button onClick={() => deleteLogEntry(entry)} aria-label="Delete entry" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
-                                <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
-                              </button>
+                              {!entry.isPreview && (
+                                <button onClick={() => deleteLogEntry(entry)} aria-label="Delete entry" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+                                  <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                                </button>
+                              )}
                             </div>
                           )) : <div style={{ flex: 1 }} />}
                         </div>
@@ -849,7 +876,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 {activeMedications.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </Field>
-            <Field label="Amount" style={{ marginBottom: 16 }}>
+            <Field label={`Amount (${activeMedications.find(m => m.id === logDraft.medicationId)?.unitLabel || 'pills'})`} style={{ marginBottom: 16 }}>
               <input value={logDraft.doseQtyStr} onChange={e => setLogDraft(d => ({ ...d, doseQtyStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 2" style={mdInputStyle} autoFocus />
             </Field>
