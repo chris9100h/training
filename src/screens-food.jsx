@@ -5336,16 +5336,109 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     closeExport();
   }
 
+  const [confirmEl, confirm] = useConfirm();
+  // Shopping list as an image: same "poster" idiom as the Food Log's own
+  // screenshot (captureNodeAsPng, screens-lib.jsx) and the Plan poster
+  // (screens-schedule.jsx), same background-watermark treatment (VIPs get
+  // their own background image, everyone else gets the ZANE mark). Always
+  // mounted, only ever hidden via display:none (see the Food Log poster's
+  // own comment for why it can't be conditionally rendered on `capturing`).
+  const [capturing, setCapturing] = useStateFd(false);
+  const captureRef = useRefFd(null);
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.16 : 0.11, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.19, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
+  const takeScreenshot = async () => {
+    const res = await captureNodeAsPng(captureRef.current, {
+      filename: `shopping-list-${today}.png`,
+      setCapturing,
+    });
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Shopping list image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
+
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Shopping list" onBack={onClose} right={
         displayList.length > 0 && (
-          <button onClick={openExport} aria-label="Export list" style={fdTopAddBtn}>
-            <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={takeScreenshot} disabled={capturing} aria-label="Share shopping list as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
+              {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+            </button>
+            <button onClick={openExport} aria-label="Export list" style={fdTopAddBtn}>
+              <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
+            </button>
+          </div>
         )
       } />
+      {confirmEl}
+      {/* Poster tree: always mounted, only ever hidden via display:none, never
+          conditionally rendered on `capturing` itself (captureNodeAsPng only
+          flips capturing to true AFTER checking captureRef.current is
+          non-null, so if this tree were gated on `capturing` the ref would
+          still be null at that exact check, same reasoning as the Food Log
+          poster above it in this file). No rename affordance, no Plan-mode
+          controls: this is a static image, not another interactive surface. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          {_shotGridOn && <SvgGrid />}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Shopping List</div>
+                <div className="micro" style={{ marginTop: 4 }}>Next {shoppingDays} day{shoppingDays === 1 ? '' : 's'}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
+            </div>
+
+            <BracketFrame gold style={{ padding: 20, marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
+                <div>
+                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{shoppingDays}</div>
+                  <div className="micro" style={{ marginTop: 4 }}>{shoppingDays === 1 ? 'Day' : 'Days'}</div>
+                </div>
+                <div>
+                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{displayList.length}</div>
+                  <div className="micro" style={{ marginTop: 4 }}>{displayList.length === 1 ? 'Item' : 'Items'}</div>
+                </div>
+              </div>
+            </BracketFrame>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
+              {displayList.map(item => (
+                // Translucent surface-tint fill (not fdQuickRowInner's opaque
+                // one), same reason the Food Log poster's entry cards use it:
+                // an opaque row blocks the watermark entirely wherever it
+                // sits, leaving it visible only in the gaps between rows.
+                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={fdEntryName}>{item.displayName}</div>
+                    {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    {item.fromProjection && <Pill gold>Plan</Pill>}
+                    <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Card style={{ textAlign: 'center' }}>
           <div className="micro" style={{ marginBottom: 10 }}>Shopping for the next</div>
