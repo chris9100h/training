@@ -353,6 +353,19 @@ Plan-Mode-Auto-Fill-Marker (Migration 0198): eine Zeile je (User, Tag), für den
 - Store field: `store.foodTemplateDays`. Synchronisiert (Boot-Load auf jüngere Tage gefenstert, syncStore-Diff, Boot-Merge), aber **nicht im Backup** (abgeleiteter Geräte-/Sync-Status, EXCLUDED in `tools/check-backup-coverage.cjs`).
 - RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0198.
 
+### `zane_food_shopping_prefs`
+
+Per-Food-Präferenzen der Shopping List (Migration 0215), geräteübergreifend synchronisiert (löste die rein lokalen localStorage-Keys `logbook-shopping-name-overrides`/`logbook-shopping-exclusions` ab). Eine Zeile je (User, Food) fasst alles, was ein User an einem Food für die Shopping List angepasst hat: Anzeigename-Override, Ausschluss-Flag, Packungsgröße. Alle drei Felder sind unabhängig voneinander optional; sind alle drei leer/false, hat die Zeile keinen Existenzgrund mehr, der Client löscht sie dann statt eine No-Op-Zeile stehen zu lassen (`fdSetShoppingPref` in `screens-food.jsx`). Nur Foods mit echter `food_id` können hier eine Zeile haben (Rezept-Zutaten/Custom Items ohne `food_id` bleiben unantastbar, gleiche Einschränkung wie zuvor).
+
+- `id` (text, PK, `LB.uid()`), `user_id` (uuid), `food_id` (text, NOT NULL, FK → `zane_foods.id` `ON DELETE CASCADE`)
+- `name_override` (text, nullable): Anzeigename statt des generischen DB-Namens (z.B. "Original" bei Marke "Weetabix")
+- `excluded` (boolean, NOT NULL, Default false): Checkbox links neben der Zeile in `ShoppingListScreen`, per Default an (= nicht excluded). Ein entfernter Haken nimmt das Item nur aus Export/Screenshot raus, die Zeile bleibt (gedimmt) sichtbar in einem eigenen "Excluded"-Abschnitt der Liste
+- `package_size_g` (numeric, nullable): Packungsgröße in Gramm, z.B. `400` bei einer 400g-Packung. Treibt `fdFormatShoppingQty`: die vorgeschlagene Kaufmenge rundet auf ganze Packungen auf (`Math.ceil`), statt die rohe Gramm-Schätzung zu zeigen. `null`/nicht gesetzt heißt Fallback auf die reine Gramm-Rundung wie zuvor (`fdRoundShoppingQty`)
+- `created_at`/`updated_at` (timestamptz)
+- **UNIQUE (`user_id`, `food_id`)**: höchstens eine Präferenz-Zeile je Food und User
+- Store field: `store.foodShoppingPrefs`. Einfache eigene User-Collection wie `zane_food_favorites`, gleiches Collection-Sync-/Boot-Merge-Muster (`diffCollectionById`), kein Coach-Zugriff.
+- RLS: nur eigene Zeilen (`(select auth.uid()) = user_id`, initPlan-Caching von Anfang an, nicht erst nachträglich gefixt wie bei `zane_food_favorites`/`zane_food_recipes` in Migration 0192). Migration 0215.
+
 ### `zane_recipe_shares`
 
 Share-Links für Rezepte (Share-Button im Recipes-Tab des Food Trackers). Eine Zeile pro geteiltem Rezept, gekeyt über einen nicht erratbaren Token, der zugleich der Deep-Link ist (`…/?share=<token>`). `recipe` ist ein jsonb-**Snapshot** zum Zeitpunkt des Teilens (`{ name, portions, items }`, Shape wie bei `zane_food_recipes`): der Link funktioniert weiter, wenn der Sharer das Original später editiert oder löscht, und leakt umgekehrt keine späteren Änderungen. Erneutes Teilen desselben Rezepts refresht den Snapshot und liefert **denselben** Token (Upsert über `user_id`+`recipe_id`), Re-Shares stapeln also keine Zeilen.

@@ -484,6 +484,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.foodTemplateSlots?.length ? 1 : 0)
     + (backup.foodMealPlans?.length ? 1 : 0)
+    + (backup.foodShoppingPrefs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -676,6 +677,17 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.foodMealPlans.map(p => ({
         id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
         coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodShoppingPrefs?.length) {
+    prog('Uploading shopping list preferences…');
+    await unwrap(_supabase.from('zane_food_shopping_prefs').upsert(
+      backup.foodShoppingPrefs.map(p => ({
+        id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
+        excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+        updated_at: p.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -1070,13 +1082,18 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // active. Mirrors zane_schedules. Own store only, same reasoning as the
     // slots/favorites/recipes above.
     isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Shopping List per-food preferences (migration 0215): name override,
+    // exclude flag, package size, own store only like the rest of the
+    // Food Tracker's personal collections above.
+    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, name_override, excluded, package_size_g, created_at, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
+         foodShoppingPrefsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1119,6 +1136,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
   if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
+  if (foodShoppingPrefsRes?.error) throw foodShoppingPrefsRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
@@ -1295,6 +1313,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     foodMealPlans: (foodMealPlansRes?.data || []).map(p => ({
       id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
       coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
+    })),
+    foodShoppingPrefs: (foodShoppingPrefsRes?.data || []).map(p => ({
+      id: p.id, foodId: p.food_id, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
+      packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
+      createdAt: p.created_at, updatedAt: p.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1859,6 +1882,16 @@ async function syncStore(prev, next, userId) {
       coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_meal_plans').delete().in('id', removed.map(p => p.id)));
+  }
+
+  if (prev.foodShoppingPrefs !== next.foodShoppingPrefs) {
+    const { upsert, removed } = diffCollectionById(prev.foodShoppingPrefs, next.foodShoppingPrefs);
+    if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
+      id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
+      excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+      updated_at: p.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_shopping_prefs').delete().in('id', removed.map(p => p.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {

@@ -2497,6 +2497,31 @@ CREATE POLICY "zane_food_template_days_own"
   ON zane_food_template_days FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
+-- Per-food Shopping List preferences (migration 0215): display-name override,
+-- exclude flag, and package size in grams, one row per (user, food). Simple
+-- owned collection like favorites/recipes, no coach access. A row with all
+-- three unset has no reason to exist, the client deletes it instead of
+-- leaving a no-op row behind.
+CREATE TABLE zane_food_shopping_prefs (
+  id              text        PRIMARY KEY,
+  user_id         uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id         text        NOT NULL REFERENCES public.zane_foods(id) ON DELETE CASCADE,
+  name_override   text,
+  excluded        boolean     NOT NULL DEFAULT false,
+  package_size_g  numeric,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, food_id)
+);
+
+CREATE INDEX zane_food_shopping_prefs_user_idx ON public.zane_food_shopping_prefs USING btree (user_id);
+
+ALTER TABLE zane_food_shopping_prefs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_shopping_prefs_own"
+  ON zane_food_shopping_prefs FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
 -- One row per shared recipe, keyed by an unguessable token that doubles as the
 -- deep link (.../?share=<token>). `recipe` is a jsonb snapshot taken when the

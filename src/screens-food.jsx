@@ -438,23 +438,29 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
 }
-// A user's local per-food display-name override (see
-// fdReadShoppingNameOverrides), keyed by foodId: for the handful of foods
-// whose bare name is genuinely ambiguous out of context (an OFF/USDA
-// product naming only the flavor/variant, e.g. "Original", with the actual
-// brand as its own field), renaming it once beats showing brand context on
-// every single line (rejected earlier, too noisy for the common case where
-// the bare name is already fine). Adds displayName (the override, or the
-// original name unchanged) and overridden (whether one is active, so the
-// row can skip its own brand subtitle instead of showing it twice) to every
-// item, then re-sorts by whatever ends up actually displayed. Recipe-
-// exploded/custom items without a foodId can't be targeted this way.
-function fdApplyShoppingNameOverrides(list, overrides) {
+// Applies every stored per-food Shopping List preference
+// (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
+// see fdSetShoppingPref) in one pass: a display-name override (for the
+// handful of foods whose bare name is genuinely ambiguous out of context, an
+// OFF/USDA product naming only the flavor/variant, e.g. "Original", with the
+// actual brand as its own field), an exclude flag, and a package size for
+// fdFormatShoppingQty below. All three are independent and optional; a food
+// with no matching pref row gets none of them. Adds displayName/overridden
+// (so the row can skip its own brand subtitle instead of showing it twice)
+// to every item, then re-sorts by whatever ends up actually displayed.
+// Recipe-exploded/custom items without a foodId can never have a pref row,
+// nothing stable to key one on.
+function fdApplyShoppingPrefs(list, prefs) {
+  const byFoodId = new Map((prefs || []).map(p => [p.foodId, p]));
   const out = list.map(item => {
-    const override = item.foodId && overrides ? overrides[item.foodId] : null;
-    return override
-      ? { ...item, displayName: override, overridden: true }
-      : { ...item, displayName: item.foodName, overridden: false };
+    const pref = item.foodId ? byFoodId.get(item.foodId) : null;
+    return {
+      ...item,
+      displayName: pref?.nameOverride || item.foodName,
+      overridden: !!pref?.nameOverride,
+      excluded: !!pref?.excluded,
+      packageSizeG: pref?.packageSizeG ?? null,
+    };
   });
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
@@ -469,6 +475,20 @@ function fdRoundShoppingQty(grams) {
   const unit = grams < 50 ? 5 : 25;
   return `${Math.round(grams / unit) * unit || unit}g`;
 }
+// Package-aware buy quantity. With no package size set, the plain rounded
+// estimate above, unchanged. With one, rounds UP to whole packages (you
+// can't buy half a pack) and shows the resulting exact total rather than
+// running it back through fdRoundShoppingQty, which is built for messy raw
+// estimates, not a number that's already an exact multiple of the package
+// size. `packs` is returned alongside so a row can caption "2 x 400g"; the
+// export text/html only ever use `qty`, a pack count would just be noise in
+// a line meant for pasting into Notes.
+function fdFormatShoppingQty(grams, packageSizeG) {
+  if (!(packageSizeG > 0)) return { qty: fdRoundShoppingQty(grams), packs: null };
+  const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+  const buyGrams = packs * packageSizeG;
+  return { qty: buyGrams >= 1000 ? `${fdRound1(buyGrams / 1000)}kg` : `${buyGrams}g`, packs };
+}
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
 // default on a fresh device. Unlike logbook-label-scanner-provider this has
@@ -481,52 +501,34 @@ function fdReadShoppingDays() {
 function fdWriteShoppingDays(v) {
   try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
 }
-// Per-device only (CLAUDE.md localStorage-keys list), same reasoning as
-// logbook-shopping-list-days: a personal display tweak, not worth a synced
-// setting. {} on any read failure (missing key, corrupt JSON, private
-// browsing quota) rather than throwing: an override is a nice-to-have, not
-// something that should ever be able to break the list itself.
-function fdReadShoppingNameOverrides() {
-  try {
-    const v = JSON.parse(localStorage.getItem('logbook-shopping-name-overrides'));
-    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
-  } catch (_) { return {}; }
-}
-function fdWriteShoppingNameOverrides(v) {
-  try { localStorage.setItem('logbook-shopping-name-overrides', JSON.stringify(v)); } catch (_) {}
-}
-// A user's local "I'll get this separately" exclusion, keyed by foodId: some
-// foods qualify by the normal frequency/plan rules but aren't actually a
-// grocery-run item for this user (bulk whey ordered every couple of months
-// from a different retailer, say). Unlike a hard filter this never removes
-// the item, it only flags it: ShoppingListScreen still renders it (dimmed,
-// checkbox unchecked) in its own "Excluded" section so the user is still
-// reminded it exists and will eventually run out, just kept out of the
-// export/screenshot. A bare `true` is enough to store, no need for the
-// foodName too: the live item already carries its own name wherever this
-// renders, and an exclusion for a food that later drops out of the list
-// entirely simply stops rendering anywhere, nothing to separately clean up.
-// Recipe-exploded/custom items without a foodId can't be targeted this way,
-// same limitation as renaming.
-function fdApplyShoppingExclusions(list, exclusions) {
-  return list.map(item => ({ ...item, excluded: !!(item.foodId && exclusions && exclusions[item.foodId]) }));
-}
-function fdReadShoppingExclusions() {
-  try {
-    const v = JSON.parse(localStorage.getItem('logbook-shopping-exclusions'));
-    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
-  } catch (_) { return {}; }
-}
-function fdWriteShoppingExclusions(v) {
-  try { localStorage.setItem('logbook-shopping-exclusions', JSON.stringify(v)); } catch (_) {}
+// Finds-or-creates this food's zane_food_shopping_prefs row, merges `patch`
+// (one or more of nameOverride/excluded/packageSizeG) into it, and deletes
+// the row instead of upserting it if the merge leaves all three at their
+// default (no override, not excluded, no package size): a row with nothing
+// to say has no reason to exist. setStore drives it through the normal
+// syncStore diff/upsert like any other collection, so this doesn't touch
+// Supabase directly.
+function fdSetShoppingPref(setStore, foodId, patch) {
+  setStore(s => {
+    const list = s.foodShoppingPrefs || [];
+    const existing = list.find(p => p.foodId === foodId);
+    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null }), ...patch };
+    const isDefault = !merged.nameOverride && !merged.excluded && !merged.packageSizeG;
+    const next = isDefault
+      ? list.filter(p => p.foodId !== foodId)
+      : existing
+        ? list.map(p => p.foodId === foodId ? merged : p)
+        : [...list, merged];
+    return { ...s, foodShoppingPrefs: next };
+  });
 }
 // One food per line, plain text (no bullets/markdown: Notes and every other
 // notes app render those as literal characters, not a real list), in the
-// same alphabetical order fdApplyShoppingNameOverrides already sorted them
-// in. displayName (not the raw foodName) so a renamed item exports under
-// its override too, that was the whole point of being able to rename it.
+// same alphabetical order fdApplyShoppingPrefs already sorted them in.
+// displayName (not the raw foodName) so a renamed item exports under its
+// override too, that was the whole point of being able to rename it.
 function fdBuildShoppingExportText(list, withAmounts) {
-  return list.map(item => withAmounts ? `${item.displayName} ${fdRoundShoppingQty(item.grams)}` : item.displayName).join('\n');
+  return list.map(item => withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).qty}` : item.displayName).join('\n');
 }
 // HTML twin of the text above, a real <ul><li> list rather than \n-joined
 // lines: a raw string's \n reads to Notes' paste parser as a soft line break
@@ -537,7 +539,7 @@ function fdBuildShoppingExportText(list, withAmounts) {
 // user's own override, any of which could contain '&'/'<'/'>' (e.g. "M&M's").
 function fdBuildShoppingExportHtml(list, withAmounts) {
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdRoundShoppingQty(item.grams)}` : item.displayName)}</li>`).join('');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).qty}` : item.displayName)}</li>`).join('');
   return `<ul>${rows}</ul>`;
 }
 
@@ -4115,7 +4117,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
-      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} today={today} />
+      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} setStore={setStore} today={today} />
 
       {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
           buttons. Recomputes its options from the open entry. */}
@@ -5260,10 +5262,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   );
 }
 
-// What to buy: a pure read/derive view, never writes to the store, so unlike
-// its siblings it takes no setStore/userId and needs no useConfirm. See
-// fdBuildShoppingList for the full merge logic.
-function ShoppingListScreen({ open, onClose, store, today }) {
+// What to buy: mostly a read/derive view over fdBuildShoppingList (see there
+// for the full merge logic), setStore is only for the per-food prefs
+// (fdSetShoppingPref); still no userId/useConfirm like its siblings, it
+// never touches Supabase directly or needs a destructive-action confirm.
+function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   const [shoppingDays, setShoppingDays] = useStateFd(fdReadShoppingDays);
   function changeShoppingDays(v) {
     const n = Math.max(1, Math.min(30, Math.round(v)));
@@ -5279,67 +5282,50 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
-  // Local per-food display-name override and exclusion (see
-  // fdApplyShoppingNameOverrides/fdApplyShoppingExclusions): displayList is
-  // what actually renders, list stays the untouched fdBuildShoppingList
-  // output, only used to recompute displayList. Neither function filters
-  // anything out any more, both just annotate every item (displayName/
-  // overridden, excluded), so includedList/excludedList below split the
-  // SAME list rather than one filtering the other's input away.
-  const [overrides, setOverrides] = useStateFd(fdReadShoppingNameOverrides);
-  const [exclusions, setExclusions] = useStateFd(fdReadShoppingExclusions);
+  // Per-food display-name override, exclude flag and package size (see
+  // fdApplyShoppingPrefs): displayList is what actually renders, list stays
+  // the untouched fdBuildShoppingList output, only used to recompute
+  // displayList. store.foodShoppingPrefs is synced cross-device (migration
+  // 0215), so this needs no local mirror state or localStorage of its own,
+  // fdSetShoppingPref below writes straight through setStore.
   const displayList = useMemoFd(
-    () => fdApplyShoppingNameOverrides(fdApplyShoppingExclusions(list, exclusions), overrides),
-    [list, overrides, exclusions],
+    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs),
+    [list, store.foodShoppingPrefs],
   );
   // What actually feeds the export/screenshot (included only) vs. what's
   // still shown, just set aside, in the list screen's own "Excluded" section.
   const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
 
-  const [renameItem, setRenameItem] = useStateFd(null); // the tapped displayList item, or null
-  const [renameDraft, setRenameDraft] = useStateFd('');
-  function openRename(item) {
-    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key an override or exclusion on
-    setRenameItem(item);
-    setRenameDraft(item.displayName);
+  const [editItem, setEditItem] = useStateFd(null); // the tapped displayList item, or null
+  const [editDraft, setEditDraft] = useStateFd('');
+  const [pkgDraft, setPkgDraft] = useStateFd('');
+  function openEdit(item) {
+    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
+    setEditItem(item);
+    setEditDraft(item.displayName);
+    setPkgDraft(item.packageSizeG ? String(item.packageSizeG) : '');
   }
-  function closeRename() { setRenameItem(null); setRenameDraft(''); }
-  function saveRename() {
-    if (!renameItem) return;
-    const trimmed = renameDraft.trim();
-    const next = { ...overrides };
-    if (!trimmed || trimmed === renameItem.foodName) {
-      // Blank, or typed back to exactly the original: same as Reset, no
-      // point leaving a no-op override sitting in localStorage forever.
-      delete next[renameItem.foodId];
-    } else {
-      next[renameItem.foodId] = trimmed;
-    }
-    setOverrides(next);
-    fdWriteShoppingNameOverrides(next);
-    closeRename();
+  function closeEdit() { setEditItem(null); setEditDraft(''); setPkgDraft(''); }
+  function saveEdit() {
+    if (!editItem) return;
+    const trimmed = editDraft.trim();
+    // Blank, or typed back to exactly the original: same as no override, no
+    // point leaving a no-op override sitting in the DB forever.
+    const nameOverride = (!trimmed || trimmed === editItem.foodName) ? null : trimmed;
+    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride, packageSizeG: fdNum(pkgDraft) });
+    closeEdit();
   }
-  function resetRename() {
-    if (!renameItem) return;
-    const next = { ...overrides };
-    delete next[renameItem.foodId];
-    setOverrides(next);
-    fdWriteShoppingNameOverrides(next);
-    closeRename();
+  function resetEdit() {
+    if (!editItem) return;
+    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null });
+    closeEdit();
   }
-  // The checkbox's own handler, independent of the rename sheet: toggles
-  // straight from either list section, no sheet involved. Un-excluding just
-  // deletes the key rather than storing `false`, so a food nobody has ever
-  // touched and one that's been explicitly re-included both read the same
-  // (absent from the object), keeping the stored set exactly as large as the
-  // number of foods actually excluded right now.
+  // The checkbox's own handler, independent of the edit sheet: toggles
+  // straight from either list section, no sheet involved.
   function toggleExclusion(item) {
     if (!item.foodId) return;
-    const next = { ...exclusions };
-    if (next[item.foodId]) delete next[item.foodId]; else next[item.foodId] = true;
-    setExclusions(next);
-    fdWriteShoppingExclusions(next);
+    fdSetShoppingPref(setStore, item.foodId, { excluded: !item.excluded });
   }
   // Shared row for both includedList and excludedList below: same layout,
   // just dimmed with the checkbox unchecked once excluded. The checkbox is a
@@ -5347,6 +5333,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   // real <button> elements can't nest without the browser silently breaking
   // the layout back out of the outer one.
   function renderShoppingRow(item) {
+    const { qty, packs } = fdFormatShoppingQty(item.grams, item.packageSizeG);
     return (
       <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: item.excluded ? 0.55 : 1 }}>
         <FdCheckbox
@@ -5355,14 +5342,17 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
           onToggle={() => toggleExclusion(item)}
         />
-        <button onClick={() => openRename(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
+        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={fdEntryName}>{item.displayName}</div>
             {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {item.fromProjection && <Pill gold>Plan</Pill>}
-            <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
+            <div style={{ textAlign: 'right' }}>
+              <div className="num" style={{ fontSize: 13, color: UI.ink }}>{qty}</div>
+              {packs != null && <div style={{ fontSize: 9, color: UI.inkFaint }}>{packs}&times; {fdRoundShoppingQty(item.packageSizeG)}</div>}
+            </div>
           </div>
         </button>
       </div>
@@ -5502,7 +5492,9 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             </BracketFrame>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
-              {includedList.map(item => (
+              {includedList.map(item => {
+                const { qty, packs } = fdFormatShoppingQty(item.grams, item.packageSizeG);
+                return (
                 // Translucent surface-tint fill (not fdQuickRowInner's opaque
                 // one), same reason the Food Log poster's entry cards use it:
                 // an opaque row blocks the watermark entirely wherever it
@@ -5516,10 +5508,14 @@ function ShoppingListScreen({ open, onClose, store, today }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                     {item.fromProjection && <Pill gold>Plan</Pill>}
-                    <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="num" style={{ fontSize: 13, color: UI.ink }}>{qty}</div>
+                      {packs != null && <div style={{ fontSize: 9, color: UI.inkFaint }}>{packs}&times; {fdRoundShoppingQty(item.packageSizeG)}</div>}
+                    </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -5603,16 +5599,23 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           </>
         )}
       </Sheet>
-      <Sheet open={!!renameItem} onClose={closeRename} title="Rename" titleColor="var(--accent)">
+      <Sheet open={!!editItem} onClose={closeEdit} title="Edit item" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
-          Original: {renameItem?.foodName}{renameItem?.brand ? ` · ${renameItem.brand}` : ''}
+          Original: {editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
         </div>
         <Field label="Show as" style={{ marginBottom: 14 }}>
-          <TextInput value={renameDraft} onChange={setRenameDraft} placeholder={renameItem?.foodName} autoFocus />
+          <TextInput value={editDraft} onChange={setEditDraft} placeholder={editItem?.foodName} autoFocus />
         </Field>
+        <Field label="Package size (g)" style={{ marginBottom: 6 }}>
+          <input value={pkgDraft} onChange={e => setPkgDraft(fdDecimalFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder="e.g. 400" style={fdInputStyle} />
+        </Field>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
+          Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {renameItem?.overridden && <Btn kind="ghost" onClick={resetRename} style={{ flex: 1 }}>Reset</Btn>}
-          <Btn onClick={saveRename} style={{ flex: renameItem?.overridden ? 2 : 1 }}>Save</Btn>
+          {(editItem?.overridden || editItem?.packageSizeG) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG) ? 2 : 1 }}>Save</Btn>
         </div>
       </Sheet>
     </Screen>
