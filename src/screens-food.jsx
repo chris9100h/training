@@ -495,6 +495,28 @@ function fdReadShoppingNameOverrides() {
 function fdWriteShoppingNameOverrides(v) {
   try { localStorage.setItem('logbook-shopping-name-overrides', JSON.stringify(v)); } catch (_) {}
 }
+// A user's local "don't show this on my shopping list" exclusion, keyed by
+// foodId: some foods qualify by the normal frequency/plan rules but aren't
+// actually a grocery-run item for this user (bulk whey ordered every couple
+// of months from a different retailer, say). Hiding it once beats it
+// resurfacing on every future list. Stores the foodName alongside the key
+// (not just a bare id) so the "manage excluded" sheet can list it by name
+// without needing to cross-reference the live list, which won't contain an
+// excluded food at all once this filter runs. Recipe-exploded/custom items
+// without a foodId can't be targeted this way, same limitation as renaming.
+function fdApplyShoppingExclusions(list, exclusions) {
+  if (!exclusions || !Object.keys(exclusions).length) return list;
+  return list.filter(item => !(item.foodId && exclusions[item.foodId]));
+}
+function fdReadShoppingExclusions() {
+  try {
+    const v = JSON.parse(localStorage.getItem('logbook-shopping-exclusions'));
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  } catch (_) { return {}; }
+}
+function fdWriteShoppingExclusions(v) {
+  try { localStorage.setItem('logbook-shopping-exclusions', JSON.stringify(v)); } catch (_) {}
+}
 // One food per line, plain text (no bullets/markdown: Notes and every other
 // notes app render those as literal characters, not a real list), in the
 // same alphabetical order fdApplyShoppingNameOverrides already sorted them
@@ -5248,16 +5270,23 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
-  // Local per-food display-name override (see fdApplyShoppingNameOverrides):
-  // displayList is what actually renders/exports, list stays the untouched
+  // Local per-food display-name override and exclusion (see
+  // fdApplyShoppingNameOverrides/fdApplyShoppingExclusions): displayList is
+  // what actually renders/exports, list stays the untouched
   // fdBuildShoppingList output, only used to recompute displayList.
+  // Exclude first, then rename: no point computing a display name for an
+  // item about to be filtered out anyway.
   const [overrides, setOverrides] = useStateFd(fdReadShoppingNameOverrides);
-  const displayList = useMemoFd(() => fdApplyShoppingNameOverrides(list, overrides), [list, overrides]);
+  const [exclusions, setExclusions] = useStateFd(fdReadShoppingExclusions);
+  const displayList = useMemoFd(
+    () => fdApplyShoppingNameOverrides(fdApplyShoppingExclusions(list, exclusions), overrides),
+    [list, overrides, exclusions],
+  );
 
   const [renameItem, setRenameItem] = useStateFd(null); // the tapped displayList item, or null
   const [renameDraft, setRenameDraft] = useStateFd('');
   function openRename(item) {
-    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key an override on
+    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key an override or exclusion on
     setRenameItem(item);
     setRenameDraft(item.displayName);
   }
@@ -5284,6 +5313,28 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     setOverrides(next);
     fdWriteShoppingNameOverrides(next);
     closeRename();
+  }
+  function excludeItem() {
+    if (!renameItem) return;
+    const next = { ...exclusions, [renameItem.foodId]: renameItem.foodName };
+    setExclusions(next);
+    fdWriteShoppingExclusions(next);
+    closeRename();
+  }
+
+  // "Manage excluded" sheet: the only way back for something excludeItem
+  // hid, since an excluded food no longer appears in displayList at all for
+  // the rename sheet to reopen it from.
+  const [manageExclOpen, setManageExclOpen] = useStateFd(false);
+  const exclusionEntries = useMemoFd(
+    () => Object.entries(exclusions).sort((a, b) => a[1].localeCompare(b[1])),
+    [exclusions],
+  );
+  function restoreExclusion(foodId) {
+    const next = { ...exclusions };
+    delete next[foodId];
+    setExclusions(next);
+    fdWriteShoppingExclusions(next);
   }
 
   // Two-step sheet: pick content (amounts or not) first, then how to get it
@@ -5446,6 +5497,13 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
         </Card>
 
+        {exclusionEntries.length > 0 && (
+          <button onClick={() => setManageExclOpen(true)} style={{ background: 'none', border: 'none', padding: 0, alignSelf: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-eye-slash" style={{ marginRight: 6 }} />
+            {exclusionEntries.length} {exclusionEntries.length === 1 ? 'item' : 'items'} excluded · Manage
+          </button>
+        )}
+
         {!displayList.length ? (
           <Empty title="Nothing yet"
             sub="Log meals for a couple of weeks, or set up a meal plan, and your regulars will show up here."
@@ -5518,6 +5576,30 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           {renameItem?.overridden && <Btn kind="ghost" onClick={resetRename} style={{ flex: 1 }}>Reset</Btn>}
           <Btn onClick={saveRename} style={{ flex: renameItem?.overridden ? 2 : 1 }}>Save</Btn>
         </div>
+        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 16, paddingTop: 16 }}>
+          <Btn kind="ghost" onClick={excludeItem} style={{ width: '100%' }}>
+            <i className="fa-solid fa-eye-slash" style={{ marginRight: 8 }} /> Exclude from shopping list
+          </Btn>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px', textAlign: 'center' }}>
+            Not a grocery-run item for you (a bulk order every few months, say)? Hide it here, it won't show up on future lists either. Manage excluded items from the list screen.
+          </div>
+        </div>
+      </Sheet>
+      <Sheet open={manageExclOpen} onClose={() => setManageExclOpen(false)} title="Excluded items" titleColor="var(--accent)">
+        {exclusionEntries.length === 0 ? (
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>Nothing excluded.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {exclusionEntries.map(([foodId, foodName]) => (
+              <div key={foodId} style={fdQuickRowInner}>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{foodName}</div>
+                </div>
+                <button onClick={() => restoreExclusion(foodId)} style={{ ...btnGhost, padding: '6px 12px', fontSize: 11, flexShrink: 0 }}>Restore</button>
+              </div>
+            ))}
+          </div>
+        )}
       </Sheet>
     </Screen>
   );
