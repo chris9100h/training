@@ -475,19 +475,31 @@ function fdRoundShoppingQty(grams) {
   const unit = grams < 50 ? 5 : 25;
   return `${Math.round(grams / unit) * unit || unit}g`;
 }
+// A package size is a fact printed on the product, not an estimate: unlike
+// fdRoundShoppingQty above, this never rounds the number itself, only picks
+// g vs kg and how many decimals to show (found via a real 372g wrap pack
+// that fdRoundShoppingQty's nearest-25 rule was silently showing as 375g).
+// 3 decimals in kg is always exact for a whole-gram input (1g = 0.001kg),
+// parseFloat drops any trailing zeros so a round kg value still reads "1kg".
+function fdExactShoppingQty(grams) {
+  if (!(grams > 0)) return '0g';
+  if (grams < 1000) return `${grams}g`;
+  return `${parseFloat((grams / 1000).toFixed(3))}kg`;
+}
 // Package-aware buy quantity. With no package size set, the plain rounded
 // estimate above, unchanged, as `headline` with no `sub`. With one, the whole
 // point of setting it was to shop by pack count, not by weight, so `headline`
 // becomes "3 x 400g" (rounds UP, you can't buy half a pack) and the actual
 // gram total moves to `sub`, a small reference figure rather than the
-// headline number. Exports use `headline` too, "3 x 400g" reads as a normal
-// shopping-list line same as any plain amount.
+// headline number. Both the package size and the resulting total are exact
+// values (not estimates), so they go through fdExactShoppingQty, never
+// fdRoundShoppingQty. Exports use `headline` too, "3 x 400g" reads as a
+// normal shopping-list line same as any plain amount.
 function fdFormatShoppingQty(grams, packageSizeG) {
   if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
   const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
   const buyGrams = packs * packageSizeG;
-  const total = buyGrams >= 1000 ? `${fdRound1(buyGrams / 1000)}kg` : `${buyGrams}g`;
-  return { headline: `${packs}× ${fdRoundShoppingQty(packageSizeG)}`, sub: total };
+  return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: fdExactShoppingQty(buyGrams) };
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
