@@ -260,9 +260,22 @@ function fdSlotMatchesDate(slot, store, dateISO) {
 const FD_SHOPPING_ANALYSIS_DAYS = 14;
 const FD_SHOPPING_STAPLE_MIN = 3;
 const FD_SHOPPING_DAYS_DEFAULT = 7;
+// Floor for the historical rate's denominator (see fdBuildShoppingList): a
+// food whose only occurrences in the window are all recent doesn't get
+// divided by the full FD_SHOPPING_ANALYSIS_DAYS, which would silently assume
+// an empty earlier week actually happened. Flooring at a week (rather than
+// using the raw day-span) keeps a single very-recent occurrence from being
+// read as "needed every single day".
+const FD_SHOPPING_RATE_FLOOR_DAYS = 7;
 
 function fdNormFoodName(name) {
   return (name || '').trim().toLowerCase();
+}
+// Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored
+// to dodge DST/midnight shifts (same approach as screens-health.jsx's
+// healthDayDiff, reimplemented locally to keep this section self-contained).
+function fdDaysBetween(a, b) {
+  return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 }
 // foodId is always "<source>:<sourceId>" (see confirmStageItem), so a
 // name-based key can never collide with one.
@@ -304,7 +317,8 @@ function fdFavoriteShoppingKeys(foodFavorites) {
 // because one has an id-key and the other a name-key, even though their
 // foodName is identical. Folds any name-keyed group into an existing
 // id-keyed group when their normalized names match, foodId stays the
-// group's identity, only the totals combine. Mutates and returns `tally`.
+// group's identity, only the totals (and the earliest firstDate, for
+// fdBuildShoppingList's rate denominator) combine. Mutates and returns `tally`.
 function fdReconcileShoppingTally(tally) {
   const idKeyByName = new Map();
   tally.forEach((row, key) => { if (row.foodId) idKeyByName.set(fdNormFoodName(row.foodName), key); });
@@ -316,6 +330,7 @@ function fdReconcileShoppingTally(tally) {
     const target = tally.get(idKey);
     target.totalGrams += row.totalGrams;
     if (row.count != null) target.count = (target.count || 0) + row.count;
+    if (row.firstDate && (!target.firstDate || row.firstDate < target.firstDate)) target.firstDate = row.firstDate;
     toDrop.push(key);
   });
   toDrop.forEach(key => tally.delete(key));
@@ -335,9 +350,10 @@ function fdShoppingHistoryTally(foodLogs, todayISO) {
     if (e.planned || e.date < cutoff || e.date > todayISO) return;
     fdExplodeForShopping(e).forEach(leaf => {
       const key = fdShoppingKey(leaf.foodId, leaf.foodName);
-      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0, count: 0 };
+      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0, count: 0, firstDate: e.date };
       row.totalGrams += leaf.quantityG;
       row.count += 1;
+      if (e.date < row.firstDate) row.firstDate = e.date;
       tally.set(key, row);
     });
   });
@@ -371,13 +387,22 @@ function fdShoppingProjectionTally(store, todayISO, days) {
 // food's quantity is the projection's own total for the window, full stop,
 // never added to the historical estimate (a template slot is a definite
 // future need, not a second vote alongside an inferred one). A food with no
-// projection falls back to the historical daily rate scaled to
-// shoppingDays, gated by the staple/favorite threshold: a favorited food
-// only needs to have actually been logged once in the window to qualify
-// (favoriting is already a strong "I need this" signal), a non-favorited one
-// needs 3+. A key only reaches the history map at all via a real
-// occurrence, so "favorited but never logged in the window" can't reach
-// this filter and is correctly never resurrected.
+// projection falls back to the historical rate scaled to shoppingDays,
+// gated by the staple/favorite threshold: a favorited food only needs to
+// have actually been logged once in the window to qualify (favoriting is
+// already a strong "I need this" signal), a non-favorited one needs 3+. A
+// key only reaches the history map at all via a real occurrence, so
+// "favorited but never logged in the window" can't reach this filter and is
+// correctly never resurrected.
+// The historical rate itself divides by the number of days since that
+// food's EARLIEST occurrence in the window (floored at
+// FD_SHOPPING_RATE_FLOOR_DAYS), not always by the full
+// FD_SHOPPING_ANALYSIS_DAYS: a recipe cooked twice this week but never
+// before has all of its history packed into the last few days, and dividing
+// that by the full 14 would silently assume an equally-empty earlier week
+// actually happened, halving the real weekly amount. A long-running staple
+// whose occurrences already span the full window is unaffected, its
+// earliest occurrence sits at the window's cutoff either way.
 function fdBuildShoppingList(store, todayISO, shoppingDays) {
   const favKeys = fdFavoriteShoppingKeys(store.foodFavorites);
   const hist = fdShoppingHistoryTally(store.foodLogs, todayISO);
@@ -392,7 +417,8 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
     }
     const h = hist.get(key);
     if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
-    const grams = (h.totalGrams / FD_SHOPPING_ANALYSIS_DAYS) * shoppingDays;
+    const daysSpan = Math.max(FD_SHOPPING_RATE_FLOOR_DAYS, fdDaysBetween(h.firstDate, todayISO) + 1);
+    const grams = (h.totalGrams / daysSpan) * shoppingDays;
     if (grams > 0) out.push({ key, foodName: h.foodName, grams, fromProjection: false });
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
