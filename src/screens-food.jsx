@@ -284,17 +284,16 @@ function fdShoppingKey(foodId, foodName) {
 }
 // A food-log-shaped row (a real store.foodLogs entry, or a virtual
 // fdMaterializeSlotEntry projection row, both share the same shape) -> its
-// flat "leaf" items to tally. A recipe's recipeItems snapshot never carries
-// a foodId OR a brand (confirmRecipeLog, applyBlockRecipe and a template
-// slot's own draftBuilt all whitelist the same brand-less fields, see
-// docs/database.md's zane_food_logs section), so every exploded leaf is
-// name-keyed and brand-less even if the recipe's own ingredients were
-// originally real zane_foods matches with a brand of their own. A recipe
-// row with no recipeItems (a legacy row predating the snapshot) falls back
-// to one opaque leaf rather than silently dropping it.
+// flat "leaf" items to tally. A recipe's recipeItems snapshot carries
+// foodId/brand for anything logged since that pairing was added to
+// applyBlockRecipe/confirmRecipeLog/the template slot's draftBuilt (see
+// docs/database.md's zane_food_logs section); a legacy row logged before
+// that (or one with no recipeItems at all, predating the snapshot entirely)
+// falls back to a name-keyed, brand-less leaf rather than silently dropping
+// it, same as it always did.
 function fdExplodeForShopping(entry) {
   if (entry.source === 'recipe' && entry.recipeItems && entry.recipeItems.length) {
-    return entry.recipeItems.map(ri => ({ foodId: null, foodName: ri.foodName, brand: null, quantityG: ri.quantityG || 0 }));
+    return entry.recipeItems.map(ri => ({ foodId: ri.foodId ?? null, foodName: ri.foodName, brand: ri.brand ?? null, quantityG: ri.quantityG || 0 }));
   }
   return [{ foodId: entry.foodId || null, foodName: entry.foodName, brand: entry.brand || null, quantityG: entry.quantityG || 0 }];
 }
@@ -1092,6 +1091,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const now = new Date().toISOString();
     const recipeId = recipeBlockSave ? LB.uid() : null;
     const recipeItems = entries.map(e => ({
+      foodId: e.foodId ?? null, brand: e.brand ?? null,
       foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
       protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
       sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
@@ -2537,6 +2537,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const promptRecipe = snap ? (() => {
       const perTotal = origChosen ? totalPortions / origChosen : 1;
       return { ...recipe, portions: totalPortions, items: snap.map(i => ({
+        foodId: i.foodId ?? null, brand: i.brand ?? null,
         foodName: i.foodName,
         quantityG: (i.quantityG || 0) * perTotal,
         protein: (i.protein || 0) * perTotal,
@@ -2583,8 +2584,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // what's shown collapsed (each row still needs its own whole-number
     // kcal, so it's individually rounded here). A later edit to the source
     // recipe must never retroactively change this: copied here, not
-    // referenced.
+    // referenced. foodId/brand are pure identity, not a measurement, so
+    // copying them through doesn't violate that freeze, unlike the macros
+    // below they're never rescaled or recomputed from a live source.
     const recipeItems = items.map(i => ({
+      foodId: i.foodId ?? null, brand: i.brand ?? null,
       foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
       calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
       protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
@@ -4707,6 +4711,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const scale = draft.portions / totalPortions;
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const recipeItems = items.map(i => ({
+        foodId: i.foodId ?? null, brand: i.brand ?? null,
         foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
         calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
         protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
