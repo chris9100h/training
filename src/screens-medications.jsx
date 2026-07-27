@@ -670,6 +670,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   type="text" inputMode="decimal" placeholder="e.g. 60" style={mdInputStyle} />
               </Field>
             </div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
+              Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
+            </div>
             <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
               {medSheet.id && mdEffectiveStock(medications.find(m => m.id === medSheet.id) || {}, medicationLogs, today) != null && (
                 <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
