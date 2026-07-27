@@ -1718,6 +1718,20 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_template_slo
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_recipes;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_recipes
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+-- Migration 0220: the coach-writable medication tables (0218) repeat the
+-- same shape and were missing the guard.
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plans;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plans
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medications;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medications
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_schedule_slots;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_schedule_slots
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_logs;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- Migration 0125 grant changes:
 --   REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM anon, authenticated;

@@ -29,6 +29,14 @@
 
 const { useState: useStateMd, useEffect: useEffectMd, useMemo: useMemoMd } = React;
 
+// Own copy of fdShiftDate (screens-food.jsx), same reasoning as MdCheckbox:
+// that one is private to the Food Tracker's own module scope.
+function mdShiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return LB.fmtISO(d);
+}
+
 // ── Style constants (own copies, mirrors screens-food.jsx's fd* helpers) ──
 const mdListRow = {
   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
@@ -60,6 +68,53 @@ function mdSegBtn(active) {
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
     textShadow: active ? 'none' : 'var(--text-lift)',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
+// Timeline date-switcher + hour-grid style helpers, own copies of
+// fdNavBtn/fdIconBtn/FdHourTrunk/FdHourTick/fdHourRow/fdHourLabelCol/
+// fdHourAddBtn (screens-food.jsx), same "own copy" reasoning as MdCheckbox.
+function mdNavBtn() {
+  return {
+    width: 32, height: 32, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+    background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+  };
+}
+function mdIconBtn(size) {
+  return {
+    flexShrink: 0, width: size, height: size, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`,
+    background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+  };
+}
+const MD_HOUR_GUTTER = 16;
+function MdHourTrunk() {
+  return <div style={{ position: 'absolute', left: 6, top: 0, bottom: 0, width: 2, background: UI.hairStrong, pointerEvents: 'none' }} />;
+}
+function MdHourTick() {
+  return (
+    <div style={{ width: MD_HOUR_GUTTER, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+      <div style={{ marginLeft: 6, width: MD_HOUR_GUTTER - 6, height: 2, background: UI.hairStrong }} />
+    </div>
+  );
+}
+function mdHourRow(filled, isNow) {
+  return {
+    display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
+    background: isNow ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+    padding: filled ? '10px 10px' : '8px 10px',
+  };
+}
+const mdHourLabelCol = { width: 24, flexShrink: 0, textAlign: 'right' };
+function mdHourAddBtn(isNow) {
+  return {
+    flexShrink: 0, width: 30, height: 30, borderRadius: 4,
+    border: `var(--hair-width) solid ${isNow ? 'var(--hair-accent)' : UI.hairStrong}`,
+    background: 'transparent', color: isNow ? 'var(--accent)' : UI.inkSoft,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent',
   };
 }
@@ -140,7 +195,12 @@ function mdSlotAppliesOn(slot, dateISO, wd) {
 }
 function mdMaterializeSlotEntry(med, slot, dateISO) {
   return {
-    id: LB.uid(), medicationId: med.id, medicationName: med.name,
+    // Deterministic per (day, slot), same reasoning as fdMaterializeSlotEntry
+    // (screens-food.jsx): two devices/tabs auto-filling the same due slot
+    // before either has synced would otherwise mint different random ids,
+    // and the purely id-keyed upsert would then insert both as permanent
+    // duplicates instead of colliding into one row.
+    id: `md_${dateISO}_${slot.id}`, medicationId: med.id, medicationName: med.name,
     date: dateISO, time: `${String(slot.hour).padStart(2, '0')}:00`,
     doseQty: slot.doseQty, planned: true, scheduleSlotId: slot.id,
   };
@@ -148,10 +208,13 @@ function mdMaterializeSlotEntry(med, slot, dateISO) {
 // Fills in today's due-but-missing doses from active schedule slots, same
 // idea as the Food Tracker's own auto-fill effect. Checks scheduleSlotId
 // against today's existing log rows (not just count) so a slot that already
-// materialized isn't duplicated; a deliberately-deleted entry can reappear on
-// a fresh boot (no zane_food_template_days-style cross-device marker for
-// this yet), an accepted v1 rough edge, not a correctness bug: at worst you
-// see a stray "still due" row you can mark taken or ignore.
+// materialized isn't duplicated; a deliberately-deleted entry can reappear
+// later the same day if some unrelated medications/scheduleSlots edit
+// re-triggers the calling effect (no zane_food_template_days-style
+// cross-device marker for this yet), an accepted v1 rough edge, not a
+// correctness bug: at worst you see a stray "still due" row you can mark
+// taken or ignore. See the effect below for why it can no longer happen
+// simply from the delete itself.
 function mdAutoFillToday(store, setStore, todayISO) {
   const wd = LB.isoWd(new Date());
   const medsById = new Map((store.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
@@ -220,35 +283,59 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
   const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
 
-  // Auto-fill today's due doses. Gated on the collections it reads plus
-  // `today`, same dependency shape as the Food Tracker's own fill effect.
+  // Auto-fill today's due doses. medicationLogs is deliberately NOT a
+  // dependency: it is, unavoidably, since mdAutoFillToday only skips a slot
+  // that already has a log row. If it were listed here, deleting an
+  // auto-filled entry would change medicationLogs, re-trigger this very
+  // effect, and mdAutoFillToday would see the slot as no-longer-represented
+  // and materialize it right back, so a delete could never stick while its
+  // slot is still due today. Same exclusion the Food Tracker's own
+  // template-day effect makes for store.foodLogs, for the same reason.
   useEffectMd(() => {
     mdAutoFillToday(store, setStore, today);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.medicationScheduleSlots, store.medications, store.medicationLogs, today]);
+  }, [store.medicationScheduleSlots, store.medications, today]);
 
   // ─────────────────────────── Timeline tab ───────────────────────────
-  const todaysLogs = useMemoMd(
-    () => medicationLogs.filter(l => l.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
-    [medicationLogs, today],
+  // Same structure as the Food Tracker's own Log tab (screens-food.jsx): a
+  // date switcher plus a full 0-23 hour grid that's always rendered, filled
+  // or not, rather than an empty-state takeover on a day with nothing yet.
+  const [curDate, setCurDate] = useStateMd(today);
+  const dayLabel = curDate === today ? 'Today' : curDate === mdShiftDate(today, -1) ? 'Yesterday' : curDate === mdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const shiftDay = (delta) => setCurDate(d => mdShiftDate(d, delta));
+  const curDateLogs = useMemoMd(
+    () => medicationLogs.filter(l => l.date === curDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
+    [medicationLogs, curDate],
   );
+  const byHour = useMemoMd(() => {
+    const map = {};
+    curDateLogs.forEach(e => {
+      const h = parseInt((e.time || '0:00').split(':')[0], 10) || 0;
+      (map[h] = map[h] || []).push(e);
+    });
+    return map;
+  }, [curDateLogs]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
   async function deleteLogEntry(entry) {
-    if (!await confirm('Remove this entry from today’s timeline?', { title: 'Delete entry', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm('Remove this entry from the timeline?', { title: 'Delete entry', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).filter(l => l.id !== entry.id) }));
   }
 
-  const [logDraft, setLogDraft] = useStateMd(null); // { medicationId, doseQtyStr } | null
-  function openLogSheet() {
-    setLogDraft({ medicationId: activeMedications[0]?.id || '', doseQtyStr: '' });
+  const [logDraft, setLogDraft] = useStateMd(null); // { medicationId, doseQtyStr, hour } | null
+  // hour is set when opened from a specific hour row's own "+" (logs at
+  // exactly that hour); left null from the TopBar's generic "+" (logs at
+  // the current wall-clock time), same distinction as Food's pendingHour.
+  function openLogSheet(hour) {
+    setLogDraft({ medicationId: activeMedications[0]?.id || '', doseQtyStr: '', hour: hour != null ? hour : null });
   }
   function saveLogDraft() {
     const med = medications.find(m => m.id === logDraft?.medicationId);
     const qty = mdNum(logDraft?.doseQtyStr);
     if (!med || !(qty > 0)) return;
-    const entry = { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: today, time: LB.nowHHMM(), doseQty: qty, planned: false, scheduleSlotId: null };
+    const time = logDraft.hour != null ? `${String(logDraft.hour).padStart(2, '0')}:00` : LB.nowHHMM();
+    const entry = { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
     setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), entry] }));
     setLogDraft(null);
   }
@@ -305,7 +392,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize ? String(med.packageSize) : '',
       stockStr: '',
     } : {
-      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '',
+      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '', pendingSlots: [],
     });
   }
   function closeMedSheet() { setMedSheet(null); }
@@ -333,7 +420,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         stockBaseline: stockTyped, stockSetAt: stockTyped != null ? nowISO : null,
         archived: false, createdAt: nowISO, updatedAt: nowISO,
       };
-      setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
+      // Schedule slots added while the sheet was still in create mode (see
+      // openSlotDraft/saveSlotDraft) live only in medSheet.pendingSlots until
+      // now: the medication needed a real id to attach them to first.
+      const newSlots = (medSheet.pendingSlots || []).map(sl => ({ ...sl, medicationId: newMed.id }));
+      setStore(s => ({
+        ...s,
+        medications: [...(s.medications || []), newMed],
+        medicationScheduleSlots: [...(s.medicationScheduleSlots || []), ...newSlots],
+      }));
     }
     closeMedSheet();
   }
@@ -347,10 +442,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     closeMedSheet();
   }
 
-  // Schedule slots for the medication currently open in medSheet.
+  // Schedule slots for the medication currently open in medSheet. While
+  // still creating (no id yet) these live in medSheet.pendingSlots instead
+  // of the store, see saveSlotDraft/saveMedSheet.
   const medSheetSlots = useMemoMd(
-    () => medSheet?.id ? scheduleSlots.filter(sl => sl.medicationId === medSheet.id) : [],
-    [scheduleSlots, medSheet?.id],
+    () => medSheet?.id ? scheduleSlots.filter(sl => sl.medicationId === medSheet.id) : (medSheet?.pendingSlots || []),
+    [scheduleSlots, medSheet?.id, medSheet?.pendingSlots],
   );
   const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, active, phaseOpen, startDate, endDate }
   function openSlotDraft(slot) {
@@ -363,12 +460,30 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     });
   }
   function saveSlotDraft() {
-    if (!medSheet?.id || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!medSheet || !slotDraft || !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     const nowISO = new Date().toISOString();
-    const startDate = slotDraft.phaseOpen && slotDraft.startDate ? slotDraft.startDate : null;
-    const endDate = slotDraft.phaseOpen && slotDraft.endDate ? slotDraft.endDate : null;
+    // Gated on the fields' own values, NOT on phaseOpen: phaseOpen only
+    // controls whether the date-range section is visually expanded.
+    // Collapsing it to declutter the sheet must not silently wipe a
+    // staged cycle's dates, only actually clearing the inputs should.
+    const startDate = slotDraft.startDate || null;
+    const endDate = slotDraft.endDate || null;
+    if (!medSheet.id) {
+      // Medication not saved yet: keep the slot on the draft itself
+      // (medSheet.pendingSlots), medicationId gets filled in on final Save.
+      setMedSheet(d => {
+        const pending = d.pendingSlots || [];
+        if (slotDraft.id) {
+          return { ...d, pendingSlots: pending.map(sl => sl.id !== slotDraft.id ? sl : { ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty, active: slotDraft.active, startDate, endDate, updatedAt: nowISO }) };
+        }
+        const newSlot = { id: LB.uid(), medicationId: null, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty, active: true, startDate, endDate, createdAt: nowISO, updatedAt: nowISO };
+        return { ...d, pendingSlots: [...pending, newSlot] };
+      });
+      setSlotDraft(null);
+      return;
+    }
     if (slotDraft.id) {
       setStore(s => ({
         ...s,
@@ -387,6 +502,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function deleteSlot(slot) {
+    if (!medSheet.id) {
+      setMedSheet(d => ({ ...d, pendingSlots: (d.pendingSlots || []).filter(sl => sl.id !== slot.id) }));
+      return;
+    }
     setStore(s => ({ ...s, medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.id !== slot.id) }));
   }
   function toggleWeekday(wd) {
@@ -446,11 +565,31 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     mdWriteLowStockAcks(next);
   }
 
+  // Tapping a row here only ever updates stock, never identity/category/
+  // schedule: those live behind the Schedule tab's own medication sheet, on
+  // purpose, so Inventory stays a single-purpose "how much is left" screen.
+  const [stockSheet, setStockSheet] = useStateMd(null); // { id, name, unitLabel, stockStr } | null
+  function openStockSheet(med) {
+    setStockSheet({ id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', stockStr: '' });
+  }
+  function saveStockSheet() {
+    if (!stockSheet) return;
+    const stockTyped = mdNum(stockSheet.stockStr);
+    if (stockTyped != null) {
+      const nowISO = new Date().toISOString();
+      setStore(s => ({
+        ...s,
+        medications: (s.medications || []).map(m => m.id !== stockSheet.id ? m : { ...m, stockBaseline: stockTyped, stockSetAt: nowISO, updatedAt: nowISO }),
+      }));
+    }
+    setStockSheet(null);
+  }
+
   function renderMedRow(med) {
     const effectiveStock = mdEffectiveStock(med, medicationLogs, today);
     const low = mdIsLowStock(med, effectiveStock);
     return (
-      <button key={med.id} onClick={() => openMedSheet(med)} style={{ ...mdQuickRowInner, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, textAlign: 'left' }}>
+      <button key={med.id} onClick={() => openStockSheet(med)} style={{ ...mdQuickRowInner, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, textAlign: 'left' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <div style={{ ...mdEntryName, minWidth: 0 }}>{med.name}</div>
@@ -474,7 +613,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     <Screen>
       <TopBar title="Medications" onBack={() => go({ name: 'home' })} right={
         screenTab === 'timeline' && (
-          <button onClick={openLogSheet} aria-label="Log a dose" style={mdTopAddBtn} disabled={!activeMedications.length}>
+          <button onClick={() => openLogSheet()} aria-label="Log a dose" style={mdTopAddBtn} disabled={!activeMedications.length}>
             <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
           </button>
         )
@@ -484,25 +623,78 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {screenTab === 'timeline' && (
-          !todaysLogs.length ? (
-            <Empty title="Nothing today" sub="Set up a schedule, or log a dose right now."
-              icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {todaysLogs.map(entry => (
-                <div key={entry.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: entry.planned ? 1 : 0.7 }}>
-                  <MdCheckbox checked={!entry.planned} onToggle={() => toggleTaken(entry)} label={entry.planned ? 'Mark as taken' : 'Mark as not taken'} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={mdEntryName}>{entry.medicationName}</div>
-                    <div style={mdEntryMeta}>{entry.time} · {mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}</div>
-                  </div>
-                  <button onClick={() => deleteLogEntry(entry)} aria-label="Delete entry" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
-                    <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+          <>
+            {/* Day nav: same idiom as the Food Tracker's own Log-tab date
+                switcher (screens-food.jsx), unbounded both ways. */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button onClick={() => shiftDay(-1)} aria-label="Previous day" style={mdNavBtn()}>
+                <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
+                <div style={{ position: 'relative', width: 26, height: 26, flexShrink: 0 }}>
+                  <button aria-label="Jump to date" style={mdIconBtn(26)}>
+                    <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
                   </button>
+                  <input type="date" value={curDate}
+                    onChange={e => e.target.value && setCurDate(e.target.value)}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                  />
                 </div>
-              ))}
+              </div>
+              <button onClick={() => shiftDay(1)} aria-label="Next day" style={mdNavBtn()}>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
+              </button>
             </div>
-          )
+
+            {!activeMedications.length && (
+              <div style={mdEmptyHint}>Add a medication in the Schedule tab to start logging doses.</div>
+            )}
+
+            {/* Hourly timeline: every hour 0-23 always renders, filled or
+                not, same reasoning as the Food Tracker's own hour rows. No
+                meal-category grouping layer here, that's a food-specific
+                concept medications have no equivalent of: one continuous
+                24-hour list instead. */}
+            <div>
+              <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <MdHourTrunk />
+                {Array.from({ length: 24 }, (_, h) => h).map(h => {
+                  const es = byHour[h] || [];
+                  const filled = es.length > 0;
+                  const isNow = curDate === today && h === new Date().getHours();
+                  return (
+                    <div key={h} style={{ display: 'flex', alignItems: 'center' }}>
+                      <MdHourTick />
+                      <div style={{ ...mdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
+                        <div style={mdHourLabelCol}>
+                          <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {filled ? es.map(entry => (
+                            <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: entry.planned ? 0.7 : 1 }}>
+                              <MdCheckbox checked={!entry.planned} onToggle={() => toggleTaken(entry)} label={entry.planned ? 'Mark as taken' : 'Mark as not taken'} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={mdEntryName}>{entry.medicationName}</div>
+                                <div style={mdEntryMeta}>{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}</div>
+                              </div>
+                              <button onClick={() => deleteLogEntry(entry)} aria-label="Delete entry" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+                                <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                              </button>
+                            </div>
+                          )) : <div style={{ flex: 1 }} />}
+                        </div>
+                        <button onClick={() => openLogSheet(h)} aria-label={`Log a dose at ${String(h).padStart(2, '0')}:00`} style={mdHourAddBtn(isNow)} disabled={!activeMedications.length}>
+                          <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
 
         {screenTab === 'schedule' && (
@@ -610,6 +802,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <Sheet open={!!logDraft} onClose={() => setLogDraft(null)} title="Log a dose" titleColor="var(--accent)">
         {logDraft && (
           <>
+            {logDraft.hour != null && (
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>
+                Logging at {String(logDraft.hour).padStart(2, '0')}:00 on {dayLabel}
+              </div>
+            )}
             <Field label="Medication" style={{ marginBottom: 14 }}>
               <select value={logDraft.medicationId} onChange={e => setLogDraft(d => ({ ...d, medicationId: e.target.value }))} style={mdInputStyle}>
                 {activeMedications.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -620,6 +817,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 type="text" inputMode="decimal" placeholder="e.g. 2" style={mdInputStyle} autoFocus />
             </Field>
             <Btn onClick={saveLogDraft} disabled={!mdNum(logDraft.doseQtyStr)} style={{ width: '100%' }}>Log it</Btn>
+          </>
+        )}
+      </Sheet>
+
+      {/* Inventory tab: stock-only. Identity/category/schedule stay behind
+          the Schedule tab's medication sheet on purpose, see stockSheet. */}
+      <Sheet open={!!stockSheet} onClose={() => setStockSheet(null)} title={stockSheet?.name || 'Update stock'} titleColor="var(--accent)">
+        {stockSheet && (
+          <>
+            {mdEffectiveStock(medications.find(m => m.id === stockSheet.id) || {}, medicationLogs, today) != null && (
+              <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 12 }}>
+                Current stock: <span className="num">{mdFmtQty(mdEffectiveStock(medications.find(m => m.id === stockSheet.id), medicationLogs, today), stockSheet.unitLabel)}</span>
+              </div>
+            )}
+            <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>
+              <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
+                type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
+            </Field>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
+              Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+            </div>
+            <Btn onClick={saveStockSheet} style={{ width: '100%' }}>Save</Btn>
           </>
         )}
       </Sheet>
@@ -687,26 +906,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
               </div>
             </div>
-            {medSheet.id && (
-              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8 }}>Schedule</div>
-                {medSheetSlots.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                    {medSheetSlots.map(sl => (
-                      <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
-                          {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, medSheet.unitLabel)}
-                          {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
-                        </div>
-                        <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
-                        <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
+            <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Schedule</div>
+              {medSheetSlots.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                  {medSheetSlots.map(sl => (
+                    <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
+                        {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, medSheet.unitLabel)}
+                        {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
                       </div>
-                    ))}
-                  </div>
-                )}
-                <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
-              </div>
-            )}
+                      <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
+                      <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {medSheet.id && <Btn kind="ghost" onClick={() => deleteMedication(medications.find(m => m.id === medSheet.id))} style={{ flex: 1, color: UI.danger }}>Delete</Btn>}
               <Btn onClick={saveMedSheet} disabled={!medSheet.name.trim()} style={{ flex: medSheet.id ? 2 : 1 }}>Save</Btn>

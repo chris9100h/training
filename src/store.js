@@ -2015,7 +2015,13 @@ async function syncStore(prev, next, userId) {
   }
   if (prev.medications !== next.medications) {
     const { upsert, removed } = diffCollectionById(prev.medications, next.medications);
-    if (upsert.length) ops.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
+    // preOps, not ops: zane_medication_schedule_slots.medication_id is a real,
+    // non-deferrable NOT NULL FK into this table (same hazard as
+    // zane_food_recipes above), and every op in `ops` fires concurrently, so
+    // a brand new medication plus a schedule slot for it in the same diff
+    // (exactly what pushMedicationPlanToClient does) could hit the slot
+    // upsert first and 23503.
+    if (upsert.length) preOps.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
       id: m.id, user_id: userId, medication_plan_id: m.medicationPlanId ?? null, name: m.name,
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
       package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
@@ -4434,7 +4440,13 @@ async function pushMedicationPlanToClient({ plan, medications, scheduleSlots, co
   const medCopies = (medications || []).map(m => {
     const nid = uid();
     medIdMap[m.id] = nid;
-    return { ...m, id: nid, medicationPlanId: newPlanId, createdAt: nowISO, updatedAt: nowISO };
+    // stockBaseline/stockSetAt are explicitly reset, not spread from the
+    // coach's own row: those describe the coach's personal supply, not the
+    // client's, and the client has zero medicationLogs against this brand
+    // new id, so an inherited baseline would read back as real stock they
+    // never had. The client sets their own via Inventory once they actually
+    // have the medication in hand.
+    return { ...m, id: nid, medicationPlanId: newPlanId, stockBaseline: null, stockSetAt: null, createdAt: nowISO, updatedAt: nowISO };
   });
   // Only ever copies slots whose medication is actually part of this push
   // (medIdMap has no entry otherwise), so a stray slot referencing a

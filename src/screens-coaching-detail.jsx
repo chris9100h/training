@@ -1927,6 +1927,13 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
   const coachMedPlans = (store?.medicationPlans || []).filter(p => !p.archived);
   const [clientMeds, setClientMeds] = useStateC(null);
   const [clientSlots, setClientSlots] = useStateC([]);
+  // Actually-taken doses (planned:false) from the last 14 days, RLS already
+  // permits this (see migration 0218's stated rationale: a coach should see
+  // "complete medication list, schedule and actual logged adherence", not
+  // just the static schedule). Bounded to 14 days and taken-only, not the
+  // client's whole history: this card only ever shows "last taken", not a
+  // full timeline, so nothing older than that is ever read.
+  const [clientLogs, setClientLogs] = useStateC([]);
   const [clientError, setClientError] = useStateC(false);
   const [pickerOpen, setPickerOpen] = useStateC(false);
   const [pushTarget, setPushTarget] = useStateC(null);
@@ -1934,17 +1941,20 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
 
   const loadClientMeds = () => {
     if (!clientId) return;
+    const sinceISO = LB.fmtISO(new Date(Date.now() - 14 * 86400000));
     Promise.all([
       LB.supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, medication_plan_id').eq('user_id', clientId).eq('archived', false),
       LB.supabase.from('zane_medication_schedule_slots').select('id, medication_id, weekdays, hour, dose_qty, active').eq('user_id', clientId),
-    ]).then(([medsRes, slotsRes]) => {
+      LB.supabase.from('zane_medication_logs').select('medication_id, date, time').eq('user_id', clientId).eq('planned', false).gte('date', sinceISO).order('date', { ascending: false }).order('time', { ascending: false }),
+    ]).then(([medsRes, slotsRes, logsRes]) => {
       // A failed query used to render as "nothing tracked", same trap
       // ClientNutritionTab's own comment calls out for meal plans.
-      if (medsRes.error || slotsRes.error) { setClientMeds([]); setClientSlots([]); setClientError(true); return; }
+      if (medsRes.error || slotsRes.error || logsRes.error) { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientError(true); return; }
       setClientError(false);
       setClientMeds(medsRes.data || []);
       setClientSlots(slotsRes.data || []);
-    }).catch(() => { setClientMeds([]); setClientSlots([]); setClientError(true); });
+      setClientLogs(logsRes.data || []);
+    }).catch(() => { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientError(true); });
   };
   useEffectC(() => { loadClientMeds(); }, [clientId]);
 
@@ -1988,6 +1998,9 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
           {clientMeds.map(m => {
             const slots = clientSlots.filter(sl => sl.medication_id === m.id && sl.active);
+            // clientLogs is already ordered newest-first, so the first match
+            // per medication is its most recently actually-taken dose.
+            const lastTaken = clientLogs.find(l => l.medication_id === m.id);
             return (
               <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1996,6 +2009,9 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
                 </div>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
                   {slots.length ? slots.map(sl => `${wdLabel(sl.weekdays)} ${String(sl.hour).padStart(2, '0')}:00 · ${sl.dose_qty} ${m.unit_label || 'pills'}`).join('; ') : 'No schedule'}
+                </div>
+                <div style={{ fontSize: 11, color: lastTaken ? UI.inkSoft : 'var(--warn)', fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {lastTaken ? `Last taken ${lastTaken.date === LB.todayISO() ? 'today' : lastTaken.date} · ${lastTaken.time}` : 'Not logged in the last 14 days'}
                 </div>
               </div>
             );
