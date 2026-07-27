@@ -495,18 +495,21 @@ function fdReadShoppingNameOverrides() {
 function fdWriteShoppingNameOverrides(v) {
   try { localStorage.setItem('logbook-shopping-name-overrides', JSON.stringify(v)); } catch (_) {}
 }
-// A user's local "don't show this on my shopping list" exclusion, keyed by
-// foodId: some foods qualify by the normal frequency/plan rules but aren't
-// actually a grocery-run item for this user (bulk whey ordered every couple
-// of months from a different retailer, say). Hiding it once beats it
-// resurfacing on every future list. Stores the foodName alongside the key
-// (not just a bare id) so the "manage excluded" sheet can list it by name
-// without needing to cross-reference the live list, which won't contain an
-// excluded food at all once this filter runs. Recipe-exploded/custom items
-// without a foodId can't be targeted this way, same limitation as renaming.
+// A user's local "I'll get this separately" exclusion, keyed by foodId: some
+// foods qualify by the normal frequency/plan rules but aren't actually a
+// grocery-run item for this user (bulk whey ordered every couple of months
+// from a different retailer, say). Unlike a hard filter this never removes
+// the item, it only flags it: ShoppingListScreen still renders it (dimmed,
+// checkbox unchecked) in its own "Excluded" section so the user is still
+// reminded it exists and will eventually run out, just kept out of the
+// export/screenshot. A bare `true` is enough to store, no need for the
+// foodName too: the live item already carries its own name wherever this
+// renders, and an exclusion for a food that later drops out of the list
+// entirely simply stops rendering anywhere, nothing to separately clean up.
+// Recipe-exploded/custom items without a foodId can't be targeted this way,
+// same limitation as renaming.
 function fdApplyShoppingExclusions(list, exclusions) {
-  if (!exclusions || !Object.keys(exclusions).length) return list;
-  return list.filter(item => !(item.foodId && exclusions[item.foodId]));
+  return list.map(item => ({ ...item, excluded: !!(item.foodId && exclusions && exclusions[item.foodId]) }));
 }
 function fdReadShoppingExclusions() {
   try {
@@ -541,14 +544,20 @@ function fdBuildShoppingExportHtml(list, withAmounts) {
 // Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
 // accent-bordered box when planned (not eaten yet), the same box filled with a
 // check once logged (eaten). Tapping toggles the entry's planned state.
-function FdCheckbox({ checked, onToggle }) {
+// disabled/label are only used by the Shopping List's own reuse of this for
+// its include/exclude toggle (a different meaning than planned/eaten, hence
+// the label override; disabled covers rows with no stable id to toggle at
+// all), both optional and unused by the original two call sites above.
+function FdCheckbox({ checked, onToggle, disabled, label }) {
   return (
     <button
       data-reorder-ignore="true"
-      onClick={onToggle}
-      aria-label={checked ? 'Mark as planned' : 'Mark as eaten'}
+      onClick={disabled ? undefined : onToggle}
+      disabled={disabled}
+      aria-label={label || (checked ? 'Mark as planned' : 'Mark as eaten')}
       style={{
-        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0, cursor: 'pointer',
+        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0,
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.4 : 1,
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
@@ -5272,16 +5281,21 @@ function ShoppingListScreen({ open, onClose, store, today }) {
 
   // Local per-food display-name override and exclusion (see
   // fdApplyShoppingNameOverrides/fdApplyShoppingExclusions): displayList is
-  // what actually renders/exports, list stays the untouched
-  // fdBuildShoppingList output, only used to recompute displayList.
-  // Exclude first, then rename: no point computing a display name for an
-  // item about to be filtered out anyway.
+  // what actually renders, list stays the untouched fdBuildShoppingList
+  // output, only used to recompute displayList. Neither function filters
+  // anything out any more, both just annotate every item (displayName/
+  // overridden, excluded), so includedList/excludedList below split the
+  // SAME list rather than one filtering the other's input away.
   const [overrides, setOverrides] = useStateFd(fdReadShoppingNameOverrides);
   const [exclusions, setExclusions] = useStateFd(fdReadShoppingExclusions);
   const displayList = useMemoFd(
     () => fdApplyShoppingNameOverrides(fdApplyShoppingExclusions(list, exclusions), overrides),
     [list, overrides, exclusions],
   );
+  // What actually feeds the export/screenshot (included only) vs. what's
+  // still shown, just set aside, in the list screen's own "Excluded" section.
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
+  const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
 
   const [renameItem, setRenameItem] = useStateFd(null); // the tapped displayList item, or null
   const [renameDraft, setRenameDraft] = useStateFd('');
@@ -5314,27 +5328,45 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     fdWriteShoppingNameOverrides(next);
     closeRename();
   }
-  function excludeItem() {
-    if (!renameItem) return;
-    const next = { ...exclusions, [renameItem.foodId]: renameItem.foodName };
-    setExclusions(next);
-    fdWriteShoppingExclusions(next);
-    closeRename();
-  }
-
-  // "Manage excluded" sheet: the only way back for something excludeItem
-  // hid, since an excluded food no longer appears in displayList at all for
-  // the rename sheet to reopen it from.
-  const [manageExclOpen, setManageExclOpen] = useStateFd(false);
-  const exclusionEntries = useMemoFd(
-    () => Object.entries(exclusions).sort((a, b) => a[1].localeCompare(b[1])),
-    [exclusions],
-  );
-  function restoreExclusion(foodId) {
+  // The checkbox's own handler, independent of the rename sheet: toggles
+  // straight from either list section, no sheet involved. Un-excluding just
+  // deletes the key rather than storing `false`, so a food nobody has ever
+  // touched and one that's been explicitly re-included both read the same
+  // (absent from the object), keeping the stored set exactly as large as the
+  // number of foods actually excluded right now.
+  function toggleExclusion(item) {
+    if (!item.foodId) return;
     const next = { ...exclusions };
-    delete next[foodId];
+    if (next[item.foodId]) delete next[item.foodId]; else next[item.foodId] = true;
     setExclusions(next);
     fdWriteShoppingExclusions(next);
+  }
+  // Shared row for both includedList and excludedList below: same layout,
+  // just dimmed with the checkbox unchecked once excluded. The checkbox is a
+  // sibling button next to the name/amount button, not nested inside it,
+  // real <button> elements can't nest without the browser silently breaking
+  // the layout back out of the outer one.
+  function renderShoppingRow(item) {
+    return (
+      <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: item.excluded ? 0.55 : 1 }}>
+        <FdCheckbox
+          checked={!item.excluded}
+          disabled={!item.foodId}
+          label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
+          onToggle={() => toggleExclusion(item)}
+        />
+        <button onClick={() => openRename(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={fdEntryName}>{item.displayName}</div>
+            {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {item.fromProjection && <Pill gold>Plan</Pill>}
+            <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
+          </div>
+        </button>
+      </div>
+    );
   }
 
   // Two-step sheet: pick content (amounts or not) first, then how to get it
@@ -5357,11 +5389,11 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   // boundaries), an explicit list structure removes that guesswork. Falls
   // back to plain-text-only if the richer multi-type write isn't supported.
   async function doExport(withAmounts) {
-    const text = fdBuildShoppingExportText(displayList, withAmounts);
+    const text = fdBuildShoppingExportText(includedList, withAmounts);
     let copied = false;
     if (typeof ClipboardItem !== 'undefined') {
       try {
-        const html = fdBuildShoppingExportHtml(displayList, withAmounts);
+        const html = fdBuildShoppingExportHtml(includedList, withAmounts);
         await navigator.clipboard.write([new ClipboardItem({
           'text/plain': new Blob([text], { type: 'text/plain' }),
           'text/html': new Blob([html], { type: 'text/html' }),
@@ -5382,7 +5414,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   // anyway for every OTHER target (Messages, Mail, AirDrop, ...) where a
   // plain string is exactly what's wanted and there's no checklist to lose.
   async function doShare(withAmounts) {
-    const text = fdBuildShoppingExportText(displayList, withAmounts);
+    const text = fdBuildShoppingExportText(includedList, withAmounts);
     try { await navigator.share({ text }); } catch (_) {}
     closeExport();
   }
@@ -5421,7 +5453,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Shopping list" onBack={onClose} right={
-        displayList.length > 0 && (
+        includedList.length > 0 && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={takeScreenshot} disabled={capturing} aria-label="Share shopping list as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
               {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
@@ -5463,18 +5495,20 @@ function ShoppingListScreen({ open, onClose, store, today }) {
                   <div className="micro" style={{ marginTop: 4 }}>{shoppingDays === 1 ? 'Day' : 'Days'}</div>
                 </div>
                 <div>
-                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{displayList.length}</div>
-                  <div className="micro" style={{ marginTop: 4 }}>{displayList.length === 1 ? 'Item' : 'Items'}</div>
+                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{includedList.length}</div>
+                  <div className="micro" style={{ marginTop: 4 }}>{includedList.length === 1 ? 'Item' : 'Items'}</div>
                 </div>
               </div>
             </BracketFrame>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
-              {displayList.map(item => (
+              {includedList.map(item => (
                 // Translucent surface-tint fill (not fdQuickRowInner's opaque
                 // one), same reason the Food Log poster's entry cards use it:
                 // an opaque row blocks the watermark entirely wherever it
                 // sits, leaving it visible only in the gaps between rows.
+                // Excluded items never make it into includedList, they don't
+                // belong in a "what to buy" poster at all.
                 <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{item.displayName}</div>
@@ -5497,31 +5531,34 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
         </Card>
 
-        {exclusionEntries.length > 0 && (
-          <button onClick={() => setManageExclOpen(true)} style={{ background: 'none', border: 'none', padding: 0, alignSelf: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-            <i className="fa-solid fa-eye-slash" style={{ marginRight: 6 }} />
-            {exclusionEntries.length} {exclusionEntries.length === 1 ? 'item' : 'items'} excluded · Manage
-          </button>
-        )}
-
         {!displayList.length ? (
           <Empty title="Nothing yet"
             sub="Log meals for a couple of weeks, or set up a meal plan, and your regulars will show up here."
             icon={<i className="fa-solid fa-basket-shopping" style={{ fontSize: 28, color: UI.inkFaint }} />} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {displayList.map(item => (
-              <button key={item.key} onClick={() => openRename(item)} style={{ ...fdQuickRowInner, cursor: item.foodId ? 'pointer' : 'default' }}>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{item.displayName}</div>
-                  {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+          // One wrapping div so the parent's own gap:16 (Card -> this block)
+          // applies exactly once: a bare fragment here would flatten into
+          // direct flex children and add that same 16px between the knurl,
+          // the label and the excluded rows too, on top of their own margins.
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {includedList.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {includedList.map(renderShoppingRow)}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>
+                Nothing to buy right now, everything's excluded.
+              </div>
+            )}
+            {excludedList.length > 0 && (
+              <>
+                <div className="knurl" style={{ margin: '16px 0 10px' }} />
+                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Excluded</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {excludedList.map(renderShoppingRow)}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  {item.fromProjection && <Pill gold>Plan</Pill>}
-                  <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
-                </div>
-              </button>
-            ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -5576,30 +5613,6 @@ function ShoppingListScreen({ open, onClose, store, today }) {
           {renameItem?.overridden && <Btn kind="ghost" onClick={resetRename} style={{ flex: 1 }}>Reset</Btn>}
           <Btn onClick={saveRename} style={{ flex: renameItem?.overridden ? 2 : 1 }}>Save</Btn>
         </div>
-        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 16, paddingTop: 16 }}>
-          <Btn kind="ghost" onClick={excludeItem} style={{ width: '100%' }}>
-            <i className="fa-solid fa-eye-slash" style={{ marginRight: 8 }} /> Exclude from shopping list
-          </Btn>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px', textAlign: 'center' }}>
-            Not a grocery-run item for you (a bulk order every few months, say)? Hide it here, it won't show up on future lists either. Manage excluded items from the list screen.
-          </div>
-        </div>
-      </Sheet>
-      <Sheet open={manageExclOpen} onClose={() => setManageExclOpen(false)} title="Excluded items" titleColor="var(--accent)">
-        {exclusionEntries.length === 0 ? (
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>Nothing excluded.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {exclusionEntries.map(([foodId, foodName]) => (
-              <div key={foodId} style={fdQuickRowInner}>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{foodName}</div>
-                </div>
-                <button onClick={() => restoreExclusion(foodId)} style={{ ...btnGhost, padding: '6px 12px', fontSize: 11, flexShrink: 0 }}>Restore</button>
-              </div>
-            ))}
-          </div>
-        )}
       </Sheet>
     </Screen>
   );
