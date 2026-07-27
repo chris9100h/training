@@ -289,6 +289,29 @@ function fdFavoriteShoppingKeys(foodFavorites) {
   (foodFavorites || []).forEach(f => set.add(fdShoppingKey(f.foodId, f.foodName)));
   return set;
 }
+// A recipe-exploded ingredient never carries a foodId (see fdExplodeForShopping),
+// so the SAME grocery item logged both standalone (search/barcode, a real
+// foodId) and only ever inside a recipe lands as two separate groups purely
+// because one has an id-key and the other a name-key, even though their
+// foodName is identical. Folds any name-keyed group into an existing
+// id-keyed group when their normalized names match, foodId stays the
+// group's identity, only the totals combine. Mutates and returns `tally`.
+function fdReconcileShoppingTally(tally) {
+  const idKeyByName = new Map();
+  tally.forEach((row, key) => { if (row.foodId) idKeyByName.set(fdNormFoodName(row.foodName), key); });
+  const toDrop = [];
+  tally.forEach((row, key) => {
+    if (row.foodId) return;
+    const idKey = idKeyByName.get(fdNormFoodName(row.foodName));
+    if (!idKey || idKey === key) return;
+    const target = tally.get(idKey);
+    target.totalGrams += row.totalGrams;
+    if (row.count != null) target.count = (target.count || 0) + row.count;
+    toDrop.push(key);
+  });
+  toDrop.forEach(key => tally.delete(key));
+  return tally;
+}
 // Last FD_SHOPPING_ANALYSIS_DAYS of ACTUALLY-EATEN entries (planned rows
 // never count toward "what do I typically buy"). store.foodLogs is
 // boot-windowed to LB.FOOD_HISTORY_WINDOW_DAYS (30, see foodHistCutoff
@@ -309,7 +332,7 @@ function fdShoppingHistoryTally(foodLogs, todayISO) {
       tally.set(key, row);
     });
   });
-  return tally;
+  return fdReconcileShoppingTally(tally);
 }
 // The active plan's slots projected across `days` calendar days from today
 // (today included), reusing fdSlotMatchesDate/fdMaterializeSlotEntry
@@ -333,7 +356,7 @@ function fdShoppingProjectionTally(store, todayISO, days) {
       });
     });
   }
-  return tally;
+  return fdReconcileShoppingTally(tally);
 }
 // Merges the two signals without ever double-counting a food: a projected
 // food's quantity is the projection's own total for the window, full stop,
