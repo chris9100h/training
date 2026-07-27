@@ -5391,37 +5391,77 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   const [editItem, setEditItem] = useStateFd(null); // the tapped displayList item, or null
   const [editDraft, setEditDraft] = useStateFd('');
   const [pkgDraft, setPkgDraft] = useStateFd('');
-  // Always starts blank, unlike editDraft/pkgDraft: this is an "update the
-  // count" field, not a display of the current value (that's the read-only
-  // effectiveStockG line in the sheet itself). Blank on Save means "leave
-  // stock tracking as it is", not "clear it", so an unrelated name edit
-  // doesn't accidentally wipe out a tracked count just for being left empty.
+  // All three always start blank, unlike editDraft/pkgDraft: these are
+  // "update the count" fields, not a display of the current value (that's
+  // the read-only effectiveStockG line in the sheet itself). All blank on
+  // Save means "leave stock tracking as it is", not "clear it", so an
+  // unrelated name edit doesn't accidentally wipe out a tracked count just
+  // for being left empty. stockDraft (plain grams) is only used without a
+  // package size; with one, stockPacksDraft/stockExtraDraft take over so a
+  // user can say "2 packs" or "2 packs plus a half-used one" directly,
+  // instead of doing the pack-to-gram math themselves. Either field alone
+  // still works (0 packs + grams = pure grams, packs + 0 grams = pure packs).
   const [stockDraft, setStockDraft] = useStateFd('');
+  const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
+  const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
   function openEdit(item) {
     if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
     setEditItem(item);
     setEditDraft(item.displayName);
     setPkgDraft(item.packageSizeG ? String(item.packageSizeG) : '');
     setStockDraft('');
+    setStockPacksDraft('');
+    setStockExtraDraft('');
   }
-  function closeEdit() { setEditItem(null); setEditDraft(''); setPkgDraft(''); setStockDraft(''); }
+  function closeEdit() {
+    setEditItem(null); setEditDraft(''); setPkgDraft('');
+    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+  }
+  // True if any field actually differs from what the sheet opened with.
+  // editDraft/pkgDraft are pre-filled on open (dirty means "changed from
+  // that"), the three stock drafts always start blank (dirty means "typed
+  // into at all"). Backs requestCloseEdit's confirm below.
+  function isEditDirty() {
+    if (!editItem) return false;
+    if (editDraft !== editItem.displayName) return true;
+    if (pkgDraft !== (editItem.packageSizeG ? String(editItem.packageSizeG) : '')) return true;
+    return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
+  }
+  // Sheet's backdrop tap calls onClose directly with no dirty-check of its
+  // own (same for every Sheet in the app), so a stray tap outside the panel
+  // while mid-edit silently threw away whatever was typed. This is what
+  // actually goes in as onClose instead: closeEdit is still called directly
+  // by Save/Reset themselves, which just did something deliberate.
+  async function requestCloseEdit() {
+    if (isEditDirty() && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeEdit();
+  }
   function saveEdit() {
     if (!editItem) return;
     const trimmed = editDraft.trim();
     // Blank, or typed back to exactly the original: same as no override, no
     // point leaving a no-op override sitting in the DB forever.
     const nameOverride = (!trimmed || trimmed === editItem.foodName) ? null : trimmed;
-    const patch = { nameOverride, packageSizeG: fdNum(pkgDraft) };
+    const packageSizeG = fdNum(pkgDraft);
+    const patch = { nameOverride, packageSizeG };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
     // makes "I just restocked" mean "start counting from zero again".
-    const stockTyped = fdNum(stockDraft);
+    let stockTyped = null;
+    if (packageSizeG > 0) {
+      if (stockPacksDraft.trim() || stockExtraDraft.trim()) {
+        stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdNum(stockExtraDraft) || 0);
+      }
+    } else {
+      stockTyped = fdNum(stockDraft);
+    }
     if (stockTyped != null) { patch.stockBaselineG = stockTyped; patch.stockSetAt = new Date().toISOString(); }
     fdSetShoppingPref(setStore, editItem.foodId, patch);
     closeEdit();
   }
-  function resetEdit() {
+  async function resetEdit() {
     if (!editItem) return;
+    if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
     fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
@@ -5735,7 +5775,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
           </>
         )}
       </Sheet>
-      <Sheet open={!!editItem} onClose={closeEdit} title="Edit item" titleColor="var(--accent)">
+      <Sheet open={!!editItem} onClose={requestCloseEdit} title="Edit item" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
           Original: {editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
         </div>
@@ -5753,12 +5793,37 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
           {editItem?.effectiveStockG != null && (
             <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
               Current stock: <span className="num">{fdExactShoppingQty(editItem.effectiveStockG)}</span>
+              {editItem.packageSizeG > 0 && (
+                <span style={{ color: UI.inkFaint }}>
+                  {' '}({Math.floor(editItem.effectiveStockG / editItem.packageSizeG)} packs
+                  {editItem.effectiveStockG % editItem.packageSizeG > 0 ? ` + ${fdExactShoppingQty(editItem.effectiveStockG % editItem.packageSizeG)}` : ''})
+                </span>
+              )}
             </div>
           )}
-          <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
-            <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
-              type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
-          </Field>
+          {fdNum(pkgDraft) > 0 ? (
+            // A package size is already known, so stock is worth entering in
+            // packs instead of doing the pack-to-gram math yourself: "2
+            // packs" beats "800g", and "2 packs + 150g" (a couple of sealed
+            // ones plus an opened partial) beats guessing a single gram
+            // figure. Either field alone still works (0 + grams = pure
+            // grams, packs + 0 = pure packs), this is one input, not a mode switch.
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <Field label="Full packs" style={{ flex: 1, marginBottom: 0 }}>
+                <input value={stockPacksDraft} onChange={e => setStockPacksDraft(fdDecimalFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
+              </Field>
+              <Field label="+ grams" style={{ flex: 1, marginBottom: 0 }}>
+                <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdDecimalFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
+              </Field>
+            </div>
+          ) : (
+            <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
+              <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
+            </Field>
+          )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
             Tracks what's actually eaten since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
           </div>
