@@ -1084,10 +1084,11 @@ function ClientSetupTab(props) {
   const [sub, setSub] = useStateC('plan');
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }]}
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }, { id: 'medications', label: 'Meds', icon: 'fa-pills' }]}
         active={sub} onChange={setSub} />
       {sub === 'plan'      && <ClientPlanTab {...props} />}
       {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
+      {sub === 'medications' && <ClientMedicationsTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
     </div>
   );
 }
