@@ -445,14 +445,22 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
 // baseline rather than a live-decremented counter that would need a hook in
 // every food-logging code path, plus an undo hook wherever a log entry is
 // later edited or deleted (see zane_food_shopping_prefs in
-// docs/database.md). sinceISO is a full stock_set_at timestamp truncated to
-// its date: day-granularity like the rest of this file's tallies, so
-// anything logged the same day the baseline was set still counts.
+// docs/database.md). Compares real moments in time, not just calendar
+// dates: day-granularity (truncating sinceISO to its date) sounded fine but
+// wasn't, a same-day entry logged BEFORE the baseline was set still counted
+// against it (a real report: updating stock at 2pm still deducted a 10am
+// entry from hours earlier that day, the weighed/counted "X grams left"
+// already accounted for it). entry.date/.time are local wall-clock (see
+// zane_food_logs in docs/database.md), and a date-time string with no
+// timezone designator parses as local too, so this compares correctly
+// against sinceISO (a real UTC instant) without needing the browser's own
+// UTC offset at all.
 function fdConsumedSince(foodLogs, foodId, sinceISO, todayISO) {
-  const sinceDate = sinceISO.slice(0, 10);
+  const sinceMoment = new Date(sinceISO);
   let total = 0;
   (foodLogs || []).forEach(entry => {
-    if (entry.planned || entry.date < sinceDate || entry.date > todayISO) return;
+    if (entry.planned || entry.date > todayISO) return;
+    if (new Date(`${entry.date}T${entry.time || '00:00'}:00`) < sinceMoment) return;
     fdExplodeForShopping(entry).forEach(leaf => {
       if (leaf.foodId === foodId) total += leaf.quantityG || 0;
     });
