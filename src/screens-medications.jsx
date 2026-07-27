@@ -11,23 +11,26 @@
    - Schedule: named plans (My Plans / Client Templates for a coach, like
      FoodTemplateScreen). A plan is just a grouping a medication can
      optionally belong to (medicationPlanId is a nullable soft reference,
-     see migration 0218); its own "Add medication" only ever attaches an
-     already-created one (or creates a new one pre-assigned to it), so
+     see migration 0218); its own "Add medication" is a picker over already-
+     created, currently-unassigned medications ONLY, never a create form, so
      removing a medication from a plan, or deleting the plan itself, never
-     destroys the medication, its schedule or its log history.
+     destroys the medication, its schedule or its log history. A schedule
+     slot's own weekday/hour/dose fields (the "Add time" sub-sheet) are the
+     one place time itself is entered.
    - Inventory: two sub-tabs, mirroring the Food Shopping List's own
-     Shopping List/Inventory split. Inventory is the stock/low-stock view,
+     Shopping List/Inventory split. Inventory is the stock/low-stock view
+     (its own dedicated stockSheet is the only place stock is entered),
      every non-archived medication (not just stock-tracked ones, unlike the
      Shopping List's own Inventory tab: this domain's medication list IS the
      inventory, there's no separate frequency-filtered "staple" concept
      sitting in front of it), with a Running Low section for anything
-     that's dipped under its package size. Medications is the actual
-     create/edit/delete surface for a medication, independent of any plan,
-     same list as Inventory just presented for editing rather than for
-     stock. Creating one is identity-only (name, brand, category, unit,
-     package size): time is a Schedule-tab concern, so the recurring weekly
-     schedule slot(s) only become editable once the medication has been
-     saved (a real id to attach a slot to), from either tab.
+     that's dipped under its package size, and a Tracked/Not-tracked filter
+     underneath. Medications is the actual create/edit/delete surface for a
+     medication's identity (name, brand, category, unit, package size)
+     ONLY, independent of any plan, same list as Inventory just presented
+     for editing rather than for stock: neither stock (Inventory tab's
+     stockSheet) nor schedule (Schedule tab, once the medication has a real
+     id) are ever entered here.
 
    Multiple plans run concurrently on purpose (no active_*_id pointer like
    food): daily vitamins alongside a coach-prescribed cycle is the normal
@@ -485,33 +488,35 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // nullable soft reference, see migration 0218).
   const [medSheet, setMedSheet] = useStateMd(null);
   const medSheetInitialSnap = useRefMd(null);
-  // Only the identity/stock fields: creating is identity-only (see the
-  // Schedule section's medSheet.id gate below, time is set up later, from
-  // wherever the medication actually gets scheduled), and an existing
-  // medication's schedule already writes straight to the store the moment
-  // you add/edit/delete a time (see saveSlotDraft/deleteSlot), so neither
-  // needs to be part of this "did the user change something" snapshot.
+  // Identity fields only: medSheet never touches stock (that's the
+  // Inventory tab's own stockSheet, see openStockSheet below) or schedule
+  // while creating (see the Schedule section's medSheet.id gate further
+  // down; an existing medication's schedule already writes straight to the
+  // store the moment you add/edit/delete a time, see saveSlotDraft/
+  // deleteSlot, so it was never part of "did the user change something"
+  // here to begin with).
   function snapMedSheet(d) {
     return JSON.stringify({
-      name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel,
-      packageSizeStr: d.packageSizeStr, stockStr: d.stockStr,
+      name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
     });
   }
-  function openMedSheet(med, planIdForNew) {
+  // A medication is only ever created unassigned (medicationPlanId: null):
+  // creating one lives exclusively in the Inventory tab's Medications
+  // sub-tab, a plan's own "Add medication" only ever attaches an existing
+  // one (see attachMedicationToPlan), never creates a fresh one.
+  function openMedSheet(med) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize ? String(med.packageSize) : '',
-      stockStr: '',
     } : {
-      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '',
-      planId: planIdForNew ?? null,
+      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
   }
   function closeMedSheet() { setMedSheet(null); }
   // Backdrop tap used to drop the whole in-progress medication (name,
-  // brand, category, unit, package size, stock) silently, same trap
+  // brand, category, unit, package size) silently, same trap
   // screens-food.jsx's own meal-slot draft had (see requestCloseDraft there).
   async function requestCloseMedSheet() {
     if (medSheet && snapMedSheet(medSheet) !== medSheetInitialSnap.current
@@ -521,7 +526,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function saveMedSheet() {
     if (!medSheet || !medSheet.name.trim()) return;
     const packageSize = mdNum(medSheet.packageSizeStr);
-    const stockTyped = mdNum(medSheet.stockStr);
     const nowISO = new Date().toISOString();
     if (medSheet.id) {
       setStore(s => ({
@@ -530,15 +534,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
           packageSize, updatedAt: nowISO,
-          ...(stockTyped != null ? { stockBaseline: stockTyped, stockSetAt: nowISO } : {}),
         }),
       }));
     } else {
       const newMed = {
-        id: LB.uid(), medicationPlanId: medSheet.planId ?? null, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
+        id: LB.uid(), medicationPlanId: null, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
-        stockBaseline: stockTyped, stockSetAt: stockTyped != null ? nowISO : null,
-        archived: false, createdAt: nowISO, updatedAt: nowISO,
+        stockBaseline: null, stockSetAt: null, archived: false, createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
     }
@@ -690,6 +692,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setLowStockAcks(next);
     mdWriteLowStockAcks(next);
   }
+
+  // Filter for the main list below Running Low: All / Tracked (has a stock
+  // count) / Not tracked. Never applies to Running Low itself, being low
+  // stock definitionally requires a real count to compare against package
+  // size, so that section is always "Tracked" anyway.
+  const [invStockFilter, setInvStockFilter] = useStateMd('all'); // 'all' | 'tracked' | 'untracked'
+  const mainInventoryList = useMemoMd(() => {
+    const rest = inventoryList.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
+    if (invStockFilter === 'all') return rest;
+    return rest.filter(m => {
+      const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
+      return invStockFilter === 'tracked' ? tracked : !tracked;
+    });
+  }, [inventoryList, medicationLogs, today, invStockFilter]);
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
@@ -875,7 +891,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
               </Btn>
               {!viewedPlanMeds.length ? (
-                <Empty title="Nothing in this plan yet" sub="Add a medication you've already created, or create a new one."
+                <Empty title="Nothing in this plan yet" sub="Add a medication you've already created in the Medications tab."
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -917,9 +933,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   <Empty title="No medications yet" sub="Add one in the Medications tab to start tracking it here."
                     icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {inventoryList.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))).map(renderMedRow)}
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+                      {[{ id: 'all', label: 'All' }, { id: 'tracked', label: 'Tracked' }, { id: 'untracked', label: 'Not tracked' }].map(f => (
+                        <button key={f.id} onClick={() => setInvStockFilter(f.id)} style={mdSegBtn(invStockFilter === f.id)}>{f.label}</button>
+                      ))}
+                    </div>
+                    {!mainInventoryList.length ? (
+                      <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {mainInventoryList.map(renderMedRow)}
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             ) : (
@@ -1007,15 +1034,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Add an existing (unassigned) medication to the viewed plan, or jump
-          into medSheet to create a brand new one already assigned to it. */}
+      {/* Add an existing (unassigned) medication to the viewed plan.
+          Creating a new medication only ever happens in the Inventory tab's
+          Medications sub-tab, never from here (see openMedSheet). */}
       <Sheet open={addToPlanOpen} onClose={() => setAddToPlanOpen(false)} title="Add medication" titleColor="var(--accent)">
-        <Btn onClick={() => { setAddToPlanOpen(false); openMedSheet(null, viewedPlanId); }} style={{ width: '100%', marginBottom: 14 }}>
-          <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Create new
-        </Btn>
-        {unassignedMeds.length > 0 && <div className="micro" style={{ marginBottom: 8 }}>Or add one you already have</div>}
         {unassignedMeds.length === 0 ? (
-          <div style={mdEmptyHint}>No unassigned medications. Create a new one, or remove one from another plan first (its own "Remove from plan" button).</div>
+          <div style={mdEmptyHint}>No unassigned medications. Create one in the Medications tab first, or remove one from another plan (its own "Remove from plan" button).</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {unassignedMeds.map(m => (
@@ -1062,25 +1086,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            {/* Stock, like schedule below, only becomes settable once the
-                medication is saved: creating one is identity-only (name,
-                brand, category, unit, package size), nothing else. */}
-            {medSheet.id && (
-              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-                {mdEffectiveStock(medications.find(m => m.id === medSheet.id) || {}, medicationLogs, today) != null && (
-                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
-                    Current stock: <span className="num">{mdFmtQty(mdEffectiveStock(medications.find(m => m.id === medSheet.id), medicationLogs, today), medSheet.unitLabel)}</span>
-                  </div>
-                )}
-                <Field label={`Update stock (${medSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>
-                  <input value={medSheet.stockStr} onChange={e => setMedSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
-                    type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} />
-                </Field>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
-                  Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
-                </div>
-              </div>
-            )}
             {/* Time is a Schedule-tab thing, not part of creating a
                 medication: only an already-saved medication (real id) gets
                 this section at all, regardless of whether it's opened from
