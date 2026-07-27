@@ -417,16 +417,36 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   keys.forEach(key => {
     const p = proj.get(key);
     if (p) {
-      if (p.totalGrams > 0) out.push({ key, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
+      if (p.totalGrams > 0) out.push({ key, foodId: p.foodId || null, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
       return;
     }
     const h = hist.get(key);
     if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
     const daysSpan = Math.max(FD_SHOPPING_RATE_FLOOR_DAYS, fdDaysBetween(h.firstDate, todayISO) + 1);
     const grams = (h.totalGrams / daysSpan) * shoppingDays;
-    if (grams > 0) out.push({ key, foodName: h.foodName, brand: h.brand || null, grams, fromProjection: false });
+    if (grams > 0) out.push({ key, foodId: h.foodId || null, foodName: h.foodName, brand: h.brand || null, grams, fromProjection: false });
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
+}
+// A user's local per-food display-name override (see
+// fdReadShoppingNameOverrides), keyed by foodId: for the handful of foods
+// whose bare name is genuinely ambiguous out of context (an OFF/USDA
+// product naming only the flavor/variant, e.g. "Original", with the actual
+// brand as its own field), renaming it once beats showing brand context on
+// every single line (rejected earlier, too noisy for the common case where
+// the bare name is already fine). Adds displayName (the override, or the
+// original name unchanged) and overridden (whether one is active, so the
+// row can skip its own brand subtitle instead of showing it twice) to every
+// item, then re-sorts by whatever ends up actually displayed. Recipe-
+// exploded/custom items without a foodId can't be targeted this way.
+function fdApplyShoppingNameOverrides(list, overrides) {
+  const out = list.map(item => {
+    const override = item.foodId && overrides ? overrides[item.foodId] : null;
+    return override
+      ? { ...item, displayName: override, overridden: true }
+      : { ...item, displayName: item.foodName, overridden: false };
+  });
+  return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 // Display rounding: under 50g rounds to the nearest 5, under 1000g to the
 // nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
@@ -451,22 +471,38 @@ function fdReadShoppingDays() {
 function fdWriteShoppingDays(v) {
   try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
 }
+// Per-device only (CLAUDE.md localStorage-keys list), same reasoning as
+// logbook-shopping-list-days: a personal display tweak, not worth a synced
+// setting. {} on any read failure (missing key, corrupt JSON, private
+// browsing quota) rather than throwing: an override is a nice-to-have, not
+// something that should ever be able to break the list itself.
+function fdReadShoppingNameOverrides() {
+  try {
+    const v = JSON.parse(localStorage.getItem('logbook-shopping-name-overrides'));
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  } catch (_) { return {}; }
+}
+function fdWriteShoppingNameOverrides(v) {
+  try { localStorage.setItem('logbook-shopping-name-overrides', JSON.stringify(v)); } catch (_) {}
+}
 // One food per line, plain text (no bullets/markdown: Notes and every other
 // notes app render those as literal characters, not a real list), in the
-// same alphabetical order fdBuildShoppingList already sorted them in.
+// same alphabetical order fdApplyShoppingNameOverrides already sorted them
+// in. displayName (not the raw foodName) so a renamed item exports under
+// its override too, that was the whole point of being able to rename it.
 function fdBuildShoppingExportText(list, withAmounts) {
-  return list.map(item => withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName).join('\n');
+  return list.map(item => withAmounts ? `${item.displayName} ${fdRoundShoppingQty(item.grams)}` : item.displayName).join('\n');
 }
 // HTML twin of the text above, a real <ul><li> list rather than \n-joined
 // lines: a raw string's \n reads to Notes' paste parser as a soft line break
 // WITHIN one paragraph (still one checklist item), not a paragraph break, so
 // plain text alone can't reliably become one checklist row per food.
-// Explicit <li> boundaries remove that guesswork. Escaped because foodName
-// comes from OFF/USDA data or free-typed custom entries, either could
-// contain '&'/'<'/'>' (e.g. "M&M's").
+// Explicit <li> boundaries remove that guesswork. Escaped because
+// displayName comes from OFF/USDA data, free-typed custom entries, or a
+// user's own override, any of which could contain '&'/'<'/'>' (e.g. "M&M's").
 function fdBuildShoppingExportHtml(list, withAmounts) {
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName)}</li>`).join('');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdRoundShoppingQty(item.grams)}` : item.displayName)}</li>`).join('');
   return `<ul>${rows}</ul>`;
 }
 
@@ -5202,6 +5238,44 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
+  // Local per-food display-name override (see fdApplyShoppingNameOverrides):
+  // displayList is what actually renders/exports, list stays the untouched
+  // fdBuildShoppingList output, only used to recompute displayList.
+  const [overrides, setOverrides] = useStateFd(fdReadShoppingNameOverrides);
+  const displayList = useMemoFd(() => fdApplyShoppingNameOverrides(list, overrides), [list, overrides]);
+
+  const [renameItem, setRenameItem] = useStateFd(null); // the tapped displayList item, or null
+  const [renameDraft, setRenameDraft] = useStateFd('');
+  function openRename(item) {
+    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key an override on
+    setRenameItem(item);
+    setRenameDraft(item.displayName);
+  }
+  function closeRename() { setRenameItem(null); setRenameDraft(''); }
+  function saveRename() {
+    if (!renameItem) return;
+    const trimmed = renameDraft.trim();
+    const next = { ...overrides };
+    if (!trimmed || trimmed === renameItem.foodName) {
+      // Blank, or typed back to exactly the original: same as Reset, no
+      // point leaving a no-op override sitting in localStorage forever.
+      delete next[renameItem.foodId];
+    } else {
+      next[renameItem.foodId] = trimmed;
+    }
+    setOverrides(next);
+    fdWriteShoppingNameOverrides(next);
+    closeRename();
+  }
+  function resetRename() {
+    if (!renameItem) return;
+    const next = { ...overrides };
+    delete next[renameItem.foodId];
+    setOverrides(next);
+    fdWriteShoppingNameOverrides(next);
+    closeRename();
+  }
+
   // Two-step sheet: pick content (amounts or not) first, then how to get it
   // out (share or copy). exportContent doubles as the step tracker: null is
   // step 1, set is step 2. Skips straight to copying when navigator.share
@@ -5222,11 +5296,11 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   // boundaries), an explicit list structure removes that guesswork. Falls
   // back to plain-text-only if the richer multi-type write isn't supported.
   async function doExport(withAmounts) {
-    const text = fdBuildShoppingExportText(list, withAmounts);
+    const text = fdBuildShoppingExportText(displayList, withAmounts);
     let copied = false;
     if (typeof ClipboardItem !== 'undefined') {
       try {
-        const html = fdBuildShoppingExportHtml(list, withAmounts);
+        const html = fdBuildShoppingExportHtml(displayList, withAmounts);
         await navigator.clipboard.write([new ClipboardItem({
           'text/plain': new Blob([text], { type: 'text/plain' }),
           'text/html': new Blob([html], { type: 'text/html' }),
@@ -5247,7 +5321,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   // anyway for every OTHER target (Messages, Mail, AirDrop, ...) where a
   // plain string is exactly what's wanted and there's no checklist to lose.
   async function doShare(withAmounts) {
-    const text = fdBuildShoppingExportText(list, withAmounts);
+    const text = fdBuildShoppingExportText(displayList, withAmounts);
     try { await navigator.share({ text }); } catch (_) {}
     closeExport();
   }
@@ -5256,7 +5330,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Shopping list" onBack={onClose} right={
-        list.length > 0 && (
+        displayList.length > 0 && (
           <button onClick={openExport} aria-label="Export list" style={fdTopAddBtn}>
             <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
           </button>
@@ -5269,23 +5343,23 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
         </Card>
 
-        {!list.length ? (
+        {!displayList.length ? (
           <Empty title="Nothing yet"
             sub="Log meals for a couple of weeks, or set up a meal plan, and your regulars will show up here."
             icon={<i className="fa-solid fa-basket-shopping" style={{ fontSize: 28, color: UI.inkFaint }} />} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {list.map(item => (
-              <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default' }}>
+            {displayList.map(item => (
+              <button key={item.key} onClick={() => openRename(item)} style={{ ...fdQuickRowInner, cursor: item.foodId ? 'pointer' : 'default' }}>
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{item.foodName}</div>
-                  {item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+                  <div style={fdEntryName}>{item.displayName}</div>
+                  {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                   {item.fromProjection && <Pill gold>Plan</Pill>}
                   <div className="num" style={{ fontSize: 13, color: UI.ink }}>{fdRoundShoppingQty(item.grams)}</div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -5329,6 +5403,18 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             </div>
           </>
         )}
+      </Sheet>
+      <Sheet open={!!renameItem} onClose={closeRename} title="Rename" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
+          Original: {renameItem?.foodName}{renameItem?.brand ? ` · ${renameItem.brand}` : ''}
+        </div>
+        <Field label="Show as" style={{ marginBottom: 14 }}>
+          <TextInput value={renameDraft} onChange={setRenameDraft} placeholder={renameItem?.foodName} autoFocus />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {renameItem?.overridden && <Btn kind="ghost" onClick={resetRename} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveRename} style={{ flex: renameItem?.overridden ? 2 : 1 }}>Save</Btn>
+        </div>
       </Sheet>
     </Screen>
   );
