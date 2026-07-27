@@ -1206,10 +1206,19 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
   if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   if (foodShoppingPrefsRes?.error) throw foodShoppingPrefsRes.error;
-  if (medicationPlansRes?.error) throw medicationPlansRes.error;
-  if (medicationsRes?.error) throw medicationsRes.error;
-  if (medicationScheduleSlotsRes?.error) throw medicationScheduleSlotsRes.error;
-  if (medicationLogsRes?.error) throw medicationLogsRes.error;
+  // Soft-fail, unlike every other collection above: Medications is an
+  // opt-in, off-by-default feature (meds_enabled), so its own plumbing must
+  // never be able to take down boot for the users who never turned it on,
+  // e.g. if these tables' migration hasn't landed on this project yet (the
+  // exact failure mode two earlier incidents on this branch already hit,
+  // for zane_food_shopping_prefs's own new columns). Logged, not thrown; the
+  // mapping below already treats a missing .data as an empty array, so this
+  // load just comes back with nothing for these four collections and
+  // self-heals the next time it succeeds.
+  if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
+  if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
+  if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
+  if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
