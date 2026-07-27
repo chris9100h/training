@@ -5344,7 +5344,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
         />
         <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={fdEntryName}>{item.displayName}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+              <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
+              {(item.overridden || item.packageSizeG) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
+            </div>
             {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
