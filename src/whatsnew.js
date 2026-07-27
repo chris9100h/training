@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.678',
+    date: '2026-07-27',
+    title: 'Never wonder what to buy again 🛒',
+    items: [
+      "🛒 A Shopping List that builds itself. It looks at what you've actually been eating the last couple of weeks, adds whatever's coming up in your meal plan, and hands you back a sorted list of what to buy and how much. Find it in Food → the basket icon up top. Defaults to a week, but the day count is yours to adjust right on the screen.",
+      "📋 Get the list out however suits you: tap the share icon, pick with or without amounts, then Copy (one item per line, pastes into Notes as a proper checklist) or Share to send it anywhere else. Database name not pulling its weight (\"Original\" means nothing three weeks later)? Tap that item to rename it, once, for good.",
+      "📷 Building a recipe now has the same barcode and label scanner as everywhere else in the app, and a small checkmark next to favorites, recent items and recipe ingredients shows you which ones are already in our shared database.",
+      "✨ Smaller fixes: recipe ingredients list biggest-to-smallest now instead of in whatever order you added them, deleting one ingredient from a recipe no longer wipes the whole thing, and Settings → Health → Food has a new toggle to hide meal-category headers in your daily timeline if you'd rather see a flat hour-by-hour list.",
+    ],
+  },
+  {
     id: 'v2.676',
     date: '2026-07-26',
     title: 'Fewer taps to Water & Food 👆',
