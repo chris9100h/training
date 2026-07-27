@@ -285,17 +285,18 @@ function fdShoppingKey(foodId, foodName) {
 // A food-log-shaped row (a real store.foodLogs entry, or a virtual
 // fdMaterializeSlotEntry projection row, both share the same shape) -> its
 // flat "leaf" items to tally. A recipe's recipeItems snapshot never carries
-// a foodId (confirmRecipeLog, applyBlockRecipe and a template slot's own
-// draftBuilt all agree on that shape, see docs/database.md's zane_food_logs
-// section), so every exploded leaf is name-keyed even if the recipe's own
-// ingredients were originally real zane_foods matches. A recipe row with no
-// recipeItems (a legacy row predating the snapshot) falls back to one opaque
-// leaf rather than silently dropping it.
+// a foodId OR a brand (confirmRecipeLog, applyBlockRecipe and a template
+// slot's own draftBuilt all whitelist the same brand-less fields, see
+// docs/database.md's zane_food_logs section), so every exploded leaf is
+// name-keyed and brand-less even if the recipe's own ingredients were
+// originally real zane_foods matches with a brand of their own. A recipe
+// row with no recipeItems (a legacy row predating the snapshot) falls back
+// to one opaque leaf rather than silently dropping it.
 function fdExplodeForShopping(entry) {
   if (entry.source === 'recipe' && entry.recipeItems && entry.recipeItems.length) {
-    return entry.recipeItems.map(ri => ({ foodId: null, foodName: ri.foodName, quantityG: ri.quantityG || 0 }));
+    return entry.recipeItems.map(ri => ({ foodId: null, foodName: ri.foodName, brand: null, quantityG: ri.quantityG || 0 }));
   }
-  return [{ foodId: entry.foodId || null, foodName: entry.foodName, quantityG: entry.quantityG || 0 }];
+  return [{ foodId: entry.foodId || null, foodName: entry.foodName, brand: entry.brand || null, quantityG: entry.quantityG || 0 }];
 }
 // Registers both keys a favorite could be reached by, not just its own
 // primary one: a favorite with a real foodId still gets its name-key added
@@ -318,7 +319,11 @@ function fdFavoriteShoppingKeys(foodFavorites) {
 // foodName is identical. Folds any name-keyed group into an existing
 // id-keyed group when their normalized names match, foodId stays the
 // group's identity, only the totals (and the earliest firstDate, for
-// fdBuildShoppingList's rate denominator) combine. Mutates and returns `tally`.
+// fdBuildShoppingList's rate denominator) combine. A missing brand on the
+// surviving row is backfilled from the dropped one (never overwrites one it
+// already has): the id-keyed row is standalone-logged and may well have a
+// brand the recipe-only occurrence never could (see fdExplodeForShopping).
+// Mutates and returns `tally`.
 function fdReconcileShoppingTally(tally) {
   const idKeyByName = new Map();
   tally.forEach((row, key) => { if (row.foodId) idKeyByName.set(fdNormFoodName(row.foodName), key); });
@@ -331,6 +336,7 @@ function fdReconcileShoppingTally(tally) {
     target.totalGrams += row.totalGrams;
     if (row.count != null) target.count = (target.count || 0) + row.count;
     if (row.firstDate && (!target.firstDate || row.firstDate < target.firstDate)) target.firstDate = row.firstDate;
+    if (!target.brand && row.brand) target.brand = row.brand;
     toDrop.push(key);
   });
   toDrop.forEach(key => tally.delete(key));
@@ -350,7 +356,7 @@ function fdShoppingHistoryTally(foodLogs, todayISO) {
     if (e.planned || e.date < cutoff || e.date > todayISO) return;
     fdExplodeForShopping(e).forEach(leaf => {
       const key = fdShoppingKey(leaf.foodId, leaf.foodName);
-      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0, count: 0, firstDate: e.date };
+      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, brand: leaf.brand, totalGrams: 0, count: 0, firstDate: e.date };
       row.totalGrams += leaf.quantityG;
       row.count += 1;
       if (e.date < row.firstDate) row.firstDate = e.date;
@@ -375,7 +381,7 @@ function fdShoppingProjectionTally(store, todayISO, days) {
       if (!fdSlotMatchesDate(slot, store, d)) return;
       fdExplodeForShopping(fdMaterializeSlotEntry(slot, d)).forEach(leaf => {
         const key = fdShoppingKey(leaf.foodId, leaf.foodName);
-        const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, totalGrams: 0 };
+        const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, brand: leaf.brand, totalGrams: 0 };
         row.totalGrams += leaf.quantityG;
         tally.set(key, row);
       });
@@ -412,16 +418,24 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   keys.forEach(key => {
     const p = proj.get(key);
     if (p) {
-      if (p.totalGrams > 0) out.push({ key, foodName: p.foodName, grams: p.totalGrams, fromProjection: true });
+      if (p.totalGrams > 0) out.push({ key, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
       return;
     }
     const h = hist.get(key);
     if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
     const daysSpan = Math.max(FD_SHOPPING_RATE_FLOOR_DAYS, fdDaysBetween(h.firstDate, todayISO) + 1);
     const grams = (h.totalGrams / daysSpan) * shoppingDays;
-    if (grams > 0) out.push({ key, foodName: h.foodName, grams, fromProjection: false });
+    if (grams > 0) out.push({ key, foodName: h.foodName, brand: h.brand || null, grams, fromProjection: false });
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
+}
+// "Weetabix Original" rather than a bare "Original": some OFF/USDA products
+// name only the flavor/variant, with the actual identifying brand as its own
+// field, unusable alone out of context on a shopping list. Recipe-exploded
+// items never carry a brand (see fdExplodeForShopping) and fall back to the
+// bare name, same as always.
+function fdShoppingDisplayName(item) {
+  return item.brand ? `${item.brand} ${item.foodName}` : item.foodName;
 }
 // Display rounding: under 50g rounds to the nearest 5, under 1000g to the
 // nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
@@ -450,7 +464,7 @@ function fdWriteShoppingDays(v) {
 // notes app render those as literal characters, not a real list), in the
 // same alphabetical order fdBuildShoppingList already sorted them in.
 function fdBuildShoppingExportText(list, withAmounts) {
-  return list.map(item => withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName).join('\n');
+  return list.map(item => withAmounts ? `${fdShoppingDisplayName(item)} ${fdRoundShoppingQty(item.grams)}` : fdShoppingDisplayName(item)).join('\n');
 }
 // HTML twin of the text above, a real <ul><li> list rather than \n-joined
 // lines: a raw string's \n reads to Notes' paste parser as a soft line break
@@ -461,7 +475,7 @@ function fdBuildShoppingExportText(list, withAmounts) {
 // contain '&'/'<'/'>' (e.g. "M&M's").
 function fdBuildShoppingExportHtml(list, withAmounts) {
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName)}</li>`).join('');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${fdShoppingDisplayName(item)} ${fdRoundShoppingQty(item.grams)}` : fdShoppingDisplayName(item))}</li>`).join('');
   return `<ul>${rows}</ul>`;
 }
 
@@ -5268,6 +5282,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
               <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default' }}>
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                   <div style={fdEntryName}>{item.foodName}</div>
+                  {item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                   {item.fromProjection && <Pill gold>Plan</Pill>}
