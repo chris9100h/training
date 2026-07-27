@@ -34,6 +34,7 @@ const ASSETS = [
   BASE + '/src/screens-health.jsx',
   BASE + '/src/screens-water.jsx',
   BASE + '/src/screens-food.jsx',
+  BASE + '/src/screens-medications.jsx',
   BASE + '/src/screens-onboarding.jsx',
   BASE + '/src/screens-cardio.jsx',
   BASE + '/src/screens-featuremap.jsx',
