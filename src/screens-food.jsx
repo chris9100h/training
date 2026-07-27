@@ -5553,7 +5553,8 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             {excludedList.length > 0 && (
               <>
                 <div className="knurl" style={{ margin: '16px 0 10px' }} />
-                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Excluded</div>
+                <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi, textAlign: 'center' }}>Excluded</div>
+                <div className="knurl" style={{ margin: '10px 0' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {excludedList.map(renderShoppingRow)}
                 </div>
