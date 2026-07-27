@@ -8,9 +8,16 @@
    Three tabs:
    - Timeline: today's doses (auto-filled from active schedule slots, same
      planned/logged distinction as food), plus logging an ad-hoc dose.
-   - Schedule: named plans (My Plans / Client Templates for a coach, like
-     FoodTemplateScreen), each holding medications, each medication holding
-     its own recurring weekly schedule slot(s).
+   - Schedule: two sub-tabs. Medications is the actual create/edit/delete
+     surface for a medication (identity, unit, package size, its own
+     recurring weekly schedule slot(s)), independent of any plan
+     (medicationPlanId is a nullable soft reference, see migration 0218).
+     Plans (My Plans / Client Templates for a coach, like FoodTemplateScreen)
+     are just named groupings a medication can optionally belong to; a
+     plan's own "Add medication" only ever attaches an already-created one
+     (or creates a new one pre-assigned to it), so removing a medication
+     from a plan, or deleting the plan itself, never destroys the
+     medication, its schedule or its log history.
    - Inventory: every non-archived medication (not just stock-tracked ones,
      unlike the Shopping List's own Inventory tab: this domain's medication
      list IS the inventory, there's no separate frequency-filtered "staple"
@@ -364,6 +371,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   // ─────────────────────────── Schedule tab ───────────────────────────
+  // Plans are just named groupings a medication can optionally belong to
+  // (medicationPlanId, nullable, see migration 0218's own "soft reference"
+  // comment): the Medications sub-tab is the actual create/edit/delete
+  // surface for the medication itself, independent of any plan, so removing
+  // one from a plan (or deleting the plan) never has to destroy it.
+  const [scheduleSubTab, setScheduleSubTab] = useStateMd('plans'); // 'plans' | 'medications'
   const [planSubTab, setPlanSubTab] = useStateMd('mine'); // 'mine' | 'templates', coach bucket only
   const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
   const plans = useMemoMd(() => medicationPlans.filter(p => !p.archived && inBucket(p)), [medicationPlans, isCoach, planSubTab]);
@@ -377,7 +390,59 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     [medications, viewedPlanId],
   );
 
+  // "Add medication" from within a plan: pick an existing unassigned
+  // medication to attach, or jump into medSheet to create a brand new one
+  // pre-assigned to this plan. Only ever offers UNASSIGNED medications,
+  // never ones already sitting in another plan: moving one across plans is
+  // a deliberate two-step action (remove from the old plan first, in its
+  // own medSheet), never a silent side effect of adding it here.
+  const [addToPlanOpen, setAddToPlanOpen] = useStateMd(false);
+  const unassignedMeds = useMemoMd(
+    () => activeMedications.filter(m => !m.medicationPlanId).sort((a, b) => a.name.localeCompare(b.name)),
+    [activeMedications],
+  );
+  function attachMedicationToPlan(med) {
+    setStore(s => ({
+      ...s,
+      medications: (s.medications || []).map(m => m.id !== med.id ? m : { ...m, medicationPlanId: viewedPlanId, updatedAt: new Date().toISOString() }),
+    }));
+  }
+  // Shared row for a medication list: the plan-detail view and the
+  // Medications tab both show name + category + schedule summary, the
+  // latter additionally prefixes which plan (if any) it's currently in.
+  function renderMedListRow(m, { showPlanTag } = {}) {
+    const planName = m.medicationPlanId ? (medicationPlans.find(p => p.id === m.medicationPlanId)?.name || null) : null;
+    const activeSlots = scheduleSlots.filter(sl => sl.medicationId === m.id && sl.active);
+    const scheduleSummary = activeSlots.length
+      ? activeSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
+      : 'No schedule yet';
+    return (
+      <button key={m.id} onClick={() => openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={mdEntryName}>{m.name}</span>
+          {m.category && <Pill gold>{mdCategoryLabel(m.category)}</Pill>}
+        </div>
+        <div style={mdEntryMeta}>
+          {showPlanTag && `${planName || 'Unassigned'} · `}{scheduleSummary}
+        </div>
+      </button>
+    );
+  }
+
   const [planNameDraft, setPlanNameDraft] = useStateMd(null); // { id: null|id, name }
+  const planNameInitialSnap = useRefMd(null);
+  function openPlanNameDraft(draft) {
+    planNameInitialSnap.current = draft.name;
+    setPlanNameDraft(draft);
+  }
+  // Same backdrop-dismiss protection as requestCloseMedSheet/
+  // requestCloseSlotDraft: a typed plan name (new or renamed) shouldn't
+  // vanish silently on a stray backdrop tap either.
+  async function requestClosePlanNameDraft() {
+    if (planNameDraft && planNameDraft.name !== planNameInitialSnap.current
+      && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setPlanNameDraft(null);
+  }
   function createPlan(name) {
     const id = LB.uid();
     const nowISO = new Date().toISOString();
@@ -392,13 +457,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
   }
   async function deletePlan(plan) {
-    if (!await confirm(`Delete "${plan.name}" and every medication in it?`, { title: 'Delete plan', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
-    const medIds = new Set(medications.filter(m => m.medicationPlanId === plan.id).map(m => m.id));
+    // Unassigns rather than deletes the medications in it: a plan is just a
+    // grouping, the medications (and their schedule/history) belong in the
+    // Medications tab regardless, same reasoning as removeMedicationFromPlan.
+    if (!await confirm(`Delete "${plan.name}"? Its medications stay in your Medications list, just unassigned from this plan.`, { title: 'Delete plan', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({
       ...s,
       medicationPlans: (s.medicationPlans || []).filter(p => p.id !== plan.id),
-      medications: (s.medications || []).filter(m => m.medicationPlanId !== plan.id),
-      medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => !medIds.has(sl.medicationId)),
+      medications: (s.medications || []).map(m => m.medicationPlanId !== plan.id ? m : { ...m, medicationPlanId: null, updatedAt: new Date().toISOString() }),
     }));
     setViewedPlanId(null);
   }
@@ -407,7 +473,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   // Medication identity + inventory edit sheet. draft.id === null means
-  // "creating a new medication in viewedPlanId".
+  // "creating a new medication", optionally pre-assigned to a plan
+  // (draft.planId, set only when opened from that plan's own "Add
+  // medication" picker below); null/unassigned when opened from the
+  // Medications tab, exactly as valid a state as any (medicationPlanId is a
+  // nullable soft reference, see migration 0218).
   const [medSheet, setMedSheet] = useStateMd(null);
   const medSheetInitialSnap = useRefMd(null);
   // Only the identity/stock fields, not medSheetSlots: an existing
@@ -421,13 +491,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       packageSizeStr: d.packageSizeStr, stockStr: d.stockStr, pendingSlots: d.pendingSlots || [],
     });
   }
-  function openMedSheet(med) {
+  function openMedSheet(med, planIdForNew) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize ? String(med.packageSize) : '',
       stockStr: '',
     } : {
-      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '', pendingSlots: [],
+      id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '',
+      pendingSlots: [], planId: planIdForNew ?? null,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -458,10 +529,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         }),
       }));
     } else {
-      const planId = viewedPlanId;
-      if (!planId) return;
       const newMed = {
-        id: LB.uid(), medicationPlanId: planId, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
+        id: LB.uid(), medicationPlanId: medSheet.planId ?? null, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
         stockBaseline: stockTyped, stockSetAt: stockTyped != null ? nowISO : null,
         archived: false, createdAt: nowISO, updatedAt: nowISO,
@@ -484,6 +553,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       ...s,
       medications: (s.medications || []).filter(m => m.id !== med.id),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.medicationId !== med.id),
+    }));
+    closeMedSheet();
+  }
+  // Non-destructive counterpart to Delete: the medication, its schedule and
+  // its log history all stay exactly as they are, only its plan membership
+  // clears, so it reappears unassigned in the Medications tab instead of
+  // vanishing. No confirm needed, unlike Delete: nothing is actually lost.
+  function removeMedicationFromPlan(med) {
+    setStore(s => ({
+      ...s,
+      medications: (s.medications || []).map(m => m.id !== med.id ? m : { ...m, medicationPlanId: null, updatedAt: new Date().toISOString() }),
     }));
     closeMedSheet();
   }
@@ -645,6 +725,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setStockSheet(null);
   }
 
+  // Stock is the headline here, package size the quiet caption, same
+  // prominence swap as the Food Shopping List's own Inventory row
+  // (fdBuildInventoryList/renderShoppingRow, screens-food.jsx): without a
+  // real buy-quantity estimate to show, the number worth a glance is how
+  // much is actually left, not the static per-pack fact.
   function renderMedRow(med) {
     const effectiveStock = mdEffectiveStock(med, medicationLogs, today);
     const low = mdIsLowStock(med, effectiveStock);
@@ -655,15 +740,18 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ ...mdEntryName, minWidth: 0 }}>{med.name}</div>
             {med.category && <Pill gold>{mdCategoryLabel(med.category)}</Pill>}
           </div>
-          {effectiveStock != null
-            ? <div style={{ fontSize: 10, color: low ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
-                {mdFmtQty(effectiveStock, med.unitLabel)} {low ? 'left' : 'in stock'}
-              </div>
-            : (med.brand ? <div style={mdEntryMeta}>{med.brand}</div> : <div style={mdEntryMeta}>Not tracked</div>)}
+          {med.packageSize > 0
+            ? <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{mdFmtQty(med.packageSize, med.unitLabel)}/pack</div>
+            : (med.brand ? <div style={mdEntryMeta}>{med.brand}</div> : null)}
         </div>
-        {med.packageSize > 0 && (
-          <div className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{mdFmtQty(med.packageSize, med.unitLabel)}/pack</div>
-        )}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          {effectiveStock != null
+            ? (<>
+                <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{mdFmtQty(effectiveStock, med.unitLabel)}</div>
+                <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
+              </>)
+            : <div style={mdEntryMeta}>Not tracked</div>}
+        </div>
       </button>
     );
   }
@@ -764,25 +852,50 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         {screenTab === 'schedule' && (
           !viewedPlan ? (
             <>
-              {isCoach && <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} style={{ padding: 0, marginBottom: 4 }} />}
-              <Btn onClick={() => setPlanNameDraft({ id: null, name: '' })} style={{ width: '100%' }}>
-                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New plan
-              </Btn>
-              {!plans.length ? (
-                <Empty title="No plans yet" sub="A plan groups medications you take for the same reason, vitamins, a cycle, whatever makes sense to you."
-                  icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+              <SubTabBar tabs={[{ id: 'plans', label: 'Plans' }, { id: 'medications', label: 'Medications' }]} active={scheduleSubTab} onChange={setScheduleSubTab} style={{ padding: 0, marginBottom: 4 }} />
+              {scheduleSubTab === 'plans' ? (
+                <>
+                  {isCoach && <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} style={{ padding: 0, marginBottom: 4 }} />}
+                  <Btn onClick={() => openPlanNameDraft({ id: null, name: '' })} style={{ width: '100%' }}>
+                    <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New plan
+                  </Btn>
+                  {!plans.length ? (
+                    <Empty title="No plans yet" sub="A plan groups medications you take for the same reason, vitamins, a cycle, whatever makes sense to you."
+                      icon={<i className="fa-solid fa-folder-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {plans.map(p => (
+                        <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
+                          <span style={mdEntryName}>{p.name}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={mdEntryMeta}>{medications.filter(m => !m.archived && m.medicationPlanId === p.id).length}</span>
+                            <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {plans.map(p => (
-                    <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
-                      <span style={mdEntryName}>{p.name}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={mdEntryMeta}>{medications.filter(m => !m.archived && m.medicationPlanId === p.id).length}</span>
-                        <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  {/* The actual create/edit surface for a medication, entirely
+                      independent of any plan (see medicationPlanId's nullable
+                      "soft reference"). A plan's own "Add medication" only ever
+                      attaches one already created here, never creates it fresh
+                      tied to that plan, so removing one from a plan never has
+                      to destroy it. */}
+                  <Btn onClick={() => openMedSheet(null)} style={{ width: '100%' }}>
+                    <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
+                  </Btn>
+                  {!inventoryList.length ? (
+                    <Empty title="No medications yet" sub="Create one here, then add it to a plan (or several, one at a time) whenever you're ready."
+                      icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {inventoryList.map(m => renderMedListRow(m, { showPlanTag: true }))}
+                    </div>
+                  )}
+                </>
               )}
             </>
           ) : (
@@ -793,33 +906,19 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 </button>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {isCoach && <button className="label" onClick={() => setCoachMenuOpen(true)} style={mdEditBtn}>Coach</button>}
-                  <button className="label" onClick={() => setPlanNameDraft({ id: viewedPlan.id, name: viewedPlan.name })} style={mdEditBtn}>Rename</button>
+                  <button className="label" onClick={() => openPlanNameDraft({ id: viewedPlan.id, name: viewedPlan.name })} style={mdEditBtn}>Rename</button>
                 </div>
               </div>
               <div className="display" style={{ fontSize: 20, color: UI.ink }}>{viewedPlan.name}</div>
-              <Btn onClick={() => openMedSheet(null)} style={{ width: '100%' }}>
+              <Btn onClick={() => setAddToPlanOpen(true)} style={{ width: '100%' }}>
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
               </Btn>
               {!viewedPlanMeds.length ? (
-                <Empty title="Nothing in this plan yet" sub="Add a medication, then give it a weekly schedule."
+                <Empty title="Nothing in this plan yet" sub="Add a medication you've already created, or create a new one."
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {viewedPlanMeds.map(m => (
-                    <button key={m.id} onClick={() => openMedSheet(m)} style={{ ...mdQuickRowInner, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4, textAlign: 'left' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={mdEntryName}>{m.name}</span>
-                        {m.category && <Pill gold>{mdCategoryLabel(m.category)}</Pill>}
-                      </div>
-                      <div style={mdEntryMeta}>
-                        {scheduleSlots.filter(sl => sl.medicationId === m.id && sl.active).length
-                          ? scheduleSlots.filter(sl => sl.medicationId === m.id && sl.active).map(sl =>
-                              `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`
-                            ).join('; ')
-                          : 'No schedule yet'}
-                      </div>
-                    </button>
-                  ))}
+                  {viewedPlanMeds.map(m => renderMedListRow(m))}
                 </div>
               )}
             </>
@@ -908,7 +1007,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       </Sheet>
 
       {/* Create/rename a plan */}
-      <Sheet open={!!planNameDraft} onClose={() => setPlanNameDraft(null)} title={planNameDraft?.id ? 'Rename plan' : 'New plan'} titleColor="var(--accent)">
+      <Sheet open={!!planNameDraft} onClose={requestClosePlanNameDraft} title={planNameDraft?.id ? 'Rename plan' : 'New plan'} titleColor="var(--accent)">
         {planNameDraft && (
           <>
             <Field label="Name" style={{ marginBottom: 16 }}>
@@ -919,6 +1018,27 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               <Btn kind="ghost" onClick={() => { const p = viewedPlan; setPlanNameDraft(null); deletePlan(p); }} style={{ width: '100%', marginTop: 8, color: UI.danger }}>Delete plan</Btn>
             )}
           </>
+        )}
+      </Sheet>
+
+      {/* Add an existing (unassigned) medication to the viewed plan, or jump
+          into medSheet to create a brand new one already assigned to it. */}
+      <Sheet open={addToPlanOpen} onClose={() => setAddToPlanOpen(false)} title="Add medication" titleColor="var(--accent)">
+        <Btn onClick={() => { setAddToPlanOpen(false); openMedSheet(null, viewedPlanId); }} style={{ width: '100%', marginBottom: 14 }}>
+          <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Create new
+        </Btn>
+        {unassignedMeds.length > 0 && <div className="micro" style={{ marginBottom: 8 }}>Or add one you already have</div>}
+        {unassignedMeds.length === 0 ? (
+          <div style={mdEmptyHint}>No unassigned medications. Create a new one, or remove one from another plan first (its own "Remove from plan" button).</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {unassignedMeds.map(m => (
+              <button key={m.id} onClick={() => { attachMedicationToPlan(m); setAddToPlanOpen(false); }} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
+                <span style={mdEntryName}>{m.name}</span>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            ))}
+          </div>
         )}
       </Sheet>
 
@@ -988,6 +1108,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               )}
               <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
             </div>
+            {medSheet.id && medications.find(m => m.id === medSheet.id)?.medicationPlanId && (
+              <Btn kind="ghost" onClick={() => removeMedicationFromPlan(medications.find(m => m.id === medSheet.id))} style={{ width: '100%', marginBottom: 8 }}>
+                <i className="fa-solid fa-arrow-right-from-bracket" style={{ marginRight: 8 }} />Remove from plan
+              </Btn>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               {medSheet.id && <Btn kind="ghost" onClick={() => deleteMedication(medications.find(m => m.id === medSheet.id))} style={{ flex: 1, color: UI.danger }}>Delete</Btn>}
               <Btn onClick={saveMedSheet} disabled={!medSheet.name.trim()} style={{ flex: medSheet.id ? 2 : 1 }}>Save</Btn>
