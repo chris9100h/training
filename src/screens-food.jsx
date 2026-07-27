@@ -5181,15 +5181,18 @@ function ShoppingListScreen({ open, onClose, store, today }) {
      store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
   );
 
-  // Same share-with-clipboard-fallback pattern as the check-in text export
-  // (screens-coaching-tabs.jsx doExportText): navigator.share (which on iOS
-  // lists Notes as a target) when available, otherwise straight to the
-  // clipboard for a manual paste.
+  // Always clipboard, deliberately not navigator.share: sharing straight to
+  // Notes hands it the raw text via the Share Extension, which (unlike a
+  // manual paste) does not go through Notes' own "split multi-line text
+  // into separate checklist items" logic and dumps everything into one
+  // item instead. A manual paste after copying reliably gets one checklist
+  // row per line, which was the whole point of this export.
+  const [justCopied, setJustCopied] = useStateFd(null); // null | 'amounts' | 'names'
   async function doExport(withAmounts) {
     const text = fdBuildShoppingExportText(list, withAmounts);
-    if (navigator.share) { try { await navigator.share({ text }); } catch (_) {} }
-    else { try { await navigator.clipboard.writeText(text); } catch (_) {} }
-    setExportOpen(false);
+    try { await navigator.clipboard.writeText(text); } catch (_) { return; }
+    setJustCopied(withAmounts ? 'amounts' : 'names');
+    setTimeout(() => { setExportOpen(false); setJustCopied(null); }, 900);
   }
 
   if (!open) return null;
@@ -5232,15 +5235,18 @@ function ShoppingListScreen({ open, onClose, store, today }) {
       <Sheet open={exportOpen} onClose={() => setExportOpen(false)} title="Export list" titleColor="var(--accent)">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
           <button onClick={() => doExport(true)} style={fdScanChoice}>
-            <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
+            <i className={`fa-solid ${justCopied === 'amounts' ? 'fa-check' : 'fa-weight-hanging'}`} style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>{justCopied === 'amounts' ? 'Copied' : 'With amounts'}</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
           </button>
           <button onClick={() => doExport(false)} style={fdScanChoice}>
-            <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
+            <i className={`fa-solid ${justCopied === 'names' ? 'fa-check' : 'fa-list'}`} style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>{justCopied === 'names' ? 'Copied' : 'Names only'}</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
           </button>
+        </div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 12, lineHeight: '16px' }}>
+          Copies to your clipboard, one item per line. Paste it into Notes (or anywhere else) to keep every item as its own checkable line.
         </div>
       </Sheet>
     </Screen>
