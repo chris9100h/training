@@ -22,10 +22,12 @@
      inventory, there's no separate frequency-filtered "staple" concept
      sitting in front of it), with a Running Low section for anything
      that's dipped under its package size. Medications is the actual
-     create/edit/delete surface for a medication (identity, unit, package
-     size, its own recurring weekly schedule slot(s)), independent of any
-     plan, same list as Inventory just presented for editing rather than
-     for stock.
+     create/edit/delete surface for a medication, independent of any plan,
+     same list as Inventory just presented for editing rather than for
+     stock. Creating one is identity-only (name, brand, category, unit,
+     package size): time is a Schedule-tab concern, so the recurring weekly
+     schedule slot(s) only become editable once the medication has been
+     saved (a real id to attach a slot to), from either tab.
 
    Multiple plans run concurrently on purpose (no active_*_id pointer like
    food): daily vitamins alongside a coach-prescribed cycle is the normal
@@ -483,15 +485,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // nullable soft reference, see migration 0218).
   const [medSheet, setMedSheet] = useStateMd(null);
   const medSheetInitialSnap = useRefMd(null);
-  // Only the identity/stock fields, not medSheetSlots: an existing
+  // Only the identity/stock fields: creating is identity-only (see the
+  // Schedule section's medSheet.id gate below, time is set up later, from
+  // wherever the medication actually gets scheduled), and an existing
   // medication's schedule already writes straight to the store the moment
-  // you add/edit/delete a time (see saveSlotDraft/deleteSlot), so it's never
-  // "unsaved" here; pendingSlots (create mode only) is the one schedule
-  // piece that IS still only local, so it's included.
+  // you add/edit/delete a time (see saveSlotDraft/deleteSlot), so neither
+  // needs to be part of this "did the user change something" snapshot.
   function snapMedSheet(d) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel,
-      packageSizeStr: d.packageSizeStr, stockStr: d.stockStr, pendingSlots: d.pendingSlots || [],
+      packageSizeStr: d.packageSizeStr, stockStr: d.stockStr,
     });
   }
   function openMedSheet(med, planIdForNew) {
@@ -501,16 +504,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       stockStr: '',
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '', stockStr: '',
-      pendingSlots: [], planId: planIdForNew ?? null,
+      planId: planIdForNew ?? null,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
   }
   function closeMedSheet() { setMedSheet(null); }
   // Backdrop tap used to drop the whole in-progress medication (name,
-  // package size, stock, and any schedule times already added via
-  // pendingSlots while still creating) silently, same trap screens-food.jsx's
-  // own meal-slot draft had (see requestCloseDraft there).
+  // brand, category, unit, package size, stock) silently, same trap
+  // screens-food.jsx's own meal-slot draft had (see requestCloseDraft there).
   async function requestCloseMedSheet() {
     if (medSheet && snapMedSheet(medSheet) !== medSheetInitialSnap.current
       && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
@@ -538,15 +540,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         stockBaseline: stockTyped, stockSetAt: stockTyped != null ? nowISO : null,
         archived: false, createdAt: nowISO, updatedAt: nowISO,
       };
-      // Schedule slots added while the sheet was still in create mode (see
-      // openSlotDraft/saveSlotDraft) live only in medSheet.pendingSlots until
-      // now: the medication needed a real id to attach them to first.
-      const newSlots = (medSheet.pendingSlots || []).map(sl => ({ ...sl, medicationId: newMed.id }));
-      setStore(s => ({
-        ...s,
-        medications: [...(s.medications || []), newMed],
-        medicationScheduleSlots: [...(s.medicationScheduleSlots || []), ...newSlots],
-      }));
+      setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
     }
     closeMedSheet();
   }
@@ -571,12 +565,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     closeMedSheet();
   }
 
-  // Schedule slots for the medication currently open in medSheet. While
-  // still creating (no id yet) these live in medSheet.pendingSlots instead
-  // of the store, see saveSlotDraft/saveMedSheet.
+  // Schedule slots for the medication currently open in medSheet. Only
+  // reachable once medSheet.id is set (the Schedule section below is gated
+  // on it, see its own comment): a medication being created has no id yet
+  // to attach a slot to, and time is a Schedule-tab thing, not part of
+  // "creating a medication" in the first place.
   const medSheetSlots = useMemoMd(
-    () => medSheet?.id ? scheduleSlots.filter(sl => sl.medicationId === medSheet.id) : (medSheet?.pendingSlots || []),
-    [scheduleSlots, medSheet?.id, medSheet?.pendingSlots],
+    () => medSheet?.id ? scheduleSlots.filter(sl => sl.medicationId === medSheet.id) : [],
+    [scheduleSlots, medSheet?.id],
   );
   const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, active, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
@@ -603,7 +599,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function saveSlotDraft() {
-    if (!medSheet || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!medSheet?.id || !slotDraft || !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     const nowISO = new Date().toISOString();
@@ -613,20 +609,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // staged cycle's dates, only actually clearing the inputs should.
     const startDate = slotDraft.startDate || null;
     const endDate = slotDraft.endDate || null;
-    if (!medSheet.id) {
-      // Medication not saved yet: keep the slot on the draft itself
-      // (medSheet.pendingSlots), medicationId gets filled in on final Save.
-      setMedSheet(d => {
-        const pending = d.pendingSlots || [];
-        if (slotDraft.id) {
-          return { ...d, pendingSlots: pending.map(sl => sl.id !== slotDraft.id ? sl : { ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty, active: slotDraft.active, startDate, endDate, updatedAt: nowISO }) };
-        }
-        const newSlot = { id: LB.uid(), medicationId: null, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty, active: true, startDate, endDate, createdAt: nowISO, updatedAt: nowISO };
-        return { ...d, pendingSlots: [...pending, newSlot] };
-      });
-      setSlotDraft(null);
-      return;
-    }
     if (slotDraft.id) {
       setStore(s => ({
         ...s,
@@ -645,10 +627,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function deleteSlot(slot) {
-    if (!medSheet.id) {
-      setMedSheet(d => ({ ...d, pendingSlots: (d.pendingSlots || []).filter(sl => sl.id !== slot.id) }));
-      return;
-    }
     setStore(s => ({ ...s, medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.id !== slot.id) }));
   }
   function toggleWeekday(wd) {
@@ -1098,24 +1076,30 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
               </div>
             </div>
-            <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-              <div className="micro" style={{ marginBottom: 8 }}>Schedule</div>
-              {medSheetSlots.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                  {medSheetSlots.map(sl => (
-                    <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
-                        {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, medSheet.unitLabel)}
-                        {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
+            {/* Time is a Schedule-tab thing, not part of creating a
+                medication: only an already-saved medication (real id) gets
+                this section at all, regardless of whether it's opened from
+                here or from a plan's own detail view. */}
+            {medSheet.id && (
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+                <div className="micro" style={{ marginBottom: 8 }}>Schedule</div>
+                {medSheetSlots.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                    {medSheetSlots.map(sl => (
+                      <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default', opacity: sl.active ? 1 : 0.5 }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
+                          {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, medSheet.unitLabel)}
+                          {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
+                        </div>
+                        <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
+                        <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
                       </div>
-                      <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
-                      <button onClick={() => deleteSlot(sl)} aria-label="Delete time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-xmark" style={{ fontSize: 14 }} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
-            </div>
+                    ))}
+                  </div>
+                )}
+                <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
+              </div>
+            )}
             {medSheet.id && medications.find(m => m.id === medSheet.id)?.medicationPlanId && (
               <Btn kind="ghost" onClick={() => removeMedicationFromPlan(medications.find(m => m.id === medSheet.id))} style={{ width: '100%', marginBottom: 8 }}>
                 <i className="fa-solid fa-arrow-right-from-bracket" style={{ marginRight: 8 }} />Remove from plan
