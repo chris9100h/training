@@ -200,9 +200,15 @@ const TAB_ICONS = {
       <path d="M15 2c0 3-1 5-1 5a2 2 0 0 0 2 2v13"/>
     </svg>
   ),
+  medications: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="9" width="16" height="6" rx="3" transform="rotate(45 12 12)"/>
+      <line x1="12" y1="9" x2="12" y2="15" transform="rotate(45 12 12)"/>
+    </svg>
+  ),
 };
 
-function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false }) {
+function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false, showMeds = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
@@ -210,20 +216,23 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
   ].map(t => {
-    const healthSlot = t.id === 'health' ? (routeName === 'water' ? 'water' : routeName === 'food' ? 'food' : 'health') : null;
-    const slotLabel = { water: 'Water', food: 'Food' }[healthSlot] || t.label;
+    const healthSlot = t.id === 'health' ? (routeName === 'water' ? 'water' : routeName === 'food' ? 'food' : routeName === 'medications' ? 'medications' : 'health') : null;
+    const slotLabel = { water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot] || t.label;
     return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
   });
   const idx = tabs.findIndex(t => t.id === active);
-  // Health, its water tracker and its food tracker share one tab slot
-  // (routeName === 'water'/'food' still light up as 'health', see tabActive
-  // in app.jsx). Tapping the slot steps forward through Health → Water →
-  // Food → Health; the final step falls through to the plain onChange(id)
-  // below since that path was never a no-op to begin with.
+  // Health, its water tracker, food tracker and (opt-in) medications tracker
+  // share one tab slot (routeName === 'water'/'food'/'medications' still
+  // light up as 'health', see tabActive in app.jsx). Tapping the slot steps
+  // forward through Health → Water → Food → (Medications, only if showMeds)
+  // → Health; the final step falls through to the plain onChange(id) below
+  // since that path was never a no-op to begin with. showMeds false (the
+  // default) reproduces the exact 3-step cycle unchanged.
   const handleTabClick = (id) => {
     if (id === 'health') {
       if (routeName === 'health') { onChange('water'); return; }
       if (routeName === 'water') { onChange('food'); return; }
+      if (routeName === 'food' && showMeds) { onChange('medications'); return; }
     }
     onChange(id);
   };
@@ -237,7 +246,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   // otherwise) rather than the icon's dark-on-gold-plate treatment. Every tab
   // reserves the same slot height (see the height:4 placeholder at both call
   // sites) so only Health's growing dots never shifts the bar's height.
-  const healthDots = (on, healthSlot) => {
+  const healthDots = (on, healthSlot, meds) => {
     const lit = on ? UI.gold : UI.inkFaint;
     const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
     const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
@@ -247,6 +256,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         <span style={dotStyle(healthSlot === 'health')} />
         <span style={dotStyle(healthSlot === 'water')} />
         <span style={dotStyle(healthSlot === 'food')} />
+        {meds && <span style={dotStyle(healthSlot === 'medications')} />}
       </div>
     );
   };
@@ -285,7 +295,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       const r = barRef.current?.getBoundingClientRect();
       if (!r) return;
       suppressClickRef.current = true;
-      // Clamped so the two-chip popup (roughly 180-220px wide) can't clip off
+      // Clamped so the two-or-three-chip popup (roughly 180-300px wide) can't clip off
       // a narrow phone's edge when Health sits in an outer tab slot.
       const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
       const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
@@ -379,7 +389,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                     )}
                   </div>
                   <span>{label}</span>
-                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, showMeds)}</div>
                 </button>
               );
             })}
@@ -510,7 +520,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
                 <span style={{ marginRight: '-0.14em' }}>{label}</span>
-                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, showMeds)}</div>
               </button>
             );
           })}
@@ -531,7 +541,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
         zIndex: 30,
       }}>
-        {['health', 'water', 'food'].filter(id => id !== currentHealthSlot).map(id => {
+        {['health', 'water', 'food', ...(showMeds ? ['medications'] : [])].filter(id => id !== currentHealthSlot).map(id => {
           const hovered = reveal.hoverId === id;
           return (
             <div key={id} data-health-option={id} style={{
@@ -543,7 +553,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
             }}>
               {React.cloneElement(TAB_ICONS[id], { width: 22, height: 22 })}
               <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                {{ health: 'Health', water: 'Water', food: 'Food' }[id]}
+                {{ health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[id]}
               </span>
             </div>
           );

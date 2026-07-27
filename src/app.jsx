@@ -1585,13 +1585,15 @@ function App() {
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
-  // Library and cardio-plans live under the merged "Plan" tab; the water and
-  // food trackers live under the Health tab: keep the right tab lit for each.
+  // Library and cardio-plans live under the merged "Plan" tab; the water,
+  // food and (opt-in) medications trackers live under the Health tab: keep
+  // the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
-    : (route.name === 'water' || route.name === 'food') ? 'health'
+    : (route.name === 'water' || route.name === 'food' || route.name === 'medications') ? 'health'
     : route.name;
+  const showMeds = !!store?.settings?.medsEnabled;
 
   const showCoaching = !!(
     store?.settings?.showCoachingTab ||
@@ -1623,6 +1625,7 @@ function App() {
     case 'health':        screen = <window.Screens.HealthScreen {...props} openMacroTargets={route.openMacroTargets} />; break;
     case 'water':         screen = <window.Screens.WaterScreen {...props} />; break;
     case 'food':          screen = <window.Screens.FoodScreen {...props} date={route.date} />; break;
+    case 'medications':   screen = <window.Screens.MedicationsScreen {...props} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
@@ -1655,7 +1658,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showMeds={showMeds} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
@@ -1667,7 +1670,7 @@ function App() {
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
-      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
+      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showMeds={showMeds} />}
     </>
   );
 

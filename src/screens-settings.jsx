@@ -612,6 +612,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [waterSubSheet, setWaterSubSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
+  const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   // Food tracker meal boundaries (migration 0206). Resolved rather than read
   // raw, so an unset setting shows the built-in defaults and the editor always
   // has six rows to work with.
@@ -1966,6 +1967,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <NavRow label="Health" first onTap={() => setHealthSubSheet(true)} />
             <NavRow label="Water" onTap={() => setWaterSubSheet(true)} />
             <NavRow label="Food" onTap={() => setFoodSubSheet(true)} />
+            <NavRow label="Medications" onTap={() => setMedsSubSheet(true)} />
             {(store.statusPeriods || []).length > 0 && (
               <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
             )}
@@ -2079,6 +2081,38 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFoodSubSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Medications ══ */}
+      <SettingsSheet open={medsSubSheet} onClose={() => setMedsSubSheet(false)} title="Medications">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Medications" first>
+            <Toggle on={!!store.settings?.medsEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, medsEnabled: !s.settings?.medsEnabled } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Adds a Medications tracker to the Health tab slot (cycles Health → Water → Food → Medications). Off by default, not everyone wants to deal with medications.
+          </div>
+          {store.settings?.medsEnabled && (
+            <div style={{ marginTop: 16 }}>
+              <Row label="Dose reminders" first>
+                <Toggle on={!!store.settings?.medicationReminderEnabled} onToggle={() => {
+                  const next = !store.settings?.medicationReminderEnabled;
+                  // Push not active, so send them to the push sheet first, same
+                  // as the meal-reminder toggle does, instead of enabling a
+                  // reminder that can never be delivered.
+                  if (next && !pushEnabled) { setMedsSubSheet(false); setPushSheet(true); return; }
+                  setStore(s => ({ ...s, settings: { ...s.settings, medicationReminderEnabled: next } }));
+                }} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Get a nudge when a scheduled dose is still unlogged an hour after its time. Needs notifications on.
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setMedsSubSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
