@@ -5565,15 +5565,20 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   // checkbox (a shopping-only concept) and swaps the buy-quantity column for
   // a quiet package-size reference instead, there's nothing to purchase here.
   function renderShoppingRow(item, inventoryMode) {
-    // grams is only ever > 0 for a real fdBuildShoppingList estimate (it
-    // filters out zero/negative grams itself); fromProjection is exclusive
-    // to that same path. Both are always 0/false on an inventoryList item
-    // (see fdBuildInventoryList), and on a low-stock item lowStockList only
-    // borrowed from inventoryList because displayList never had it (see
-    // lowStockList's own comment): neither case has a real buy-quantity to
-    // show, so the right column falls back to the package size instead,
-    // regardless of inventoryMode (which only ever governs the checkbox).
+    // grams is only ever > 0 for a real fdBuildShoppingList estimate (both its
+    // history and projection paths filter out non-positive grams themselves);
+    // fromProjection is exclusive to that same path. Every displayList-sourced
+    // row therefore always has hasEstimate === true, so !hasEstimate exactly
+    // means "this came from fdBuildInventoryList" (directly via the Inventory
+    // tab, or via lowStockList's own fallback for a low-stock item displayList
+    // never had, see its comment), which always carries a real effectiveStockG
+    // (fdBuildInventoryList's own filter condition). Without a real buy
+    // quantity, the stock level is the one number worth a headline, not the
+    // static package-size fact, so the two swap position versus the
+    // hasEstimate row below: package size becomes the quiet caption (a fact
+    // that explains the number on the right), stock takes the headline slot.
     const hasEstimate = item.grams > 0 || item.fromProjection;
+    const low = fdIsLowStock(item);
     const { headline, sub } = hasEstimate ? fdFormatShoppingQty(item.grams, item.packageSizeG) : { headline: null, sub: null };
     return (
       <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: item.excluded ? 0.55 : 1 }}>
@@ -5591,16 +5596,20 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
               {(item.overridden || item.packageSizeG || item.effectiveStockG != null) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
             </div>
-            {item.effectiveStockG != null
-              // Stock tracked: always shown, not just once low, otherwise
-              // setting an initial healthy count gives zero feedback
-              // anywhere on the list that it actually took (a real report:
-              // 2 packs against a 1-pack low-stock threshold saved fine,
-              // just showed nothing anywhere to confirm it).
-              ? <div style={{ fontSize: 10, color: fdIsLowStock(item) ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
-                  {fdExactShoppingQty(item.effectiveStockG)} {fdIsLowStock(item) ? 'left' : 'in stock'}
-                </div>
-              : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>)}
+            {hasEstimate
+              ? (item.effectiveStockG != null
+                  // Stock tracked: always shown, not just once low, otherwise
+                  // setting an initial healthy count gives zero feedback
+                  // anywhere on the list that it actually took (a real report:
+                  // 2 packs against a 1-pack low-stock threshold saved fine,
+                  // just showed nothing anywhere to confirm it).
+                  ? <div style={{ fontSize: 10, color: low ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
+                      {fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
+                    </div>
+                  : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))
+              : (item.packageSizeG > 0
+                  ? <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fdExactShoppingQty(item.packageSizeG)}/pack</div>
+                  : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {hasEstimate
@@ -5611,7 +5620,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                     {sub && <div style={{ fontSize: 9, color: UI.inkFaint }}>{sub}</div>}
                   </div>
                 </>)
-              : (item.packageSizeG > 0 && <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{fdExactShoppingQty(item.packageSizeG)}/pack</div>)}
+              : (
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{fdExactShoppingQty(item.effectiveStockG)}</div>
+                    <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
+                  </div>
+                )}
           </div>
         </button>
       </div>
