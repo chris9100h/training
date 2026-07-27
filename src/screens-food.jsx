@@ -72,6 +72,16 @@ function fdScaleEntry(e, scale) {
     })) : null,
   };
 }
+// Ingredients read top-heavy (biggest contributor first) rather than in
+// whatever order they were added/picked, which has no relationship to
+// amount and reads as a random jumble on anything past a couple of
+// ingredients. Display-only: never mutates or reorders the underlying
+// stored array (recipe.items, entry.recipeItems), only what a given render
+// site iterates. Used by the timeline's expanded ingredient view, the
+// recipe editor, and an incoming share preview.
+function fdSortIngredientsByQty(items) {
+  return [...(items || [])].sort((a, b) => (b.quantityG || 0) - (a.quantityG || 0));
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -3229,7 +3239,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                       {hasRecipeItems && expanded && (
                                         <div style={{ position: 'relative', marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                           <FdIngredientTrunk />
-                                          {e.recipeItems.map((ri, i) => (
+                                          {fdSortIngredientsByQty(e.recipeItems).map((ri, i) => (
                                             <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
                                               <FdIngredientTick />
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
@@ -3900,7 +3910,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20, maxHeight: 220, overflowY: 'auto' }}>
-              {(byHour[recipeBlockHour] || []).map(e => (
+              {fdSortIngredientsByQty(byHour[recipeBlockHour] || []).map(e => (
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
@@ -4254,7 +4264,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
             {items.length} ingredient{items.length === 1 ? '' : 's'} · makes {recipe.portions || 1} portion{(recipe.portions || 1) === 1 ? '' : 's'}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {items.map((i, idx) => (
+            {fdSortIngredientsByQty(items).map((i, idx) => (
               <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
@@ -5564,7 +5574,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             </Btn>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map(i => (
+              {fdSortIngredientsByQty(items).map(i => (
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
