@@ -5222,6 +5222,16 @@ function ShoppingListScreen({ open, onClose, store, today }) {
     setJustCopied(withAmounts ? 'amounts' : 'names');
     setTimeout(() => { setExportOpen(false); setJustCopied(null); }, 900);
   }
+  // Separate from doExport on purpose: the Web Share API's `text` is always
+  // plain (no HTML variant exists), so this can't carry the <ul><li> fix
+  // above, sharing straight to Notes may still land as one glued item. Kept
+  // anyway for every OTHER target (Messages, Mail, AirDrop, ...) where a
+  // plain string is exactly what's wanted and there's no checklist to lose.
+  async function doShare(withAmounts) {
+    const text = fdBuildShoppingExportText(list, withAmounts);
+    try { await navigator.share({ text }); } catch (_) {}
+    setExportOpen(false);
+  }
 
   if (!open) return null;
   return (
@@ -5261,6 +5271,7 @@ function ShoppingListScreen({ open, onClose, store, today }) {
         )}
       </div>
       <Sheet open={exportOpen} onClose={() => setExportOpen(false)} title="Export list" titleColor="var(--accent)">
+        <div className="micro" style={{ marginBottom: 8 }}>Copy to clipboard</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
           <button onClick={() => doExport(true)} style={fdScanChoice}>
             <i className={`fa-solid ${justCopied === 'amounts' ? 'fa-check' : 'fa-weight-hanging'}`} style={{ fontSize: 22, color: 'var(--accent)' }} />
@@ -5273,9 +5284,29 @@ function ShoppingListScreen({ open, onClose, store, today }) {
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
           </button>
         </div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 12, lineHeight: '16px' }}>
-          Copies to your clipboard, one item per line. Paste it into Notes (or anywhere else) to keep every item as its own checkable line.
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
+          One item per line. Paste it into Notes to keep every item as its own checkable line.
         </div>
+        {typeof navigator.share === 'function' && (
+          <>
+            <div className="micro" style={{ marginTop: 18, marginBottom: 8 }}>Share</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              <button onClick={() => doShare(true)} style={fdScanChoice}>
+                <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
+              </button>
+              <button onClick={() => doShare(false)} style={fdScanChoice}>
+                <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10, lineHeight: '16px' }}>
+              Sends the list to Messages, Mail, or any other app via your share sheet.
+            </div>
+          </>
+        )}
       </Sheet>
     </Screen>
   );
