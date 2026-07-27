@@ -2511,6 +2511,8 @@ CREATE TABLE zane_food_shopping_prefs (
   package_size_g  numeric,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
+  stock_baseline_g numeric,                            -- 0216, null together with stock_set_at when tracking is off
+  stock_set_at    timestamptz,                          -- 0216
   UNIQUE (user_id, food_id)
 );
 

@@ -687,6 +687,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.foodShoppingPrefs.map(p => ({
         id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
         excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+        stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
         updated_at: p.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -1082,10 +1083,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // active. Mirrors zane_schedules. Own store only, same reasoning as the
     // slots/favorites/recipes above.
     isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    // Shopping List per-food preferences (migration 0215): name override,
-    // exclude flag, package size, own store only like the rest of the
-    // Food Tracker's personal collections above.
-    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, name_override, excluded, package_size_g, created_at, updated_at').eq('user_id', userId),
+    // Shopping List per-food preferences (migration 0215/0216): name
+    // override, exclude flag, package size, stock baseline, own store only
+    // like the rest of the Food Tracker's personal collections above.
+    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, created_at, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1317,6 +1318,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     foodShoppingPrefs: (foodShoppingPrefsRes?.data || []).map(p => ({
       id: p.id, foodId: p.food_id, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
       packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
+      stockBaselineG: p.stock_baseline_g != null ? parseFloat(p.stock_baseline_g) : null,
+      stockSetAt: p.stock_set_at ?? null,
       createdAt: p.created_at, updatedAt: p.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
@@ -1889,6 +1892,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
       id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
       excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+      stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
       updated_at: p.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_shopping_prefs').delete().in('id', removed.map(p => p.id)));

@@ -438,31 +438,80 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
 }
+// Total grams of a specific food actually eaten (recipe-exploded, same as
+// the historical-rate tally elsewhere in this file) from sinceISO through
+// todayISO inclusive, planned entries excluded (not yet actually eaten).
+// Used to derive a stock-tracked food's current amount from a manually-set
+// baseline rather than a live-decremented counter that would need a hook in
+// every food-logging code path, plus an undo hook wherever a log entry is
+// later edited or deleted (see zane_food_shopping_prefs in
+// docs/database.md). sinceISO is a full stock_set_at timestamp truncated to
+// its date: day-granularity like the rest of this file's tallies, so
+// anything logged the same day the baseline was set still counts.
+function fdConsumedSince(foodLogs, foodId, sinceISO, todayISO) {
+  const sinceDate = sinceISO.slice(0, 10);
+  let total = 0;
+  (foodLogs || []).forEach(entry => {
+    if (entry.planned || entry.date < sinceDate || entry.date > todayISO) return;
+    fdExplodeForShopping(entry).forEach(leaf => {
+      if (leaf.foodId === foodId) total += leaf.quantityG || 0;
+    });
+  });
+  return total;
+}
 // Applies every stored per-food Shopping List preference
 // (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
 // see fdSetShoppingPref) in one pass: a display-name override (for the
 // handful of foods whose bare name is genuinely ambiguous out of context, an
 // OFF/USDA product naming only the flavor/variant, e.g. "Original", with the
-// actual brand as its own field), an exclude flag, and a package size for
-// fdFormatShoppingQty below. All three are independent and optional; a food
-// with no matching pref row gets none of them. Adds displayName/overridden
-// (so the row can skip its own brand subtitle instead of showing it twice)
-// to every item, then re-sorts by whatever ends up actually displayed.
-// Recipe-exploded/custom items without a foodId can never have a pref row,
-// nothing stable to key one on.
-function fdApplyShoppingPrefs(list, prefs) {
+// actual brand as its own field), an exclude flag, a package size for
+// fdFormatShoppingQty below, and inventory tracking. All independent and
+// optional; a food with no matching pref row gets none of them. Adds
+// displayName/overridden (so the row can skip its own brand subtitle
+// instead of showing it twice) to every item, then re-sorts by whatever
+// ends up actually displayed. Recipe-exploded/custom items without a foodId
+// can never have a pref row, nothing stable to key one on.
+function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
   const byFoodId = new Map((prefs || []).map(p => [p.foodId, p]));
   const out = list.map(item => {
     const pref = item.foodId ? byFoodId.get(item.foodId) : null;
+    const stockBaselineG = pref?.stockBaselineG ?? null;
+    const stockSetAt = pref?.stockSetAt ?? null;
+    const effectiveStockG = (stockBaselineG != null && stockSetAt)
+      ? Math.max(0, stockBaselineG - fdConsumedSince(foodLogs, item.foodId, stockSetAt, todayISO))
+      : null;
     return {
       ...item,
       displayName: pref?.nameOverride || item.foodName,
       overridden: !!pref?.nameOverride,
       excluded: !!pref?.excluded,
       packageSizeG: pref?.packageSizeG ?? null,
+      stockSetAt,
+      effectiveStockG,
     };
   });
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+// Below one package's worth: only meaningful with both a package size and
+// stock tracking enabled (see fdApplyShoppingPrefs), a food with either
+// missing has nothing to compare its stock against.
+function fdIsLowStock(item) {
+  return item.packageSizeG > 0 && item.effectiveStockG != null && item.effectiveStockG < item.packageSizeG;
+}
+// Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
+// user has already seen the Running Low banner for, keyed by foodId ->
+// the stockSetAt it was shown under. Keying on stockSetAt rather than a
+// bare boolean means a later restock (which stamps a fresh stockSetAt) no
+// longer matches the stored value, the banner comes back on its own next
+// time that food dips low again, no separate reset needed anywhere.
+function fdReadLowStockAcks() {
+  try {
+    const v = JSON.parse(localStorage.getItem('logbook-low-stock-acked'));
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  } catch (_) { return {}; }
+}
+function fdWriteLowStockAcks(v) {
+  try { localStorage.setItem('logbook-low-stock-acked', JSON.stringify(v)); } catch (_) {}
 }
 // Display rounding: under 50g rounds to the nearest 5, under 1000g to the
 // nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
@@ -516,18 +565,20 @@ function fdWriteShoppingDays(v) {
   try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
 }
 // Finds-or-creates this food's zane_food_shopping_prefs row, merges `patch`
-// (one or more of nameOverride/excluded/packageSizeG) into it, and deletes
-// the row instead of upserting it if the merge leaves all three at their
-// default (no override, not excluded, no package size): a row with nothing
-// to say has no reason to exist. setStore drives it through the normal
-// syncStore diff/upsert like any other collection, so this doesn't touch
-// Supabase directly.
+// (one or more of nameOverride/excluded/packageSizeG/stockBaselineG+
+// stockSetAt) into it, and deletes the row instead of upserting it if the
+// merge leaves everything at its default (no override, not excluded, no
+// package size, no stock baseline): a row with nothing to say has no reason
+// to exist. stockBaselineG uses == null, not a falsy check: a baseline of
+// exactly 0 (genuinely out of stock) is meaningful, not "unset". setStore
+// drives it through the normal syncStore diff/upsert like any other
+// collection, so this doesn't touch Supabase directly.
 function fdSetShoppingPref(setStore, foodId, patch) {
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
     const existing = list.find(p => p.foodId === foodId);
-    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null }), ...patch };
-    const isDefault = !merged.nameOverride && !merged.excluded && !merged.packageSizeG;
+    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null }), ...patch };
+    const isDefault = !merged.nameOverride && !merged.excluded && !merged.packageSizeG && merged.stockBaselineG == null;
     const next = isDefault
       ? list.filter(p => p.foodId !== foodId)
       : existing
@@ -5303,36 +5354,75 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   // 0215), so this needs no local mirror state or localStorage of its own,
   // fdSetShoppingPref below writes straight through setStore.
   const displayList = useMemoFd(
-    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs),
-    [list, store.foodShoppingPrefs],
+    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs, store.foodLogs, today),
+    [list, store.foodShoppingPrefs, store.foodLogs, today],
   );
   // What actually feeds the export/screenshot (included only) vs. what's
   // still shown, just set aside, in the list screen's own "Excluded" section.
+  // Both stay keyed on `excluded` alone, unaffected by low stock on purpose:
+  // an excluded bulk item running low still doesn't belong in the grocery
+  // run, it needs reordering from wherever it's normally bought, and a
+  // normal included item running low is still a normal item to buy either way.
   const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
+  // Cuts across both of the above for its own "Running Low" section instead
+  // (surfaced first regardless of where it'd otherwise sit), so the two
+  // *ForDisplay lists below carve it back out to avoid rendering it twice.
+  const lowStockList = useMemoFd(() => displayList.filter(fdIsLowStock), [displayList]);
+  const includedForDisplay = useMemoFd(() => includedList.filter(i => !fdIsLowStock(i)), [includedList]);
+  const excludedForDisplay = useMemoFd(() => excludedList.filter(i => !fdIsLowStock(i)), [excludedList]);
+
+  // One-time "Running Low" banner: shows only for a dip the user hasn't
+  // already seen (see fdReadLowStockAcks), dismissing marks every currently-
+  // fresh item as acked so the persistent section below stays but the
+  // interrupt doesn't repeat on every reopen.
+  const [lowStockAcks, setLowStockAcks] = useStateFd(fdReadLowStockAcks);
+  const freshLowStock = useMemoFd(
+    () => lowStockList.filter(i => lowStockAcks[i.foodId] !== i.stockSetAt),
+    [lowStockList, lowStockAcks],
+  );
+  function dismissLowStockBanner() {
+    const next = { ...lowStockAcks };
+    freshLowStock.forEach(i => { next[i.foodId] = i.stockSetAt; });
+    setLowStockAcks(next);
+    fdWriteLowStockAcks(next);
+  }
 
   const [editItem, setEditItem] = useStateFd(null); // the tapped displayList item, or null
   const [editDraft, setEditDraft] = useStateFd('');
   const [pkgDraft, setPkgDraft] = useStateFd('');
+  // Always starts blank, unlike editDraft/pkgDraft: this is an "update the
+  // count" field, not a display of the current value (that's the read-only
+  // effectiveStockG line in the sheet itself). Blank on Save means "leave
+  // stock tracking as it is", not "clear it", so an unrelated name edit
+  // doesn't accidentally wipe out a tracked count just for being left empty.
+  const [stockDraft, setStockDraft] = useStateFd('');
   function openEdit(item) {
     if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
     setEditItem(item);
     setEditDraft(item.displayName);
     setPkgDraft(item.packageSizeG ? String(item.packageSizeG) : '');
+    setStockDraft('');
   }
-  function closeEdit() { setEditItem(null); setEditDraft(''); setPkgDraft(''); }
+  function closeEdit() { setEditItem(null); setEditDraft(''); setPkgDraft(''); setStockDraft(''); }
   function saveEdit() {
     if (!editItem) return;
     const trimmed = editDraft.trim();
     // Blank, or typed back to exactly the original: same as no override, no
     // point leaving a no-op override sitting in the DB forever.
     const nameOverride = (!trimmed || trimmed === editItem.foodName) ? null : trimmed;
-    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride, packageSizeG: fdNum(pkgDraft) });
+    const patch = { nameOverride, packageSizeG: fdNum(pkgDraft) };
+    // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
+    // only ever counts forward from stockSetAt, so re-stamping it here is what
+    // makes "I just restocked" mean "start counting from zero again".
+    const stockTyped = fdNum(stockDraft);
+    if (stockTyped != null) { patch.stockBaselineG = stockTyped; patch.stockSetAt = new Date().toISOString(); }
+    fdSetShoppingPref(setStore, editItem.foodId, patch);
     closeEdit();
   }
   function resetEdit() {
     if (!editItem) return;
-    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null });
+    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
   // The checkbox's own handler, independent of the edit sheet: toggles
@@ -5362,7 +5452,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
               {(item.overridden || item.packageSizeG) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
             </div>
-            {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+            {fdIsLowStock(item)
+              ? <div style={{ fontSize: 10, color: 'var(--warn)', fontFamily: UI.fontUi }}>{fdExactShoppingQty(item.effectiveStockG)} left</div>
+              : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>)}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {item.fromProjection && <Pill gold>Plan</Pill>}
@@ -5538,11 +5630,38 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
         </div>
       </div>
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {freshLowStock.length > 0 && (
+          <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+              {freshLowStock.length === 1 ? `${freshLowStock[0].displayName} is running low.` : `${freshLowStock.length} items are running low.`}
+            </div>
+            <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+              <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+            </button>
+          </div>
+        )}
+
         <Card style={{ textAlign: 'center' }}>
           <div className="micro" style={{ marginBottom: 10 }}>Shopping for the next</div>
           <Stepper value={shoppingDays} step={1} min={1} max={30}
             suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
         </Card>
+
+        {lowStockList.length > 0 && (
+          // Its own card (not just a knurl section like Excluded below): this
+          // is the one category meant to interrupt, not just sit there,
+          // hence the persistent glow rather than a plain divider.
+          <div className="low-stock-glow" style={{ background: 'rgba(var(--warn-rgb),0.08)', border: '1px solid rgba(var(--warn-rgb),0.35)', borderRadius: 8, padding: '14px 14px 10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10 }}>
+              <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 12, color: 'var(--warn)' }} />
+              <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--warn)', fontFamily: UI.fontUi }}>Running Low</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {lowStockList.map(renderShoppingRow)}
+            </div>
+          </div>
+        )}
 
         {!displayList.length ? (
           <Empty title="Nothing yet"
@@ -5554,22 +5673,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
           // direct flex children and add that same 16px between the knurl,
           // the label and the excluded rows too, on top of their own margins.
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {includedList.length > 0 ? (
+            {includedForDisplay.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {includedList.map(renderShoppingRow)}
+                {includedForDisplay.map(renderShoppingRow)}
               </div>
             ) : (
               <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>
-                Nothing to buy right now, everything's excluded.
+                Nothing to buy right now.
               </div>
             )}
-            {excludedList.length > 0 && (
+            {excludedForDisplay.length > 0 && (
               <>
                 <div className="knurl" style={{ margin: '16px 0 10px' }} />
                 <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi, textAlign: 'center' }}>Excluded</div>
                 <div className="knurl" style={{ margin: '10px 0' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {excludedList.map(renderShoppingRow)}
+                  {excludedForDisplay.map(renderShoppingRow)}
                 </div>
               </>
             )}
@@ -5630,9 +5749,23 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
           Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
         </div>
+        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          {editItem?.effectiveStockG != null && (
+            <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
+              Current stock: <span className="num">{fdExactShoppingQty(editItem.effectiveStockG)}</span>
+            </div>
+          )}
+          <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
+            <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
+              type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
+          </Field>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+            Tracks what's actually eaten since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {(editItem?.overridden || editItem?.packageSizeG) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
-          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG) ? 2 : 1 }}>Save</Btn>
+          {(editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
         </div>
       </Sheet>
     </Screen>

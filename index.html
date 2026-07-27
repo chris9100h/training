@@ -366,6 +366,14 @@
     50%       { box-shadow: 0 0 14px rgba(var(--accent-raw-rgb),0.72), 0 0 36px rgba(var(--accent-raw-rgb),0.26); }
   }
   .intensity-glow-raw { animation: intensityGlowRaw 2.5s ease-in-out infinite; }
+  /* Same breathing curve as intensityGlow, recolored to --warn: the Shopping
+     List's "Running Low" section (screens-food.jsx), a food whose derived
+     stock has dropped under one package's worth. */
+  @keyframes lowStockGlow {
+    0%, 100% { box-shadow: 0 0 6px rgba(var(--warn-rgb),0.4), 0 0 20px rgba(var(--warn-rgb),0.12); }
+    50%       { box-shadow: 0 0 14px rgba(var(--warn-rgb),0.72), 0 0 36px rgba(var(--warn-rgb),0.26); }
+  }
+  .low-stock-glow { animation: lowStockGlow 2.5s ease-in-out infinite; }
 
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
      RIR dips below 0 (hot orange inner, red outer, same palette as the ember
