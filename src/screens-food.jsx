@@ -5447,12 +5447,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
     // makes "I just restocked" mean "start counting from zero again".
+    // Checked independent of which pair the sheet is CURRENTLY showing (that
+    // toggles live off pkgDraft, see the packs/grams fields below): typing a
+    // stock value in grams and only then adding a package size in the same
+    // visit swaps the visible field out from under it, and reading only the
+    // now-hidden pair would silently drop what was already typed. Packs wins
+    // if both ended up touched (only possible by touching packs after the
+    // switch, so it's what's currently visible/intended).
     let stockTyped = null;
-    if (packageSizeG > 0) {
-      if (stockPacksDraft.trim() || stockExtraDraft.trim()) {
-        stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdNum(stockExtraDraft) || 0);
-      }
-    } else {
+    if (packageSizeG > 0 && (stockPacksDraft.trim() || stockExtraDraft.trim())) {
+      stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdNum(stockExtraDraft) || 0);
+    } else if (stockDraft.trim()) {
       stockTyped = fdNum(stockDraft);
     }
     if (stockTyped != null) { patch.stockBaselineG = stockTyped; patch.stockSetAt = new Date().toISOString(); }
