@@ -502,7 +502,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const asTemplate = isCoach && planSubTab === 'templates';
     setStore(s => ({
       ...s,
-      medicationPlans: [{ id, name: (name || '').trim() || 'Medications', archived: false, isTemplate: asTemplate, coachId: null, active: true, createdAt: nowISO, updatedAt: nowISO }, ...(s.medicationPlans || [])],
+      // Defaults to INACTIVE (unlike most default states in this app): a new
+      // plan is often just being staged for later (a coach prepping a cycle
+      // ahead of its start date), not meant to fire doses the moment it's
+      // created. The user flips it on via the plan-detail view's own toggle
+      // once it's actually ready to run.
+      medicationPlans: [{ id, name: (name || '').trim() || 'Medications', archived: false, isTemplate: asTemplate, coachId: null, active: false, createdAt: nowISO, updatedAt: nowISO }, ...(s.medicationPlans || [])],
     }));
     setViewedPlanId(id);
   }
