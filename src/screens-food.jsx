@@ -284,9 +284,18 @@ function fdExplodeForShopping(entry) {
   }
   return [{ foodId: entry.foodId || null, foodName: entry.foodName, quantityG: entry.quantityG || 0 }];
 }
+// Registers both keys a favorite could be reached by, not just its own
+// primary one: a favorite with a real foodId still gets its name-key added
+// too, because the exact same food logged only through a temporary recipe
+// never carries a foodId (see fdExplodeForShopping) and would otherwise
+// tally under a name-key the favorite-boost could never match, dropping a
+// favorited, recipe-only food entirely instead of just under-counting it.
 function fdFavoriteShoppingKeys(foodFavorites) {
   const set = new Set();
-  (foodFavorites || []).forEach(f => set.add(fdShoppingKey(f.foodId, f.foodName)));
+  (foodFavorites || []).forEach(f => {
+    set.add(fdShoppingKey(f.foodId, f.foodName));
+    if (f.foodName) set.add(fdShoppingKey(null, f.foodName));
+  });
   return set;
 }
 // A recipe-exploded ingredient never carries a foodId (see fdExplodeForShopping),
