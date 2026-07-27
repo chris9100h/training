@@ -429,14 +429,6 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   });
   return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
 }
-// "Weetabix Original" rather than a bare "Original": some OFF/USDA products
-// name only the flavor/variant, with the actual identifying brand as its own
-// field, unusable alone out of context on a shopping list. Recipe-exploded
-// items never carry a brand (see fdExplodeForShopping) and fall back to the
-// bare name, same as always.
-function fdShoppingDisplayName(item) {
-  return item.brand ? `${item.brand} ${item.foodName}` : item.foodName;
-}
 // Display rounding: under 50g rounds to the nearest 5, under 1000g to the
 // nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
 // exactly "nearest 100g" once expressed in kg, reused rather than writing a
@@ -464,7 +456,7 @@ function fdWriteShoppingDays(v) {
 // notes app render those as literal characters, not a real list), in the
 // same alphabetical order fdBuildShoppingList already sorted them in.
 function fdBuildShoppingExportText(list, withAmounts) {
-  return list.map(item => withAmounts ? `${fdShoppingDisplayName(item)} ${fdRoundShoppingQty(item.grams)}` : fdShoppingDisplayName(item)).join('\n');
+  return list.map(item => withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName).join('\n');
 }
 // HTML twin of the text above, a real <ul><li> list rather than \n-joined
 // lines: a raw string's \n reads to Notes' paste parser as a soft line break
@@ -475,7 +467,7 @@ function fdBuildShoppingExportText(list, withAmounts) {
 // contain '&'/'<'/'>' (e.g. "M&M's").
 function fdBuildShoppingExportHtml(list, withAmounts) {
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = list.map(item => `<li>${esc(withAmounts ? `${fdShoppingDisplayName(item)} ${fdRoundShoppingQty(item.grams)}` : fdShoppingDisplayName(item))}</li>`).join('');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.foodName} ${fdRoundShoppingQty(item.grams)}` : item.foodName)}</li>`).join('');
   return `<ul>${rows}</ul>`;
 }
 
