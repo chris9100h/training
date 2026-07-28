@@ -451,9 +451,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   );
   const byHour = useMemoMd(() => {
     const map = {};
+    // A real entry's medicationName is a snapshot taken at log/auto-fill
+    // time (mdMaterializeSlotEntry, the log-a-dose submit): resolve it
+    // against the CURRENT medication list first so a rename shows up
+    // immediately everywhere, not just on days that haven't materialized a
+    // real row yet (those fall through to the always-live preview path
+    // below). Same full `medications` scope the dose's own unitLabel
+    // lookup a few lines down already uses, so an archived-but-still-named
+    // medication keeps showing its live name too; only a truly deleted one
+    // falls back to the snapshot.
+    const medsByIdAll = new Map(medications.map(m => [m.id, m]));
     curDateLogs.forEach(e => {
       const h = parseInt((e.time || '0:00').split(':')[0], 10) || 0;
-      (map[h] = map[h] || []).push(e);
+      const med = medsByIdAll.get(e.medicationId);
+      (map[h] = map[h] || []).push(med ? { ...e, medicationName: med.name } : e);
     });
     // Preview rows: schedule slots due on curDate with no real log yet, e.g.
     // a future day nobody's opened here before (mdAutoFillToday only ever
@@ -486,8 +497,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // medicationPlans is a real dependency, not just an incidental read: an
     // active/inactive toggle must immediately reflect here, otherwise
     // pausing/resuming a plan would silently wait for some unrelated
-    // re-render before the Timeline's preview rows caught up.
-  }, [curDateLogs, curDate, activeMedications, scheduleSlots, medicationPlans]);
+    // re-render before the Timeline's preview rows caught up. medications
+    // (not just activeMedications) is a dependency too, for medsByIdAll's
+    // live name resolution above.
+  }, [curDateLogs, curDate, activeMedications, medications, scheduleSlots, medicationPlans]);
   // Timeline hero's own tally: only entries tied to a real schedule slot
   // count as "due" (an ad-hoc extra dose, scheduleSlotId null, was never due
   // in the first place, so it shouldn't inflate the denominator); planned:
