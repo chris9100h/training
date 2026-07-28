@@ -1945,13 +1945,29 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
     () => [...pillboxSlots.map(s => ({ id: s.id, label: s.label })), { id: MD_PILLBOX_OTHER_BUCKET, label: 'Other times' }],
     [pillboxSlots],
   );
-  // A compartment section only renders if something is due in it on at
-  // least one of the 7 days: an empty "Vitamins: nothing this week" section
-  // would just be noise.
-  const visibleCompartments = useMemoMd(
-    () => compartments.filter(c => days.some(day => (day.buckets.get(c.id) || []).length > 0)),
-    [compartments, days],
-  );
+  // Per compartment, split into what repeats every single one of the 7 shown
+  // days (packed once per medication, not read 7 times over) versus what
+  // only lands on some days (still needs the per-day breakdown, since the
+  // whole point there is knowing which specific day to add it). A compartment
+  // is dropped entirely if it ends up with nothing in either bucket.
+  const compartmentGroups = useMemoMd(() => {
+    return compartments.map(c => {
+      const bySlot = new Map();
+      days.forEach(day => {
+        (day.buckets.get(c.id) || []).forEach(({ med, slot }) => {
+          if (!bySlot.has(slot.id)) bySlot.set(slot.id, { med, slot, dates: [] });
+          bySlot.get(slot.id).dates.push(day.date);
+        });
+      });
+      const entries = [...bySlot.values()];
+      const daily = entries.filter(e => e.dates.length === 7).sort((a, b) => a.med.name.localeCompare(b.med.name));
+      const varyingSlotIds = new Set(entries.filter(e => e.dates.length < 7).map(e => e.slot.id));
+      const perDay = days
+        .map((day, i) => ({ date: day.date, i, items: (day.buckets.get(c.id) || []).filter(({ slot }) => varyingSlotIds.has(slot.id)) }))
+        .filter(d => d.items.length > 0);
+      return { id: c.id, label: c.label, daily, perDay };
+    }).filter(g => g.daily.length > 0 || g.perDay.length > 0);
+  }, [compartments, days]);
 
   function toggleCheck(dateISO, scheduleSlotId) {
     const id = `${userId}_${dateISO}_${scheduleSlotId}`;
@@ -1962,6 +1978,29 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
         ...s,
         medicationPillboxChecks: exists ? cur.filter(c => c.id !== id) : [...cur, { id, date: dateISO, scheduleSlotId }],
       };
+    });
+  }
+
+  // Every-day items get ONE checkbox for the whole week instead of 7: it
+  // reflects (and toggles) all 7 underlying per-day checks together, since
+  // packing a daily med is one pass across all 7 compartments, not 7
+  // separate decisions. Same id shape/table as toggleCheck, just batched.
+  function isWeekFullyPacked(dates, scheduleSlotId) {
+    return dates.every(d => checkedIds.has(`${userId}_${d}_${scheduleSlotId}`));
+  }
+  function toggleCheckAllDays(dates, scheduleSlotId) {
+    const fullyPacked = isWeekFullyPacked(dates, scheduleSlotId);
+    setStore(s => {
+      const cur = s.medicationPillboxChecks || [];
+      if (fullyPacked) {
+        const idsToRemove = new Set(dates.map(d => `${userId}_${d}_${scheduleSlotId}`));
+        return { ...s, medicationPillboxChecks: cur.filter(c => !idsToRemove.has(c.id)) };
+      }
+      const existingIds = new Set(cur.map(c => c.id));
+      const toAdd = dates
+        .filter(d => !existingIds.has(`${userId}_${d}_${scheduleSlotId}`))
+        .map(d => ({ id: `${userId}_${d}_${scheduleSlotId}`, date: d, scheduleSlotId }));
+      return { ...s, medicationPillboxChecks: [...cur, ...toAdd] };
     });
   }
 
@@ -1987,38 +2026,53 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
             </div>
             <Btn onClick={() => setSlotsSheetOpen(true)} style={{ width: '100%' }}>Set up pillbox</Btn>
           </div>
-        ) : visibleCompartments.length === 0 ? (
+        ) : compartmentGroups.length === 0 ? (
           <div style={mdEmptyHint}>Nothing to pack this week</div>
-        ) : visibleCompartments.map(c => (
+        ) : compartmentGroups.map(g => (
           // Compartment first, then the days due within it: filling a real
           // pillbox goes compartment by compartment across the whole week
           // (all mornings, then all evenings), not day by day.
-          <div key={c.id}>
-            <Bezel style={{ marginBottom: 10 }}>{c.label}</Bezel>
+          <div key={g.id}>
+            <Bezel style={{ marginBottom: 10 }}>{g.label}</Bezel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {days.map((day, i) => {
-                const items = day.buckets.get(c.id) || [];
-                if (!items.length) return null;
-                return (
-                  <div key={day.date}>
-                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{dayLabel(day.date, i)}</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {items.map(({ med, slot }) => {
-                        const packed = checkedIds.has(`${userId}_${day.date}_${slot.id}`);
-                        return (
-                          <div key={slot.id} style={{ ...mdListRow, cursor: 'default', opacity: packed ? 0.6 : 1 }}>
-                            <MdCheckbox checked={packed} onToggle={() => toggleCheck(day.date, slot.id)} label={packed ? 'Mark as not packed' : 'Mark as packed'} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={mdEntryName}>{med.name}</div>
-                              <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
-                            </div>
+              {g.daily.length > 0 && (
+                <div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Every day</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {g.daily.map(({ med, slot, dates }) => {
+                      const packed = isWeekFullyPacked(dates, slot.id);
+                      return (
+                        <div key={slot.id} style={{ ...mdListRow, cursor: 'default', opacity: packed ? 0.6 : 1 }}>
+                          <MdCheckbox checked={packed} onToggle={() => toggleCheckAllDays(dates, slot.id)} label={packed ? 'Mark whole week as not packed' : 'Mark whole week as packed'} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={mdEntryName}>{med.name}</div>
+                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              )}
+              {g.perDay.map(day => (
+                <div key={day.date}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{dayLabel(day.date, day.i)}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {day.items.map(({ med, slot }) => {
+                      const packed = checkedIds.has(`${userId}_${day.date}_${slot.id}`);
+                      return (
+                        <div key={slot.id} style={{ ...mdListRow, cursor: 'default', opacity: packed ? 0.6 : 1 }}>
+                          <MdCheckbox checked={packed} onToggle={() => toggleCheck(day.date, slot.id)} label={packed ? 'Mark as not packed' : 'Mark as packed'} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={mdEntryName}>{med.name}</div>
+                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ))}
