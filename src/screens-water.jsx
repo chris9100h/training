@@ -432,9 +432,12 @@ function WaterScreen({ store, setStore, go, userId }) {
             which paint above a z-index:0 absolute sibling regardless of DOM
             order, so the grid needs to sit behind that baseline instead. */}
         {capturing && window.__gridEnabled && <SvgGrid style={{ zIndex: -1 }} />}
-        {/* Hero */}
+        {/* Hero. Ring first (left), stats second (right): matches the Food
+            Log's own hero (FdHeroContent, screens-food.jsx), which this one
+            had drifted from by putting the ring on the right instead. */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+            <WaterRing percent={percent} />
             <div>
               <div className="micro" style={{ color: UI.inkFaint }}>Today</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
@@ -449,7 +452,6 @@ function WaterScreen({ store, setStore, go, userId }) {
                 </span>
               </div>
             </div>
-            <WaterRing percent={percent} />
           </div>
         </BracketFrame>
 

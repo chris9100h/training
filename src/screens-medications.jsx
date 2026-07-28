@@ -1140,7 +1140,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </div>
 
             {/* Hero: same BracketFrame-plus-ring shape as the Water tracker's
-                own daily hero (screens-water.jsx), gated on there being
+                own daily hero (screens-water.jsx), ring first (left), stats
+                second (right), matching the Food Log's own hero too
+                (FdHeroContent, screens-food.jsx). Gated on there being
                 anything due at all (a medication-free day, or one with
                 nothing scheduled, has no ratio worth showing). The ring
                 itself already carries the taken/due fraction (MdDoseRing),
@@ -1149,6 +1151,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             {doseTally.due > 0 && (
               <BracketFrame gold style={{ padding: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+                  <MdDoseRing taken={doseTally.taken} due={doseTally.due} />
                   <div>
                     <div className="micro" style={{ color: UI.inkFaint }}>{dayLabel}</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginTop: 6 }}>
@@ -1157,7 +1160,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                         : `${doseTally.due - doseTally.taken} dose${doseTally.due - doseTally.taken === 1 ? '' : 's'} still due`}
                     </div>
                   </div>
-                  <MdDoseRing taken={doseTally.taken} due={doseTally.due} />
                 </div>
               </BracketFrame>
             )}
