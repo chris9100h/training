@@ -602,14 +602,17 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
   const [bodyTempSheet, setBodyTempSheet] = useStateSet(false);
   // Health sheet's three sub-categories: Health (glucose/body temp/cards),
-  // Water (the same settings body the Water tracker's own settings sheet
-  // uses, WaterSettingsBody/WaterDrinksConfigBody from screens-water.jsx,
-  // reused verbatim rather than duplicated) and Food (meal planning/
-  // reminders). waterDrinksConfigSheet is a push/pop off waterSubSheet, same
-  // as it is off the Water screen's own settings sheet, not a third
-  // simultaneous layer.
+  // Water (the same hub/settings bodies the Water tracker's own settings
+  // sheet uses, from screens-water.jsx, reused verbatim rather than
+  // duplicated) and Food (meal planning/reminders). waterGoalSheet/
+  // waterBottleSheet/waterRemindersSheet/waterDrinksConfigSheet are each a
+  // push/pop off waterSubSheet, same as they are off the Water screen's own
+  // settings sheet, never a third simultaneous layer.
   const [healthSubSheet, setHealthSubSheet] = useStateSet(false);
   const [waterSubSheet, setWaterSubSheet] = useStateSet(false);
+  const [waterGoalSheet, setWaterGoalSheet] = useStateSet(false);
+  const [waterBottleSheet, setWaterBottleSheet] = useStateSet(false);
+  const [waterRemindersSheet, setWaterRemindersSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
@@ -1714,8 +1717,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const activeCount = activeSessions.filter(s => !s.is_finished).length;
 
   // Same shape as WaterScreen's own patchSettings (screens-water.jsx): lets
-  // the reused WaterSettingsBody/WaterDrinksConfigBody write through here
-  // exactly as they do from the Water tracker itself.
+  // the reused Water*Body components write through here exactly as they do
+  // from the Water tracker itself.
   const patchSettings = (patch) => setStore(s => ({ ...s, settings: { ...s.settings, ...patch } }));
 
   return (
@@ -2000,9 +2003,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         </div>
       </SettingsSheet>
 
-      {/* ══ Health › Water: the exact settings body the Water tracker's own
-          settings sheet uses (screens-water.jsx), so there is one source of
-          truth for these fields rather than a second copy drifting apart. ══ */}
+      {/* ══ Health › Water: top-level hub, drills into Daily Goal, Bottle
+          Tracker, Reminders and Drinks & Coffee. The hub itself
+          (WaterSettingsHubBody) is the exact same component the Water
+          tracker's own settings sheet uses (screens-water.jsx), so there is
+          one source of truth rather than a second copy drifting apart. ══ */}
       <SettingsSheet open={waterSubSheet} onClose={() => setWaterSubSheet(false)} title="Water">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Show tab" first>
@@ -2012,11 +2017,36 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             Pin this to the shared tab slot to log drinks toward a daily goal.
           </div>
           {store.settings?.showWaterTab && (
-            <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
-              onClose={() => setWaterSubSheet(false)}
-              onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+            <WaterSettingsHubBody settings={store.settings || {}}
+              onOpenGoal={() => { setWaterSubSheet(false); setWaterGoalSheet(true); }}
+              onOpenBottle={() => { setWaterSubSheet(false); setWaterBottleSheet(true); }}
+              onOpenReminders={() => { setWaterSubSheet(false); setWaterRemindersSheet(true); }}
+              onOpenDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
           )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setWaterSubSheet(false)}>Done</Btn>
+          </div>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Water › Daily Goal (push off Water, same reasoning as
+          Drinks & Coffee below: one sheet open at a time keeps keyboard
+          focus calm on the time/number inputs in this sheet). ══ */}
+      <SettingsSheet open={waterGoalSheet} onClose={() => { setWaterGoalSheet(false); setWaterSubSheet(true); }} title="Daily Goal">
+        <WaterGoalWindowBody settings={store.settings || {}} patchSettings={patchSettings}
+          onClose={() => { setWaterGoalSheet(false); setWaterSubSheet(true); }} />
+      </SettingsSheet>
+
+      {/* ══ Health › Water › Bottle Tracker (push off Water) ══ */}
+      <SettingsSheet open={waterBottleSheet} onClose={() => { setWaterBottleSheet(false); setWaterSubSheet(true); }} title="Bottle Tracker">
+        <WaterBottleTrackerBody settings={store.settings || {}} patchSettings={patchSettings}
+          onClose={() => { setWaterBottleSheet(false); setWaterSubSheet(true); }} />
+      </SettingsSheet>
+
+      {/* ══ Health › Water › Reminders (push off Water) ══ */}
+      <SettingsSheet open={waterRemindersSheet} onClose={() => { setWaterRemindersSheet(false); setWaterSubSheet(true); }} title="Reminders">
+        <WaterRemindersBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
+          onClose={() => { setWaterRemindersSheet(false); setWaterSubSheet(true); }} />
       </SettingsSheet>
 
       {/* ══ Health › Water › Drinks & coffee (push off Water, same as off the

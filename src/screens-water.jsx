@@ -247,6 +247,9 @@ function WaterScreen({ store, setStore, go, userId }) {
   const [coffeeSel, setCoffeeSel] = useStateW(null); // { label, ml }
   const [statsOpen, setStatsOpen] = useStateW(false);
   const [drinksConfigOpen, setDrinksConfigOpen] = useStateW(false);
+  const [goalSheetOpen, setGoalSheetOpen] = useStateW(false);
+  const [bottleSheetOpen, setBottleSheetOpen] = useStateW(false);
+  const [remindersSheetOpen, setRemindersSheetOpen] = useStateW(false);
   const [capturing, setCapturing] = useStateW(false);
   const captureRef = useRefW(null);
 
@@ -585,14 +588,34 @@ function WaterScreen({ store, setStore, go, userId }) {
         )}
       </div>
 
-      {/* ── Settings sheet ── */}
-      {/* The drinks-config sub-sheet is a PUSH, not a stack: opening it closes
-          the settings sheet and closing it reopens settings. Two Sheets open at
-          once each run their own visualViewport keyboard handler, and both fire
-          scrollIntoView on the focused field, which makes the view jump wildly
-          on focus. One sheet open at a time keeps input focus calm. */}
+      {/* ── Settings hub: Goal, Bottle Tracker, Reminders and Drinks each get
+          their own focused sub-sheet instead of one long scroll. Every child
+          below is a PUSH, not a stack: opening one closes this hub and
+          closing it reopens the hub. Two Sheets open at once each run their
+          own visualViewport keyboard handler, and both fire scrollIntoView on
+          the focused field, which makes the view jump wildly on focus. One
+          sheet open at a time keeps input focus calm. ── */}
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Water settings" titleColor="var(--accent)">
-        <WaterSettingsBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => setSettingsOpen(false)} onConfigureDrinks={() => { setSettingsOpen(false); setDrinksConfigOpen(true); }} />
+        <WaterSettingsHubBody settings={settings}
+          onOpenGoal={() => { setSettingsOpen(false); setGoalSheetOpen(true); }}
+          onOpenBottle={() => { setSettingsOpen(false); setBottleSheetOpen(true); }}
+          onOpenReminders={() => { setSettingsOpen(false); setRemindersSheetOpen(true); }}
+          onOpenDrinks={() => { setSettingsOpen(false); setDrinksConfigOpen(true); }} />
+      </Sheet>
+
+      {/* ── Daily Goal sub-sheet ── */}
+      <Sheet open={goalSheetOpen} onClose={() => { setGoalSheetOpen(false); setSettingsOpen(true); }} title="Daily Goal" titleColor="var(--accent)">
+        <WaterGoalWindowBody settings={settings} patchSettings={patchSettings} onClose={() => { setGoalSheetOpen(false); setSettingsOpen(true); }} />
+      </Sheet>
+
+      {/* ── Bottle Tracker sub-sheet ── */}
+      <Sheet open={bottleSheetOpen} onClose={() => { setBottleSheetOpen(false); setSettingsOpen(true); }} title="Bottle Tracker" titleColor="var(--accent)">
+        <WaterBottleTrackerBody settings={settings} patchSettings={patchSettings} onClose={() => { setBottleSheetOpen(false); setSettingsOpen(true); }} />
+      </Sheet>
+
+      {/* ── Reminders sub-sheet ── */}
+      <Sheet open={remindersSheetOpen} onClose={() => { setRemindersSheetOpen(false); setSettingsOpen(true); }} title="Reminders" titleColor="var(--accent)">
+        <WaterRemindersBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => { setRemindersSheetOpen(false); setSettingsOpen(true); }} />
       </Sheet>
 
       {/* ── Drinks & coffee config sub-sheet (own sheet to keep settings tidy) ── */}
@@ -670,19 +693,46 @@ function WaterBreakdownRow({ icon, name, value, color }) {
 }
 
 // Settings body: goal, window, bottle tracker, reminders, custom drinks, coffee sizes.
-function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDrinks }) {
+// Own copy of Settings' NavRow (screens-settings.jsx), boxed-button style
+// instead of that one's flat divided list, matching the row shape this file
+// already used for "Other drinks & coffee" before this hub existed.
+function WaterNavRow({ label, hint, onTap }) {
+  return (
+    <button onClick={onTap} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 10, WebkitTapHighlightColor: 'transparent' }}>
+      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {hint != null && <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+        <ChevronRight color={UI.inkFaint} />
+      </span>
+    </button>
+  );
+}
+// Settings top-level hub: drills into Goal, Bottle Tracker, Reminders and
+// Drinks instead of one long scroll through all four at once. Shared by the
+// Water tracker's own settings sheet and Settings > Health & Nutrition >
+// Water (that one wraps this in its own "Show tab" toggle, not part of this
+// shared body).
+function WaterSettingsHubBody({ settings, onOpenGoal, onOpenBottle, onOpenReminders, onOpenDrinks }) {
+  const bottleEnabled = settings.waterBottleEnabled !== false;
+  const reminderOn = !!settings.waterReminderEnabled;
+  const drinkCount = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks.length : 0)
+    + ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes.length : 0);
+  return (
+    <div>
+      <WaterNavRow label="Daily Goal" hint={`${UI.waterToEntry(settings.waterGoalMl || 2000)} ${UI.waterEntryUnit()}`} onTap={onOpenGoal} />
+      <WaterNavRow label="Bottle Tracker" hint={bottleEnabled ? 'On' : 'Off'} onTap={onOpenBottle} />
+      <WaterNavRow label="Reminders" hint={reminderOn ? 'On' : 'Off'} onTap={onOpenReminders} />
+      <WaterNavRow label="Drinks & Coffee" hint={drinkCount > 0 ? `${drinkCount} set` : null} onTap={onOpenDrinks} />
+    </div>
+  );
+}
+// Sub-sheet body: the daily target and the window it's spread across.
+function WaterGoalWindowBody({ settings, patchSettings, onClose }) {
   const [goal, setGoal] = useStateW(String(UI.waterToEntry(settings.waterGoalMl || 2000)));
   const [start, setStart] = useStateW(settings.waterStartTime || '08:00');
   const [end, setEnd] = useStateW(settings.waterEndTime || '22:00');
-  const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
   const timeColorScheme = ['light', 'paper'].includes(settings.darkMode ?? 'dark') ? 'light' : 'dark';
   const timeStyle = { ...wtInput, colorScheme: timeColorScheme };
-
-  const bottleEnabled = settings.waterBottleEnabled !== false;
-  const reminderOn = !!settings.waterReminderEnabled;
-  const pushOn = !!settings.pushEnabled;
-  const drinkCount = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks.length : 0)
-    + ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes.length : 0);
 
   const saveGoalWindow = () => {
     const entry = parseInt(goal, 10);
@@ -696,6 +746,24 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
     patchSettings({ waterGoalMl: ml, waterStartTime: start, waterEndTime: validEnd });
   };
 
+  return (
+    <div>
+      <Field label={`Daily goal (${UI.waterEntryUnit()})`} style={{ marginBottom: 14 }}>
+        <input value={goal} onChange={e => setGoal(e.target.value.replace(/[^0-9]/g, ''))} onBlur={saveGoalWindow} type="text" inputMode="numeric" style={wtBigInput} />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <Field label="Start time"><input type="time" value={start} onChange={e => setStart(e.target.value)} onBlur={saveGoalWindow} style={timeStyle} /></Field>
+        <Field label="End time"><input type="time" value={end} onChange={e => setEnd(e.target.value)} onBlur={saveGoalWindow} style={timeStyle} /></Field>
+      </div>
+      <Btn onClick={() => { saveGoalWindow(); onClose(); }} style={{ width: '100%' }}>Done</Btn>
+    </div>
+  );
+}
+// Sub-sheet body: the emptied-bottle counter and its size.
+function WaterBottleTrackerBody({ settings, patchSettings, onClose }) {
+  const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
+  const bottleEnabled = settings.waterBottleEnabled !== false;
+
   const saveBottleMl = () => {
     // Commit on blur, like the goal field: committing on every keystroke would
     // write waterBottleMl:0 into synced settings the instant the field is
@@ -708,17 +776,6 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 
   return (
     <div>
-      {/* Goal + window */}
-      <Field label={`Daily goal (${UI.waterEntryUnit()})`} style={{ marginBottom: 14 }}>
-        <input value={goal} onChange={e => setGoal(e.target.value.replace(/[^0-9]/g, ''))} onBlur={saveGoalWindow} type="text" inputMode="numeric" style={wtBigInput} />
-      </Field>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-        <Field label="Start time"><input type="time" value={start} onChange={e => setStart(e.target.value)} onBlur={saveGoalWindow} style={timeStyle} /></Field>
-        <Field label="End time"><input type="time" value={end} onChange={e => setEnd(e.target.value)} onBlur={saveGoalWindow} style={timeStyle} /></Field>
-      </div>
-
-      {/* Bottle tracker */}
-      <Bezel style={{ marginBottom: 12 }}>Bottle tracker</Bezel>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: bottleEnabled ? 12 : 20 }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Count emptied bottles</span>
         <Toggle on={bottleEnabled} onToggle={() => patchSettings({ waterBottleEnabled: !bottleEnabled })} />
@@ -728,9 +785,16 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
           <input value={bottleMlDraft} onChange={e => setBottleMlDraft(e.target.value.replace(/[^0-9]/g, ''))} onBlur={saveBottleMl} type="text" inputMode="numeric" style={wtInput} />
         </Field>
       )}
-
-      {/* Reminders */}
-      <Bezel style={{ marginBottom: 12 }}>Reminders</Bezel>
+      <Btn onClick={onClose} style={{ width: '100%' }}>Done</Btn>
+    </div>
+  );
+}
+// Sub-sheet body: the fall-behind nudge.
+function WaterRemindersBody({ settings, patchSettings, go, onClose }) {
+  const reminderOn = !!settings.waterReminderEnabled;
+  const pushOn = !!settings.pushEnabled;
+  return (
+    <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Nudge me when I fall behind</span>
         <Toggle on={reminderOn} onToggle={() => patchSettings({ waterReminderEnabled: !reminderOn })} />
@@ -743,18 +807,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: '16px' }}>
         Uses your existing notification channel (Web Push or Pushover). Sent during your daily window.
       </div>
-
-      {/* Other drinks & coffee live in their own sub-sheet to keep this one tidy */}
-      <Bezel style={{ marginBottom: 12 }}>Drinks</Bezel>
-      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
-        <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Other drinks & coffee</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{drinkCount > 0 ? `${drinkCount} set` : 'Configure'}</span>
-          <ChevronRight color={UI.inkFaint} />
-        </span>
-      </button>
-
-      <Btn onClick={() => { saveGoalWindow(); onClose(); }} style={{ width: '100%', marginTop: 4 }}>Done</Btn>
+      <Btn onClick={onClose} style={{ width: '100%' }}>Done</Btn>
     </div>
   );
 }
