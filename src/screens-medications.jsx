@@ -31,6 +31,12 @@
      sub-sheet) are the one place time itself is entered; there is no
      separate per-slot pause toggle (removed, found confusing): the only
      way to stop a dose is removing the medication from that plan.
+     schedMed's own titleRight button opens "Move to plan" (moveTargetPlans/
+     moveMedicationToPlan): reassigns the existing membership row's
+     medicationPlanId plus every one of this plan's own slots for it to a
+     different plan of the same bucket, so reorganizing (e.g. peptides
+     mixed into a Gear plan moved out into their own Peptides plan) carries
+     the whole schedule over instead of the user rebuilding it by hand.
    - Inventory: two sub-tabs, Medications first/default and Stock second,
      mirroring the Food Shopping List's own Shopping List/Inventory split.
      Both share one search+filter row (renderSearchAndFilterRow: a name/
@@ -700,6 +706,39 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     () => schedMed?.id ? scheduleSlots.filter(sl => sl.medicationId === schedMed.id && sl.medicationPlanId === schedMed.medicationPlanId) : [],
     [scheduleSlots, schedMed?.id, schedMed?.medicationPlanId],
   );
+  // Move this medication, and this plan's whole schedule for it, into a
+  // different plan of the same bucket (mine vs. client template): e.g. "all
+  // my peptides ended up under Gear, I want them in their own Peptides plan
+  // instead" without re-typing every "Add time" slot by hand. Reassigns the
+  // existing membership row's medicationPlanId in place (still unique per
+  // (medication, plan) since the target list already excludes plans this
+  // medication is a member of) and re-scopes every one of this plan's own
+  // slots for it the same way, so the schedule itself moves wholesale.
+  const [movePlanOpen, setMovePlanOpen] = useStateMd(false);
+  const moveTargetPlans = useMemoMd(() => {
+    if (!schedMed) return [];
+    const currentPlan = medicationPlans.find(p => p.id === schedMed.medicationPlanId);
+    const alreadyIn = new Set(medicationPlanItems.filter(it => it.medicationId === schedMed.id).map(it => it.medicationPlanId));
+    return medicationPlans
+      .filter(p => !p.archived && p.id !== schedMed.medicationPlanId && !alreadyIn.has(p.id) && !!p.isTemplate === !!currentPlan?.isTemplate)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [medicationPlans, medicationPlanItems, schedMed]);
+  function moveMedicationToPlan(targetPlanId) {
+    if (!schedMed) return;
+    const sourcePlanId = schedMed.medicationPlanId;
+    setStore(s => ({
+      ...s,
+      medicationPlanItems: (s.medicationPlanItems || []).map(it =>
+        (it.medicationId === schedMed.id && it.medicationPlanId === sourcePlanId) ? { ...it, medicationPlanId: targetPlanId } : it
+      ),
+      medicationScheduleSlots: (s.medicationScheduleSlots || []).map(sl =>
+        (sl.medicationId === schedMed.id && sl.medicationPlanId === sourcePlanId) ? { ...sl, medicationPlanId: targetPlanId, updatedAt: new Date().toISOString() } : sl
+      ),
+    }));
+    setMovePlanOpen(false);
+    // No longer part of the plan being viewed, nothing left to show here.
+    closeSchedMed();
+  }
   const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
   function snapSlotDraft(d) {
@@ -1417,7 +1456,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           medSheet (Inventory > Medications). No Save button of its own:
           saveSlotDraft/deleteSlot below write straight to the store per
           slot, there's nothing else here to persist. */}
-      <Sheet open={!!schedMed && !slotDraft} onClose={closeSchedMed} title={schedMed?.name || 'Schedule'} titleColor="var(--accent)">
+      <Sheet open={!!schedMed && !slotDraft} onClose={closeSchedMed} title={schedMed?.name || 'Schedule'} titleColor="var(--accent)"
+        titleRight={schedMed && (
+          <button onClick={() => setMovePlanOpen(true)} aria-label="Move to another plan" style={mdIconBtn(30)}>
+            <i className="fa-solid fa-right-left" style={{ fontSize: 13 }} />
+          </button>
+        )}
+      >
         {schedMed && (
           <>
             {schedMedSlots.length > 0 && (
@@ -1436,6 +1481,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             )}
             <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
           </>
+        )}
+      </Sheet>
+
+      {/* Move this medication, and this plan's own schedule for it, into a
+          different plan of the same bucket, opened from schedMed's own
+          titleRight button above. Tapping a target plan moves immediately,
+          same zero-friction immediacy as the "Add medication" picker; each
+          target's own paused state is shown right in the list so the user
+          sees upfront whether doses keep firing after the move, no separate
+          confirm dialog needed since nothing is destroyed, only relocated. */}
+      <Sheet open={movePlanOpen} onClose={() => setMovePlanOpen(false)} title="Move to plan" titleColor="var(--accent)">
+        {moveTargetPlans.length === 0 ? (
+          <div style={mdEmptyHint}>No other plan to move this into yet. Create one first.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {moveTargetPlans.map(p => (
+              <button key={p.id} onClick={() => moveMedicationToPlan(p.id)} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
+                <span style={mdEntryName}>{p.name}</span>
+                {!p.active && <span style={mdTagPill(false)}>PAUSED</span>}
+              </button>
+            ))}
+          </div>
         )}
       </Sheet>
 
