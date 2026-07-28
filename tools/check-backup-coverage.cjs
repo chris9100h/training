@@ -39,7 +39,9 @@ const BACKUP_ENUM = [
   'zane_status_periods', 'zane_meso_states', 'zane_checkin_schema_templates',
   'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_water_logs',
   'zane_food_logs', 'zane_food_favorites', 'zane_food_recipes',
-  'zane_food_template_slots', 'zane_food_meal_plans',
+  'zane_food_template_slots', 'zane_food_meal_plans', 'zane_food_shopping_prefs',
+  'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items',
+  'zane_medication_schedule_slots', 'zane_medication_logs',
 ];
 // Tables restored by spreading the whole store row (…s). Their column coverage is
 // governed by what loadFromSupabase SELECTs, so they are export-checked only.
@@ -133,7 +135,8 @@ function captureImportedColumns() {
     glucoseLogs: [{}], cardioPlans: [{}], statusPeriods: [{}], mesoStates: [{}],
     checkinSchemaTemplates: [{}], bloodPressureLogs: [{}], bodyTempLogs: [{}],
     waterLogs: [{}], foodLogs: [{}], foodFavorites: [{}], foodRecipes: [{}],
-    foodTemplateSlots: [{}], foodMealPlans: [{}],
+    foodTemplateSlots: [{}], foodMealPlans: [{}], foodShoppingPrefs: [{}],
+    medicationPlans: [{}], medications: [{}], medicationPlanItems: [{}], medicationScheduleSlots: [{}], medicationLogs: [{}],
     activeScheduleId: null, activeMealTemplateId: null, cycleIndex: 0, customDayTypes: [],
   };
   return LB.importFromBackup(backup, 'u1', () => {}).then(() => written);

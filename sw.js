@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.675';
+const CACHE = 'zane-v2.680';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
@@ -34,6 +34,7 @@ const ASSETS = [
   BASE + '/src/screens-health.jsx',
   BASE + '/src/screens-water.jsx',
   BASE + '/src/screens-food.jsx',
+  BASE + '/src/screens-medications.jsx',
   BASE + '/src/screens-onboarding.jsx',
   BASE + '/src/screens-cardio.jsx',
   BASE + '/src/screens-featuremap.jsx',

@@ -200,30 +200,47 @@ const TAB_ICONS = {
       <path d="M15 2c0 3-1 5-1 5a2 2 0 0 0 2 2v13"/>
     </svg>
   ),
+  medications: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="9" width="16" height="6" rx="3" transform="rotate(45 12 12)"/>
+      <line x1="12" y1="9" x2="12" y2="15" transform="rotate(45 12 12)"/>
+    </svg>
+  ),
 };
 
-function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false }) {
+// Fixed display order for the shared Health/Water/Food/Medications tab
+// slot. Each of the four is independently toggleable in Settings, so the
+// set of enabled ones can be any subset of this order, never a fixed count.
+const HEALTH_SLOT_ORDER = ['health', 'water', 'food', 'medications'];
+function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false, showWater = false, showFood = false, showMeds = false }) {
+  const slotOn = { health: showHealth, water: showWater, food: showFood, medications: showMeds };
+  const enabledSlots = HEALTH_SLOT_ORDER.filter(id => slotOn[id]);
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
     { id: 'hist', label: 'History' },
-    ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
+    ...(enabledSlots.length ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
   ].map(t => {
-    const healthSlot = t.id === 'health' ? (routeName === 'water' ? 'water' : routeName === 'food' ? 'food' : 'health') : null;
-    const slotLabel = { water: 'Water', food: 'Food' }[healthSlot] || t.label;
+    const healthSlot = t.id === 'health' ? (enabledSlots.includes(routeName) ? routeName : enabledSlots[0]) : null;
+    const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot] || t.label;
     return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
   });
   const idx = tabs.findIndex(t => t.id === active);
-  // Health, its water tracker and its food tracker share one tab slot
-  // (routeName === 'water'/'food' still light up as 'health', see tabActive
-  // in app.jsx). Tapping the slot steps forward through Health → Water →
-  // Food → Health; the final step falls through to the plain onChange(id)
-  // below since that path was never a no-op to begin with.
+  // Health, its water tracker, food tracker and medications tracker share one
+  // tab slot (routeName being any of the four still lights up 'health', see
+  // tabActive in app.jsx), each independently shown or hidden in Settings.
+  // Tapping the slot steps forward through whichever of the four are
+  // currently enabled, in HEALTH_SLOT_ORDER, wrapping back to the first once
+  // it reaches the end; landing on the first enabled one if routeName isn't
+  // one of them at all (e.g. arriving from Home, or the current one having
+  // just been disabled). All four enabled reproduces the original fixed
+  // Health → Water → Food → Medications cycle unchanged.
   const handleTabClick = (id) => {
-    if (id === 'health') {
-      if (routeName === 'health') { onChange('water'); return; }
-      if (routeName === 'water') { onChange('food'); return; }
+    if (id === 'health' && enabledSlots.length) {
+      const curIdx = enabledSlots.indexOf(routeName);
+      onChange(enabledSlots[(curIdx + 1) % enabledSlots.length]);
+      return;
     }
     onChange(id);
   };
@@ -237,18 +254,97 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   // otherwise) rather than the icon's dark-on-gold-plate treatment. Every tab
   // reserves the same slot height (see the height:4 placeholder at both call
   // sites) so only Health's growing dots never shifts the bar's height.
-  const healthDots = (on, healthSlot) => {
+  const healthDots = (on, healthSlot, slots) => {
     const lit = on ? UI.gold : UI.inkFaint;
     const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
     const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
     const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}`, boxShadow: filled ? glow : 'none' });
     return (
       <div style={{ display: 'flex', gap: 3 }}>
-        <span style={dotStyle(healthSlot === 'health')} />
-        <span style={dotStyle(healthSlot === 'water')} />
-        <span style={dotStyle(healthSlot === 'food')} />
+        {slots.map(id => <span key={id} style={dotStyle(healthSlot === id)} />)}
       </div>
     );
+  };
+
+  // Long-press on the Health slot (whichever of Health/Water/Food it's
+  // currently showing, from any tab) reveals the two OTHER slots just above
+  // the dock; drag onto one while still holding and release there to jump
+  // straight to it. A plain short tap is untouched, still runs the cycle
+  // above via handleTabClick. Bottom-dock only, the sidebar has no reach
+  // problem to solve and keeps the plain click-cycle.
+  const [reveal, setReveal] = React.useState(null); // { anchorX, bottom, hoverId } | null
+  const barRef = React.useRef(null);
+  const pressTimerRef = React.useRef(null);
+  const pressStartRef = React.useRef(null);
+  const suppressClickRef = React.useRef(false);
+  const activeListenersRef = React.useRef(null);
+  const healthIdx = tabs.findIndex(t => t.id === 'health');
+  const currentHealthSlot = tabs.find(t => t.id === 'health')?.healthSlot || 'health';
+  const cancelPressTimer = () => { if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; } };
+  const resolveHealthOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-health-option]')?.getAttribute('data-health-option') || null;
+  React.useEffect(() => () => {
+    cancelPressTimer();
+    if (activeListenersRef.current) {
+      document.removeEventListener('pointermove', activeListenersRef.current.onMove);
+      document.removeEventListener('pointerup', activeListenersRef.current.onUp);
+      document.removeEventListener('pointercancel', activeListenersRef.current.onUp);
+      activeListenersRef.current = null;
+    }
+  }, []);
+  const healthOnPointerDown = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (enabledSlots.length <= 1) return; // nothing else to reveal
+    pressStartRef.current = { x: e.clientX, y: e.clientY };
+    const buttonEl = e.currentTarget;
+    cancelPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      const r = barRef.current?.getBoundingClientRect();
+      if (!r) return;
+      suppressClickRef.current = true;
+      // Clamped so the two-or-three-chip popup (roughly 180-300px wide) can't clip off
+      // a narrow phone's edge when Health sits in an outer tab slot.
+      const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
+      const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
+      setReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+      const onMove = (ev) => setReveal(rv => rv && { ...rv, hoverId: resolveHealthOption(ev.clientX, ev.clientY) });
+      const onUp = (ev) => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        activeListenersRef.current = null;
+        setReveal(null);
+        const pick = resolveHealthOption(ev.clientX, ev.clientY);
+        if (pick) {
+          onChange(pick);
+          // Release landed on a popup chip, a sibling of this button, so no
+          // native click will ever follow to consume suppressClickRef itself
+          // (a click only fires when press and release resolve to the same
+          // element): clear it now, or the next ordinary tap on this button
+          // would be silently swallowed by healthOnClick below.
+          suppressClickRef.current = false;
+        } else if (!buttonEl.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+          // Released somewhere that is neither a popup chip nor the button
+          // itself (e.g. the backdrop): same reasoning, no trailing click is
+          // coming to reset the flag, so reset it here instead of leaving it
+          // stuck for whatever ordinary tap happens to land next.
+          suppressClickRef.current = false;
+        }
+      };
+      activeListenersRef.current = { onMove, onUp };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
+    }, 200);
+  };
+  const healthOnPointerMove = (e) => {
+    if (!pressTimerRef.current || !pressStartRef.current) return;
+    if (Math.hypot(e.clientX - pressStartRef.current.x, e.clientY - pressStartRef.current.y) > 10) cancelPressTimer();
+  };
+  const healthOnPointerUp = cancelPressTimer;
+  const healthOnClick = (id) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    handleTabClick(id);
   };
 
   if (sidebar) {
@@ -314,7 +410,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                     )}
                   </div>
                   <span>{label}</span>
-                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, enabledSlots)}</div>
                 </button>
               );
             })}
@@ -338,13 +434,14 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const ICON_H = 26;     // icon-zone height, drives the icon→label gap
   const ICON_SZ = 24;    // glyph size in the bottom dock (sidebar untouched)
   return (
+    <>
     <div style={{
       flexShrink: 0,
       padding: `10px 12px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
       background: 'transparent',
       zIndex: 20,
     }}>
-      <div style={{
+      <div ref={barRef} style={{
         position: 'relative',
         background: 'rgba(var(--bg-rgb),0.92)',
         backdropFilter: 'blur(24px) saturate(130%)',
@@ -394,8 +491,16 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
             const { healthSlot, iconKey, label } = t;
+            const isHealthTab = t.id === 'health';
             return (
-              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
+              <button key={t.id} data-tour={`tab-${t.id}`}
+                onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
+                onPointerDown={isHealthTab ? healthOnPointerDown : undefined}
+                onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
+                onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
+                onPointerCancel={isHealthTab ? healthOnPointerUp : undefined}
+                onContextMenu={isHealthTab ? (e) => e.preventDefault() : undefined}
+                style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
@@ -406,6 +511,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
                 WebkitTapHighlightColor: 'transparent',
+                ...(isHealthTab ? { userSelect: 'none', touchAction: 'manipulation' } : null),
               }}>
                 {/* Icon zone, matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
@@ -435,13 +541,47 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
                 <span style={{ marginRight: '-0.14em' }}>{label}</span>
-                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, enabledSlots)}</div>
               </button>
             );
           })}
         </div>
       </div>
     </div>
+    {reveal && (
+      <div style={{
+        position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
+        transformOrigin: 'bottom center',
+        display: 'flex', gap: 8, padding: 8,
+        background: 'rgba(var(--bg-rgb),0.92)',
+        backdropFilter: 'blur(24px) saturate(130%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 8,
+        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
+        zIndex: 30,
+      }}>
+        {enabledSlots.filter(id => id !== currentHealthSlot).map(id => {
+          const hovered = reveal.hoverId === id;
+          return (
+            <div key={id} data-health-option={id} style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              padding: '10px 18px', borderRadius: 6,
+              background: hovered ? 'rgba(var(--accent-rgb),0.22)' : 'transparent',
+              border: `1px solid ${hovered ? UI.gold : UI.hairStrong}`,
+              color: hovered ? UI.gold : UI.inkSoft,
+            }}>
+              {React.cloneElement(TAB_ICONS[id], { width: 22, height: 22 })}
+              <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {{ health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[id]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    )}
+    </>
   );
 }
 
@@ -601,6 +741,23 @@ function Toggle({ on, onToggle, disabled = false }) {
 function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  // Every sheet opens with the keyboard down, full stop: a field left
+  // focused from wherever the user was before (a background screen, or a
+  // sheet this one replaces/covers) would otherwise keep the OS keyboard
+  // open for no reason, and an autoFocus field of THIS sheet's own would
+  // pop it open fresh. Both read the same way from the user's side ("the
+  // keyboard jumps up when I open a sheet"), so both are unconditionally
+  // blurred here, not just the former: an autoFocus prop stops doing
+  // anything at all once this runs, the field is exactly as unfocused as
+  // one without it, tapping it is the only way in either case now.
+  // useLayoutEffect (not useEffect) runs synchronously right after this
+  // sheet's own DOM, including that autoFocus child, has already
+  // committed, so there's no visible flash of focus before it's dropped.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.blur) active.blur();
+  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;

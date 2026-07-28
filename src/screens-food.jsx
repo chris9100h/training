@@ -72,6 +72,16 @@ function fdScaleEntry(e, scale) {
     })) : null,
   };
 }
+// Ingredients read top-heavy (biggest contributor first) rather than in
+// whatever order they were added/picked, which has no relationship to
+// amount and reads as a random jumble on anything past a couple of
+// ingredients. Display-only: never mutates or reorders the underlying
+// stored array (recipe.items, entry.recipeItems), only what a given render
+// site iterates. Used by the timeline's expanded ingredient view, the
+// recipe editor, and an incoming share preview.
+function fdSortIngredientsByQty(items) {
+  return [...(items || [])].sort((a, b) => (b.quantityG || 0) - (a.quantityG || 0));
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -248,20 +258,431 @@ function fdSlotMatchesDate(slot, store, dateISO) {
   return slot.dayType === 'training' ? isTraining : !isTraining;
 }
 
+// ── Shopping list ────────────────────────────────────────────────────
+// What to buy, derived from two independent signals that never double-count
+// the same food (see fdBuildShoppingList): the last FD_SHOPPING_ANALYSIS_DAYS
+// of what was actually eaten (pattern detection), and the active meal plan's
+// template slots projected across the shopping window (definite, not
+// inferred). shoppingDays is a display/scale knob, not a second analysis
+// window: it rescales the historical daily rate AND the projection
+// lookahead together (see fdBuildShoppingList for why those two must move
+// in lockstep instead of the projection staying fixed at a calendar week).
+const FD_SHOPPING_ANALYSIS_DAYS = 14;
+const FD_SHOPPING_STAPLE_MIN = 3;
+const FD_SHOPPING_DAYS_DEFAULT = 7;
+// Floor for the historical rate's denominator (see fdBuildShoppingList): a
+// food whose only occurrences in the window are all recent doesn't get
+// divided by the full FD_SHOPPING_ANALYSIS_DAYS, which would silently assume
+// an empty earlier week actually happened. Flooring at a week (rather than
+// using the raw day-span) keeps a single very-recent occurrence from being
+// read as "needed every single day".
+const FD_SHOPPING_RATE_FLOOR_DAYS = 7;
+
+function fdNormFoodName(name) {
+  return (name || '').trim().toLowerCase();
+}
+// Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored
+// to dodge DST/midnight shifts (same approach as screens-health.jsx's
+// healthDayDiff, reimplemented locally to keep this section self-contained).
+function fdDaysBetween(a, b) {
+  return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
+}
+// foodId is always "<source>:<sourceId>" (see confirmStageItem), so a
+// name-based key can never collide with one.
+function fdShoppingKey(foodId, foodName) {
+  return foodId ? `id:${foodId}` : `name:${fdNormFoodName(foodName)}`;
+}
+// A food-log-shaped row (a real store.foodLogs entry, or a virtual
+// fdMaterializeSlotEntry projection row, both share the same shape) -> its
+// flat "leaf" items to tally. A recipe's recipeItems snapshot carries
+// foodId/brand for anything logged since that pairing was added to
+// applyBlockRecipe/confirmRecipeLog/the template slot's draftBuilt (see
+// docs/database.md's zane_food_logs section); a legacy row logged before
+// that (or one with no recipeItems at all, predating the snapshot entirely)
+// falls back to a name-keyed, brand-less leaf rather than silently dropping
+// it, same as it always did.
+function fdExplodeForShopping(entry) {
+  if (entry.source === 'recipe' && entry.recipeItems && entry.recipeItems.length) {
+    return entry.recipeItems.map(ri => ({ foodId: ri.foodId ?? null, foodName: ri.foodName, brand: ri.brand ?? null, quantityG: ri.quantityG || 0 }));
+  }
+  return [{ foodId: entry.foodId || null, foodName: entry.foodName, brand: entry.brand || null, quantityG: entry.quantityG || 0 }];
+}
+// Registers both keys a favorite could be reached by, not just its own
+// primary one: a favorite with a real foodId still gets its name-key added
+// too, because the exact same food logged only through a temporary recipe
+// never carries a foodId (see fdExplodeForShopping) and would otherwise
+// tally under a name-key the favorite-boost could never match, dropping a
+// favorited, recipe-only food entirely instead of just under-counting it.
+function fdFavoriteShoppingKeys(foodFavorites) {
+  const set = new Set();
+  (foodFavorites || []).forEach(f => {
+    set.add(fdShoppingKey(f.foodId, f.foodName));
+    if (f.foodName) set.add(fdShoppingKey(null, f.foodName));
+  });
+  return set;
+}
+// A recipe-exploded ingredient never carries a foodId (see fdExplodeForShopping),
+// so the SAME grocery item logged both standalone (search/barcode, a real
+// foodId) and only ever inside a recipe lands as two separate groups purely
+// because one has an id-key and the other a name-key, even though their
+// foodName is identical. Folds any name-keyed group into an existing
+// id-keyed group when their normalized names match, foodId stays the
+// group's identity, only the totals (and the earliest firstDate, for
+// fdBuildShoppingList's rate denominator) combine. A missing brand on the
+// surviving row is backfilled from the dropped one (never overwrites one it
+// already has): the id-keyed row is standalone-logged and may well have a
+// brand the recipe-only occurrence never could (see fdExplodeForShopping).
+// Mutates and returns `tally`.
+function fdReconcileShoppingTally(tally) {
+  const idKeyByName = new Map();
+  tally.forEach((row, key) => { if (row.foodId) idKeyByName.set(fdNormFoodName(row.foodName), key); });
+  const toDrop = [];
+  tally.forEach((row, key) => {
+    if (row.foodId) return;
+    const idKey = idKeyByName.get(fdNormFoodName(row.foodName));
+    if (!idKey || idKey === key) return;
+    const target = tally.get(idKey);
+    target.totalGrams += row.totalGrams;
+    if (row.count != null) target.count = (target.count || 0) + row.count;
+    if (row.firstDate && (!target.firstDate || row.firstDate < target.firstDate)) target.firstDate = row.firstDate;
+    if (!target.brand && row.brand) target.brand = row.brand;
+    toDrop.push(key);
+  });
+  toDrop.forEach(key => tally.delete(key));
+  return tally;
+}
+// Last FD_SHOPPING_ANALYSIS_DAYS of ACTUALLY-EATEN entries (planned rows
+// never count toward "what do I typically buy"). store.foodLogs is
+// boot-windowed to LB.FOOD_HISTORY_WINDOW_DAYS (30, see foodHistCutoff
+// above), well past 14, so this never needs the lazy old-date fetch the
+// timeline's own scroll-back uses. date > todayISO is excluded too: Plan
+// Mode allows future-dated rows, and those belong to the projection below,
+// not the "what did I eat" tally.
+function fdShoppingHistoryTally(foodLogs, todayISO) {
+  const cutoff = fdShiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
+  const tally = new Map();
+  (foodLogs || []).forEach(e => {
+    if (e.planned || e.date < cutoff || e.date > todayISO) return;
+    fdExplodeForShopping(e).forEach(leaf => {
+      const key = fdShoppingKey(leaf.foodId, leaf.foodName);
+      const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, brand: leaf.brand, totalGrams: 0, count: 0, firstDate: e.date };
+      row.totalGrams += leaf.quantityG;
+      row.count += 1;
+      if (e.date < row.firstDate) row.firstDate = e.date;
+      tally.set(key, row);
+    });
+  });
+  return fdReconcileShoppingTally(tally);
+}
+// The active plan's slots projected across `days` calendar days from today
+// (today included), reusing fdSlotMatchesDate/fdMaterializeSlotEntry
+// verbatim, the exact functions the real per-day auto-fill effect uses.
+// Empty map with no active plan or no slots: contributes nothing rather
+// than throwing, callers treat an empty projection as "no plan-driven need".
+function fdShoppingProjectionTally(store, todayISO, days) {
+  const tally = new Map();
+  const activePlanId = store.activeMealTemplateId;
+  const slots = activePlanId ? (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId) : [];
+  if (!slots.length) return tally;
+  for (let i = 0; i < days; i++) {
+    const d = fdShiftDate(todayISO, i);
+    slots.forEach(slot => {
+      if (!fdSlotMatchesDate(slot, store, d)) return;
+      fdExplodeForShopping(fdMaterializeSlotEntry(slot, d)).forEach(leaf => {
+        const key = fdShoppingKey(leaf.foodId, leaf.foodName);
+        const row = tally.get(key) || { foodId: leaf.foodId, foodName: leaf.foodName, brand: leaf.brand, totalGrams: 0 };
+        row.totalGrams += leaf.quantityG;
+        tally.set(key, row);
+      });
+    });
+  }
+  return fdReconcileShoppingTally(tally);
+}
+// Merges the two signals without ever double-counting a food: a projected
+// food's quantity is the projection's own total for the window, full stop,
+// never added to the historical estimate (a template slot is a definite
+// future need, not a second vote alongside an inferred one). A food with no
+// projection falls back to the historical rate scaled to shoppingDays,
+// gated by the staple/favorite threshold: a favorited food only needs to
+// have actually been logged once in the window to qualify (favoriting is
+// already a strong "I need this" signal), a non-favorited one needs 3+. A
+// key only reaches the history map at all via a real occurrence, so
+// "favorited but never logged in the window" can't reach this filter and is
+// correctly never resurrected.
+// The historical rate itself divides by the number of days since that
+// food's EARLIEST occurrence in the window (floored at
+// FD_SHOPPING_RATE_FLOOR_DAYS), not always by the full
+// FD_SHOPPING_ANALYSIS_DAYS: a recipe cooked twice this week but never
+// before has all of its history packed into the last few days, and dividing
+// that by the full 14 would silently assume an equally-empty earlier week
+// actually happened, halving the real weekly amount. A long-running staple
+// whose occurrences already span the full window is unaffected, its
+// earliest occurrence sits at the window's cutoff either way.
+function fdBuildShoppingList(store, todayISO, shoppingDays) {
+  const favKeys = fdFavoriteShoppingKeys(store.foodFavorites);
+  const hist = fdShoppingHistoryTally(store.foodLogs, todayISO);
+  const proj = fdShoppingProjectionTally(store, todayISO, shoppingDays);
+  const keys = new Set([...hist.keys(), ...proj.keys()]);
+  const out = [];
+  keys.forEach(key => {
+    const p = proj.get(key);
+    if (p) {
+      if (p.totalGrams > 0) out.push({ key, foodId: p.foodId || null, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
+      return;
+    }
+    const h = hist.get(key);
+    if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
+    const daysSpan = Math.max(FD_SHOPPING_RATE_FLOOR_DAYS, fdDaysBetween(h.firstDate, todayISO) + 1);
+    const grams = (h.totalGrams / daysSpan) * shoppingDays;
+    if (grams > 0) out.push({ key, foodId: h.foodId || null, foodName: h.foodName, brand: h.brand || null, grams, fromProjection: false });
+  });
+  return out.sort((a, b) => a.foodName.localeCompare(b.foodName));
+}
+// Total grams of a specific food actually eaten (recipe-exploded, same as
+// the historical-rate tally elsewhere in this file) from sinceISO through
+// todayISO inclusive, planned entries excluded (not yet actually eaten).
+// Used to derive a stock-tracked food's current amount from a manually-set
+// baseline rather than a live-decremented counter that would need a hook in
+// every food-logging code path, plus an undo hook wherever a log entry is
+// later edited or deleted (see zane_food_shopping_prefs in
+// docs/database.md). Compares real moments in time, not just calendar
+// dates: day-granularity (truncating sinceISO to its date) sounded fine but
+// wasn't, a same-day entry logged BEFORE the baseline was set still counted
+// against it (a real report: updating stock at 2pm still deducted a 10am
+// entry from hours earlier that day, the weighed/counted "X grams left"
+// already accounted for it). entry.date/.time are local wall-clock (see
+// zane_food_logs in docs/database.md), and a date-time string with no
+// timezone designator parses as local too, so this compares correctly
+// against sinceISO (a real UTC instant) without needing the browser's own
+// UTC offset at all.
+function fdConsumedSince(foodLogs, foodId, sinceISO, todayISO) {
+  const sinceMoment = new Date(sinceISO);
+  let total = 0;
+  (foodLogs || []).forEach(entry => {
+    if (entry.planned || entry.date > todayISO) return;
+    if (new Date(`${entry.date}T${entry.time || '00:00'}:00`) < sinceMoment) return;
+    fdExplodeForShopping(entry).forEach(leaf => {
+      if (leaf.foodId === foodId) total += leaf.quantityG || 0;
+    });
+  });
+  return total;
+}
+// Derives a stock-tracked food's current amount at read time from its
+// manually-set baseline via fdConsumedSince above: null with tracking off (no
+// baseline set, or a baseline somehow missing its stockSetAt to count forward
+// from). Shared by fdApplyShoppingPrefs (below) and fdBuildInventoryList
+// (further below): the Inventory tab lists a tracked pref row directly
+// (there's no separate "item" wrapping it, unlike the Shopping List side), so
+// this takes the pref row itself rather than an already-merged item.
+function fdEffectiveStockG(pref, foodLogs, todayISO) {
+  if (pref?.stockBaselineG == null || !pref.stockSetAt) return null;
+  return Math.max(0, pref.stockBaselineG - fdConsumedSince(foodLogs, pref.foodId, pref.stockSetAt, todayISO));
+}
+// Applies every stored per-food Shopping List preference
+// (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
+// see fdSetShoppingPref) in one pass: a display-name override (for the
+// handful of foods whose bare name is genuinely ambiguous out of context, an
+// OFF/USDA product naming only the flavor/variant, e.g. "Original", with the
+// actual brand as its own field), an exclude flag, a package size for
+// fdFormatShoppingQty below, and inventory tracking. All independent and
+// optional; a food with no matching pref row gets none of them. Adds
+// displayName/overridden (so the row can skip its own brand subtitle
+// instead of showing it twice) to every item, then re-sorts by whatever
+// ends up actually displayed. Recipe-exploded/custom items without a foodId
+// can never have a pref row, nothing stable to key one on.
+function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
+  const byFoodId = new Map((prefs || []).map(p => [p.foodId, p]));
+  const out = list.map(item => {
+    const pref = item.foodId ? byFoodId.get(item.foodId) : null;
+    return {
+      ...item,
+      displayName: pref?.nameOverride || item.foodName,
+      overridden: !!pref?.nameOverride,
+      excluded: !!pref?.excluded,
+      packageSizeG: pref?.packageSizeG ?? null,
+      stockSetAt: pref?.stockSetAt ?? null,
+      effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
+    };
+  });
+  return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+// Every food with inventory tracking on (a stock_baseline_g set), read
+// straight off zane_food_shopping_prefs (store.foodShoppingPrefs), independent
+// of fdBuildShoppingList's own staple/projection filter above: a bulk item
+// bought twice a year is still something worth seeing and updating here, even
+// through a long stretch where it never once qualifies as a shopping-list
+// "staple". Uses the pref row's own food_name/brand (migration 0217) rather
+// than cross-referencing foodLogs/foodFavorites for a name, so a tracked item
+// stays identifiable in the Inventory tab even once it ages out of both.
+// Shares fdEffectiveStockG/renderShoppingRow with the Shopping List tab (see
+// ShoppingListScreen), just fed from this list instead of displayList.
+function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
+  const foodLogs = foodLogsOverride || store.foodLogs;
+  return (store.foodShoppingPrefs || [])
+    .filter(p => p.stockBaselineG != null)
+    .map(p => ({
+      key: `id:${p.foodId}`,
+      foodId: p.foodId,
+      foodName: p.foodName,
+      brand: p.brand || null,
+      displayName: p.nameOverride || p.foodName,
+      overridden: !!p.nameOverride,
+      excluded: !!p.excluded,
+      packageSizeG: p.packageSizeG ?? null,
+      stockSetAt: p.stockSetAt,
+      effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
+      grams: 0,
+      fromProjection: false,
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+// Below one package's worth: only meaningful with both a package size and
+// stock tracking enabled (see fdApplyShoppingPrefs), a food with either
+// missing has nothing to compare its stock against.
+function fdIsLowStock(item) {
+  return item.packageSizeG > 0 && item.effectiveStockG != null && item.effectiveStockG < item.packageSizeG;
+}
+// Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
+// user has already seen the Running Low banner for, keyed by foodId ->
+// the stockSetAt it was shown under. Keying on stockSetAt rather than a
+// bare boolean means a later restock (which stamps a fresh stockSetAt) no
+// longer matches the stored value, the banner comes back on its own next
+// time that food dips low again, no separate reset needed anywhere.
+function fdReadLowStockAcks() {
+  try {
+    const v = JSON.parse(localStorage.getItem('logbook-low-stock-acked'));
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  } catch (_) { return {}; }
+}
+function fdWriteLowStockAcks(v) {
+  try { localStorage.setItem('logbook-low-stock-acked', JSON.stringify(v)); } catch (_) {}
+}
+// Display rounding: under 50g rounds to the nearest 5, under 1000g to the
+// nearest 25, at or above 1000g switches to kg (fdRound1's "nearest 0.1" is
+// exactly "nearest 100g" once expressed in kg, reused rather than writing a
+// second decimal-rounding rule). Never rounds a genuinely non-zero amount
+// down to a misleading 0.
+function fdRoundShoppingQty(grams) {
+  if (!(grams > 0)) return '0g';
+  if (grams >= 1000) return `${fdRound1(grams / 1000)}kg`;
+  const unit = grams < 50 ? 5 : 25;
+  return `${Math.round(grams / unit) * unit || unit}g`;
+}
+// A package size is a fact printed on the product, not an estimate: unlike
+// fdRoundShoppingQty above, this never rounds the number itself, only picks
+// g vs kg and how many decimals to show (found via a real 372g wrap pack
+// that fdRoundShoppingQty's nearest-25 rule was silently showing as 375g).
+// 3 decimals in kg is always exact for a whole-gram input (1g = 0.001kg),
+// parseFloat drops any trailing zeros so a round kg value still reads "1kg".
+function fdExactShoppingQty(grams) {
+  if (!(grams > 0)) return '0g';
+  if (grams < 1000) return `${grams}g`;
+  return `${parseFloat((grams / 1000).toFixed(3))}kg`;
+}
+// Package-aware buy quantity. With no package size set, the plain rounded
+// estimate above, unchanged, as `headline` with no `sub`. With one, the whole
+// point of setting it was to shop by pack count, not by weight, so `headline`
+// becomes "3 x 400g" (rounds UP, you can't buy half a pack), an exact fact
+// about the product so it goes through fdExactShoppingQty, never
+// fdRoundShoppingQty. `sub` used to just restate packs x size in kg, purely
+// redundant with headline; it's the estimated need BEFORE rounding up to
+// whole packages now instead, so a user can see how much headroom buying
+// whole packages leaves them (still an estimate like the no-package-size
+// case, so fdRoundShoppingQty, not fdExactShoppingQty). Exports use
+// `headline` only, "3 x 400g" reads as a normal shopping-list line same as
+// any plain amount.
+function fdFormatShoppingQty(grams, packageSizeG) {
+  if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
+  const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+  return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
+}
+// Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
+// preference, not worth a synced setting/migration, self-heals to the
+// default on a fresh device. Unlike logbook-label-scanner-provider this has
+// exactly one simultaneous reader (ShoppingListScreen itself), so no
+// cross-component broadcast is needed.
+function fdReadShoppingDays() {
+  try { const v = parseInt(localStorage.getItem('logbook-shopping-list-days'), 10); return v > 0 ? v : FD_SHOPPING_DAYS_DEFAULT; }
+  catch (_) { return FD_SHOPPING_DAYS_DEFAULT; }
+}
+function fdWriteShoppingDays(v) {
+  try { localStorage.setItem('logbook-shopping-list-days', String(v)); } catch (_) {}
+}
+// Finds-or-creates this food's zane_food_shopping_prefs row, merges `patch`
+// (one or more of nameOverride/excluded/packageSizeG/stockBaselineG+
+// stockSetAt, plus foodName/brand, see below) into it, and deletes the row
+// instead of upserting it if the merge leaves everything at its default (no
+// override, not excluded, no package size, no stock baseline): a row with
+// nothing to say has no reason to exist. stockBaselineG uses == null, not a
+// falsy check: a baseline of exactly 0 (genuinely out of stock) is
+// meaningful, not "unset". foodName/brand (migration 0217) are a plain
+// identity snapshot, like zane_food_logs/zane_food_favorites already do;
+// they don't count towards isDefault, a food's own name never keeps an
+// otherwise-empty row alive by itself. Every live call site (saveEdit,
+// toggleExclusion) always includes the item's current foodName/brand in
+// patch, this is the only place that writes this table, so the snapshot can
+// never silently go stale relative to what the list itself shows for the
+// same foodId. Needed so the Inventory tab (fdBuildInventoryList) can show a
+// name for a tracked item independent of fdBuildShoppingList's own
+// staple/projection filter. setStore drives it through the normal syncStore
+// diff/upsert like any other collection, so this doesn't touch Supabase
+// directly.
+function fdSetShoppingPref(setStore, foodId, patch) {
+  setStore(s => {
+    const list = s.foodShoppingPrefs || [];
+    const existing = list.find(p => p.foodId === foodId);
+    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
+    const next = isDefault
+      ? list.filter(p => p.foodId !== foodId)
+      : existing
+        ? list.map(p => p.foodId === foodId ? merged : p)
+        : [...list, merged];
+    return { ...s, foodShoppingPrefs: next };
+  });
+}
+// One food per line, plain text (no bullets/markdown: Notes and every other
+// notes app render those as literal characters, not a real list), in the
+// same alphabetical order fdApplyShoppingPrefs already sorted them in.
+// displayName (not the raw foodName) so a renamed item exports under its
+// override too, that was the whole point of being able to rename it.
+function fdBuildShoppingExportText(list, withAmounts) {
+  return list.map(item => withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).headline}` : item.displayName).join('\n');
+}
+// HTML twin of the text above, a real <ul><li> list rather than \n-joined
+// lines: a raw string's \n reads to Notes' paste parser as a soft line break
+// WITHIN one paragraph (still one checklist item), not a paragraph break, so
+// plain text alone can't reliably become one checklist row per food.
+// Explicit <li> boundaries remove that guesswork. Escaped because
+// displayName comes from OFF/USDA data, free-typed custom entries, or a
+// user's own override, any of which could contain '&'/'<'/'>' (e.g. "M&M's").
+function fdBuildShoppingExportHtml(list, withAmounts) {
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = list.map(item => `<li>${esc(withAmounts ? `${item.displayName} ${fdFormatShoppingQty(item.grams, item.packageSizeG).headline}` : item.displayName)}</li>`).join('');
+  return `<ul>${rows}</ul>`;
+}
+
 // Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
 // accent-bordered box when planned (not eaten yet), the same box filled with a
 // check once logged (eaten). Tapping toggles the entry's planned state.
-function FdCheckbox({ checked, onToggle }) {
+// disabled/label are only used by the Shopping List's own reuse of this for
+// its include/exclude toggle (a different meaning than planned/eaten, hence
+// the label override; disabled covers rows with no stable id to toggle at
+// all), both optional and unused by the original two call sites above.
+function FdCheckbox({ checked, onToggle, disabled, label }) {
   return (
     <button
       data-reorder-ignore="true"
-      onClick={onToggle}
-      aria-label={checked ? 'Mark as planned' : 'Mark as eaten'}
+      onClick={disabled ? undefined : onToggle}
+      disabled={disabled}
+      aria-label={label || (checked ? 'Mark as planned' : 'Mark as eaten')}
       style={{
-        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0, cursor: 'pointer',
+        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0,
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.4 : 1,
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
+        textShadow: checked ? 'none' : 'var(--text-lift)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -593,6 +1014,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
   // mode. Controls the recurring fixum slots that auto-fill each day's plan.
   const [templateOpen, setTemplateOpen] = useStateFd(false);
+  // Shopping list overlay. Unlike templateOpen this is NOT plan-mode gated:
+  // its historical-frequency half is useful with Plan Mode off, the
+  // template-projection half just contributes nothing without an active plan.
+  const [shoppingOpen, setShoppingOpen] = useStateFd(false);
   // Timeline entry whose overflow (kebab) action menu is open, or null. The
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
@@ -865,6 +1290,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const now = new Date().toISOString();
     const recipeId = recipeBlockSave ? LB.uid() : null;
     const recipeItems = entries.map(e => ({
+      foodId: e.foodId ?? null, brand: e.brand ?? null,
       foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
       protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
       sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
@@ -895,6 +1321,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ? [{
             id: recipeId, name,
             items: entries.map(e => ({
+              id: LB.uid(),
               foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
               quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
               fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
@@ -938,30 +1365,43 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // real total is never inflated by something not yet eaten.
   const projectedTotals = useMemoFd(() => sumTotals(dayEntries), [dayEntries]);
 
+  const dayLog = useMemoFd(
+    () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
+    [store.dailyLogs, curDate]);
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
   // personal ones, and training/rest day pick different targets. null when
   // nothing is set, in which case the hero just shows a bare total, no ring.
   const macroTargets = useMemoFd(() => LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros), [store.settings?.macroTargets, coachingMacros]);
   const dayTarget = useMemoFd(() => {
+    // A day already scored keeps the target it was scored against, the same
+    // dayTargetOverride contract LB.dailyLogAdherence and the food
+    // reconciler effect (screens-health.jsx) already use: without this,
+    // scrolling back to an old day after a later macro change would show it
+    // measured against TODAY's numbers here, while the Health tab's card for
+    // that same day (which reads the frozen dailyLogs.adherence first)
+    // correctly kept showing the historical one. Today and future days have
+    // no snap yet, so they fall through to the live target as before.
+    const snap = dayLog?.targetsSnap;
+    const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
+    if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
     return LB.dayTargetFromMacros(macroTargets, isTraining);
-  }, [store, macroTargets, curDate]);
+  }, [store, macroTargets, curDate, dayLog]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
   // Same weighted-macro-distance formula HealthScreen's today card uses
   // (LB.macroAdherence), computed live off dayTotals rather than reading
-  // dailyLogs.adherence: that stored field only gets reconciled by an
-  // effect living in HealthScreen, which isn't mounted while viewing this
+  // dailyLogs.adherence directly: that stored field only gets reconciled by
+  // an effect living in HealthScreen, which isn't mounted while viewing this
   // screen, so it would show a stale number right after logging something
-  // here. null (hidden) when there's no macro target to score against.
-  // A meal-of-choice day is deliberately unscored (see LB.dailyLogAdherence),
-  // and this is the one adherence figure in the app that is recomputed live
-  // rather than read from the store, so it needs the rule applied a second
-  // time or the Food hero would show a percentage while the Health tab shows
-  // none for the same day.
-  const dayLog = useMemoFd(
-    () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
-    [store.dailyLogs, curDate]);
+  // here (dayTarget above already resolves to the correct historical target
+  // once one is stored, this only keeps the TOTALS live). null (hidden) when
+  // there's no macro target to score against. A meal-of-choice day is
+  // deliberately unscored (see LB.dailyLogAdherence), and this is the one
+  // adherence figure in the app that is recomputed live rather than read
+  // from the store, so it needs the rule applied a second time or the Food
+  // hero would show a percentage while the Health tab shows none for the
+  // same day.
   const isMealOfChoice = !!dayLog?.mealOfChoice;
   const dayAdherence = useMemoFd(
     () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
@@ -1038,6 +1478,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour, mealCats]);
+
+  // settings.hideFoodCategories swaps the six meal-category groups for one
+  // synthetic all-day group (label: null skips the header card, see the
+  // timeline render below). Every hour still renders exactly as it does
+  // today, filled or empty, since the hour loop only ever reads
+  // startHour/endHour off whichever group it's handed. Categories themselves
+  // stay the basis for "Repeat yesterday" and Manage Entries either way,
+  // this only affects what the main timeline draws.
+  const timelineGroups = useMemoFd(
+    () => store.settings?.hideFoodCategories ? [{ id: 'all', label: null, startHour: 0, endHour: 24 }] : categoryTotals,
+    [store.settings?.hideFoodCategories, categoryTotals]
+  );
 
   // Yesterday's entries grouped by meal category, so an empty category can
   // offer to repeat it in one tap. Reads the store only: nothing is fetched
@@ -1565,11 +2017,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
     // A day that hasn't happened yet can't already have something "eaten" on
     // it: landing on a future date forces planned, regardless of whether the
-    // source entry was logged or planned itself. Planned clones never touch the
-    // target's daily log, so a future target neither warns about overwriting
-    // manual macros nor gets a patchDaily (which would null them).
+    // source entry was logged or planned itself. In Plan Mode, landing on
+    // TODAY is the same situation, today isn't over either, so it's still
+    // something to plan and check off later (same rule submitRepeatYesterday
+    // follows for its own curDate-only copy). Without Plan Mode there is no
+    // planned state to land in, so a same-day/past copy always logs outright.
+    // Planned clones never touch the target's daily log, so a target that
+    // lands planned neither warns about overwriting manual macros nor gets a
+    // patchDaily (which would null them).
     const targetIsFuture = targetDate > today;
-    if (!targetIsFuture) {
+    const targetLandsPlanned = targetIsFuture || (planMode && targetDate === today);
+    if (!targetLandsPlanned) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
     }
@@ -1578,7 +2036,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!selected.length) return s;
       const now = new Date().toISOString();
       const clones = selected.map(l => ({
-        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned,
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetLandsPlanned ? true : l.planned,
         // Same rule "Repeat yesterday" follows: a copy is its own entry and
         // must not inherit the split/merge batch (its "undo split" would act
         // on another day) or the template-slot marker (auto-fill would treat
@@ -1588,7 +2046,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
-      if (!targetIsFuture) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      if (!targetLandsPlanned) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
       if (mode === 'move') {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
@@ -2297,6 +2755,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const promptRecipe = snap ? (() => {
       const perTotal = origChosen ? totalPortions / origChosen : 1;
       return { ...recipe, portions: totalPortions, items: snap.map(i => ({
+        foodId: i.foodId ?? null, brand: i.brand ?? null,
         foodName: i.foodName,
         quantityG: (i.quantityG || 0) * perTotal,
         protein: (i.protein || 0) * perTotal,
@@ -2343,8 +2802,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // what's shown collapsed (each row still needs its own whole-number
     // kcal, so it's individually rounded here). A later edit to the source
     // recipe must never retroactively change this: copied here, not
-    // referenced.
+    // referenced. foodId/brand are pure identity, not a measurement, so
+    // copying them through doesn't violate that freeze, unlike the macros
+    // below they're never rescaled or recomputed from a live source.
     const recipeItems = items.map(i => ({
+      foodId: i.foodId ?? null, brand: i.brand ?? null,
       foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
       calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
       protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
@@ -2616,14 +3078,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </button>
           ) : tab === 'log' ? (
             // Day-level actions. Screenshot and multi-select need something to
-            // act on, but the overflow must not: declaring a meal-of-choice day
-            // is a morning decision, made before anything is logged.
+            // act on, but the overflow and shopping list must not: a
+            // meal-of-choice day is a morning decision made before anything is
+            // logged, and the shopping list is a standalone feature that
+            // draws on history/plan data, independent of today's entries.
             <div style={{ display: 'flex', gap: 8 }}>
               {dayEntries.length > 0 && (
                 <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
                   {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
                 </button>
               )}
+              <button onClick={() => setShoppingOpen(true)} aria-label="Shopping list" style={fdTopAddBtn}>
+                <i className="fa-solid fa-basket-shopping" style={{ fontSize: 13 }} />
+              </button>
               <button onClick={() => setDayMenu(true)} aria-label="Day options" style={fdTopAddBtn}>
                 <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
               </button>
@@ -2826,33 +3293,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <div>
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
               <div ref={timelineDragRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {categoryTotals.map(cat => (
+                {timelineGroups.map(cat => (
                   <div key={cat.id}>
-                    <div style={fdCategoryCard}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
-                        <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
-                      </div>
-                      {/* Only offered where it can't be a mistake: this meal
-                          slot is empty today and yesterday's is not. Once
-                          anything is logged here the button is gone, so the
-                          card goes back to being a pure read-only summary. */}
-                      {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
-                        <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
-                          display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
-                          padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                        }}>
-                          <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
-                          Repeat yesterday
-                        </button>
-                      ) : (
-                        <div style={{ textAlign: 'right' }}>
-                          <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                          <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                    {cat.label && (
+                      <div style={fdCategoryCard}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
+                          <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                         </div>
-                      )}
-                    </div>
-                    <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {/* Only offered where it can't be a mistake: this meal
+                            slot is empty today and yesterday's is not. Once
+                            anything is logged here the button is gone, so the
+                            card goes back to being a pure read-only summary. */}
+                        {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
+                          <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
+                            display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
+                            padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                          }}>
+                            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+                            Repeat yesterday
+                          </button>
+                        ) : (
+                          <div style={{ textAlign: 'right' }}>
+                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                            <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ position: 'relative', marginTop: cat.label ? 6 : 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <FdHourTrunk />
                       {Array.from({ length: cat.endHour - cat.startHour }, (_, i) => cat.startHour + i).map(h => {
                         const es = byHour[h] || [];
@@ -2942,7 +3411,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                       {hasRecipeItems && expanded && (
                                         <div style={{ position: 'relative', marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                           <FdIngredientTrunk />
-                                          {e.recipeItems.map((ri, i) => (
+                                          {fdSortIngredientsByQty(e.recipeItems).map((ri, i) => (
                                             <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
                                               <FdIngredientTick />
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
@@ -3109,7 +3578,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
                           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
+                              {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
                               <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
                             </div>
                             {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
@@ -3169,7 +3638,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {recentFoods.map(l => (
                     <button key={l.id} onClick={() => reAddFromRecent(l)} style={fdResultRow}>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <div style={fdEntryName}>{l.foodName}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                          <div style={{ ...fdEntryName, minWidth: 0 }}>{l.foodName}</div>
+                        </div>
                         {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -3193,7 +3665,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     <div key={f.id} style={fdQuickRowWrap}>
                       <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                          <div style={fdEntryName}>{f.foodName}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                            <div style={{ ...fdEntryName, minWidth: 0 }}>{f.foodName}</div>
+                          </div>
                           {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -3607,7 +4082,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20, maxHeight: 220, overflowY: 'auto' }}>
-              {(byHour[recipeBlockHour] || []).map(e => (
+              {fdSortIngredientsByQty(byHour[recipeBlockHour] || []).map(e => (
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
@@ -3780,6 +4255,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
+
+      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} setStore={setStore} today={today} userId={userId} />
 
       {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
           buttons. Recomputes its options from the open entry. */}
@@ -3959,7 +4436,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
             {items.length} ingredient{items.length === 1 ? '' : 's'} · makes {recipe.portions || 1} portion{(recipe.portions || 1) === 1 ? '' : 's'}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {items.map((i, idx) => (
+            {fdSortIngredientsByQty(items).map((i, idx) => (
               <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
@@ -4452,6 +4929,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const scale = draft.portions / totalPortions;
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const recipeItems = items.map(i => ({
+        foodId: i.foodId ?? null, brand: i.brand ?? null,
         foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
         calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
         protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
@@ -4923,6 +5401,632 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   );
 }
 
+// What to buy: mostly a read/derive view over fdBuildShoppingList (see there
+// for the full merge logic), setStore is only for the per-food prefs
+// (fdSetShoppingPref); still no userId/useConfirm like its siblings, it
+// never touches Supabase directly or needs a destructive-action confirm.
+function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
+  // 'list' is the default/most-opened path (see fdBuildInventoryList's own
+  // comment): the Running Low section and its banner stay there rather than
+  // moving to 'inventory', so the warning still surfaces on the path a user
+  // actually opens often, not just the one dedicated to browsing stock.
+  const [screenTab, setScreenTab] = useStateFd('list'); // 'list' | 'inventory'
+  // store.foodLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
+  // understates consumption, and so overstates stock, for a baseline set
+  // further back than that (a bulk item bought a few times a year). Lazily
+  // fetched in full from the DB whenever the Inventory tab is actually open,
+  // rather than widening the boot window itself, which every screen would
+  // then pay for on every load. Reset to null on leaving the tab so the next
+  // visit always refetches current data, not a stale snapshot.
+  const [stockBackfill, setStockBackfill] = useStateFd(null);
+  useEffectFd(() => {
+    if (!open || screenTab !== 'inventory') { setStockBackfill(null); return; }
+    const oldestBaseline = (store.foodShoppingPrefs || []).reduce((min, p) => (p.stockSetAt && (!min || p.stockSetAt < min)) ? p.stockSetAt : min, null);
+    if (!oldestBaseline) return;
+    let cancelled = false;
+    LB.fetchFoodLogsSince(userId, oldestBaseline.slice(0, 10))
+      .then(rows => { if (!cancelled) setStockBackfill(rows); })
+      .catch(err => console.error('food stock backfill fetch failed:', err));
+    return () => { cancelled = true; };
+  }, [open, screenTab, store.foodShoppingPrefs, userId]);
+  const logsForStock = stockBackfill || store.foodLogs;
+  const [shoppingDays, setShoppingDays] = useStateFd(fdReadShoppingDays);
+  function changeShoppingDays(v) {
+    const n = Math.max(1, Math.min(30, Math.round(v)));
+    setShoppingDays(n);
+    fdWriteShoppingDays(n);
+  }
+  // Gated on `open` so this doesn't recompute while the screen sits closed.
+  // Deps cover everything fdBuildShoppingList reads, directly or through
+  // LB.isTrainingDayForDate's own schedule/session lookups.
+  const list = useMemoFd(
+    () => open ? fdBuildShoppingList(store, today, shoppingDays) : [],
+    [open, store.foodLogs, store.foodFavorites, store.foodTemplateSlots, store.activeMealTemplateId,
+     store.schedules, store.activeScheduleId, store.sessions, store.dailyLogs, today, shoppingDays],
+  );
+
+  // Per-food display-name override, exclude flag and package size (see
+  // fdApplyShoppingPrefs): displayList is what actually renders, list stays
+  // the untouched fdBuildShoppingList output, only used to recompute
+  // displayList. store.foodShoppingPrefs is synced cross-device (migration
+  // 0215), so this needs no local mirror state or localStorage of its own,
+  // fdSetShoppingPref below writes straight through setStore.
+  const displayList = useMemoFd(
+    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs, logsForStock, today),
+    [list, store.foodShoppingPrefs, logsForStock, today],
+  );
+  // What actually feeds the export/screenshot (included only) vs. what's
+  // still shown, just set aside, in the list screen's own "Excluded" section.
+  // Both stay keyed on `excluded` alone, unaffected by low stock on purpose:
+  // an excluded bulk item running low still doesn't belong in the grocery
+  // run, it needs reordering from wherever it's normally bought, and a
+  // normal included item running low is still a normal item to buy either way.
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
+  const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
+  // The Inventory tab's own list, independent of `list`/`displayList` above:
+  // every tracked food, not just this window's staples/projections (see
+  // fdBuildInventoryList).
+  const inventoryList = useMemoFd(
+    () => open ? fdBuildInventoryList(store, today, logsForStock) : [],
+    [open, store.foodShoppingPrefs, logsForStock, today],
+  );
+  // Cuts across displayList for its own "Running Low" section instead
+  // (surfaced first regardless of where it'd otherwise sit), so the two
+  // *ForDisplay lists below carve it back out to avoid rendering it twice.
+  // Also folds in inventoryList: fdIsLowStock only needs packageSizeG +
+  // effectiveStockG (see fdBuildInventoryList's own comment), so a rarely-
+  // bought bulk item can dip low on a week it doesn't qualify as a shopping
+  // "staple" at all, and never reaches displayList in the first place. Left
+  // out entirely, the very item inventory tracking exists for (bought too
+  // rarely to ever count as a staple, see this file's own Whey/Dextrin
+  // examples) would silently never trigger the warning it was built for.
+  // Prefers the displayList copy when a food is in both (real grams/
+  // fromProjection, a useful buy-quantity line in the hero row below), the
+  // inventoryList copy only fills in a food displayList doesn't have at all.
+  const lowStockList = useMemoFd(() => {
+    const fromDisplay = displayList.filter(fdIsLowStock);
+    const seen = new Set(fromDisplay.map(i => i.foodId));
+    const extra = inventoryList.filter(i => fdIsLowStock(i) && !seen.has(i.foodId));
+    return [...fromDisplay, ...extra];
+  }, [displayList, inventoryList]);
+  const includedForDisplay = useMemoFd(() => includedList.filter(i => !fdIsLowStock(i)), [includedList]);
+  const excludedForDisplay = useMemoFd(() => excludedList.filter(i => !fdIsLowStock(i)), [excludedList]);
+
+  // One-time "Running Low" banner: shows only for a dip the user hasn't
+  // already seen (see fdReadLowStockAcks), dismissing marks every currently-
+  // fresh item as acked so the persistent section below stays but the
+  // interrupt doesn't repeat on every reopen.
+  const [lowStockAcks, setLowStockAcks] = useStateFd(fdReadLowStockAcks);
+  const freshLowStock = useMemoFd(
+    () => lowStockList.filter(i => lowStockAcks[i.foodId] !== i.stockSetAt),
+    [lowStockList, lowStockAcks],
+  );
+  function dismissLowStockBanner() {
+    const next = { ...lowStockAcks };
+    freshLowStock.forEach(i => { next[i.foodId] = i.stockSetAt; });
+    setLowStockAcks(next);
+    fdWriteLowStockAcks(next);
+  }
+
+  const [editItem, setEditItem] = useStateFd(null); // the tapped displayList item, or null
+  const [editDraft, setEditDraft] = useStateFd('');
+  const [pkgDraft, setPkgDraft] = useStateFd('');
+  // All three always start blank, unlike editDraft/pkgDraft: these are
+  // "update the count" fields, not a display of the current value (that's
+  // the read-only effectiveStockG line in the sheet itself). All blank on
+  // Save means "leave stock tracking as it is", not "clear it", so an
+  // unrelated name edit doesn't accidentally wipe out a tracked count just
+  // for being left empty. stockDraft (plain grams) is only used without a
+  // package size; with one, stockPacksDraft/stockExtraDraft take over so a
+  // user can say "2 packs" or "2 packs plus a half-used one" directly,
+  // instead of doing the pack-to-gram math themselves. Either field alone
+  // still works (0 packs + grams = pure grams, packs + 0 grams = pure packs).
+  const [stockDraft, setStockDraft] = useStateFd('');
+  const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
+  const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
+  function openEdit(item) {
+    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
+    setEditItem(item);
+    setEditDraft(item.displayName);
+    setPkgDraft(item.packageSizeG != null ? String(item.packageSizeG) : '');
+    setStockDraft('');
+    setStockPacksDraft('');
+    setStockExtraDraft('');
+  }
+  function closeEdit() {
+    setEditItem(null); setEditDraft(''); setPkgDraft('');
+    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+  }
+  // True if any field actually differs from what the sheet opened with.
+  // editDraft/pkgDraft are pre-filled on open (dirty means "changed from
+  // that"), the three stock drafts always start blank (dirty means "typed
+  // into at all"). Backs requestCloseEdit's confirm below.
+  function isEditDirty() {
+    if (!editItem) return false;
+    if (editDraft !== editItem.displayName) return true;
+    if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
+    return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
+  }
+  // Sheet's backdrop tap calls onClose directly with no dirty-check of its
+  // own (same for every Sheet in the app), so a stray tap outside the panel
+  // while mid-edit silently threw away whatever was typed. This is what
+  // actually goes in as onClose instead: closeEdit is still called directly
+  // by Save/Reset themselves, which just did something deliberate.
+  async function requestCloseEdit() {
+    if (isEditDirty() && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    closeEdit();
+  }
+  function saveEdit() {
+    if (!editItem) return;
+    const trimmed = editDraft.trim();
+    // Blank, or typed back to exactly the original: same as no override, no
+    // point leaving a no-op override sitting in the DB forever.
+    const nameOverride = (!trimmed || trimmed === editItem.foodName) ? null : trimmed;
+    const packageSizeG = fdNum(pkgDraft);
+    const patch = { nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null };
+    // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
+    // only ever counts forward from stockSetAt, so re-stamping it here is what
+    // makes "I just restocked" mean "start counting from zero again".
+    // Checked independent of which pair the sheet is CURRENTLY showing (that
+    // toggles live off pkgDraft, see the packs/grams fields below): typing a
+    // stock value in grams and only then adding a package size in the same
+    // visit swaps the visible field out from under it, and reading only the
+    // now-hidden pair would silently drop what was already typed. Packs wins
+    // if both ended up touched (only possible by touching packs after the
+    // switch, so it's what's currently visible/intended).
+    let stockTyped = null;
+    if (packageSizeG > 0 && (stockPacksDraft.trim() || stockExtraDraft.trim())) {
+      stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdNum(stockExtraDraft) || 0);
+    } else if (stockDraft.trim()) {
+      stockTyped = fdNum(stockDraft);
+    }
+    if (stockTyped != null) { patch.stockBaselineG = stockTyped; patch.stockSetAt = new Date().toISOString(); }
+    fdSetShoppingPref(setStore, editItem.foodId, patch);
+    closeEdit();
+  }
+  async function resetEdit() {
+    if (!editItem) return;
+    if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
+    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
+    closeEdit();
+  }
+  // The checkbox's own handler, independent of the edit sheet: toggles
+  // straight from either list section, no sheet involved.
+  function toggleExclusion(item) {
+    if (!item.foodId) return;
+    fdSetShoppingPref(setStore, item.foodId, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
+  }
+  // Shared row for both includedList and excludedList below: same layout,
+  // just dimmed with the checkbox unchecked once excluded. The checkbox is a
+  // sibling button next to the name/amount button, not nested inside it,
+  // real <button> elements can't nest without the browser silently breaking
+  // the layout back out of the outer one.
+  // inventoryMode (Inventory tab, see below) drops the include/exclude
+  // checkbox (a shopping-only concept) and swaps the buy-quantity column for
+  // a quiet package-size reference instead, there's nothing to purchase here.
+  function renderShoppingRow(item, inventoryMode) {
+    // grams is only ever > 0 for a real fdBuildShoppingList estimate (both its
+    // history and projection paths filter out non-positive grams themselves);
+    // fromProjection is exclusive to that same path. Every displayList-sourced
+    // row therefore always has hasEstimate === true, so !hasEstimate exactly
+    // means "this came from fdBuildInventoryList" (directly via the Inventory
+    // tab, or via lowStockList's own fallback for a low-stock item displayList
+    // never had, see its comment), which always carries a real effectiveStockG
+    // (fdBuildInventoryList's own filter condition). Without a real buy
+    // quantity, the stock level is the one number worth a headline, not the
+    // static package-size fact, so the two swap position versus the
+    // hasEstimate row below: package size becomes the quiet caption (a fact
+    // that explains the number on the right), stock takes the headline slot.
+    const hasEstimate = item.grams > 0 || item.fromProjection;
+    const low = fdIsLowStock(item);
+    const { headline, sub } = hasEstimate ? fdFormatShoppingQty(item.grams, item.packageSizeG) : { headline: null, sub: null };
+    // Dimming for `excluded` is a Shopping List concept (it's what the
+    // checkbox below toggles): skipped in inventoryMode, same reasoning as
+    // hiding the checkbox itself, a food excluded from the buy list is
+    // still just a normal tracked item here, nothing to visually mute.
+    return (
+      <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: (item.excluded && !inventoryMode) ? 0.55 : 1 }}>
+        {!inventoryMode && (
+          <FdCheckbox
+            checked={!item.excluded}
+            disabled={!item.foodId}
+            label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
+            onToggle={() => toggleExclusion(item)}
+          />
+        )}
+        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+              <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
+              {(item.overridden || item.packageSizeG || item.effectiveStockG != null) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
+            </div>
+            {hasEstimate
+              ? (item.effectiveStockG != null
+                  // Stock tracked: always shown, not just once low, otherwise
+                  // setting an initial healthy count gives zero feedback
+                  // anywhere on the list that it actually took (a real report:
+                  // 2 packs against a 1-pack low-stock threshold saved fine,
+                  // just showed nothing anywhere to confirm it).
+                  ? <div style={{ fontSize: 10, color: low ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
+                      {fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
+                    </div>
+                  : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))
+              : (item.packageSizeG > 0
+                  ? <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fdExactShoppingQty(item.packageSizeG)}/pack</div>
+                  : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {hasEstimate
+              ? (<>
+                  {item.fromProjection && <Pill gold>Plan</Pill>}
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="num" style={{ fontSize: 13, color: UI.ink }}>{headline}</div>
+                    {sub && <div style={{ fontSize: 9, color: UI.inkFaint }}>{sub}</div>}
+                  </div>
+                </>)
+              : (
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{fdExactShoppingQty(item.effectiveStockG)}</div>
+                    <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
+                  </div>
+                )}
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  // Two-step sheet: pick content (amounts or not) first, then how to get it
+  // out (share or copy). exportContent doubles as the step tracker: null is
+  // step 1, set is step 2. Skips straight to copying when navigator.share
+  // isn't available at all, there's no real method choice to show then.
+  const [exportOpen, setExportOpen] = useStateFd(false);
+  const [exportContent, setExportContent] = useStateFd(null); // null | 'amounts' | 'names'
+  const [justCopied, setJustCopied] = useStateFd(false);
+  function openExport() { setExportContent(null); setJustCopied(false); setExportOpen(true); }
+  function closeExport() { setExportOpen(false); setExportContent(null); setJustCopied(false); }
+  function pickContent(withAmounts) {
+    if (typeof navigator.share !== 'function') { doExport(withAmounts); return; }
+    setExportContent(withAmounts ? 'amounts' : 'names');
+  }
+
+  // Writes a real HTML <ul><li> list alongside the plain text: a raw
+  // \n-joined string doesn't reliably read as separate checklist rows to
+  // every paste target (Notes' parser cares about actual paragraph
+  // boundaries), an explicit list structure removes that guesswork. Falls
+  // back to plain-text-only if the richer multi-type write isn't supported.
+  async function doExport(withAmounts) {
+    const text = fdBuildShoppingExportText(includedList, withAmounts);
+    let copied = false;
+    if (typeof ClipboardItem !== 'undefined') {
+      try {
+        const html = fdBuildShoppingExportHtml(includedList, withAmounts);
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([html], { type: 'text/html' }),
+        })]);
+        copied = true;
+      } catch (_) { /* fall through to plain writeText below */ }
+    }
+    if (!copied) {
+      try { await navigator.clipboard.writeText(text); copied = true; } catch (_) {}
+    }
+    if (!copied) return;
+    setJustCopied(true);
+    setTimeout(closeExport, 900);
+  }
+  // Separate from doExport on purpose: the Web Share API's `text` is always
+  // plain (no HTML variant exists), so this can't carry the <ul><li> fix
+  // above, sharing straight to Notes may still land as one glued item. Kept
+  // anyway for every OTHER target (Messages, Mail, AirDrop, ...) where a
+  // plain string is exactly what's wanted and there's no checklist to lose.
+  async function doShare(withAmounts) {
+    const text = fdBuildShoppingExportText(includedList, withAmounts);
+    try { await navigator.share({ text }); } catch (_) {}
+    closeExport();
+  }
+
+  const [confirmEl, confirm] = useConfirm();
+  // Shopping list as an image: same "poster" idiom as the Food Log's own
+  // screenshot (captureNodeAsPng, screens-lib.jsx) and the Plan poster
+  // (screens-schedule.jsx), same background-watermark treatment (VIPs get
+  // their own background image, everyone else gets the ZANE mark). Always
+  // mounted, only ever hidden via display:none (see the Food Log poster's
+  // own comment for why it can't be conditionally rendered on `capturing`).
+  const [capturing, setCapturing] = useStateFd(false);
+  const captureRef = useRefFd(null);
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.16 : 0.11, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.19, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
+  const takeScreenshot = async () => {
+    const res = await captureNodeAsPng(captureRef.current, {
+      filename: `shopping-list-${today}.png`,
+      setCapturing,
+    });
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Shopping list image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title="Shopping list" onBack={onClose} right={
+        screenTab === 'list' && includedList.length > 0 && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={takeScreenshot} disabled={capturing} aria-label="Share shopping list as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
+              {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+            </button>
+            <button onClick={openExport} aria-label="Export list" style={fdTopAddBtn}>
+              <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
+            </button>
+          </div>
+        )
+      } />
+      {confirmEl}
+      {/* Screenshotting/exporting only mean anything on the buy list, not
+          here, hence gating the TopBar's own buttons above on 'list' too:
+          Inventory is a straight stock browse, nothing to ship out. */}
+      <SubTabBar tabs={[{ id: 'list', label: 'Shopping List' }, { id: 'inventory', label: 'Inventory' }]} active={screenTab} onChange={setScreenTab} />
+      {/* Poster tree: always mounted, only ever hidden via display:none, never
+          conditionally rendered on `capturing` itself (captureNodeAsPng only
+          flips capturing to true AFTER checking captureRef.current is
+          non-null, so if this tree were gated on `capturing` the ref would
+          still be null at that exact check, same reasoning as the Food Log
+          poster above it in this file). No rename affordance, no Plan-mode
+          controls: this is a static image, not another interactive surface. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          {_shotGridOn && <SvgGrid />}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>Shopping List</div>
+                <div className="micro" style={{ marginTop: 4 }}>Next {shoppingDays} day{shoppingDays === 1 ? '' : 's'}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
+            </div>
+
+            <BracketFrame gold style={{ padding: 20, marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
+                <div>
+                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{shoppingDays}</div>
+                  <div className="micro" style={{ marginTop: 4 }}>{shoppingDays === 1 ? 'Day' : 'Days'}</div>
+                </div>
+                <div>
+                  <div className="num" style={{ fontSize: 28, color: UI.ink, fontWeight: 300 }}>{includedList.length}</div>
+                  <div className="micro" style={{ marginTop: 4 }}>{includedList.length === 1 ? 'Item' : 'Items'}</div>
+                </div>
+              </div>
+            </BracketFrame>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
+              {includedList.map(item => {
+                const { headline, sub } = fdFormatShoppingQty(item.grams, item.packageSizeG);
+                return (
+                // Translucent surface-tint fill (not fdQuickRowInner's opaque
+                // one), same reason the Food Log poster's entry cards use it:
+                // an opaque row blocks the watermark entirely wherever it
+                // sits, leaving it visible only in the gaps between rows.
+                // Excluded items never make it into includedList, they don't
+                // belong in a "what to buy" poster at all.
+                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={fdEntryName}>{item.displayName}</div>
+                    {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    {item.fromProjection && <Pill gold>Plan</Pill>}
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="num" style={{ fontSize: 13, color: UI.ink }}>{headline}</div>
+                      {sub && <div style={{ fontSize: 9, color: UI.inkFaint }}>{sub}</div>}
+                    </div>
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {screenTab === 'list' ? (
+          <>
+            {freshLowStock.length > 0 && (
+              <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+                  {freshLowStock.length === 1 ? `${freshLowStock[0].displayName} is running low.` : `${freshLowStock.length} items are running low.`}
+                </div>
+                <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                </button>
+              </div>
+            )}
+
+            <Card style={{ textAlign: 'center' }}>
+              <div className="micro" style={{ marginBottom: 10 }}>Shopping for the next</div>
+              <Stepper value={shoppingDays} step={1} min={1} max={30}
+                suffix={shoppingDays === 1 ? ' day' : ' days'} onChange={changeShoppingDays} />
+            </Card>
+
+            {lowStockList.length > 0 && (
+              // Its own card (not just a knurl section like Excluded below): this
+              // is the one category meant to interrupt, not just sit there,
+              // hence the persistent glow rather than a plain divider. Stays on
+              // this tab on purpose (see screenTab's own comment above): the
+              // Inventory tab is the complete, calm browse, this is the interrupt.
+              <div className="low-stock-glow" style={{ background: 'rgba(var(--warn-rgb),0.08)', border: '1px solid rgba(var(--warn-rgb),0.35)', borderRadius: 8, padding: '14px 14px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10 }}>
+                  <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 12, color: 'var(--warn)' }} />
+                  <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--warn)', fontFamily: UI.fontUi }}>Running Low</div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {lowStockList.map(item => renderShoppingRow(item))}
+                </div>
+              </div>
+            )}
+
+            {!displayList.length ? (
+              <Empty title="Nothing yet"
+                sub="Log meals for a couple of weeks, or set up a meal plan, and your regulars will show up here."
+                icon={<i className="fa-solid fa-basket-shopping" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+            ) : (
+              // One wrapping div so the parent's own gap:16 (Card -> this block)
+              // applies exactly once: a bare fragment here would flatten into
+              // direct flex children and add that same 16px between the knurl,
+              // the label and the excluded rows too, on top of their own margins.
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {includedForDisplay.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {includedForDisplay.map(item => renderShoppingRow(item))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>
+                    Nothing to buy right now.
+                  </div>
+                )}
+                {excludedForDisplay.length > 0 && (
+                  <>
+                    <div className="knurl" style={{ margin: '16px 0 10px' }} />
+                    <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi, textAlign: 'center' }}>Excluded</div>
+                    <div className="knurl" style={{ margin: '10px 0' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {excludedForDisplay.map(item => renderShoppingRow(item))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        ) : !inventoryList.length ? (
+          <Empty title="Nothing tracked yet"
+            sub="Open an item from the shopping list, set a package size or stock count, and it shows up here too."
+            icon={<i className="fa-solid fa-boxes-stacked" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+        ) : (
+          // Flat and alphabetical, same convention as the Shopping List tab's
+          // own sections, no separate low-stock hero here: that stays the
+          // Shopping List tab's job (see screenTab's own comment above),
+          // this is the complete, calm browse of everything tracked.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {inventoryList.map(item => renderShoppingRow(item, true))}
+          </div>
+        )}
+      </div>
+      <Sheet open={exportOpen} onClose={closeExport} title="Export list" titleColor="var(--accent)">
+        {justCopied ? (
+          // Own view rather than nested in the Copy button: pickContent's
+          // no-navigator.share fallback copies straight from step 1, never
+          // visiting the step-2 grid the button-level state lived in before.
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '20px 0' }}>
+            <i className="fa-solid fa-circle-check" style={{ fontSize: 28, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Copied</span>
+          </div>
+        ) : !exportContent ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            <button onClick={() => pickContent(true)} style={fdScanChoice}>
+              <i className="fa-solid fa-weight-hanging" style={{ fontSize: 22, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>With amounts</span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast 500g</span>
+            </button>
+            <button onClick={() => pickContent(false)} style={fdScanChoice}>
+              <i className="fa-solid fa-list" style={{ fontSize: 22, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Names only</span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Chicken breast</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="micro" style={{ marginBottom: 8 }}>Share or copy?</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              <button onClick={() => doShare(exportContent === 'amounts')} style={fdScanChoice}>
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Share</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Messages, Mail, AirDrop…</span>
+              </button>
+              <button onClick={() => doExport(exportContent === 'amounts')} style={fdScanChoice}>
+                <i className="fa-solid fa-copy" style={{ fontSize: 22, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Copy</span>
+                <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>One item per line, for Notes</span>
+              </button>
+            </div>
+          </>
+        )}
+      </Sheet>
+      <Sheet open={!!editItem} onClose={requestCloseEdit} title="Edit item" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
+          Original: {editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
+        </div>
+        <Field label="Show as" style={{ marginBottom: 14 }}>
+          <TextInput value={editDraft} onChange={setEditDraft} placeholder={editItem?.foodName} autoFocus />
+        </Field>
+        <Field label="Package size (g)" style={{ marginBottom: 6 }}>
+          <input value={pkgDraft} onChange={e => setPkgDraft(fdDecimalFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder="e.g. 400" style={fdInputStyle} />
+        </Field>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
+          Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
+        </div>
+        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          {editItem?.effectiveStockG != null && (
+            <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
+              Current stock: <span className="num">{fdExactShoppingQty(editItem.effectiveStockG)}</span>
+              {editItem.packageSizeG > 0 && (
+                <span style={{ color: UI.inkFaint }}>
+                  {' '}({Math.floor(editItem.effectiveStockG / editItem.packageSizeG)} packs
+                  {editItem.effectiveStockG % editItem.packageSizeG > 0 ? ` + ${fdExactShoppingQty(editItem.effectiveStockG % editItem.packageSizeG)}` : ''})
+                </span>
+              )}
+            </div>
+          )}
+          {fdNum(pkgDraft) > 0 ? (
+            // A package size is already known, so stock is worth entering in
+            // packs instead of doing the pack-to-gram math yourself: "2
+            // packs" beats "800g", and "2 packs + 150g" (a couple of sealed
+            // ones plus an opened partial) beats guessing a single gram
+            // figure. Either field alone still works (0 + grams = pure
+            // grams, packs + 0 = pure packs), this is one input, not a mode switch.
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <Field label="Full packs" style={{ flex: 1, marginBottom: 0 }}>
+                <input value={stockPacksDraft} onChange={e => setStockPacksDraft(fdDecimalFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
+              </Field>
+              <Field label="+ grams" style={{ flex: 1, marginBottom: 0 }}>
+                <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdDecimalFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
+              </Field>
+            </div>
+          ) : (
+            <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
+              <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
+            </Field>
+          )}
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+            Tracks what's actually eaten since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
+        </div>
+      </Sheet>
+    </Screen>
+  );
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
@@ -4937,7 +6041,12 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   useEffectFd(() => {
     if (!open) return;
     const n = recipe?.name || '';
-    const it = recipe?.items || [];
+    // Backfill a stable id for any item that predates one: applyBlockRecipe's
+    // "Create a recipe from HH:00" once saved recipe items with no id field
+    // at all. Every item's id then read as undefined, so removeItem's
+    // list.filter(i => i.id !== id) matched that same undefined on EVERY
+    // item and wiped the whole recipe instead of the one being removed.
+    const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
     const p = recipe?.portions || 1;
     setName(n); setItems(it); setPortions(p);
     initialSnap.current = JSON.stringify({ name: n, items: it, portions: p });
@@ -5062,10 +6171,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             </Btn>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map(i => (
+              {fdSortIngredientsByQty(items).map(i => (
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
-                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    </div>
                     <span style={fdEntryMeta}>
                       {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
                       <span style={fdMetaDivider} />
@@ -5159,6 +6271,21 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // Same All/Zane/OFF/USDA filter the main Search tab has, shown only once a
   // search has run (see the template picker for the same reasoning).
   const [pickSource, setPickSource] = useStateFd(null);
+  // Scan entry points for the Search tab, mirroring FoodScreen's own
+  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
+  // quintet (same shared per-device localStorage key, see
+  // logbook-label-scanner-provider in CLAUDE.md).
+  const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
+  const [scanOpen, setScanOpen] = useStateFd(false);
+  const [labelScanning, setLabelScanning] = useStateFd(false);
+  const [labelError, setLabelError] = useStateFd(null);
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
+  useEffectFd(() => {
+    const onChange = e => setLabelScannerProvider(e.detail);
+    window.addEventListener('zane-scanner-provider', onChange);
+    return () => window.removeEventListener('zane-scanner-provider', onChange);
+  }, []);
+  const labelInputRef = useRefFd(null);
 
   useEffectFd(() => {
     if (!open) return;
@@ -5167,19 +6294,101 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
+    setScanPickerOpen(false); setScanOpen(false); setLabelScanning(false); setLabelError(null);
   }, [open]);
 
-  // srcOverride: the filter buttons call this in the same tick they set
-  // pickSource, so the state has not committed yet and reading it here would
-  // search with the previous filter.
-  async function runPickerSearch(srcOverride) {
-    const q = query.trim();
+  // override: handleScan calls this in the same tick it sets query, so the
+  // state has not committed yet and reading it here would search the
+  // previous query. srcOverride: same deal for the filter buttons and
+  // pickSource.
+  async function runPickerSearch(override, srcOverride) {
+    const q = (typeof override === 'string' ? override : query).trim();
     if (!q || searching) return;
     setSearching(true); setSearchError(null);
     const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickSource);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
     setResults(res.results);
+  }
+  // A scanned barcode runs straight through the normal search (same as
+  // FoodScreen's handleScan): the found product shows as a result to tap.
+  function handleScan(code) {
+    setScanOpen(false);
+    setQuery(code);
+    runPickerSearch(code);
+  }
+
+  // Nutrition-label scan, mirrors FoodScreen's handleLabelFile/prefillFromLabel
+  // pair, landing in the same qtyItem/quantity-step shape a search result
+  // uses (openQtyForResult) instead of a separate path.
+  async function handleLabelFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setLabelError(null);
+    setLabelScanning(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
+      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      setLabelScanning(false);
+      if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
+      prefillFromLabel(res.label);
+    } catch (_) {
+      setLabelScanning(false);
+      setLabelError('Could not read that image. Try again.');
+    }
+  }
+
+  // Same per-100 normalization FoodScreen's prefillFromLabel does. A scalable
+  // basis (100g/100ml, or a serving weight to convert through) opens the
+  // quantity step exactly like a search result (openQtyForResult); source:
+  // 'custom' and no sourceId means confirmStageItem's ensureFoodCached call
+  // correctly skips caching it, same as any hand-typed food. No scalable
+  // basis at all falls back to the manual-entry form's typed totals, this
+  // sheet's only other way to stage a fixed (non-scalable) amount.
+  function prefillFromLabel(label) {
+    if (!label || label.is_nutrition_label === false) {
+      setLabelError("That doesn't look like a nutrition label. Try a straight-on photo of the table.");
+      return;
+    }
+    const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    const sug = label.sugar_g, sat = label.sat_fat_g, sod = label.sodium_mg;
+    if (cal == null && p == null && c == null && f == null) {
+      setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
+      return;
+    }
+    const per100 = (label.basis === '100g' || label.basis === '100ml')
+      ? { p, c, f, fib, sug, sat, sod }
+      : (label.serving_size_g > 0)
+        ? (k => ({
+            p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null,
+            fib: fib != null ? fib * k : null, sug: sug != null ? sug * k : null,
+            sat: sat != null ? sat * k : null, sod: sod != null ? sod * k : null,
+          }))(100 / label.serving_size_g)
+        : null;
+
+    if (per100) {
+      const netCarbs = !!store.settings?.netCarbs;
+      setQtyItem({
+        name: label.name || '', brand: label.brand || null, source: 'custom', sourceId: null,
+        kcalPer100g: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0,
+        proteinPer100g: per100.p, carbsPer100g: per100.c, fatPer100g: per100.f, fiberPer100g: per100.fib,
+        sugarPer100g: per100.sug, satFatPer100g: per100.sat, sodiumMgPer100g: per100.sod,
+        fromCache: false, units: null,
+      });
+      setQtyUnitIdx(null); setQtyCountStr('');
+      setQtyG((label.basis === '100g' || label.basis === '100ml') ? '100' : String(Math.round(label.serving_size_g)));
+      return;
+    }
+
+    // No scalable basis: fall back to the manual-entry form's typed totals,
+    // this sheet's own last resort, same role FoodScreen's Custom Item form
+    // plays for this case.
+    setManualOpen(true);
+    setMName(label.name || ''); setMG('');
+    setMP(p != null ? String(Math.round(p)) : ''); setMC(c != null ? String(Math.round(c)) : ''); setMF(f != null ? String(Math.round(f)) : '');
+    setMFib(fib != null ? String(Math.round(fib)) : '');
   }
 
   function closeQtySheet() { setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr(''); }
@@ -5335,7 +6544,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     fat: fdRound1(staged.reduce((a, i) => a + (i.fat || 0), 0)),
   }), [staged]);
 
-  // Two sibling Sheets, not one nested in the other's children (the app's
+  // Sibling Sheets, not nested in each other's children (the app's
   // documented overlay convention, docs/internals.md "Modal-/Overlay-
   // Landschaft": a Sheet that must render above another already-open Sheet
   // gets a bumped zIndex instead, tier 200 = "must sit above a specific open
@@ -5355,21 +6564,25 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <div style={{ position: 'relative', width: '100%' }}>
                 <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerSearch(); }}
-                  type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                  type="text" placeholder="Search food, or scan →" style={{ ...fdInputStyle, paddingRight: 32 }} />
                 {query && (
                   <button onClick={() => { setQuery(''); setResults(null); setSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
                     <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
                   </button>
                 )}
               </div>
+              <button onClick={() => setScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
+                <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
+              </button>
               <button onClick={() => runPickerSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                 {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
+            {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>{labelError}</div>}
             {results != null && (
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
                 {FD_SOURCE_FILTERS.map(f => (
-                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
+                  <button key={f.label} onClick={() => { setPickSource(f.id); runPickerSearch(undefined, f.id); }} style={fdSegBtn(pickSource === f.id)}>{f.label}</button>
                 ))}
               </div>
             )}
@@ -5452,7 +6665,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
               {favoritesSorted.map(f => (
                 <button key={f.id} onClick={() => openQtyForLog(f)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <div style={fdEntryName}>{f.foodName}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <div style={{ ...fdEntryName, minWidth: 0 }}>{f.foodName}</div>
+                    </div>
                     {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -5473,7 +6689,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
               {recentPicks.map(l => (
                 <button key={l.id} onClick={() => openQtyForLog(l)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <div style={fdEntryName}>{l.foodName}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                      <div style={{ ...fdEntryName, minWidth: 0 }}>{l.foodName}</div>
+                    </div>
                     {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -5553,6 +6772,39 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
           </>
         )}
       </Sheet>
+
+      {/* ── Barcode vs. label picker (opened by the search row's scan
+          button), same sibling-Sheet/zIndex-200 pattern as the quantity step
+          above, since it also must render above the still-open "Add
+          ingredients" Sheet. ── */}
+      <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)" zIndex={200}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          <button onClick={() => { setScanPickerOpen(false); setScanOpen(true); }} style={fdScanChoice}>
+            <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>The code on the packaging</span>
+          </button>
+          <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+            ))}
+          </div>
+        </div>
+      </Sheet>
+
+      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
+          which works on iOS Safari without any library. */}
+      <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
+      {labelScanning && <FdLabelBusy />}
+      {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </>
   );
 }

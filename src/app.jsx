@@ -882,6 +882,31 @@ function App() {
             const serverCardioPlanIds = new Set((fresh.cardioPlans || []).map(p => p.id));
             const baseCardioPlanIds = base ? new Set((base.cardioPlans || []).map(p => p.id)) : null;
             const localOnlyCardioPlans = (cur.cardioPlans || []).filter(x => !serverCardioPlanIds.has(x.id) && !baseCardioPlanIds?.has(x.id));
+            // Shopping List prefs (migration 0215) and the five Medications
+            // tables (migration 0218/0221) need the exact same resurrection
+            // guard as every collection above: without it, a package size set
+            // or a dose logged in the seconds before this background fetch
+            // resolves is silently discarded by the plain `...fresh` spread,
+            // and since syncBase.current is also repointed to that same fresh
+            // reference right after, the lost edit is never even re-uploaded.
+            const serverShopPrefIds = new Set((fresh.foodShoppingPrefs || []).map(p => p.id));
+            const baseShopPrefIds = base ? new Set((base.foodShoppingPrefs || []).map(p => p.id)) : null;
+            const localOnlyShopPrefs = (cur.foodShoppingPrefs || []).filter(x => !serverShopPrefIds.has(x.id) && !baseShopPrefIds?.has(x.id));
+            const serverMedPlanIds = new Set((fresh.medicationPlans || []).map(p => p.id));
+            const baseMedPlanIds = base ? new Set((base.medicationPlans || []).map(p => p.id)) : null;
+            const localOnlyMedPlans = (cur.medicationPlans || []).filter(x => !serverMedPlanIds.has(x.id) && !baseMedPlanIds?.has(x.id));
+            const serverMedIds = new Set((fresh.medications || []).map(m => m.id));
+            const baseMedIds = base ? new Set((base.medications || []).map(m => m.id)) : null;
+            const localOnlyMeds = (cur.medications || []).filter(x => !serverMedIds.has(x.id) && !baseMedIds?.has(x.id));
+            const serverMedSlotIds = new Set((fresh.medicationScheduleSlots || []).map(s => s.id));
+            const baseMedSlotIds = base ? new Set((base.medicationScheduleSlots || []).map(s => s.id)) : null;
+            const localOnlyMedSlots = (cur.medicationScheduleSlots || []).filter(x => !serverMedSlotIds.has(x.id) && !baseMedSlotIds?.has(x.id));
+            const serverMedLogIds = new Set((fresh.medicationLogs || []).map(l => l.id));
+            const baseMedLogIds = base ? new Set((base.medicationLogs || []).map(l => l.id)) : null;
+            const localOnlyMedLogs = (cur.medicationLogs || []).filter(x => !serverMedLogIds.has(x.id) && !baseMedLogIds?.has(x.id));
+            const serverMedPlanItemIds = new Set((fresh.medicationPlanItems || []).map(i => i.id));
+            const baseMedPlanItemIds = base ? new Set((base.medicationPlanItems || []).map(i => i.id)) : null;
+            const localOnlyMedPlanItems = (cur.medicationPlanItems || []).filter(x => !serverMedPlanItemIds.has(x.id) && !baseMedPlanItemIds?.has(x.id));
             // Locally-deleted items (in base but not in cur): exclude from fresh
             // so they aren't resurrected while syncStore deletion is in flight.
             const curExIdSet = new Set((cur.exercises || []).map(e => e.id));
@@ -914,6 +939,18 @@ function App() {
             const delCheckinTplIds = baseCheckinTplIds ? new Set([...baseCheckinTplIds].filter(id => !curCheckinTplIdSet.has(id))) : null;
             const curCardioPlanIdSet = new Set((cur.cardioPlans || []).map(p => p.id));
             const delCardioPlanIds = baseCardioPlanIds ? new Set([...baseCardioPlanIds].filter(id => !curCardioPlanIdSet.has(id))) : null;
+            const curShopPrefIdSet = new Set((cur.foodShoppingPrefs || []).map(p => p.id));
+            const delShopPrefIds = baseShopPrefIds ? new Set([...baseShopPrefIds].filter(id => !curShopPrefIdSet.has(id))) : null;
+            const curMedPlanIdSet = new Set((cur.medicationPlans || []).map(p => p.id));
+            const delMedPlanIds = baseMedPlanIds ? new Set([...baseMedPlanIds].filter(id => !curMedPlanIdSet.has(id))) : null;
+            const curMedIdSet = new Set((cur.medications || []).map(m => m.id));
+            const delMedIds = baseMedIds ? new Set([...baseMedIds].filter(id => !curMedIdSet.has(id))) : null;
+            const curMedSlotIdSet = new Set((cur.medicationScheduleSlots || []).map(s => s.id));
+            const delMedSlotIds = baseMedSlotIds ? new Set([...baseMedSlotIds].filter(id => !curMedSlotIdSet.has(id))) : null;
+            const curMedLogIdSet = new Set((cur.medicationLogs || []).map(l => l.id));
+            const delMedLogIds = baseMedLogIds ? new Set([...baseMedLogIds].filter(id => !curMedLogIdSet.has(id))) : null;
+            const curMedPlanItemIdSet = new Set((cur.medicationPlanItems || []).map(i => i.id));
+            const delMedPlanItemIds = baseMedPlanItemIds ? new Set([...baseMedPlanItemIds].filter(id => !curMedPlanItemIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
             // so for ids present on both sides we compare updatedAt and keep
             // whichever is newer, this protects an in-flight local session's
@@ -1052,6 +1089,12 @@ function App() {
               workoutTemplates: [...localOnlyTemplates, ...mergeById(fresh.workoutTemplates || [], cur.workoutTemplates, base?.workoutTemplates, delTplIds)],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...mergeById(fresh.checkinSchemaTemplates || [], cur.checkinSchemaTemplates, base?.checkinSchemaTemplates, delCheckinTplIds)],
               cardioPlans: [...localOnlyCardioPlans, ...mergeById(fresh.cardioPlans || [], cur.cardioPlans, base?.cardioPlans, delCardioPlanIds)],
+              foodShoppingPrefs: [...localOnlyShopPrefs, ...mergeById(fresh.foodShoppingPrefs || [], cur.foodShoppingPrefs, base?.foodShoppingPrefs, delShopPrefIds)],
+              medicationPlans: [...localOnlyMedPlans, ...mergeById(fresh.medicationPlans || [], cur.medicationPlans, base?.medicationPlans, delMedPlanIds)],
+              medications: [...localOnlyMeds, ...mergeById(fresh.medications || [], cur.medications, base?.medications, delMedIds)],
+              medicationScheduleSlots: [...localOnlyMedSlots, ...mergeById(fresh.medicationScheduleSlots || [], cur.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlotIds)],
+              medicationLogs: [...localOnlyMedLogs, ...mergeById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds)],
+              medicationPlanItems: [...localOnlyMedPlanItems, ...mergeById(fresh.medicationPlanItems || [], cur.medicationPlanItems, base?.medicationPlanItems, delMedPlanItemIds)],
               mesoStates,
               planDrafts,
             };
@@ -1585,13 +1628,15 @@ function App() {
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
-  // Library and cardio-plans live under the merged "Plan" tab; the water and
-  // food trackers live under the Health tab: keep the right tab lit for each.
+  // Library and cardio-plans live under the merged "Plan" tab; the water,
+  // food and (opt-in) medications trackers live under the Health tab: keep
+  // the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
-    : (route.name === 'water' || route.name === 'food') ? 'health'
+    : (route.name === 'water' || route.name === 'food' || route.name === 'medications') ? 'health'
     : route.name;
+  const showMeds = !!store?.settings?.medsEnabled;
 
   const showCoaching = !!(
     store?.settings?.showCoachingTab ||
@@ -1600,6 +1645,8 @@ function App() {
     store?.coaching?.asClient?.status === 'active'
   );
   const showHealth = !!store?.settings?.showHealthTab;
+  const showWater = !!store?.settings?.showWaterTab;
+  const showFood = !!store?.settings?.showFoodTab;
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
@@ -1623,6 +1670,7 @@ function App() {
     case 'health':        screen = <window.Screens.HealthScreen {...props} openMacroTargets={route.openMacroTargets} />; break;
     case 'water':         screen = <window.Screens.WaterScreen {...props} />; break;
     case 'food':          screen = <window.Screens.FoodScreen {...props} date={route.date} />; break;
+    case 'medications':   screen = <window.Screens.MedicationsScreen {...props} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
@@ -1655,7 +1703,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
@@ -1667,7 +1715,7 @@ function App() {
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
-      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
+      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />}
     </>
   );
 

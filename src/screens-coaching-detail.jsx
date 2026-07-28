@@ -1914,6 +1914,159 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
   );
 }
 
+// Coach view into a client's Medications: current medications + schedule
+// (read directly via the coach-of-client RLS, mirroring
+// ClientNutritionTab's own clientMealPlans query above) plus pushing one of
+// the coach's OWN medication plans to this client
+// (LB.pushMedicationPlanToClient, mirrors pushMealPlanToClient). No
+// activate-now/add-only choice here, unlike the meal-plan push: medication
+// plans have no single active pointer, a pushed plan just runs alongside
+// whatever the client already has (see zane_medication_plans in
+// docs/database.md).
+function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store }) {
+  const coachMedPlans = (store?.medicationPlans || []).filter(p => !p.archived).sort((a, b) => a.name.localeCompare(b.name));
+  const [clientMeds, setClientMeds] = useStateC(null);
+  const [clientSlots, setClientSlots] = useStateC([]);
+  // Which plan(s) a medication belongs to (migration 0221, many-to-many):
+  // only fetched here to label a schedule line by plan when a medication
+  // spans more than one, not to gate anything on plan-active (this card has
+  // no due-date/Timeline logic, unlike the main screen's auto-fill).
+  const [clientPlans, setClientPlans] = useStateC([]);
+  // Actually-taken doses (planned:false) from the last 14 days, RLS already
+  // permits this (see migration 0218's stated rationale: a coach should see
+  // "complete medication list, schedule and actual logged adherence", not
+  // just the static schedule). Bounded to 14 days and taken-only, not the
+  // client's whole history: this card only ever shows "last taken", not a
+  // full timeline, so nothing older than that is ever read.
+  const [clientLogs, setClientLogs] = useStateC([]);
+  const [clientError, setClientError] = useStateC(false);
+  const [pickerOpen, setPickerOpen] = useStateC(false);
+  const [pushTarget, setPushTarget] = useStateC(null);
+  const [pushBusy, setPushBusy] = useStateC(false);
+
+  const loadClientMeds = () => {
+    if (!clientId) return;
+    const sinceISO = LB.fmtISO(new Date(Date.now() - 14 * 86400000));
+    Promise.all([
+      LB.supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size').eq('user_id', clientId).eq('archived', false),
+      LB.supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty').eq('user_id', clientId),
+      LB.supabase.from('zane_medication_logs').select('medication_id, date, time').eq('user_id', clientId).eq('planned', false).gte('date', sinceISO).order('date', { ascending: false }).order('time', { ascending: false }),
+      LB.supabase.from('zane_medication_plans').select('id, name').eq('user_id', clientId),
+    ]).then(([medsRes, slotsRes, logsRes, plansRes]) => {
+      // A failed query used to render as "nothing tracked", same trap
+      // ClientNutritionTab's own comment calls out for meal plans.
+      if (medsRes.error || slotsRes.error || logsRes.error || plansRes.error) { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientPlans([]); setClientError(true); return; }
+      setClientError(false);
+      setClientMeds((medsRes.data || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+      setClientSlots(slotsRes.data || []);
+      setClientLogs(logsRes.data || []);
+      setClientPlans(plansRes.data || []);
+    }).catch(() => { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientPlans([]); setClientError(true); });
+  };
+  useEffectC(() => { loadClientMeds(); }, [clientId]);
+
+  const doPush = async () => {
+    if (!pushTarget) return;
+    setPushBusy(true);
+    try {
+      const planItems = (store?.medicationPlanItems || []).filter(it => it.medicationPlanId === pushTarget.id);
+      const medIds = new Set(planItems.map(it => it.medicationId));
+      const planMeds = (store?.medications || []).filter(m => medIds.has(m.id));
+      await LB.pushMedicationPlanToClient({
+        plan: pushTarget, medications: planMeds, planItems,
+        scheduleSlots: (store?.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId === pushTarget.id),
+        coachUserId: userId, coachingId, clientId,
+      });
+      setPushTarget(null);
+      setPickerOpen(false);
+      loadClientMeds();
+    } catch (e) {
+      UI.alert(e?.message || 'Push failed.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const wdLabel = (weekdays) => (weekdays || []).length === 7 ? 'Every day' : (weekdays || []).map(w => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][w]).join('/');
+
+  if (clientMeds === null) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MEDICATIONS</div>
+      {clientError ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+          Couldn't load their medications. Check your connection and try again.
+        </div>
+      ) : !clientMeds.length ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+          Nothing tracked yet. Push one of your plans to get {clientName || 'them'} started.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {clientMeds.map(m => {
+            const slots = clientSlots.filter(sl => sl.medication_id === m.id);
+            // Only label each line by its plan when this medication's slots
+            // actually span more than one (migration 0221: a slot is scoped
+            // to one specific (medication, plan) pair), to avoid clutter in
+            // the common single-plan case.
+            const spansPlans = new Set(slots.map(sl => sl.medication_plan_id)).size > 1;
+            const planLabel = (planId) => spansPlans ? `${clientPlans.find(p => p.id === planId)?.name || 'Unknown plan'}: ` : '';
+            // clientLogs is already ordered newest-first, so the first match
+            // per medication is its most recently actually-taken dose.
+            const lastTaken = clientLogs.find(l => l.medication_id === m.id);
+            return (
+              <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.name}</span>
+                  {m.category && <span className="micro" style={{ color: 'var(--accent)' }}>{m.category.toUpperCase()}</span>}
+                </div>
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
+                  {slots.length ? slots.map(sl => `${planLabel(sl.medication_plan_id)}${wdLabel(sl.weekdays)} ${String(sl.hour).padStart(2, '0')}:00 · ${sl.dose_qty} ${m.unit_label || 'pills'}`).join('; ') : 'No schedule'}
+                </div>
+                <div style={{ fontSize: 11, color: lastTaken ? UI.inkSoft : 'var(--warn)', fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {lastTaken ? `Last taken ${lastTaken.date === LB.todayISO() ? 'today' : lastTaken.date} · ${lastTaken.time}` : 'Not logged in the last 14 days'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+        <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push a medication plan
+      </Btn>
+
+      <Sheet open={pickerOpen && !pushTarget} onClose={() => setPickerOpen(false)} title="Push a medication plan" titleColor="var(--accent)">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+          Copies one of your medication plans into {clientName || 'the client'}'s account, alongside whatever else they're already tracking.
+        </div>
+        {coachMedPlans.length === 0 ? (
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '12px 0' }}>You have no medication plans yet. Create one in Medications (turn it on in Settings).</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {coachMedPlans.map(p => (
+              <button key={p.id} onClick={() => setPushTarget(p)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{p.name}{p.isTemplate ? ' · template' : ''}</span>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+              </button>
+            ))}
+          </div>
+        )}
+      </Sheet>
+      <Sheet open={!!pushTarget} onClose={() => !pushBusy && setPushTarget(null)} title={pushTarget?.name || 'Medication plan'} titleColor="var(--accent)">
+        {pushTarget && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              Push "{pushTarget.name}" to {clientName || 'them'}? It runs alongside anything else they're already tracking.
+            </div>
+            <Btn onClick={doPush} disabled={pushBusy} style={{ width: '100%' }}>{pushBusy ? 'Pushing…' : 'Push'}</Btn>
+          </>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
 // Loads a client's store, keeping it in sync via LB.syncStore on every write.
 // Shared by CoachPlanEditorScreen and CoachNewPlanScreen. `scheduleId` (editor
 // only) additionally snapshots the initial schedule for diffing and tracks

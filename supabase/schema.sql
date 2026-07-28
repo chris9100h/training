@@ -260,11 +260,14 @@ CREATE TABLE public.zane_user_settings (
   macro_calc jsonb,                          -- 0205: last inputs of the target estimator (prefill only; shape in docs/database.md)
   meal_windows jsonb,                        -- 0206: six ascending start hours for the food tracker meal categories, null = defaults
   show_health_tab boolean NOT NULL DEFAULT false,
+  show_water_tab boolean NOT NULL DEFAULT false,   -- 0222: independent of show_health_tab, see docs/database.md
+  show_food_tab boolean NOT NULL DEFAULT false,    -- 0222
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
   plan_mode boolean NOT NULL DEFAULT false,
+  hide_food_categories boolean NOT NULL DEFAULT false, -- 0214: flat hour timeline instead of meal-category header cards, display-only
   default_checkin_schema jsonb,
   status_mode text,
   status_mode_since timestamp with time zone,
@@ -290,7 +293,9 @@ CREATE TABLE public.zane_user_settings (
   water_reminder_enabled boolean NOT NULL DEFAULT false,
   water_last_push_at timestamp with time zone,
   tz_offset_minutes integer,
-  meal_reminder_enabled boolean NOT NULL DEFAULT false
+  meal_reminder_enabled boolean NOT NULL DEFAULT false,
+  meds_enabled boolean NOT NULL DEFAULT false,
+  medication_reminder_enabled boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -1715,6 +1720,24 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_template_slo
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_recipes;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_recipes
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+-- Migration 0220: the coach-writable medication tables (0218) repeat the
+-- same shape and were missing the guard.
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plans;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plans
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medications;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medications
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_schedule_slots;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_schedule_slots
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_logs;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+-- Migration 0221: new table gets the guard from day one.
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- Migration 0125 grant changes:
 --   REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM anon, authenticated;
@@ -2495,6 +2518,169 @@ ALTER TABLE zane_food_template_days ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "zane_food_template_days_own"
   ON zane_food_template_days FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+-- Per-food Shopping List preferences (migration 0215): display-name override,
+-- exclude flag, and package size in grams, one row per (user, food). Simple
+-- owned collection like favorites/recipes, no coach access. A row with all
+-- three unset has no reason to exist, the client deletes it instead of
+-- leaving a no-op row behind.
+CREATE TABLE zane_food_shopping_prefs (
+  id              text        PRIMARY KEY,
+  user_id         uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id         text        NOT NULL REFERENCES public.zane_foods(id) ON DELETE CASCADE,
+  name_override   text,
+  excluded        boolean     NOT NULL DEFAULT false,
+  package_size_g  numeric,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  stock_baseline_g numeric,                            -- 0216, null together with stock_set_at when tracking is off
+  stock_set_at    timestamptz,                          -- 0216
+  food_name       text        NOT NULL,                 -- 0217, snapshot at write time
+  brand           text,                                 -- 0217
+  UNIQUE (user_id, food_id)
+);
+
+CREATE INDEX zane_food_shopping_prefs_user_idx ON public.zane_food_shopping_prefs USING btree (user_id);
+
+ALTER TABLE zane_food_shopping_prefs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_shopping_prefs_own"
+  ON zane_food_shopping_prefs FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+-- ── Medications (migration 0218) ────────────────────────────────────────────────
+-- Personal (optionally coach-managed) medication/vitamin/supplement tracker,
+-- modeled on the Food Tracker's Plan Mode. Four tables: named plan container
+-- (is_template/coach_id, same coach bucket as meal plans, but no single active
+-- pointer, many plans run concurrently), the medications themselves (category
+-- free text, package_size/stock_baseline derived inventory like
+-- zane_food_shopping_prefs), weekly recurring schedule slots (weekdays
+-- integer[], 0=Mon..6=Sun like isoWd in store.js; optional start_date/end_date
+-- for a time-phased cycle, both null = unbounded/default), and the intake log
+-- (mirrors zane_food_logs: planned/logged, medication_name copied at write
+-- time). Coach access mirrors zane_food_meal_plans/zane_food_template_slots
+-- exactly (zane_is_coach_of, migration 0199): full read/write on all four, not
+-- just what a coach personally pushed.
+CREATE TABLE zane_medication_plans (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  archived    boolean     NOT NULL DEFAULT false,
+  is_template boolean     NOT NULL DEFAULT false,
+  coach_id    uuid,
+  active      boolean     NOT NULL DEFAULT true,   -- migration 0221: only an active plan's slots fire, several can be active at once
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_medication_plans_user_idx ON public.zane_medication_plans USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_medication_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own medication plans"                     ON zane_medication_plans FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client medication plans"   ON zane_medication_plans FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client medication plans"  ON zane_medication_plans FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client medication plans" ON zane_medication_plans FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client medication plans" ON zane_medication_plans FOR DELETE USING (zane_is_coach_of(user_id));
+
+CREATE TABLE zane_medications (
+  id                 text        PRIMARY KEY,
+  user_id            uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name               text        NOT NULL,
+  brand              text,
+  category           text,                              -- free text, UI presets only (vitamin/supplement/compound/other)
+  unit_label         text        NOT NULL DEFAULT 'pills',
+  package_size       numeric,
+  stock_baseline     numeric,
+  stock_set_at       timestamptz,
+  archived           boolean     NOT NULL DEFAULT false,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_medications_user_idx ON public.zane_medications USING btree (user_id);
+
+ALTER TABLE zane_medications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own medications"                     ON zane_medications FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client medications"   ON zane_medications FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client medications"  ON zane_medications FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client medications" ON zane_medications FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client medications" ON zane_medications FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- migration 0221: pure membership join (medication <-> plan), many-to-many.
+-- medication_id is a hard FK (a membership row has no life without its
+-- medication); medication_plan_id is a SOFT reference (no FK), same reason
+-- zane_medications.medication_plan_id used to be one: both are client-diffed
+-- personal collections, a hard cascade here could race the client's sync diff.
+CREATE TABLE zane_medication_plan_items (
+  id                 text        PRIMARY KEY,
+  user_id            uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  medication_plan_id text        NOT NULL,
+  medication_id      text        NOT NULL REFERENCES public.zane_medications(id) ON DELETE CASCADE,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (medication_id, medication_plan_id)
+);
+
+CREATE INDEX zane_medication_plan_items_user_idx ON public.zane_medication_plan_items USING btree (user_id);
+CREATE INDEX zane_medication_plan_items_plan_idx ON public.zane_medication_plan_items USING btree (medication_plan_id);
+CREATE INDEX zane_medication_plan_items_med_idx  ON public.zane_medication_plan_items USING btree (medication_id);
+
+ALTER TABLE zane_medication_plan_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own medication plan items"                     ON zane_medication_plan_items FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client medication plan items"   ON zane_medication_plan_items FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client medication plan items"  ON zane_medication_plan_items FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client medication plan items" ON zane_medication_plan_items FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client medication plan items" ON zane_medication_plan_items FOR DELETE USING (zane_is_coach_of(user_id));
+
+CREATE TABLE zane_medication_schedule_slots (
+  id                 text        PRIMARY KEY,
+  user_id            uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  medication_id      text        NOT NULL REFERENCES public.zane_medications(id) ON DELETE CASCADE,
+  medication_plan_id text,                                            -- soft reference, migration 0221: scopes this slot to one (medication, plan) pair
+  weekdays           integer[]   NOT NULL DEFAULT '{0,1,2,3,4,5,6}',   -- 0=Mon..6=Sun, see isoWd in store.js
+  hour               integer     NOT NULL DEFAULT 8,                  -- 0-23
+  dose_qty           numeric     NOT NULL,
+  start_date         date,                                            -- null = unbounded (default/simple case)
+  end_date           date,                                            -- null = unbounded
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_medication_schedule_slots_user_idx ON public.zane_medication_schedule_slots USING btree (user_id);
+CREATE INDEX zane_medication_schedule_slots_med_idx ON public.zane_medication_schedule_slots USING btree (medication_id);
+
+ALTER TABLE zane_medication_schedule_slots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own medication schedule slots"                     ON zane_medication_schedule_slots FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client medication schedule slots"   ON zane_medication_schedule_slots FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client medication schedule slots"  ON zane_medication_schedule_slots FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client medication schedule slots" ON zane_medication_schedule_slots FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client medication schedule slots" ON zane_medication_schedule_slots FOR DELETE USING (zane_is_coach_of(user_id));
+
+CREATE TABLE zane_medication_logs (
+  id               text        PRIMARY KEY,
+  user_id          uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  medication_id    text        REFERENCES public.zane_medications(id) ON DELETE SET NULL,
+  medication_name  text        NOT NULL,           -- copied at write time
+  date             text        NOT NULL,           -- YYYY-MM-DD (local day)
+  time             text        NOT NULL,           -- HH:MM (local time)
+  dose_qty         numeric     NOT NULL,
+  planned          boolean     NOT NULL DEFAULT false,
+  schedule_slot_id text        REFERENCES public.zane_medication_schedule_slots(id) ON DELETE SET NULL,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_medication_logs_user_date ON public.zane_medication_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_medication_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own medication logs"                     ON zane_medication_logs FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client medication logs"   ON zane_medication_logs FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client medication logs"  ON zane_medication_logs FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client medication logs" ON zane_medication_logs FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client medication logs" ON zane_medication_logs FOR DELETE USING (zane_is_coach_of(user_id));
 
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
 -- One row per shared recipe, keyed by an unguessable token that doubles as the
