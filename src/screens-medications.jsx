@@ -2046,7 +2046,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
                           <MdCheckbox checked={packed} onToggle={() => toggleCheckAllDays(dates, slot.id)} label={packed ? 'Mark whole week as not packed' : 'Mark whole week as packed'} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={mdEntryName}>{med.name}</div>
-                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
+                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)} · {parseFloat((slot.doseQty * dates.length).toFixed(2))} for the week</div>
                           </div>
                         </div>
                       );
