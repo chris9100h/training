@@ -66,6 +66,19 @@ function wtHhmmToDecimal(t) {
   const [h, m] = (t || '0:0').split(':').map(Number);
   return (h || 0) + (m || 0) / 60;
 }
+// Full-precision ordering key for a logged entry. The stored `time` is only
+// HH:MM, so two drinks logged seconds apart round to the identical string
+// and a time-only sort can't tell them apart (their displayed order then
+// falls back to whatever order they happen to sit in the underlying array,
+// which does not reliably match when they were actually logged). `createdAt`
+// carries full precision and is stamped in the same instant as `time`
+// wherever entries are created, so it never contradicts the coarse field,
+// only refines same-minute ties. Falls back to the coarse field if a row is
+// ever missing it.
+function wtEntryTs(e) {
+  const ts = e.createdAt ? Date.parse(e.createdAt) : NaN;
+  return isNaN(ts) ? wtHhmmToDecimal(e.time) * 3600000 : ts;
+}
 // Inclusive list of local YYYY-MM-DD strings from `from` to `to` (capped so a
 // silly custom range can't build an unbounded array).
 function wtDateRange(from, to) {
@@ -570,7 +583,7 @@ function WaterScreen({ store, setStore, go, userId }) {
             <div style={{ textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi }}>Nothing logged yet today</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[...todayEntries].sort((a, b) => wtHhmmToDecimal(b.time) - wtHhmmToDecimal(a.time)).map(e => (
+              {[...todayEntries].sort((a, b) => wtEntryTs(b) - wtEntryTs(a)).map(e => (
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                     <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
@@ -693,18 +706,22 @@ function WaterBreakdownRow({ icon, name, value, color }) {
 }
 
 // Settings body: goal, window, bottle tracker, reminders, custom drinks, coffee sizes.
-// Own copy of Settings' NavRow (screens-settings.jsx), boxed-button style
-// instead of that one's flat divided list, matching the row shape this file
-// already used for "Other drinks & coffee" before this hub existed.
-function WaterNavRow({ label, hint, onTap }) {
+// Own copy of Settings' NavRow (screens-settings.jsx): same flat, divided
+// list (a .knurl hairline between rows, no box around each one) as every
+// other Settings sub-sheet (Health, Food), so this hub reads as the app's
+// one standard sub-category list instead of a visually distinct style.
+function WaterNavRow({ label, hint, onTap, first = false }) {
   return (
-    <button onClick={onTap} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 10, WebkitTapHighlightColor: 'transparent' }}>
-      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {hint != null && <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
-        <ChevronRight color={UI.inkFaint} />
-      </span>
-    </button>
+    <>
+      {!first && <div className="knurl" />}
+      <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
+        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {hint != null && <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+        </div>
+      </button>
+    </>
   );
 }
 // Settings top-level hub: drills into Goal, Bottle Tracker, Reminders and
@@ -718,8 +735,8 @@ function WaterSettingsHubBody({ settings, onOpenGoal, onOpenBottle, onOpenRemind
   const drinkCount = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks.length : 0)
     + ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes.length : 0);
   return (
-    <div>
-      <WaterNavRow label="Daily Goal" hint={`${UI.waterToEntry(settings.waterGoalMl || 2000)} ${UI.waterEntryUnit()}`} onTap={onOpenGoal} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <WaterNavRow label="Daily Goal" first hint={`${UI.waterToEntry(settings.waterGoalMl || 2000)} ${UI.waterEntryUnit()}`} onTap={onOpenGoal} />
       <WaterNavRow label="Bottle Tracker" hint={bottleEnabled ? 'On' : 'Off'} onTap={onOpenBottle} />
       <WaterNavRow label="Reminders" hint={reminderOn ? 'On' : 'Off'} onTap={onOpenReminders} />
       <WaterNavRow label="Drinks & Coffee" hint={drinkCount > 0 ? `${drinkCount} set` : null} onTap={onOpenDrinks} />
