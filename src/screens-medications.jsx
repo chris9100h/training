@@ -230,6 +230,12 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
 function mdIsLowStock(med, effectiveStock) {
   return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
 }
+// Whether a medication currently belongs to at least one plan (migration
+// 0221: membership is many-to-many via zane_medication_plan_items, no single
+// medicationPlanId on the medication itself anymore).
+function mdHasPlan(med, medicationPlanItems) {
+  return medicationPlanItems.some(it => it.medicationId === med.id);
+}
 
 // A schedule slot applies to `dateISO` if its plan is active, today's
 // weekday is in its list, and (when set) dateISO falls inside its optional
@@ -323,20 +329,35 @@ function MdCheckbox({ checked, onToggle, label }) {
   );
 }
 
+// Gold-bordered section label for the Stock filter sheet, own copy of
+// GoldSectionLabel (screens-lib.jsx's own Exercises filter sheet, the
+// pattern this mirrors) since that one is private to that module's own
+// scope by convention.
+function MdGoldLabel({ children, style }) {
+  return (
+    <div className="micro" style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10, ...style }}>
+      {children}
+    </div>
+  );
+}
+
 function MedicationsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
   const [screenTab, setScreenTab] = useStateMd('timeline'); // 'timeline' | 'schedule' | 'inventory'
 
   const medications = store.medications || [];
-  const activeMedications = useMemoMd(() => medications.filter(m => !m.archived), [medications]);
+  // Alphabetical at the source: every list/picker/dropdown built from this
+  // (inventoryList, the plan-detail medication list, the Log-a-dose select,
+  // ...) inherits the order for free instead of each needing its own sort.
+  const activeMedications = useMemoMd(() => medications.filter(m => !m.archived).sort((a, b) => a.name.localeCompare(b.name)), [medications]);
   const medicationPlans = store.medicationPlans || [];
   const scheduleSlots = store.medicationScheduleSlots || [];
   const medicationLogs = store.medicationLogs || [];
   const medicationPlanItems = store.medicationPlanItems || [];
 
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
-  const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
+  const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active').sort((a, b) => (a.clientName || '').localeCompare(b.clientName || '')), [store.coaching]);
 
   // Auto-fill today's due doses. medicationLogs is deliberately NOT a
   // dependency: it is, unavoidably, since mdAutoFillToday only skips a slot
@@ -431,7 +452,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // it, its other plans' memberships/schedules, or its log history.
   const [planSubTab, setPlanSubTab] = useStateMd('mine'); // 'mine' | 'templates', coach bucket only
   const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
-  const plans = useMemoMd(() => medicationPlans.filter(p => !p.archived && inBucket(p)), [medicationPlans, isCoach, planSubTab]);
+  const plans = useMemoMd(() => medicationPlans.filter(p => !p.archived && inBucket(p)).sort((a, b) => a.name.localeCompare(b.name)), [medicationPlans, isCoach, planSubTab]);
   const [viewedPlanId, setViewedPlanId] = useStateMd(null);
   useEffectMd(() => {
     if (viewedPlanId && !plans.some(p => p.id === viewedPlanId)) setViewedPlanId(null);
@@ -442,7 +463,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     [medicationPlanItems, viewedPlanId],
   );
   const viewedPlanMeds = useMemoMd(
-    () => medications.filter(m => !m.archived && viewedPlanMedIds.has(m.id)),
+    () => medications.filter(m => !m.archived && viewedPlanMedIds.has(m.id)).sort((a, b) => a.name.localeCompare(b.name)),
     [medications, viewedPlanMedIds],
   );
 
@@ -575,10 +596,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // Every plan this medication currently belongs to, for medSheet's own
   // membership list below (a medication can be in several plans at once,
   // see the header comment).
-  const medSheetMemberships = useMemoMd(
-    () => medSheet?.id ? medicationPlanItems.filter(it => it.medicationId === medSheet.id) : [],
-    [medicationPlanItems, medSheet?.id],
-  );
+  const medSheetMemberships = useMemoMd(() => {
+    if (!medSheet?.id) return [];
+    const planName = (it) => medicationPlans.find(p => p.id === it.medicationPlanId)?.name || '';
+    return medicationPlanItems.filter(it => it.medicationId === medSheet.id).sort((a, b) => planName(a).localeCompare(planName(b)));
+  }, [medicationPlanItems, medSheet?.id, medicationPlans]);
   // A medication is only ever created with zero plan memberships: creating
   // one lives exclusively in the Inventory tab's Medications sub-tab, a
   // plan's own "Add medication" only ever attaches an existing one (see
@@ -777,13 +799,45 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // stock view (renderMedRow), Medications is the create/edit/delete surface
   // for the medication itself (renderMedListRow), independent of any plan.
   const [invSubTab, setInvSubTab] = useStateMd('inventory'); // 'inventory' | 'medications'
-  const inventoryList = useMemoMd(
-    () => [...activeMedications].sort((a, b) => a.name.localeCompare(b.name)),
-    [activeMedications],
-  );
+  // activeMedications is already alphabetically sorted at its own
+  // declaration, nothing left to do here beyond the name/intent this
+  // variable carries in the rest of this tab's code.
+  const inventoryList = activeMedications;
+
+  // Stock filter sheet, mirrors the Exercises library's own filter sheet
+  // (screens-lib.jsx: GoldSectionLabel sections of checkable Pills, a
+  // Filter button with a gold active-count badge). Category is multi-select
+  // (an array, like that screen's own MUSCLE GROUP filter); Plan and Tracked
+  // are each a nullable single choice (like that screen's own PLAN filter:
+  // tapping the same pill again clears it back to "no filter").
+  const [stockFilterCategories, setStockFilterCategories] = useStateMd([]); // MED_CATEGORIES ids
+  const [stockFilterInPlan, setStockFilterInPlan] = useStateMd(null); // 'in' | 'out' | null
+  const [stockFilterTracked, setStockFilterTracked] = useStateMd(null); // 'tracked' | 'untracked' | null
+  const [stockFiltersOpen, setStockFiltersOpen] = useStateMd(false);
+  const toggleStockFilterCategory = (c) => setStockFilterCategories(cats => cats.includes(c) ? cats.filter(x => x !== c) : [...cats, c]);
+  const toggleStockFilterInPlan = (v) => setStockFilterInPlan(cur => cur === v ? null : v);
+  const toggleStockFilterTracked = (v) => setStockFilterTracked(cur => cur === v ? null : v);
+  const stockFilterActiveCount = stockFilterCategories.length + (stockFilterInPlan !== null ? 1 : 0) + (stockFilterTracked !== null ? 1 : 0);
+  function clearStockFilters() {
+    setStockFilterCategories([]);
+    setStockFilterInPlan(null);
+    setStockFilterTracked(null);
+  }
+  // Category and Plan apply to BOTH Running Low and the main list below it,
+  // both are genuine "which medications" questions. Tracked/Not-tracked
+  // stays scoped to the main list only (see mainInventoryList below): Running
+  // Low is definitionally always tracked (it requires a real stock count to
+  // compare against package size), so that axis is either a no-op or
+  // always-empty there depending on which side you pick.
+  const categoryPlanFilteredInventory = useMemoMd(() => inventoryList.filter(m => {
+    const matchCategory = stockFilterCategories.length === 0 || stockFilterCategories.includes(m.category);
+    const matchPlan = stockFilterInPlan === null || (stockFilterInPlan === 'in' ? mdHasPlan(m, medicationPlanItems) : !mdHasPlan(m, medicationPlanItems));
+    return matchCategory && matchPlan;
+  }), [inventoryList, stockFilterCategories, stockFilterInPlan, medicationPlanItems]);
+
   const lowStockList = useMemoMd(
-    () => inventoryList.filter(m => mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))),
-    [inventoryList, medicationLogs, today],
+    () => categoryPlanFilteredInventory.filter(m => mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))),
+    [categoryPlanFilteredInventory, medicationLogs, today],
   );
   const [lowStockAcks, setLowStockAcks] = useStateMd(mdReadLowStockAcks);
   const freshLowStock = useMemoMd(
@@ -797,19 +851,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     mdWriteLowStockAcks(next);
   }
 
-  // Filter for the main list below Running Low: All / Tracked (has a stock
-  // count) / Not tracked. Never applies to Running Low itself, being low
-  // stock definitionally requires a real count to compare against package
-  // size, so that section is always "Tracked" anyway.
-  const [invStockFilter, setInvStockFilter] = useStateMd('all'); // 'all' | 'tracked' | 'untracked'
   const mainInventoryList = useMemoMd(() => {
-    const rest = inventoryList.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
-    if (invStockFilter === 'all') return rest;
+    const rest = categoryPlanFilteredInventory.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
+    if (stockFilterTracked === null) return rest;
     return rest.filter(m => {
       const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
-      return invStockFilter === 'tracked' ? tracked : !tracked;
+      return stockFilterTracked === 'tracked' ? tracked : !tracked;
     });
-  }, [inventoryList, medicationLogs, today, invStockFilter]);
+  }, [categoryPlanFilteredInventory, medicationLogs, today, stockFilterTracked]);
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
@@ -914,7 +963,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <MdHourTrunk />
-                {Array.from({ length: 24 }, (_, h) => h).map(h => {
+                {/* Only occupied hours plus the current real hour (whether
+                    occupied or not) render; an empty hour on any other slot
+                    is just noise, unlike Food's own hour grid (which always
+                    shows all 24, no "current hour" carve-out was requested
+                    there). */}
+                {Array.from({ length: 24 }, (_, h) => h)
+                  .filter(h => (byHour[h] || []).length > 0 || (curDate === today && h === new Date().getHours()))
+                  .map(h => {
                   const es = byHour[h] || [];
                   const filled = es.length > 0;
                   const isNow = curDate === today && h === new Date().getHours();
@@ -1033,8 +1089,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 </span>
               </button>
               <div style={{ display: 'flex', gap: 8 }}>
+                {/* "Add" not "Add medication": sharing the row with Coach at
+                    flex:1 halves its width, the full label wrapped to two
+                    lines there. Unambiguous in context, the screen is
+                    already titled with the plan and lists medications. */}
                 <Btn onClick={() => setAddToPlanOpen(true)} style={{ flex: 1 }}>
-                  <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
+                  <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add
                 </Btn>
                 {isCoach && <Btn kind="ghost" onClick={() => setCoachMenuOpen(true)} style={{ flex: 1 }}>Coach</Btn>}
               </div>
@@ -1052,7 +1112,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
         {screenTab === 'inventory' && (
           <>
-            <SubTabBar tabs={[{ id: 'medications', label: 'Medications' }, { id: 'inventory', label: 'Inventory' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
+            {/* Sub-tab labeled "Stock", not "Inventory": the outer top-level
+                tab is already called Inventory, repeating the same word one
+                level down read as a mistake, not a hierarchy. */}
+            <SubTabBar tabs={[{ id: 'medications', label: 'Medications' }, { id: 'inventory', label: 'Stock' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
             {invSubTab === 'inventory' ? (
               <>
                 {freshLowStock.length > 0 && (
@@ -1082,10 +1145,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
                   <>
-                    <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-                      {[{ id: 'all', label: 'All' }, { id: 'tracked', label: 'Tracked' }, { id: 'untracked', label: 'Not tracked' }].map(f => (
-                        <button key={f.id} onClick={() => setInvStockFilter(f.id)} style={mdSegBtn(invStockFilter === f.id)}>{f.label}</button>
-                      ))}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button onClick={() => setStockFiltersOpen(true)} style={{
+                        flexShrink: 0, background: stockFilterActiveCount > 0 ? UI.goldFaint : 'transparent',
+                        border: `1px solid ${stockFilterActiveCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+                        borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+                        color: stockFilterActiveCount > 0 ? UI.gold : UI.inkSoft,
+                        fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                        display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        Filter{stockFilterActiveCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{stockFilterActiveCount}</span>}
+                      </button>
                     </div>
                     {!mainInventoryList.length ? (
                       <div style={mdEmptyHint}>Nothing matches this filter.</div>
@@ -1165,6 +1235,37 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <Btn onClick={saveStockSheet} style={{ width: '100%' }}>Save</Btn>
           </>
         )}
+      </Sheet>
+
+      {/* Stock filter sheet, mirrors the Exercises library's own filter
+          sheet (screens-lib.jsx) exactly: a GoldSectionLabel per axis, each
+          holding checkable Pills. */}
+      <Sheet open={stockFiltersOpen} onClose={() => setStockFiltersOpen(false)} title="Filter" titleColor="var(--accent)">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <MdGoldLabel>CATEGORY</MdGoldLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {MED_CATEGORIES.map(c => (
+                <Pill key={c.id} gold={stockFilterCategories.includes(c.id)} onClick={() => toggleStockFilterCategory(c.id)} style={{ cursor: 'pointer' }}>{c.label}</Pill>
+              ))}
+            </div>
+          </div>
+          <div>
+            <MdGoldLabel>PLAN</MdGoldLabel>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Pill gold={stockFilterInPlan === 'in'} onClick={() => toggleStockFilterInPlan('in')} style={{ cursor: 'pointer' }}>In a plan</Pill>
+              <Pill gold={stockFilterInPlan === 'out'} onClick={() => toggleStockFilterInPlan('out')} style={{ cursor: 'pointer' }}>Not in a plan</Pill>
+            </div>
+          </div>
+          <div>
+            <MdGoldLabel>STOCK</MdGoldLabel>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Pill gold={stockFilterTracked === 'tracked'} onClick={() => toggleStockFilterTracked('tracked')} style={{ cursor: 'pointer' }}>Tracked</Pill>
+              <Pill gold={stockFilterTracked === 'untracked'} onClick={() => toggleStockFilterTracked('untracked')} style={{ cursor: 'pointer' }}>Not tracked</Pill>
+            </div>
+          </div>
+          {stockFilterActiveCount > 0 && <Btn kind="ghost" onClick={clearStockFilters}>Clear all filters</Btn>}
+        </div>
       </Sheet>
 
       {/* Create/rename a plan */}

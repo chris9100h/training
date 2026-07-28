@@ -1924,7 +1924,7 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
 // whatever the client already has (see zane_medication_plans in
 // docs/database.md).
 function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store }) {
-  const coachMedPlans = (store?.medicationPlans || []).filter(p => !p.archived);
+  const coachMedPlans = (store?.medicationPlans || []).filter(p => !p.archived).sort((a, b) => a.name.localeCompare(b.name));
   const [clientMeds, setClientMeds] = useStateC(null);
   const [clientSlots, setClientSlots] = useStateC([]);
   // Which plan(s) a medication belongs to (migration 0221, many-to-many):
@@ -1957,7 +1957,7 @@ function ClientMedicationsTab({ coachingId, userId, clientId, clientName, store 
       // ClientNutritionTab's own comment calls out for meal plans.
       if (medsRes.error || slotsRes.error || logsRes.error || plansRes.error) { setClientMeds([]); setClientSlots([]); setClientLogs([]); setClientPlans([]); setClientError(true); return; }
       setClientError(false);
-      setClientMeds(medsRes.data || []);
+      setClientMeds((medsRes.data || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       setClientSlots(slotsRes.data || []);
       setClientLogs(logsRes.data || []);
       setClientPlans(plansRes.data || []);
