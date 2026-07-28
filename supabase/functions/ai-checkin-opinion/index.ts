@@ -128,7 +128,32 @@ function daysSince(dateStr: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(dateStr).getTime()) / 86400000));
 }
 
-const SYSTEM_PROMPT = `You are a casual, supportive fitness coach giving a quick read on a client's weekly check-in, exactly the way a real coach reviewing the same form would. You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally. When judging weight trend or direction, always weigh the week's average figure over a single day's number: day-to-day weight moves for reasons that have nothing to do with fat loss or gain, like water, sodium, or meal timing, only the average across days is a meaningful signal. A single day's number is only worth mentioning as color, never as the basis for a trend or a macro comment.
+// A generated opinion once claimed "up about two pounds" when the app's own
+// week-over-week card showed a 0.6 down: asking the model to subtract two raw
+// numbers itself is exactly the "recompute a number" failure the system
+// prompt otherwise tells it not to do. Same weekly-average preference as
+// trendDigestLine (never the single noisy day), computed here so the
+// arithmetic is always right and the model only has to restate it.
+function pickWeeklyWeight(r: Record<string, unknown> | null | undefined): number | null {
+  const v = r?.weight_avg_last_week ?? r?.weight_today;
+  const n = v != null && v !== '' ? Number(v) : NaN;
+  return isNaN(n) ? null : n;
+}
+
+function fmtWeightDelta(delta: number): string {
+  if (Math.abs(delta) < 0.3) return 'flat';
+  return `${delta > 0 ? 'up' : 'down'} ${Math.abs(delta).toFixed(1)}`;
+}
+
+function fmtWeightSeriesTrend(weights: number[]): string {
+  if (weights.length < 2) return 'not enough weeks logged yet for a trend read';
+  const delta = weights[weights.length - 1] - weights[0];
+  return Math.abs(delta) < 0.3
+    ? `flat over the last ${weights.length} logged weeks`
+    : `${delta > 0 ? 'up' : 'down'} ${Math.abs(delta).toFixed(1)} over the last ${weights.length} logged weeks`;
+}
+
+const SYSTEM_PROMPT = `You are a casual, supportive fitness coach giving a quick read on a client's weekly check-in, exactly the way a real coach reviewing the same form would. You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally. When judging weight trend or direction, always weigh the week's average figure over a single day's number: day-to-day weight moves for reasons that have nothing to do with fat loss or gain, like water, sodium, or meal timing, only the average across days is a meaningful signal. A single day's number is only worth mentioning as color, never as the basis for a trend or a macro comment. Any weight trend or delta you are given (up, down, or flat, by how much) has already been computed correctly from the underlying numbers, just restate it, never subtract or re-derive it yourself. Weight numbers are given exactly as the client logs them, in whichever unit they use; you are not told which, so never state a specific unit for weight (no kg, no lbs, no pounds), just the number and the direction.
 
 You are NOT a doctor. Never give medical advice, never diagnose or speculate about a medical condition, never comment on medication. Stick to training, nutrition, recovery, and how this week compares to recent ones.
 
@@ -158,6 +183,20 @@ function buildUserPrompt(
   if (earlierWeeks.length) {
     lines.push('', 'EARLIER WEEKS (oldest to newest, trend only, for judging whether the current macro target is working):',
       ...earlierWeeks.map(w => trendDigestLine(w.week_start, w.responses || {})));
+  }
+  const thisWeekWeight = pickWeeklyWeight(responses);
+  const lastWeekWeight = pickWeeklyWeight(priorResponses);
+  const weightSeries = [...earlierWeeks.map(w => pickWeeklyWeight(w.responses)), lastWeekWeight, thisWeekWeight]
+    .filter((w): w is number => w != null);
+  const trendLines: string[] = [];
+  if (thisWeekWeight != null && lastWeekWeight != null) {
+    trendLines.push(`  Week-over-week: ${fmtWeightDelta(thisWeekWeight - lastWeekWeight)} from last week (this week ${thisWeekWeight}, last week ${lastWeekWeight}).`);
+  }
+  if (weightSeries.length >= 2) {
+    trendLines.push(`  Overall: ${fmtWeightSeriesTrend(weightSeries)}.`);
+  }
+  if (trendLines.length) {
+    lines.push('', 'PRECOMPUTED WEIGHT TREND (already correct, restate it, never recompute or re-derive it yourself):', ...trendLines);
   }
   if (macros) {
     const age = macros.set_at ? ` (in place for ${daysSince(macros.set_at)} days)` : '';
