@@ -17,26 +17,33 @@
      scoped to one specific (medication, plan) pair via its own
      medicationPlanId), so a coach-prescribed cycle plan can prescribe a
      different dose/timing for a medication than the user's own separate
-     plan for that same product. A plan's own "Add medication" is a picker
-     over medications not already IN THIS plan (any medication is eligible,
-     whether or not it's already a member of some other plan), never a
-     create form, so removing a medication from a plan, or deleting the
-     plan itself, never destroys the medication, its OTHER plans'
-     schedules, or its log history, only this plan's own membership + this
-     plan's own schedule slots for it. A plan also has its own `active`
-     toggle (default on): only an active plan's schedule slots fire into
-     the Timeline, several plans can be active at once by design (no single
-     active pointer, see zane_medication_plans in docs/database.md). A
-     schedule slot's own weekday/hour/dose fields (the "Add time"
-     sub-sheet) are the one place time itself is entered; there is no
-     separate per-slot pause toggle (removed, found confusing): the only
-     way to stop a dose is removing the medication from that plan.
-     schedMed's own titleRight button opens "Move to plan" (moveTargetPlans/
-     moveMedicationToPlan): reassigns the existing membership row's
-     medicationPlanId plus every one of this plan's own slots for it to a
-     different plan of the same bucket, so reorganizing (e.g. peptides
-     mixed into a Gear plan moved out into their own Peptides plan) carries
-     the whole schedule over instead of the user rebuilding it by hand.
+     plan for that same product. A plan's own "Add medication" is a
+     multi-pick picker (mirrors ExercisePicker, screens-schedule.jsx: tap
+     toggles a row into addPlanSelected instead of attaching immediately, a
+     bottom "Add N" button confirms the whole batch, its own inline search +
+     category pills narrow the list) over medications not already IN THIS
+     plan (any medication is eligible, whether or not it's already a member
+     of some other plan), never a create form, so removing a medication from
+     a plan, or deleting the plan itself, never destroys the medication, its
+     OTHER plans' schedules, or its log history, only this plan's own
+     membership + this plan's own schedule slots for it. A plan also has its
+     own `active` toggle (default on): only an active plan's schedule slots
+     fire into the Timeline, several plans can be active at once by design
+     (no single active pointer, see zane_medication_plans in
+     docs/database.md). A schedule slot's own weekday/hour/dose fields (the
+     "Add time" sub-sheet) are the one place time itself is entered; there
+     is no separate per-slot pause toggle (removed, found confusing): the
+     only way to stop a dose is removing the medication from that plan,
+     which schedMed's own "Remove from plan" button does directly (the
+     other route, medSheet's per-membership list in Inventory > Medications,
+     stays too, but that's several taps from where the user is actually
+     looking at this plan's schedule). schedMed's titleRight button opens
+     "Move to plan" (moveTargetPlans/moveMedicationToPlan) instead: reassigns
+     the existing membership row's medicationPlanId plus every one of this
+     plan's own slots for it to a different plan of the same bucket, so
+     reorganizing (e.g. peptides mixed into a Gear plan moved out into their
+     own Peptides plan) carries the whole schedule over instead of the user
+     rebuilding it by hand.
    - Inventory: two sub-tabs, Medications first/default and Stock second,
      mirroring the Food Shopping List's own Shopping List/Inventory split.
      Both share one search+filter row (renderSearchAndFilterRow: a name/
@@ -480,22 +487,62 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     [medications, viewedPlanMedIds],
   );
 
-  // "Add medication" from within a plan: pick an existing medication not
-  // already a member of THIS plan (any medication is eligible, whether or
-  // not it's already a member of some other plan, see the header comment),
-  // or jump into medSheet to create a brand new one. Attaching only ever
-  // inserts a membership row, it never creates the medication itself, so a
-  // plan's own "Add medication" is always a picker, never a create form.
+  // "Add medication" from within a plan: pick one or more existing
+  // medications not already a member of THIS plan (any medication is
+  // eligible, whether or not it's already a member of some other plan, see
+  // the header comment), or jump into medSheet to create a brand new one.
+  // Attaching only ever inserts membership rows, it never creates the
+  // medication itself, so a plan's own "Add medication" is always a picker,
+  // never a create form. Multi-pick + its own search/category filter mirror
+  // ExercisePicker (screens-schedule.jsx) exactly: tap toggles a row into
+  // `addPlanSelected` (gold highlight + check-circle) instead of attaching
+  // immediately, a bottom "Add N" button confirms the whole batch at once.
   const [addToPlanOpen, setAddToPlanOpen] = useStateMd(false);
+  const [addPlanSearch, setAddPlanSearch] = useStateMd('');
+  const [addPlanCategories, setAddPlanCategories] = useStateMd([]); // MED_CATEGORIES ids
+  const [addPlanSelected, setAddPlanSelected] = useStateMd([]); // medication ids
   const availableToAddMeds = useMemoMd(
     () => activeMedications.filter(m => !viewedPlanMedIds.has(m.id)).sort((a, b) => a.name.localeCompare(b.name)),
     [activeMedications, viewedPlanMedIds],
   );
-  function attachMedicationToPlan(med) {
+  // Search/category narrow availableToAddMeds further, same relationship as
+  // inventoryList -> filteredInventoryBase for the Inventory tab's own
+  // search+filter: kept separate so the "every medication is already in
+  // this plan" empty state (availableToAddMeds itself empty) reads
+  // differently from "your search/filter matched nothing" (this one empty
+  // but availableToAddMeds isn't).
+  const filteredAvailableToAddMeds = useMemoMd(() => {
+    const ql = addPlanSearch.trim().toUpperCase();
+    return availableToAddMeds.filter(m => {
+      const matchSearch = !ql || m.name.toUpperCase().includes(ql) || (m.brand || '').toUpperCase().includes(ql);
+      const matchCategory = addPlanCategories.length === 0 || addPlanCategories.includes(m.category);
+      return matchSearch && matchCategory;
+    });
+  }, [availableToAddMeds, addPlanSearch, addPlanCategories]);
+  function toggleAddPlanCategory(c) {
+    setAddPlanCategories(cats => cats.includes(c) ? cats.filter(x => x !== c) : [...cats, c]);
+  }
+  function toggleAddPlanSelect(id) {
+    setAddPlanSelected(sel => sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
+  }
+  // Fresh search/filter/selection every time the sheet is opened, so a
+  // previous visit's narrowed-down search never silently carries into the
+  // next one.
+  function openAddToPlan() {
+    setAddPlanSearch(''); setAddPlanCategories([]); setAddPlanSelected([]);
+    setAddToPlanOpen(true);
+  }
+  function confirmAddToPlan() {
+    if (!addPlanSelected.length) return;
+    const nowISO = new Date().toISOString();
     setStore(s => ({
       ...s,
-      medicationPlanItems: [...(s.medicationPlanItems || []), { id: LB.uid(), medicationPlanId: viewedPlanId, medicationId: med.id, createdAt: new Date().toISOString() }],
+      medicationPlanItems: [
+        ...(s.medicationPlanItems || []),
+        ...addPlanSelected.map(medId => ({ id: LB.uid(), medicationPlanId: viewedPlanId, medicationId: medId, createdAt: nowISO })),
+      ],
     }));
+    setAddToPlanOpen(false);
   }
   // Shared row for a medication list: the plan-detail view opens the
   // schedule-only sheet (mode: 'schedule', planId: the plan being viewed),
@@ -617,7 +664,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // A medication is only ever created with zero plan memberships: creating
   // one lives exclusively in the Inventory tab's Medications sub-tab, a
   // plan's own "Add medication" only ever attaches an existing one (see
-  // attachMedicationToPlan), never creates a fresh one.
+  // confirmAddToPlan), never creates a fresh one.
   function openMedSheet(med) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
@@ -676,16 +723,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // schedules for the same medication and all log history stay untouched.
   // No longer "nothing is actually lost" like the old single-plan version:
   // a plan-specific schedule genuinely goes with it now, so this needs a
-  // confirm like Delete does. Doesn't close medSheet: it now shows a list
-  // of memberships, removing one should leave the sheet open on the rest.
+  // confirm like Delete does. Doesn't close medSheet itself: it now shows a
+  // list of memberships, removing one should leave the sheet open on the
+  // rest. Returns true/false (not just implicit undefined either way) so
+  // schedMed's own "Remove from plan" button (schedMed has nothing left to
+  // show once its medication leaves the plan being viewed) can tell an
+  // actual removal apart from the user cancelling the confirm.
   async function removeMedicationFromPlan(med, planId) {
     const planName = medicationPlans.find(p => p.id === planId)?.name || 'this plan';
-    if (!await confirm(`Remove "${med.name}" from "${planName}"? Its schedule in this plan goes with it; the medication itself, any other plans it's in, and its log history all stay.`, { title: 'Remove from plan', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm(`Remove "${med.name}" from "${planName}"? Its schedule in this plan goes with it; the medication itself, any other plans it's in, and its log history all stay.`, { title: 'Remove from plan', ok: 'Remove', cancel: 'Cancel', danger: true })) return false;
     setStore(s => ({
       ...s,
       medicationPlanItems: (s.medicationPlanItems || []).filter(it => !(it.medicationId === med.id && it.medicationPlanId === planId)),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => !(sl.medicationId === med.id && sl.medicationPlanId === planId)),
     }));
+    return true;
   }
 
   // Medication currently open for schedule editing only (name/unitLabel as
@@ -1187,7 +1239,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     flex:1 halves its width, the full label wrapped to two
                     lines there. Unambiguous in context, the screen is
                     already titled with the plan and lists medications. */}
-                <Btn onClick={() => setAddToPlanOpen(true)} style={{ flex: 1 }}>
+                <Btn onClick={openAddToPlan} style={{ flex: 1 }}>
                   <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add
                 </Btn>
                 {isCoach && <Btn kind="ghost" onClick={() => setCoachMenuOpen(true)} style={{ flex: 1 }}>Coach</Btn>}
@@ -1373,22 +1425,54 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Add an existing medication (from anywhere, whether or not it's
+      {/* Add one or more existing medications (from anywhere, whether or not
           already in some other plan too) to the viewed plan. Creating a new
           medication only ever happens in the Inventory tab's Medications
-          sub-tab, never from here (see openMedSheet). */}
+          sub-tab, never from here (see openMedSheet). Search + category
+          pills sit inline under the title, mirroring ExercisePicker
+          (screens-schedule.jsx) rather than the Inventory tab's separate
+          Filter sheet: this is already its own single-purpose picker sheet,
+          nesting another sheet inside it would be one layer too many. */}
       <Sheet open={addToPlanOpen} onClose={() => setAddToPlanOpen(false)} title="Add medication" titleColor="var(--accent)">
         {availableToAddMeds.length === 0 ? (
           <div style={mdEmptyHint}>Every medication you have is already in this plan. Create a new one in the Medications tab first.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {availableToAddMeds.map(m => (
-              <button key={m.id} onClick={() => { attachMedicationToPlan(m); setAddToPlanOpen(false); }} style={{ ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left' }}>
-                <span style={mdEntryName}>{m.name}</span>
-                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
-              </button>
-            ))}
-          </div>
+          <>
+            <Field label="">
+              <TextInput value={addPlanSearch} onChange={setAddPlanSearch} placeholder="Search…" />
+            </Field>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12, marginBottom: 12 }}>
+              {MED_CATEGORIES.map(c => (
+                <Pill key={c.id} gold={addPlanCategories.includes(c.id)} onClick={() => toggleAddPlanCategory(c.id)} style={{ cursor: 'pointer' }}>{c.label}</Pill>
+              ))}
+            </div>
+            {filteredAvailableToAddMeds.length === 0 ? (
+              <div style={mdEmptyHint}>Nothing matches this filter.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {filteredAvailableToAddMeds.map(m => {
+                  const isSel = addPlanSelected.includes(m.id);
+                  return (
+                    <button key={m.id} onClick={() => toggleAddPlanSelect(m.id)} style={{
+                      ...mdQuickRowInner, display: 'flex', justifyContent: 'space-between', textAlign: 'left',
+                      background: isSel ? UI.goldFaint : UI.bgInset,
+                      border: `var(--hair-width) solid ${isSel ? UI.goldSoft : UI.hair}`,
+                    }}>
+                      <span style={{ ...mdEntryName, color: isSel ? UI.gold : UI.ink }}>{m.name}</span>
+                      {isSel
+                        ? <i className="fa-solid fa-circle-check" style={{ fontSize: 15, color: UI.gold }} />
+                        : <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {addPlanSelected.length > 0 && (
+              <Btn onClick={confirmAddToPlan} style={{ width: '100%', marginTop: 12 }}>
+                Add {addPlanSelected.length} medication{addPlanSelected.length === 1 ? '' : 's'}
+              </Btn>
+            )}
+          </>
         )}
       </Sheet>
 
@@ -1480,6 +1564,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               </div>
             )}
             <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
+            {/* The only other place this same action was reachable from is
+                medSheet's own per-membership list (Inventory > Medications),
+                several taps away from here; this is the direct route from
+                where the user is actually looking at this plan's schedule.
+                Awaits removeMedicationFromPlan's own confirm() and only
+                closes schedMed if it actually went through (its return
+                value distinguishes a real removal from a cancel), since a
+                cancelled confirm should leave this sheet exactly as-is. */}
+            <Btn kind="ghost" onClick={async () => {
+              const med = medications.find(m => m.id === schedMed.id);
+              if (await removeMedicationFromPlan(med, schedMed.medicationPlanId)) closeSchedMed();
+            }} style={{ width: '100%', marginTop: 8, color: UI.danger }}>
+              <i className="fa-solid fa-trash" style={{ marginRight: 8 }} />Remove from plan
+            </Btn>
           </>
         )}
       </Sheet>
