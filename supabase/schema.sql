@@ -260,6 +260,8 @@ CREATE TABLE public.zane_user_settings (
   macro_calc jsonb,                          -- 0205: last inputs of the target estimator (prefill only; shape in docs/database.md)
   meal_windows jsonb,                        -- 0206: six ascending start hours for the food tracker meal categories, null = defaults
   show_health_tab boolean NOT NULL DEFAULT false,
+  show_water_tab boolean NOT NULL DEFAULT false,   -- 0222: independent of show_health_tab, see docs/database.md
+  show_food_tab boolean NOT NULL DEFAULT false,    -- 0222
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,

@@ -445,6 +445,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     macro_calc: sett.macroCalc ?? null,
     meal_windows: sett.mealWindows ?? null,
     show_health_tab: sett.showHealthTab ?? false,
+    show_water_tab: sett.showWaterTab ?? false,
+    show_food_tab: sett.showFoodTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
     pin_all_notes: sett.pinAllNotes ?? false,
@@ -1582,6 +1584,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         macroCalc: sett.macro_calc ?? null,
         mealWindows: sett.meal_windows ?? null,
         showHealthTab: sett.show_health_tab ?? false,
+        showWaterTab: sett.show_water_tab ?? false,
+        showFoodTab: sett.show_food_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
         tempUnit: sett.temp_unit ?? null,
@@ -2267,6 +2271,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
+    prev.settings?.showWaterTab           !== next.settings?.showWaterTab           ||
+    prev.settings?.showFoodTab            !== next.settings?.showFoodTab            ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
@@ -2339,6 +2345,8 @@ async function syncStore(prev, next, userId) {
       macro_calc: next.settings?.macroCalc ?? null,
       meal_windows: next.settings?.mealWindows ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
+      show_water_tab: next.settings?.showWaterTab ?? false,
+      show_food_tab: next.settings?.showFoodTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       temp_unit: next.settings?.tempUnit ?? null,

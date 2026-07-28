@@ -1952,26 +1952,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         </div>
       </SettingsSheet>
 
-      {/* ══ Health Sheet: top-level hub, three sub-categories below the
-          Health tab toggle ══ */}
-      <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health">
+      {/* ══ Health & Nutrition Sheet: top-level hub, four independently
+          toggleable sub-categories. Each has its OWN "Show tab" switch (see
+          each sub-sheet below) instead of one bundled switch that used to
+          turn Health, Water and Food on or off together. ══ */}
+      <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health & Nutrition">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <Row label="Health tab" first>
-            <Toggle on={!!store.settings?.showHealthTab} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: !s.settings?.showHealthTab } }))} />
-          </Row>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+            These four share one tab slot in the nav bar. Turn on whichever you actually use, any combination works: tap the slot to cycle through them, or long-press it to jump straight to one.
           </div>
-
-          <div style={{ marginTop: 16 }}>
-            <NavRow label="Health" first onTap={() => setHealthSubSheet(true)} />
-            <NavRow label="Water" onTap={() => setWaterSubSheet(true)} />
-            <NavRow label="Food" onTap={() => setFoodSubSheet(true)} />
-            <NavRow label="Medications" onTap={() => setMedsSubSheet(true)} />
-            {(store.statusPeriods || []).length > 0 && (
-              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
-            )}
-          </div>
+          <NavRow label="Health" first hint={store.settings?.showHealthTab ? 'On' : 'Off'} onTap={() => setHealthSubSheet(true)} />
+          <NavRow label="Water" hint={store.settings?.showWaterTab ? 'On' : 'Off'} onTap={() => setWaterSubSheet(true)} />
+          <NavRow label="Food" hint={store.settings?.showFoodTab ? 'On' : 'Off'} onTap={() => setFoodSubSheet(true)} />
+          <NavRow label="Medications" hint={store.settings?.medsEnabled ? 'On' : 'Off'} onTap={() => setMedsSubSheet(true)} />
+          {(store.statusPeriods || []).length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <NavRow label="Sick & Vacation periods" first hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
           </div>
@@ -1981,9 +1979,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Health › Health (glucose/body temp/cards) ══ */}
       <SettingsSheet open={healthSubSheet} onClose={() => setHealthSubSheet(false)} title="Health">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
-          <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
-          <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+          <Row label="Show tab" first>
+            <Toggle on={!!store.settings?.showHealthTab} onToggle={() => patchSettings({ showHealthTab: !store.settings?.showHealthTab })} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Pin this to the shared tab slot to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
+            <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
+            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSubSheet(false)}>Done</Btn>
           </div>
@@ -1994,9 +2000,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           settings sheet uses (screens-water.jsx), so there is one source of
           truth for these fields rather than a second copy drifting apart. ══ */}
       <SettingsSheet open={waterSubSheet} onClose={() => setWaterSubSheet(false)} title="Water">
-        <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
-          onClose={() => setWaterSubSheet(false)}
-          onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Show tab" first>
+            <Toggle on={!!store.settings?.showWaterTab} onToggle={() => patchSettings({ showWaterTab: !store.settings?.showWaterTab })} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
+            Pin this to the shared tab slot to log drinks toward a daily goal.
+          </div>
+          <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
+            onClose={() => setWaterSubSheet(false)}
+            onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+        </div>
       </SettingsSheet>
 
       {/* ══ Health › Water › Drinks & coffee (push off Water, same as off the
@@ -2009,6 +2023,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Health › Food (meal planning/reminders) ══ */}
       <SettingsSheet open={foodSubSheet} onClose={() => setFoodSubSheet(false)} title="Food">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Show tab" first>
+            <Toggle on={!!store.settings?.showFoodTab} onToggle={() => patchSettings({ showFoodTab: !store.settings?.showFoodTab })} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
+            Pin this to the shared tab slot to log meals and macros.
+          </div>
           <Row label="Meal planning" first>
             <Toggle on={!!store.settings?.planMode} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, planMode: !s.settings?.planMode } }))} />
           </Row>
@@ -2088,11 +2108,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Health › Medications ══ */}
       <SettingsSheet open={medsSubSheet} onClose={() => setMedsSubSheet(false)} title="Medications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <Row label="Medications" first>
-            <Toggle on={!!store.settings?.medsEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, medsEnabled: !s.settings?.medsEnabled } }))} />
+          <Row label="Show tab" first>
+            <Toggle on={!!store.settings?.medsEnabled} onToggle={() => patchSettings({ medsEnabled: !store.settings?.medsEnabled })} />
           </Row>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Adds a Medications tracker to the Health tab slot (cycles Health → Water → Food → Medications). Off by default, not everyone wants to deal with medications.
+            Pin this to the shared tab slot to track medications, vitamins & supplements. Off by default, not everyone wants to deal with medications.
           </div>
           {store.settings?.medsEnabled && (
             <div style={{ marginTop: 16 }}>
