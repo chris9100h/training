@@ -1954,7 +1954,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
 
   if (!open) return null;
   return (
-    <Screen>
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Weekly Prep" sub="Pillbox" onBack={onClose} right={
         <button onClick={() => setSlotsSheetOpen(true)} aria-label="Configure pillbox" style={mdTopAddBtn}>
           <i className="fa-solid fa-gear" style={{ fontSize: 14 }} />
