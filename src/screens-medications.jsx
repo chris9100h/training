@@ -12,7 +12,11 @@
      same BracketFrame-plus-ring shape as the Water tracker's own daily hero
      (screens-water.jsx): a taken/due ring for whichever day curDate is
      currently on, counting only entries tied to a real schedule slot (an
-     ad-hoc extra dose was never "due" in the first place).
+     ad-hoc extra dose was never "due" in the first place). An hour row with
+     more than one still-due dose gets a second small button under its own
+     "+" (checkAllHour): several doses at the same hour are usually taken
+     together, so a single confirm marks every still-due one in that hour as
+     taken instead of checking each one off by hand.
    - Schedule: named plans (My Plans / Client Templates for a coach, like
      FoodTemplateScreen). A medication's membership in a plan is many-to-many
      via zane_medication_plan_items (store.medicationPlanItems, migration
@@ -483,6 +487,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }, [byHour]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
+  }
+  // Bulk "mark as taken" for a whole hour row: several doses at the same
+  // time are usually swallowed together, so checking each one off one at a
+  // time is pure friction. One-way (like toggleTaken it flips planned to
+  // false, never back to true): the individual checkboxes stay the way to
+  // undo a single one afterward. Preview rows have no real log yet (see the
+  // header comment on mdMaterializeSlotEntry) so they're never included;
+  // already-taken entries are skipped rather than re-included, both for the
+  // confirm copy's own count and so tapping this twice is a harmless no-op.
+  async function checkAllHour(hour, entries) {
+    const stillDue = entries.filter(e => !e.isPreview && e.planned);
+    if (!stillDue.length) return;
+    if (!await confirm(`Mark all ${stillDue.length} doses at ${String(hour).padStart(2, '0')}:00 as taken?`, { title: 'Mark all as taken', ok: 'Mark all', cancel: 'Cancel' })) return;
+    const ids = new Set(stillDue.map(e => e.id));
+    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => ids.has(l.id) ? { ...l, planned: false } : l) }));
   }
   async function deleteLogEntry(entry) {
     if (!await confirm('Remove this entry from the timeline?', { title: 'Delete entry', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
@@ -1213,9 +1232,22 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                             </div>
                           )) : <div style={{ flex: 1 }} />}
                         </div>
-                        <button onClick={() => openLogSheet(h)} aria-label={`Log a dose at ${String(h).padStart(2, '0')}:00`} style={mdHourAddBtn(isNow)} disabled={!activeMedications.length}>
-                          <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                          <button onClick={() => openLogSheet(h)} aria-label={`Log a dose at ${String(h).padStart(2, '0')}:00`} style={mdHourAddBtn(isNow)} disabled={!activeMedications.length}>
+                            <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+                          </button>
+                          {/* Only once there's more than one dose AND at
+                              least one is still due: several at the same
+                              hour are usually taken together, but the
+                              shortcut has nothing left to do (and nothing to
+                              confirm) once they're all already checked off,
+                              see checkAllHour's own guard. */}
+                          {es.filter(e => !e.isPreview && e.planned).length > 1 && (
+                            <button onClick={() => checkAllHour(h, es)} aria-label={`Mark all doses at ${String(h).padStart(2, '0')}:00 as taken`} style={mdHourAddBtn(isNow)}>
+                              <i className="fa-solid fa-check-double" style={{ fontSize: 11 }} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
