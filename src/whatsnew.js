@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.680',
+    date: '2026-07-28',
+    title: 'Never miss a dose again 💊',
+    items: [
+      "💊 Medications: because \"I'll just remember when I pinned\" was never a real system. Track prescriptions, vitamins, gear and peptides all in one place, right alongside Health, Water and Food. Settings → Health & Nutrition → Medications turns it on, set a schedule (days, time, how long it runs), and a Timeline shows what's due and what's already taken, hour by hour, just like the Food Log. Track stock so you know when to reorder. And unlike everywhere else in the app, plans don't fight over one active slot: run a Vitamins plan, a Gear plan and a Peptides plan all at once, each with its own schedule, the same product can even sit in more than one with a different dose in each.",
+      "📦 Keep tabs on what you've actually got: the Shopping List has a Stock tab where you set how much of something you have and its package size, then it counts down automatically as you log it in Food. Cross a threshold and a Running Low heads-up shows up so you're not the one finding out at the worst moment. It also just got sharper: instead of a rough day-count guess, it now works out your real remaining stock the moment you open the tab, so a 20kg bag that lasts way longer than a month finally adds up correctly too.",
+      "🧭 Settings got tidied up: Health is now Health & Nutrition, and Health, Water, Food and Medications each get their own on/off switch, mix and match however you actually use the app. The Food and Water settings screens themselves got shorter too: instead of one long scroll, a short menu opens straight to the section you tapped.",
+      "✨ Smaller fixes: sheets across the app open calmly now instead of popping the keyboard straight up, and copying a planned meal onto today no longer accidentally marks it as already eaten.",
+    ],
+  },
+  {
     id: 'v2.678',
     date: '2026-07-27',
     title: 'Never wonder what to buy again 🛒',
