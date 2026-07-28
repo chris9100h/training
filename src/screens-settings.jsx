@@ -612,6 +612,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [waterSubSheet, setWaterSubSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
+  const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
+  const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   // Food tracker meal boundaries (migration 0206). Resolved rather than read
   // raw, so an unset setting shows the built-in defaults and the editor always
@@ -1737,7 +1739,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
           <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
-          <NavRow label="Health" onTap={() => setHealthSheet(true)} />
+          <NavRow label="Health & Nutrition" onTap={() => setHealthSheet(true)} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
           <NavRow label="Appearance" onTap={() => setAppearanceSheet(true)} />
@@ -1985,11 +1987,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Pin this to the shared tab slot to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
-          <div style={{ marginTop: 16 }}>
-            <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
-            <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
-            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
-          </div>
+          {store.settings?.showHealthTab && (
+            <div style={{ marginTop: 16 }}>
+              <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
+              <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
+              <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSubSheet(false)}>Done</Btn>
           </div>
@@ -2007,9 +2011,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
             Pin this to the shared tab slot to log drinks toward a daily goal.
           </div>
-          <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
-            onClose={() => setWaterSubSheet(false)}
-            onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+          {store.settings?.showWaterTab && (
+            <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
+              onClose={() => setWaterSubSheet(false)}
+              onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+          )}
         </div>
       </SettingsSheet>
 
@@ -2020,7 +2026,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           onClose={() => { setWaterDrinksConfigSheet(false); setWaterSubSheet(true); }} />
       </SettingsSheet>
 
-      {/* ══ Health › Food (meal planning/reminders) ══ */}
+      {/* ══ Health › Food: top-level hub, drills into Meal Planning and Meal
+          Times rather than one long flat list of unrelated toggles. ══ */}
       <SettingsSheet open={foodSubSheet} onClose={() => setFoodSubSheet(false)} title="Food">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Show tab" first>
@@ -2029,19 +2036,26 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
             Pin this to the shared tab slot to log meals and macros.
           </div>
+          {store.settings?.showFoodTab && (
+            <>
+              <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
+              <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+            </>
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFoodSubSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Food › Meal Planning ══ */}
+      <SettingsSheet open={mealPlanningSheet} onClose={() => setMealPlanningSheet(false)} title="Meal Planning">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Meal planning" first>
             <Toggle on={!!store.settings?.planMode} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, planMode: !s.settings?.planMode } }))} />
           </Row>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
-          </div>
-          <div style={{ marginTop: 16 }}>
-            <Row label="Hide meal categories" first>
-              <Toggle on={!!store.settings?.hideFoodCategories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, hideFoodCategories: !s.settings?.hideFoodCategories } }))} />
-            </Row>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-              Show the Food Tracker's daily timeline as one flat hour list instead of grouping it under Breakfast/Lunch/Dinner header cards. Every hour still has its own "+" to log or plan something.
-            </div>
           </div>
           {store.settings?.planMode && (
             <div style={{ marginTop: 16 }}>
@@ -2051,7 +2065,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   // Push not active, so send them to the push sheet first, same
                   // as the training reminder toggle does, instead of enabling a
                   // reminder that can never be delivered.
-                  if (next && !pushEnabled) { setFoodSubSheet(false); setPushSheet(true); return; }
+                  if (next && !pushEnabled) { setMealPlanningSheet(false); setPushSheet(true); return; }
                   setStore(s => ({ ...s, settings: { ...s.settings, mealReminderEnabled: next } }));
                 }} />
               </Row>
@@ -2060,6 +2074,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             </div>
           )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setMealPlanningSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Food › Meal Times: the display toggle and the time
+          boundaries live together, "hide categories" is really "stop
+          grouping by these very boundaries". ══ */}
+      <SettingsSheet open={mealTimesSheet} onClose={() => setMealTimesSheet(false)} title="Meal Times">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Hide meal categories" first>
+            <Toggle on={!!store.settings?.hideFoodCategories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, hideFoodCategories: !s.settings?.hideFoodCategories } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Show the Food Tracker's daily timeline as one flat hour list instead of grouping it under Breakfast/Lunch/Dinner header cards. Every hour still has its own "+" to log or plan something.
+          </div>
           {/* Meal-time boundaries (migration 0206). These used to be fixed at
               00:00-09:00 Breakfast and so on, which only fits a conventional
               eating day: shift work, a late household or any fasting window
@@ -2067,10 +2098,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               Editing START hours (each meal runs to the next one's start) is
               what keeps a gap or an overlap unrepresentable. Breakfast is
               pinned to 00:00 so the day is always covered end to end. */}
-          <div style={{ marginTop: 24 }}>
-            <div className="label" style={{ marginBottom: 8 }}>Meal times</div>
+          <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.5 }}>
-              When each meal starts in the Food Tracker's timeline. Each one runs until the next begins.
+              When each meal starts. Each one runs until the next begins.
             </div>
             {mealCats.map((cat, i) => (
               <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
@@ -2100,7 +2130,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             )}
           </div>
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setFoodSubSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setMealTimesSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
