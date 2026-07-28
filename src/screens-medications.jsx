@@ -1542,9 +1542,27 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           slot, there's nothing else here to persist. */}
       <Sheet open={!!schedMed && !slotDraft} onClose={closeSchedMed} title={schedMed?.name || 'Schedule'} titleColor="var(--accent)"
         titleRight={schedMed && (
-          <button onClick={() => setMovePlanOpen(true)} aria-label="Move to another plan" style={mdIconBtn(30)}>
-            <i className="fa-solid fa-right-left" style={{ fontSize: 13 }} />
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => setMovePlanOpen(true)} aria-label="Move to another plan" style={mdIconBtn(30)}>
+              <i className="fa-solid fa-right-left" style={{ fontSize: 13 }} />
+            </button>
+            {/* Small icon next to Move rather than the earlier full-width
+                button below Add time: the only other place this same action
+                was reachable from is medSheet's own per-membership list
+                (Inventory > Medications), several taps away from here, so
+                this is the direct route from where the user is actually
+                looking at this plan's schedule. Awaits
+                removeMedicationFromPlan's own confirm() and only closes
+                schedMed if it actually went through (its return value
+                distinguishes a real removal from a cancel), since a
+                cancelled confirm should leave this sheet exactly as-is. */}
+            <button onClick={async () => {
+              const med = medications.find(m => m.id === schedMed.id);
+              if (await removeMedicationFromPlan(med, schedMed.medicationPlanId)) closeSchedMed();
+            }} aria-label="Remove from plan" style={{ ...mdIconBtn(30), color: UI.danger }}>
+              <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
+            </button>
+          </div>
         )}
       >
         {schedMed && (
@@ -1564,20 +1582,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               </div>
             )}
             <Btn kind="ghost" onClick={() => openSlotDraft(null)} style={{ width: '100%' }}><i className="fa-solid fa-plus" style={{ marginRight: 8 }} />Add time</Btn>
-            {/* The only other place this same action was reachable from is
-                medSheet's own per-membership list (Inventory > Medications),
-                several taps away from here; this is the direct route from
-                where the user is actually looking at this plan's schedule.
-                Awaits removeMedicationFromPlan's own confirm() and only
-                closes schedMed if it actually went through (its return
-                value distinguishes a real removal from a cancel), since a
-                cancelled confirm should leave this sheet exactly as-is. */}
-            <Btn kind="ghost" onClick={async () => {
-              const med = medications.find(m => m.id === schedMed.id);
-              if (await removeMedicationFromPlan(med, schedMed.medicationPlanId)) closeSchedMed();
-            }} style={{ width: '100%', marginTop: 8, color: UI.danger }}>
-              <i className="fa-solid fa-trash" style={{ marginRight: 8 }} />Remove from plan
-            </Btn>
           </>
         )}
       </Sheet>
