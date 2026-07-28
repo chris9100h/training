@@ -65,6 +65,7 @@ const EXCLUDED = {
   zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',
+  zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
 };
 
 // Columns that legitimately never round-trip.

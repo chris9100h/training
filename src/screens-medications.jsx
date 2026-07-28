@@ -410,6 +410,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
   const [screenTab, setScreenTab] = useStateMd('timeline'); // 'timeline' | 'schedule' | 'inventory'
+  const [weeklyPrepOpen, setWeeklyPrepOpen] = useStateMd(false);
 
   const medications = store.medications || [];
   // Alphabetical at the source: every list/picker/dropdown built from this
@@ -734,6 +735,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function snapMedSheet(d) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
+      excludeFromPillbox: d.excludeFromPillbox,
     });
   }
   // Every plan this medication currently belongs to, for medSheet's own
@@ -752,8 +754,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
+      excludeFromPillbox: !!med.excludeFromPillbox,
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
+      excludeFromPillbox: false,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -777,14 +781,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         medications: (s.medications || []).map(m => m.id !== medSheet.id ? m : {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
-          packageSize, updatedAt: nowISO,
+          packageSize, excludeFromPillbox: !!medSheet.excludeFromPillbox, updatedAt: nowISO,
         }),
       }));
     } else {
       const newMed = {
         id: LB.uid(), name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
-        stockBaseline: null, stockSetAt: null, archived: false, createdAt: nowISO, updatedAt: nowISO,
+        stockBaseline: null, stockSetAt: null, archived: false, excludeFromPillbox: !!medSheet.excludeFromPillbox,
+        createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
     }
@@ -1174,9 +1179,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     <Screen>
       <TopBar title="Medications" onBack={() => go({ name: 'home' })} right={
         screenTab === 'timeline' && (
-          <button onClick={() => openLogSheet()} aria-label="Log a dose" style={mdTopAddBtn} disabled={!activeMedications.length}>
-            <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setWeeklyPrepOpen(true)} aria-label="Weekly Prep" style={mdTopAddBtn}>
+              <i className="fa-solid fa-calendar-week" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={() => openLogSheet()} aria-label="Log a dose" style={mdTopAddBtn} disabled={!activeMedications.length}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+          </div>
         )
       } />
       {confirmEl}
@@ -1657,6 +1667,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
+            <div style={{ marginBottom: 14 }}>
+              <Row label="Exclude from pillbox" first>
+                <Toggle on={!!medSheet.excludeFromPillbox} onToggle={() => setMedSheet(d => ({ ...d, excludeFromPillbox: !d.excludeFromPillbox }))} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                Never show this in Weekly Prep, e.g. an injectable that doesn't go in a pill organizer.
+              </div>
+            </div>
             {medSheet.id && medSheetMemberships.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div className="micro" style={{ marginBottom: 8 }}>In these plans</div>
@@ -1854,7 +1872,232 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           </div>
         )}
       </Sheet>
+      <WeeklyPrepScreen open={weeklyPrepOpen} onClose={() => setWeeklyPrepOpen(false)} store={store} setStore={setStore} userId={userId} />
     </Screen>
+  );
+}
+
+// ── Weekly Prep: a pillbox-packing checklist for the coming 7 days ─────
+// Not a route: a same-file screen toggled by MedicationsScreen's own local
+// state, exactly like ShoppingListScreen sits inside FoodScreen
+// (screens-food.jsx). Bucketing is a pure display-time lens over the
+// existing schedule slots (mdSlotAppliesOn): redefining a pillbox slot later
+// can shift which compartment an already-packed dose displays under without
+// touching or losing the pack-check itself. "Other times" catches a dose
+// whose hour matches none of the user's slots, so nothing can silently
+// disappear from the one job this screen has (don't forget anything).
+const MD_PILLBOX_OTHER_BUCKET = '__other__';
+function mdPillboxBucketFor(hour, pillboxSlots) {
+  const matches = pillboxSlots.filter(ps => hour >= ps.startHour && hour < ps.endHour).sort((a, b) => a.startHour - b.startHour);
+  return matches.length ? matches[0].id : MD_PILLBOX_OTHER_BUCKET;
+}
+
+function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
+  const [slotsSheetOpen, setSlotsSheetOpen] = useStateMd(false);
+  const settings = store.settings || {};
+  const patchSettings = (patch) => setStore(s => ({ ...s, settings: { ...s.settings, ...patch } }));
+  const pillboxSlots = useMemoMd(
+    () => (Array.isArray(settings.pillboxSlots) ? settings.pillboxSlots : []).slice().sort((a, b) => (a.startHour ?? 0) - (b.startHour ?? 0)),
+    [settings.pillboxSlots],
+  );
+
+  // Archived and pillbox-excluded medications never contribute a bucket
+  // entry: a slot pointing at one simply finds nothing in medsById below.
+  const medsById = useMemoMd(
+    () => new Map((store.medications || []).filter(m => !m.archived && !m.excludeFromPillbox).map(m => [m.id, m])),
+    [store.medications],
+  );
+  const activePlanIds = useMemoMd(
+    () => new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id)),
+    [store.medicationPlans],
+  );
+  const checkedIds = useMemoMd(() => new Set((store.medicationPillboxChecks || []).map(c => c.id)), [store.medicationPillboxChecks]);
+
+  const days = useMemoMd(() => {
+    const todayStr = LB.todayISO();
+    const medicationScheduleSlots = store.medicationScheduleSlots || [];
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const d = mdShiftDate(todayStr, i);
+      const wd = LB.isoWd(new Date(d + 'T12:00:00'));
+      const buckets = new Map();
+      medicationScheduleSlots.forEach(slot => {
+        if (!mdSlotAppliesOn(slot, d, wd, activePlanIds)) return;
+        const med = medsById.get(slot.medicationId);
+        if (!med) return;
+        const bucketId = mdPillboxBucketFor(slot.hour, pillboxSlots);
+        if (!buckets.has(bucketId)) buckets.set(bucketId, []);
+        buckets.get(bucketId).push({ med, slot });
+      });
+      out.push({ date: d, buckets });
+    }
+    return out;
+  }, [store.medicationScheduleSlots, medsById, activePlanIds, pillboxSlots]);
+
+  function toggleCheck(dateISO, scheduleSlotId) {
+    const id = `${userId}_${dateISO}_${scheduleSlotId}`;
+    setStore(s => {
+      const cur = s.medicationPillboxChecks || [];
+      const exists = cur.some(c => c.id === id);
+      return {
+        ...s,
+        medicationPillboxChecks: exists ? cur.filter(c => c.id !== id) : [...cur, { id, date: dateISO, scheduleSlotId }],
+      };
+    });
+  }
+
+  function dayLabel(dateISO, i) {
+    if (i === 0) return 'Today';
+    if (i === 1) return 'Tomorrow';
+    return new Date(dateISO + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  if (!open) return null;
+  return (
+    <Screen>
+      <TopBar title="Weekly Prep" sub="Pillbox" onBack={onClose} right={
+        <button onClick={() => setSlotsSheetOpen(true)} aria-label="Configure pillbox" style={mdTopAddBtn}>
+          <i className="fa-solid fa-gear" style={{ fontSize: 14 }} />
+        </button>
+      } />
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {pillboxSlots.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '20px' }}>
+              Set up your pillbox compartments first (e.g. Morning, Evening), then this screen shows exactly what to pack each week.
+            </div>
+            <Btn onClick={() => setSlotsSheetOpen(true)} style={{ width: '100%' }}>Set up pillbox</Btn>
+          </div>
+        ) : days.map((day, i) => {
+          const bucketIds = [...pillboxSlots.map(s => s.id), MD_PILLBOX_OTHER_BUCKET].filter(id => (day.buckets.get(id) || []).length > 0);
+          return (
+            <div key={day.date}>
+              <Bezel style={{ marginBottom: 10 }}>{dayLabel(day.date, i)}</Bezel>
+              {bucketIds.length === 0 ? (
+                <div style={mdEmptyHint}>Nothing to pack</div>
+              ) : bucketIds.map(bucketId => {
+                const items = day.buckets.get(bucketId) || [];
+                const bucketLabel = bucketId === MD_PILLBOX_OTHER_BUCKET ? 'Other times' : (pillboxSlots.find(s => s.id === bucketId)?.label || '');
+                return (
+                  <div key={bucketId} style={{ marginBottom: 10 }}>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{bucketLabel}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {items.map(({ med, slot }) => {
+                        const packed = checkedIds.has(`${userId}_${day.date}_${slot.id}`);
+                        return (
+                          <div key={slot.id} style={{ ...mdListRow, cursor: 'default', opacity: packed ? 0.6 : 1 }}>
+                            <MdCheckbox checked={packed} onToggle={() => toggleCheck(day.date, slot.id)} label={packed ? 'Mark as not packed' : 'Mark as packed'} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={mdEntryName}>{med.name}</div>
+                              <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+      <Sheet open={slotsSheetOpen} onClose={() => setSlotsSheetOpen(false)} title="Pillbox compartments" titleColor="var(--accent)">
+        <MdPillboxSlotsBody settings={settings} patchSettings={patchSettings} onClose={() => setSlotsSheetOpen(false)} />
+      </Sheet>
+    </Screen>
+  );
+}
+
+function MdPillboxSlotRow({ left, right, onEdit, onRemove, active }) {
+  return (
+    <div onClick={onEdit} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px',
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+      border: `var(--hair-width) solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
+      cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    }}>
+      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{left}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{right}</span>
+        <button onClick={e => { e.stopPropagation(); onRemove(); }} aria-label="Remove" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+          <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+// Shared list editor for the user's own pillbox compartments (no cap, their
+// choice), a structural twin of screens-water.jsx's WaterDrinksConfigBody.
+// Used both from WeeklyPrepScreen's own gear icon and from Settings >
+// Health & Nutrition > Medications, one source of truth for these fields.
+function MdPillboxSlotsBody({ settings, patchSettings, onClose }) {
+  const slots = (Array.isArray(settings.pillboxSlots) ? settings.pillboxSlots : []).slice().sort((a, b) => (a.startHour ?? 0) - (b.startHour ?? 0));
+  const [label, setLabel] = useStateMd('');
+  const [startHour, setStartHour] = useStateMd(6);
+  const [endHour, setEndHour] = useStateMd(12);
+  const [editIdx, setEditIdx] = useStateMd(null);
+
+  const resetForm = () => { setLabel(''); setStartHour(6); setEndHour(12); setEditIdx(null); };
+  const startEdit = (i) => {
+    const s = slots[i];
+    setLabel(s.label); setStartHour(s.startHour); setEndHour(s.endHour);
+    setEditIdx(i);
+  };
+  const saveSlot = () => {
+    if (!label.trim() || endHour <= startHour) return;
+    const next = { id: editIdx != null ? slots[editIdx].id : LB.uid(), label: label.trim(), startHour, endHour };
+    if (editIdx != null) {
+      patchSettings({ pillboxSlots: slots.map((s, idx) => idx === editIdx ? next : s) });
+    } else {
+      patchSettings({ pillboxSlots: [...slots, next] });
+    }
+    resetForm();
+  };
+  const removeSlot = (i) => {
+    patchSettings({ pillboxSlots: slots.filter((_, idx) => idx !== i) });
+    if (editIdx === i) resetForm();
+  };
+
+  return (
+    <div>
+      <Bezel style={{ marginBottom: 12 }}>Compartments</Bezel>
+      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>
+        {editIdx != null ? 'Tap the row again, or another one, to change your edit.' : 'Add as many as your pillbox has. Tap one to edit it.'}
+      </div>
+      {slots.map((s, i) => (
+        <MdPillboxSlotRow key={s.id} left={s.label} right={`${String(s.startHour).padStart(2, '0')}:00-${String(s.endHour).padStart(2, '0')}:00`}
+          active={editIdx === i} onEdit={() => (editIdx === i ? resetForm() : startEdit(i))} onRemove={() => removeSlot(i)} />
+      ))}
+      <div style={{ marginTop: 4, marginBottom: 20 }}>
+        <Field label="Label" style={{ marginBottom: 14 }}>
+          <TextInput value={label} onChange={setLabel} placeholder="e.g. Morning" />
+        </Field>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Start</div>
+            <Stepper value={startHour} step={1} min={0} max={23} suffix=":00" onChange={v => {
+              const nv = Math.max(0, Math.min(23, Math.round(v)));
+              setStartHour(nv);
+              setEndHour(eh => Math.max(eh, nv + 1));
+            }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>End</div>
+            <Stepper value={endHour} step={1} min={startHour + 1} max={24} suffix=":00" onChange={v => setEndHour(Math.max(startHour + 1, Math.min(24, Math.round(v))))} />
+          </div>
+        </div>
+        {editIdx == null ? (
+          <Btn onClick={saveSlot} disabled={!label.trim()} style={{ width: '100%' }}>Add</Btn>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={resetForm} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={saveSlot} disabled={!label.trim()} style={{ flex: 1 }}>Save</Btn>
+          </div>
+        )}
+      </div>
+      <Btn onClick={onClose} style={{ width: '100%' }}>Done</Btn>
+    </div>
   );
 }
 

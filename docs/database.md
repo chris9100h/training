@@ -370,15 +370,17 @@ Per-Food-Präferenzen der Shopping List (Migration 0215/0216/0217), geräteüber
 
 ### Medications (Übersicht)
 
-Migration 0218 (Basis), Migration 0221 (Mehrfach-Plan-Zugehörigkeit). Persönlicher (optional coach-verwalteter) Tracker für Medikamente/Vitamine/Supplements, architektonisch am Food Tracker Plan Mode orientiert (Container → Items → Schedule → Log), aber mit eigenem Wochentags-Schedule (nicht an Trainings-/Rest-Tag gekoppelt) und eigener Inventory-Einheit (nicht immer Gramm). Fünf Tabellen, jede unten mit eigenem Abschnitt: `zane_medication_plans`, `zane_medications`, `zane_medication_plan_items`, `zane_medication_schedule_slots`, `zane_medication_logs`.
+Migration 0218 (Basis), Migration 0221 (Mehrfach-Plan-Zugehörigkeit), Migration 0223 (Weekly Prep). Persönlicher (optional coach-verwalteter) Tracker für Medikamente/Vitamine/Supplements, architektonisch am Food Tracker Plan Mode orientiert (Container → Items → Schedule → Log), aber mit eigenem Wochentags-Schedule (nicht an Trainings-/Rest-Tag gekoppelt) und eigener Inventory-Einheit (nicht immer Gramm). Sechs Tabellen, jede unten mit eigenem Abschnitt: `zane_medication_plans`, `zane_medications`, `zane_medication_plan_items`, `zane_medication_schedule_slots`, `zane_medication_logs`, `zane_medication_pillbox_checks`.
 
-**RLS (alle fünf Tabellen identisch):** eigene Zeilen (`(select auth.uid()) = user_id`) plus volles Coach-of-Client SELECT/INSERT/UPDATE/DELETE über `zane_is_coach_of` (Migration 0199-Muster, `zane_food_meal_plans`/`zane_food_template_slots`). Der Coach sieht damit nicht nur selbst gepushte Pläne, sondern die komplette Medikation, den Schedule und die tatsächlich geloggte Einnahme eines Clients (Adherence). Migration 0218/0221.
+**RLS (die ersten fünf Tabellen identisch):** eigene Zeilen (`(select auth.uid()) = user_id`) plus volles Coach-of-Client SELECT/INSERT/UPDATE/DELETE über `zane_is_coach_of` (Migration 0199-Muster, `zane_food_meal_plans`/`zane_food_template_slots`). Der Coach sieht damit nicht nur selbst gepushte Pläne, sondern die komplette Medikation, den Schedule und die tatsächlich geloggte Einnahme eines Clients (Adherence). Migration 0218/0221. Die sechste Tabelle, `zane_medication_pillbox_checks`, ist bewusst nur eigene Zeilen ohne Coach-Zugriff, siehe ihr eigener Abschnitt unten.
 
 **Push-Mechanismus:** `LB.pushMedicationPlanToClient` in `store.js`, 1:1 nach Vorbild von `pushMealPlanToClient` (Meal Plans): kopiert Plan + Medikamente + deren Plan-Zugehörigkeit (`zane_medication_plan_items`) + Schedule-Slots frisch in den Client-Account, postet eine Nachricht in einen eigenen "Medications"-Coaching-Thread. Die Kopie ist immer `active: true`, unabhängig vom Active-Status des Coach-eigenen Plans (gleiche Begründung wie das erzwungene `medsEnabled: true` dort: ein gepushter Plan, den der eigene Toggle des Clients versteckt, wäre witzlos).
 
 **Reminder:** eigene Edge Function `medication-reminder` (pg_cron stündlich, Migration 0219), 1:1 nach Vorbild von `meal-reminder` (siehe `medication_reminder_enabled` weiter oben), prüft `zane_medication_logs` auf noch-`planned` Einträge und feuert nach 1h Grace Period. Liest ausschließlich `zane_medication_logs` (schon materialisiert), nie die anderen vier Tabellen direkt, daher unberührt von Migration 0221.
 
-**Backup:** alle fünf Tabellen sind Teil des User-Backups (eigene, personenbezogene Daten wie Food-Logs/-Pläne).
+**Backup:** die ersten fünf Tabellen sind Teil des User-Backups (eigene, personenbezogene Daten wie Food-Logs/-Pläne). `zane_medication_pillbox_checks` ist bewusst **nicht** im Backup (abgeleiteter Wochen-Status, siehe ihr eigener Abschnitt unten).
+
+**Weekly Prep:** `WeeklyPrepScreen` (`screens-medications.jsx`) zeigt für die kommenden 7 Tage, gruppiert nach Tag und nutzerdefiniertem Pillendosen-Fach (`settings.pillboxSlots`, siehe oben), was aus den Schedule-Slots aktiver Pläne gepackt werden muss, mit einer Abhak-Checkliste je (Tag, Slot). Ein Medikament mit `exclude_from_pillbox` (siehe unten) taucht dort nie auf.
 
 ### `zane_medication_plans`
 
@@ -400,8 +402,9 @@ Das getrackte Medikament selbst (reine Identität + hergeleitetes Inventory), si
 - `unit_label` (text, NOT NULL, Default `'pills'`): die Zähleinheit, z.B. "pills"/"ml"/"drops", frei editierbar da Medikamente sehr unterschiedlich dosiert werden
 - `package_size`/`stock_baseline`/`stock_set_at` (numeric/numeric/timestamptz, alle nullable): gleiches hergeleitetes Inventory-Prinzip wie `zane_food_shopping_prefs` (aktueller Bestand = `stock_baseline` minus allem seit `stock_set_at` Geloggten, client-seitig zur Laufzeit berechnet, kein Live-Countdown-Feld)
 - `archived` (boolean, Default false), `created_at`/`updated_at`
+- `exclude_from_pillbox` (boolean, NOT NULL, Default false, Migration 0223): blendet dieses Medikament komplett aus `WeeklyPrepScreen` aus, z.B. für ein Injectable, das ohnehin nie in eine physische Pillendose kommt. Toggle in `medSheet`.
 - Store field: `store.medications`
-- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` entfernt in Migration 0221.
+- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` entfernt in Migration 0221, `exclude_from_pillbox` Migration 0223.
 
 ### `zane_medication_plan_items`
 
@@ -439,6 +442,16 @@ Die Einnahme-Timeline, spiegelt `zane_food_logs`, siehe Medications-Übersicht o
 - `created_at`
 - Store field: `store.medicationLogs`
 - RLS: siehe Medications-Übersicht. Migration 0218. Reminder-Cron liest diese Tabelle, Migration 0219.
+
+### `zane_medication_pillbox_checks`
+
+Weekly-Prep-Abhak-Marker (Migration 0223): eine Zeile je (User, Tag, Schedule-Slot), die bereits in die physische Pillendose gepackt wurde, geräteübergreifend. Genau wie `zane_food_template_days` eine reine Existenz-Markierung (Zeile da = abgehakt, Zeile weg = nicht abgehakt), kein Update-Pfad nötig.
+
+- `id` (text, PK, deterministisch `<user_id>_<date>_<schedule_slot_id>`, damit zwei Geräte denselben Haken idempotent upserten), `user_id` (uuid)
+- `date` (text, YYYY-MM-DD), `schedule_slot_id` (text, **weicher Verweis, kein FK**: gleicher Grund wie `medication_plan_id` in dieser Tabellenfamilie, ein Cascade könnte mit dem clientseitigen Sync-Diff kollidieren; eine verwaiste Zeile ist ohnehin unsichtbar, `WeeklyPrepScreen` iteriert nur über aktuell existierende Slots)
+- `created_at` (timestamptz)
+- Store field: `store.medicationPillboxChecks`. Synchronisiert (Boot-Load ab heute, `syncStore`-Diff, Boot-Merge), aber **nicht im Backup** (abgeleiteter Wochen-Status, EXCLUDED in `tools/check-backup-coverage.cjs`), gleiche Begründung wie `zane_food_template_days`.
+- RLS: **nur eigene Zeilen, kein Coach-Zugriff** (Ausnahme in dieser Tabellenfamilie, siehe Medications-Übersicht), kein `zane_guard_user_id_immutable`-Trigger (der wird nur gebraucht, wo eine Coach-UPDATE-Policy existiert, siehe Migration 0220). Migration 0223.
 
 ### `zane_recipe_shares`
 
@@ -529,6 +542,7 @@ Weitere Spalten:
 - `meal_reminder_enabled` (boolean, NOT NULL, default false, Store `mealReminderEnabled`, Migration 0201): An/Aus-Schalter für Plan-Mode-Meal-Reminder (Toggle in Settings → Health unter „Meal planning", nur sichtbar wenn `plan_mode` an; zusätzlich `push_enabled` nötig). Die `meal-reminder` Edge Function (pg_cron stündlich `0 * * * *`, gated auf `meal_reminder_enabled` + `plan_mode` + `push_enabled`) prüft je Nutzer die heutigen noch-`planned` (nicht abgehakten) `zane_food_logs`-Einträge und feuert einen Push, sobald eine geplante Mahlzeit 1h nach ihrer Uhrzeit noch offen ist. Fire-once ohne Throttle-Spalte: das Prüffenster = Cron-Takt (1h), also feuert nur der Tick, in dem `now` die (Uhrzeit + 1h)-Schwelle überschreitet (nutzt `tz_offset_minutes` für die lokale Uhr). Slots liegen immer auf der vollen Stunde (`HH:00`), daher feuert eine Slot-Mahlzeit exakt zu ihrem +1h-Punkt; ein manuell geplanter Eintrag mit krummer Minute feuert am nächsten Stunden-Tick danach. Im Backup (User-Präferenz, wie `reminder_enabled`/`water_reminder_enabled`).
 - `meds_enabled` (boolean, NOT NULL, default false, Store `medsEnabled`, Migration 0218): Feature-Master-Switch für Medications, zugleich der „Show tab"-Schalter für den Medications-Slot (Toggle in Settings → Health & Nutrition → Medications, off by default: „nicht jeder will was mit Medikamenten zu tun haben"). Aus: der Medications-Slot im Health/Water/Food/Medications-TabBar-Zyklus (`ui.jsx`) ist nicht vorhanden, alles andere unverändert. Siehe `show_health_tab`/`show_water_tab`/`show_food_tab` unten: alle vier sind seit Migration 0222 unabhängig voneinander schaltbar.
 - `medication_reminder_enabled` (boolean, NOT NULL, default false, Store `medicationReminderEnabled`, Migration 0218): An/Aus-Schalter für Medications-Dosis-Reminder (zusätzlich `meds_enabled` + `push_enabled` nötig). Die `medication-reminder` Edge Function (pg_cron stündlich `0 * * * *`, Migration 0219) ist 1:1 nach Vorbild von `meal-reminder` gebaut: prüft je Nutzer die heutigen noch-`planned` `zane_medication_logs`-Einträge und feuert einen Push, sobald eine geplante Dosis 1h nach ihrer Uhrzeit noch offen ist, gleiches Fire-once-ohne-Throttle-Prinzip (Prüffenster = Cron-Takt), da Schedule-Slots wie Meal-Slots auf der vollen Stunde liegen (`zane_medication_schedule_slots.hour`).
+- `pillbox_slots` (jsonb, nullable, Store `pillboxSlots`, Migration 0223): beliebig viele nutzerdefinierte Pillendosen-Fächer `[{ id, label, startHour, endHour }]` (z.B. "Morgens" 6-12, "Abends" 18-22), kein Limit, leer/null bis der User sie in Settings → Health & Nutrition → Medications → Pillbox anlegt. Treibt `WeeklyPrepScreen`s Sieben-Tage-Ansicht: eine fällige Dosis (`zane_medication_schedule_slots.hour`) wird dem Fach mit der frühesten `startHour` zugeordnet, unter das `hour` fällt (Fächer dürfen sich überschneiden); passt sie in kein Fach, landet sie in einem eigenen "Other times"-Fach statt zu verschwinden.
 - `show_health_tab` (boolean, default false): eigener „Show tab"-Schalter für den Health-Slot (Settings → Health & Nutrition → Health). Store field `showHealthTab`.
 - `show_water_tab` (boolean, NOT NULL, default false, Store `showWaterTab`, Migration 0222): eigener „Show tab"-Schalter für den Water-Slot (Settings → Health & Nutrition → Water). Bis Migration 0222 gab es nur `show_health_tab`, das Health/Water/Food gebündelt ein-/ausblendete; seither ist jeder der vier Slots (Health/Water/Food via diese drei Spalten, Medications via `meds_enabled`) unabhängig schaltbar, jede Kombination erlaubt. Die Migration backfillt bestehende Nutzer mit `show_health_tab = true` auf `true`, damit niemandem sichtbare Tabs beim Deploy verschwinden; neue Accounts starten wie `show_health_tab` auf `false` (Opt-in).
 - `show_food_tab` (boolean, NOT NULL, default false, Store `showFoodTab`, Migration 0222): eigener „Show tab"-Schalter für den Food-Slot (Settings → Health & Nutrition → Food), gleiche Backfill-Logik wie `show_water_tab`.

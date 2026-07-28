@@ -618,6 +618,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
   const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
+  const [pillboxSheet, setPillboxSheet] = useStateSet(false);
   // Food tracker meal boundaries (migration 0206). Resolved rather than read
   // raw, so an unset setting shows the built-in defaults and the editor always
   // has six rows to work with.
@@ -2186,15 +2187,26 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   setStore(s => ({ ...s, settings: { ...s.settings, medicationReminderEnabled: next } }));
                 }} />
               </Row>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
                 Get a nudge when a scheduled dose is still unlogged an hour after its time. Needs notifications on.
               </div>
+              <NavRow label="Pillbox" first
+                hint={Array.isArray(store.settings?.pillboxSlots) && store.settings.pillboxSlots.length ? `${store.settings.pillboxSlots.length} set` : null}
+                onTap={() => { setMedsSubSheet(false); setPillboxSheet(true); }} />
             </div>
           )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setMedsSubSheet(false)}>Done</Btn>
           </div>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Medications › Pillbox (push off Medications, same
+          reasoning as Water's own sub-sheets: this one has real text/number
+          inputs, so only one sheet stays open at a time). ══ */}
+      <SettingsSheet open={pillboxSheet} onClose={() => { setPillboxSheet(false); setMedsSubSheet(true); }} title="Pillbox compartments">
+        <MdPillboxSlotsBody settings={store.settings || {}} patchSettings={patchSettings}
+          onClose={() => { setPillboxSheet(false); setMedsSubSheet(true); }} />
       </SettingsSheet>
 
       {/* ══ Health › Glucose ══ */}

@@ -284,6 +284,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_medication_plan_items').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)),
   ];
   // zane_recipe_shares has RLS with no policies, so it is only reachable
   // through an RPC. Without this, every old ?share=<token> link kept serving
@@ -474,6 +475,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     meal_reminder_enabled: sett.mealReminderEnabled ?? false,
     meds_enabled: sett.medsEnabled ?? false,
     medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
+    pillbox_slots: sett.pillboxSlots ?? null,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -738,6 +740,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
         package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+        exclude_from_pillbox: !!m.excludeFromPillbox,
         updated_at: m.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -1193,7 +1196,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
     isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
     isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
@@ -1201,6 +1204,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
     isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
+    // foodTemplateDaysRes's backward-looking history window, since packing is
+    // always for the coming days, never the past.
+    isCoachLoad ? null : _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1209,7 +1216,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
          foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes,
-         medicationPlanItemsRes] = await Promise.all(queries);
+         medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1272,12 +1279,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (medicationScheduleSlotsRes?.error) throw medicationScheduleSlotsRes.error;
     if (medicationLogsRes?.error) throw medicationLogsRes.error;
     if (medicationPlanItemsRes?.error) throw medicationPlanItemsRes.error;
+    if (medicationPillboxChecksRes?.error) throw medicationPillboxChecksRes.error;
   } else {
     if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
     if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
     if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
     if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
     if (medicationPlanItemsRes?.error) console.warn('medication plan items load failed:', medicationPlanItemsRes.error);
+    if (medicationPillboxChecksRes?.error) console.warn('medication pillbox checks load failed:', medicationPillboxChecksRes.error);
   }
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
@@ -1473,6 +1482,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
+      excludeFromPillbox: !!m.exclude_from_pillbox,
       createdAt: m.created_at, updatedAt: m.updated_at,
     })),
     medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
@@ -1490,6 +1500,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
       createdAt: it.created_at,
+    })),
+    medicationPillboxChecks: (medicationPillboxChecksRes?.data || []).map(c => ({
+      id: c.id, date: c.date, scheduleSlotId: c.schedule_slot_id,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1608,6 +1621,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
         medsEnabled: sett.meds_enabled ?? false,
         medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
+        pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -2094,6 +2108,7 @@ async function syncStore(prev, next, userId) {
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
       package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+      exclude_from_pillbox: !!m.excludeFromPillbox,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medications').delete().in('id', removed.map(m => m.id)));
@@ -2132,6 +2147,16 @@ async function syncStore(prev, next, userId) {
       id: it.id, user_id: userId, medication_plan_id: it.medicationPlanId, medication_id: it.medicationId,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medication_plan_items').delete().in('id', removed.map(it => it.id)));
+  }
+
+  if (prev.medicationPillboxChecks !== next.medicationPillboxChecks) {
+    const { upsert, removed } = diffCollectionById(prev.medicationPillboxChecks, next.medicationPillboxChecks);
+    // ops, not preOps: schedule_slot_id is a soft reference (no FK), nothing
+    // to race.
+    if (upsert.length) ops.push(_supabase.from('zane_medication_pillbox_checks').upsert(upsert.map(c => ({
+      id: c.id, user_id: userId, date: c.date, schedule_slot_id: c.scheduleSlotId,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_pillbox_checks').delete().in('id', removed.map(c => c.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -2302,6 +2327,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
     prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
+    JSON.stringify(prev.settings?.pillboxSlots) !== JSON.stringify(next.settings?.pillboxSlots) ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
@@ -2335,6 +2361,7 @@ async function syncStore(prev, next, userId) {
       meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       meds_enabled: next.settings?.medsEnabled ?? false,
       medication_reminder_enabled: next.settings?.medicationReminderEnabled ?? false,
+      pillbox_slots: next.settings?.pillboxSlots ?? null,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
