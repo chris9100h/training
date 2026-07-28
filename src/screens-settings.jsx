@@ -2190,7 +2190,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
                 Get a nudge when a scheduled dose is still unlogged an hour after its time. Needs notifications on.
               </div>
-              <NavRow label="Pillbox" first
+              <NavRow label="Pillbox"
                 hint={Array.isArray(store.settings?.pillboxSlots) && store.settings.pillboxSlots.length ? `${store.settings.pillboxSlots.length} set` : null}
                 onTap={() => { setMedsSubSheet(false); setPillboxSheet(true); }} />
             </div>

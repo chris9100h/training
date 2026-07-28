@@ -1941,6 +1941,18 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
     return out;
   }, [store.medicationScheduleSlots, medsById, activePlanIds, pillboxSlots]);
 
+  const compartments = useMemoMd(
+    () => [...pillboxSlots.map(s => ({ id: s.id, label: s.label })), { id: MD_PILLBOX_OTHER_BUCKET, label: 'Other times' }],
+    [pillboxSlots],
+  );
+  // A compartment section only renders if something is due in it on at
+  // least one of the 7 days: an empty "Vitamins: nothing this week" section
+  // would just be noise.
+  const visibleCompartments = useMemoMd(
+    () => compartments.filter(c => days.some(day => (day.buckets.get(c.id) || []).length > 0)),
+    [compartments, days],
+  );
+
   function toggleCheck(dateISO, scheduleSlotId) {
     const id = `${userId}_${dateISO}_${scheduleSlotId}`;
     setStore(s => {
@@ -1975,19 +1987,21 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
             </div>
             <Btn onClick={() => setSlotsSheetOpen(true)} style={{ width: '100%' }}>Set up pillbox</Btn>
           </div>
-        ) : days.map((day, i) => {
-          const bucketIds = [...pillboxSlots.map(s => s.id), MD_PILLBOX_OTHER_BUCKET].filter(id => (day.buckets.get(id) || []).length > 0);
-          return (
-            <div key={day.date}>
-              <Bezel style={{ marginBottom: 10 }}>{dayLabel(day.date, i)}</Bezel>
-              {bucketIds.length === 0 ? (
-                <div style={mdEmptyHint}>Nothing to pack</div>
-              ) : bucketIds.map(bucketId => {
-                const items = day.buckets.get(bucketId) || [];
-                const bucketLabel = bucketId === MD_PILLBOX_OTHER_BUCKET ? 'Other times' : (pillboxSlots.find(s => s.id === bucketId)?.label || '');
+        ) : visibleCompartments.length === 0 ? (
+          <div style={mdEmptyHint}>Nothing to pack this week</div>
+        ) : visibleCompartments.map(c => (
+          // Compartment first, then the days due within it: filling a real
+          // pillbox goes compartment by compartment across the whole week
+          // (all mornings, then all evenings), not day by day.
+          <div key={c.id}>
+            <Bezel style={{ marginBottom: 10 }}>{c.label}</Bezel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {days.map((day, i) => {
+                const items = day.buckets.get(c.id) || [];
+                if (!items.length) return null;
                 return (
-                  <div key={bucketId} style={{ marginBottom: 10 }}>
-                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{bucketLabel}</div>
+                  <div key={day.date}>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{dayLabel(day.date, i)}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {items.map(({ med, slot }) => {
                         const packed = checkedIds.has(`${userId}_${day.date}_${slot.id}`);
@@ -2006,8 +2020,8 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
                 );
               })}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
       <Sheet open={slotsSheetOpen} onClose={() => setSlotsSheetOpen(false)} title="Pillbox compartments" titleColor="var(--accent)">
         <MdPillboxSlotsBody settings={settings} patchSettings={patchSettings} onClose={() => setSlotsSheetOpen(false)} />
