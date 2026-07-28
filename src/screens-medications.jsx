@@ -8,7 +8,11 @@
    Three tabs:
    - Timeline: today's doses (auto-filled from active schedule slots of
      active plans, same planned/logged distinction as food), plus logging an
-     ad-hoc dose.
+     ad-hoc dose. A hero (doseTally/MdDoseRing) sits above the hour grid,
+     same BracketFrame-plus-ring shape as the Water tracker's own daily hero
+     (screens-water.jsx): a taken/due ring for whichever day curDate is
+     currently on, counting only entries tied to a real schedule slot (an
+     ad-hoc extra dose was never "due" in the first place).
    - Schedule: named plans (My Plans / Client Templates for a coach, like
      FoodTemplateScreen). A medication's membership in a plan is many-to-many
      via zane_medication_plan_items (store.medicationPlanItems, migration
@@ -361,6 +365,35 @@ function MdGoldLabel({ children, style }) {
   );
 }
 
+// Timeline hero's progress ring, same SVG donut shape as WaterRing
+// (screens-water.jsx) and FdRing (screens-food.jsx) so all three daily-total
+// heroes read as the same idiom, own copy per that same convention. Unlike
+// either of those (which center a percent), this one centers the raw
+// "taken/due" fraction: a dose count reads more directly than a percentage
+// for a small whole number of doses, the percent still drives how much of
+// the ring fills. Flat accent color, not FdRing's traffic-light tiers: this
+// whole screen is already gold-accented throughout, a second color system
+// for one ring would be more machinery than a simple daily count needs.
+function MdDoseRing({ taken, due, size = 104 }) {
+  const percent = due > 0 ? Math.min(100, Math.round((taken / due) * 100)) : 0;
+  const r = 50, circ = 2 * Math.PI * r;
+  const offset = circ * (1 - percent / 100);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="60" cy="60" r={r} fill="none" stroke={UI.hair} strokeWidth="12" />
+        <circle cx="60" cy="60" r={r} fill="none" stroke={UI.gold} strokeWidth="12" strokeLinecap="round"
+          strokeDasharray={circ.toFixed(1)} strokeDashoffset={offset.toFixed(1)}
+          style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1)' }} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <span className="num" style={{ fontSize: 26, fontWeight: 600, color: UI.gold, fontVariantNumeric: 'tabular-nums' }}>{taken}/{due}</span>
+        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>TAKEN</span>
+      </div>
+    </div>
+  );
+}
+
 function MedicationsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
@@ -438,6 +471,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // pausing/resuming a plan would silently wait for some unrelated
     // re-render before the Timeline's preview rows caught up.
   }, [curDateLogs, curDate, activeMedications, scheduleSlots, medicationPlans]);
+  // Timeline hero's own tally: only entries tied to a real schedule slot
+  // count as "due" (an ad-hoc extra dose, scheduleSlotId null, was never due
+  // in the first place, so it shouldn't inflate the denominator); planned:
+  // false is "taken" (see toggleTaken/MdCheckbox), matching curDate exactly
+  // like the hour grid below it, so browsing to another day shows that
+  // day's own tally, not always literally today's.
+  const doseTally = useMemoMd(() => {
+    const scheduled = Object.values(byHour).flat().filter(e => e.scheduleSlotId);
+    return { due: scheduled.length, taken: scheduled.filter(e => !e.planned).length };
+  }, [byHour]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
@@ -1095,6 +1138,29 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
               </button>
             </div>
+
+            {/* Hero: same BracketFrame-plus-ring shape as the Water tracker's
+                own daily hero (screens-water.jsx), gated on there being
+                anything due at all (a medication-free day, or one with
+                nothing scheduled, has no ratio worth showing). The ring
+                itself already carries the taken/due fraction (MdDoseRing),
+                so the text beside it stays to a single status line rather
+                than repeating that same number a second time. */}
+            {doseTally.due > 0 && (
+              <BracketFrame gold style={{ padding: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+                  <div>
+                    <div className="micro" style={{ color: UI.inkFaint }}>{dayLabel}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginTop: 6 }}>
+                      {doseTally.taken >= doseTally.due
+                        ? 'All doses taken'
+                        : `${doseTally.due - doseTally.taken} dose${doseTally.due - doseTally.taken === 1 ? '' : 's'} still due`}
+                    </div>
+                  </div>
+                  <MdDoseRing taken={doseTally.taken} due={doseTally.due} />
+                </div>
+              </BracketFrame>
+            )}
 
             {!activeMedications.length && (
               <div style={mdEmptyHint}>Add a medication in the Schedule tab to start logging doses.</div>
