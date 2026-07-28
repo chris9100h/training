@@ -2017,11 +2017,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
     // A day that hasn't happened yet can't already have something "eaten" on
     // it: landing on a future date forces planned, regardless of whether the
-    // source entry was logged or planned itself. Planned clones never touch the
-    // target's daily log, so a future target neither warns about overwriting
-    // manual macros nor gets a patchDaily (which would null them).
+    // source entry was logged or planned itself. In Plan Mode, landing on
+    // TODAY is the same situation, today isn't over either, so it's still
+    // something to plan and check off later (same rule submitRepeatYesterday
+    // follows for its own curDate-only copy). Without Plan Mode there is no
+    // planned state to land in, so a same-day/past copy always logs outright.
+    // Planned clones never touch the target's daily log, so a target that
+    // lands planned neither warns about overwriting manual macros nor gets a
+    // patchDaily (which would null them).
     const targetIsFuture = targetDate > today;
-    if (!targetIsFuture) {
+    const targetLandsPlanned = targetIsFuture || (planMode && targetDate === today);
+    if (!targetLandsPlanned) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
     }
@@ -2030,7 +2036,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!selected.length) return s;
       const now = new Date().toISOString();
       const clones = selected.map(l => ({
-        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned,
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetLandsPlanned ? true : l.planned,
         // Same rule "Repeat yesterday" follows: a copy is its own entry and
         // must not inherit the split/merge batch (its "undo split" would act
         // on another day) or the template-slot marker (auto-fill would treat
@@ -2040,7 +2046,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
-      if (!targetIsFuture) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      if (!targetLandsPlanned) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
       if (mode === 'move') {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
