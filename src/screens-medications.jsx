@@ -1929,6 +1929,9 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
         if (!buckets.has(bucketId)) buckets.set(bucketId, []);
         buckets.get(bucketId).push({ med, slot });
       });
+      // Alphabetical within each compartment, same convention as every
+      // other name-based list in this module.
+      buckets.forEach(items => items.sort((a, b) => a.med.name.localeCompare(b.med.name)));
       out.push({ date: d, buckets });
     }
     return out;
