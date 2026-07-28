@@ -720,6 +720,24 @@ function Toggle({ on, onToggle, disabled = false }) {
 function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  const panelRef = React.useRef(null);
+  // A field left focused from wherever the user was before (a background
+  // screen, or a sheet this one is replacing) otherwise keeps the OS
+  // keyboard open even though it's no longer relevant to whatever just
+  // opened, reads as "the keyboard is stuck open on every new sheet".
+  // useLayoutEffect (not useEffect) runs synchronously right after this
+  // sheet's own DOM, including any of its own autoFocus child, has already
+  // committed: a field that's deliberately meant to open focused (e.g. the
+  // rename sheet in screens-food.jsx) is left alone, since by the time this
+  // checks it's already inside panelRef; only focus left OUTSIDE the panel
+  // that just opened gets dropped.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && panelRef.current && !panelRef.current.contains(active)) {
+      active.blur();
+    }
+  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -808,7 +826,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
         {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
-        <div onClick={e => e.stopPropagation()} style={{
+        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
