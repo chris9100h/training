@@ -845,6 +845,45 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   );
 }
 
+// Same AI opinion data as the block inside CheckInCard, surfaced again right
+// at the top of the tab: that block only renders once thisWeek's own card is
+// expanded, which buried it too deep for users to ever find or use.
+function CheckInAiOpinionBanner({ ci, onGenerated }) {
+  const [busy, setBusy] = useStateC(false);
+  const [error, setError] = useStateC(null);
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await LB.generateCheckinOpinion(ci.id);
+    setBusy(false);
+    if (!res.ok) { setError(res.error || 'Could not generate. Try again.'); return; }
+    onGenerated();
+  };
+  const { headline, body } = LB.splitHeadlineBody(ci.aiOpinion || '');
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 12, color: UI.inkFaint }} />
+        <span className="micro" style={{ color: UI.inkFaint }}>AI COACH · THIS WEEK</span>
+      </div>
+      {ci.aiOpinionGeneratedAt ? (
+        <div>
+          {headline && <div style={{ fontSize: 14, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 5 }}>{headline}</div>}
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{body}</div>
+        </div>
+      ) : (
+        <div>
+          <button onClick={generate} disabled={busy}
+            style={{ width: '100%', background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '10px 14px', fontSize: 12, fontWeight: 600, color: busy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, cursor: busy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            {busy ? 'Generating…' : 'Get AI take on this week'}
+          </button>
+          {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{error}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatPill({ label, value, delta, deltaStr, deltaDir, arrowOnly }) {
   const deltaColor = (() => {
     if (delta == null || !deltaDir) return UI.inkSoft;
@@ -1401,6 +1440,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
             </button>
           )}
         </div>
+
+        {thisWeek && <CheckInAiOpinionBanner ci={thisWeek} onGenerated={load} />}
 
         {previewOpen && previewResponses && (
           <div>
