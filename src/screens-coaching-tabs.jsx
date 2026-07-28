@@ -477,6 +477,36 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
+// Weight trend alone doesn't reliably say which phase a client is in (it's
+// noisy, and can point the "wrong" way even mid-phase), and there is no
+// stored goal/phase field anywhere in the data model. Asked fresh at
+// generation time instead: shared by CheckInCard's own inline block and
+// CheckInAiOpinionBanner, both of which otherwise duplicate this exact row.
+const CHECKIN_PHASE_OPTIONS = [
+  { value: 'cut', label: 'Cut' },
+  { value: 'maintain', label: 'Maintain' },
+  { value: 'bulk', label: 'Bulk' },
+];
+
+function CheckInPhasePicker({ onPick, busy }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>Which phase are you in?</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {CHECKIN_PHASE_OPTIONS.map(p => (
+          <button key={p.value} onClick={() => onPick(p.value)} disabled={busy}
+            style={{ flex: 1, padding: '8px 4px', borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+              background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)',
+              color: busy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent' }}>
+            {busy ? '…' : p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
@@ -487,10 +517,10 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   // or the in-progress week's live preview (ci.id doesn't exist there
   // either): there's nothing real to generate an opinion about in either case.
   const showAiOpinion = !!ci.id && !!onGenerated;
-  async function generateOpinion() {
+  async function generateOpinion(phase) {
     setOpinionBusy(true);
     setOpinionError(null);
-    const res = await LB.generateCheckinOpinion(ci.id);
+    const res = await LB.generateCheckinOpinion(ci.id, phase);
     setOpinionBusy(false);
     if (!res.ok) { setOpinionError(res.error || 'Could not generate. Try again.'); return; }
     onGenerated();
@@ -801,10 +831,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
                 </div>
               ) : (
                 <div>
-                  <button onClick={generateOpinion} disabled={opinionBusy}
-                    style={{ width: '100%', background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, color: opinionBusy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, cursor: opinionBusy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    {opinionBusy ? 'Generating…' : 'Get AI take on this check-in'}
-                  </button>
+                  <CheckInPhasePicker onPick={generateOpinion} busy={opinionBusy} />
                   {opinionError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{opinionError}</div>}
                 </div>
               )}
@@ -851,10 +878,10 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
 function CheckInAiOpinionBanner({ ci, onGenerated }) {
   const [busy, setBusy] = useStateC(false);
   const [error, setError] = useStateC(null);
-  const generate = async () => {
+  const generate = async (phase) => {
     setBusy(true);
     setError(null);
-    const res = await LB.generateCheckinOpinion(ci.id);
+    const res = await LB.generateCheckinOpinion(ci.id, phase);
     setBusy(false);
     if (!res.ok) { setError(res.error || 'Could not generate. Try again.'); return; }
     onGenerated();
@@ -873,10 +900,7 @@ function CheckInAiOpinionBanner({ ci, onGenerated }) {
         </div>
       ) : (
         <div>
-          <button onClick={generate} disabled={busy}
-            style={{ width: '100%', background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '10px 14px', fontSize: 12, fontWeight: 600, color: busy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, cursor: busy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-            {busy ? 'Generating…' : 'Get AI take on this week'}
-          </button>
+          <CheckInPhasePicker onPick={generate} busy={busy} />
           {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{error}</div>}
         </div>
       )}

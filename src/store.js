@@ -6141,8 +6141,8 @@ function splitHeadlineBody(text) {
 // assembled payload: the function itself reads the check-in's responses,
 // schema, prior check-in, and macros server-side using the caller's own
 // bearer token, so RLS (not client-supplied data) decides what's read.
-async function generateCheckinOpinion(checkinId) {
-  const res = await fnFetch(AI_CHECKIN_OPINION_URL, { checkinId });
+async function generateCheckinOpinion(checkinId, phase) {
+  const res = await fnFetch(AI_CHECKIN_OPINION_URL, { checkinId, phase });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };

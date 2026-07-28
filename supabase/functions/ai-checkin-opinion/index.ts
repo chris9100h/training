@@ -36,6 +36,7 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
 const CHECKIN_OPINION_LIMIT = 5;
+const ALLOWED_PHASES = new Set(['cut', 'maintain', 'bulk']);
 
 // Same shape/reasoning as ai-daily-summary's withinQuota: advisory, fails
 // OPEN, only a backstop against a retry storm, not the real once-per-check-in
@@ -86,6 +87,11 @@ const CHECKIN_DEFAULT_SCHEMA_FALLBACK_NOTE = 'the app\'s default check-in form';
 // UI formatting CheckInCard itself does): enough for Claude to read the
 // number/choice sensibly, exact unit conversion isn't load-bearing for a
 // casual read the way it is for the actual displayed UI.
+// A generated opinion once called a sleep score dropping to 3 a bad sign, but
+// sleep_quality is direction:'lower_better' (1 = good, 10 = bad), so a drop is
+// an improvement. The label alone can't carry that, so every field with a
+// stated direction gets it spelled out inline, the model is never left to
+// guess whether a rising or falling number is the good outcome.
 function resolveFieldLine(field: any, value: unknown): string | null {
   if (value == null || value === '') return null;
   if (field.type === 'choice' && Array.isArray(field.options)) {
@@ -93,7 +99,8 @@ function resolveFieldLine(field: any, value: unknown): string | null {
     return `${field.label}: ${opt ? opt.label : value}`;
   }
   const unit = field.unit && typeof field.unit === 'string' && !['weight'].includes(field.unit) ? ` ${field.unit}` : '';
-  return `${field.label}: ${value}${unit}`;
+  const dir = field.direction === 'lower_better' ? ' (lower is better)' : field.direction === 'higher_better' ? ' (higher is better)' : '';
+  return `${field.label}: ${value}${unit}${dir}`;
 }
 
 function buildResponsesLines(schema: any[], responses: Record<string, unknown>): string[] {
@@ -104,7 +111,13 @@ function buildResponsesLines(schema: any[], responses: Record<string, unknown>):
       const line = resolveFieldLine(field, responses?.[field.key]);
       if (line) secLines.push(`  ${line}`);
     });
-    if (secLines.length) lines.push('', String(section.label || '').toUpperCase(), ...secLines);
+    // sectionHint (e.g. "1 = good/low, 10 = bad/high") is the same context
+    // CheckInCard's own header already shows the human reading this form; the
+    // model gets it too, not just the per-field annotation above.
+    if (secLines.length) {
+      const head = String(section.label || '').toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+      lines.push('', head, ...secLines);
+    }
   });
   return lines;
 }
@@ -155,9 +168,11 @@ function fmtWeightSeriesTrend(weights: number[]): string {
 
 const SYSTEM_PROMPT = `You are a casual, supportive fitness coach giving a quick read on a client's weekly check-in, exactly the way a real coach reviewing the same form would. You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally. When judging weight trend or direction, always weigh the week's average figure over a single day's number: day-to-day weight moves for reasons that have nothing to do with fat loss or gain, like water, sodium, or meal timing, only the average across days is a meaningful signal. A single day's number is only worth mentioning as color, never as the basis for a trend or a macro comment. Any weight trend or delta you are given (up, down, or flat, by how much) has already been computed correctly from the underlying numbers, just restate it, never subtract or re-derive it yourself. Weight numbers are given exactly as the client logs them, in whichever unit they use; you are not told which, so never state a specific unit for weight (no kg, no lbs, no pounds), just the number and the direction.
 
+Some fields are explicitly marked (lower is better) or (higher is better), for example sleep or stress scored 1 to 10 where a LOWER number is the good outcome. Always read that marker before deciding whether a change is good or bad news, never assume a rising number is automatically an improvement or a falling number is automatically a decline, that assumption is wrong exactly as often as it's right.
+
 You are NOT a doctor. Never give medical advice, never diagnose or speculate about a medical condition, never comment on medication. Stick to training, nutrition, recovery, and how this week compares to recent ones.
 
-You are also given the client's current nutrition targets, how long they have been in place, and, when there is enough history, a few weeks of weight/adherence trend. Like a real coach, form an opinion on whether those targets still fit. If the trend and adherence clearly point one way (weight stalled or moving the wrong way despite solid adherence, or clearly overshooting whatever goal the client has actually stated), suggest ONE small, realistic adjustment, a modest calorie change, through carbs or fat rather than protein, and frame it as worth confirming with their coach, not as an instruction to just change it. If adherence has been inconsistent, say that comes first, before touching any numbers. If there is too little trend data yet, or the signal is mixed, or no goal is stated or implied anywhere, say the targets look reasonable for now instead of guessing a direction. Never invent a goal the client hasn't stated or clearly implied.
+You may be told the client's stated phase directly: cut, maintain, or bulk. When given, treat it as ground truth, it is authoritative, never contradict, second-guess, or hedge against it. A cut wants weight trending down (or held at a controlled, intentional pace), a bulk wants it trending up, a maintain wants it roughly flat; a trend that clearly runs the opposite way despite solid adherence is worth a comment. You are also given the client's current nutrition targets, how long they have been in place, and, when there is enough history, a few weeks of weight/adherence trend. Like a real coach, form an opinion on whether those targets still fit the stated (or, if none was given, clearly implied) phase. If the trend and adherence clearly point one way, suggest ONE small, realistic adjustment, a modest calorie change, through carbs or fat rather than protein, and frame it as worth confirming with their coach, not as an instruction to just change it. If adherence has been inconsistent, say that comes first, before touching any numbers. If no phase was stated or implied anywhere, or there is too little trend data yet, or the signal is mixed, say the targets look reasonable for now instead of guessing a direction. Never invent a phase or goal the client hasn't stated or clearly implied.
 
 Only comment on what you are explicitly given. If something wasn't answered, don't guess why or make up a reason, just leave it out.
 
@@ -175,8 +190,16 @@ function buildUserPrompt(
   earlierWeeks: Array<{ week_start: string; responses: Record<string, unknown> }>,
   macros: any | null,
   priorMacros: any | null,
+  phase: string | null,
 ): string {
-  const lines: string[] = ["This week's check-in:", ...buildResponsesLines(schema, responses)];
+  const lines: string[] = [];
+  // Told directly by the client at click-time, not inferred: leads the prompt
+  // so it's read as the authoritative frame before any of the raw numbers,
+  // not a detail buried after them.
+  if (phase) {
+    lines.push(`STATED GOAL: ${phase} (told directly by the client just now, treat as ground truth).`, '');
+  }
+  lines.push("This week's check-in:", ...buildResponsesLines(schema, responses));
   if (priorResponses) {
     lines.push('', 'PREVIOUS WEEK (for comparison, do not just restate it, use it to judge trend):', ...buildResponsesLines(schema, priorResponses));
   }
@@ -228,6 +251,8 @@ Deno.serve(async (req) => {
   const payload = await req.json().catch(() => ({}));
   const checkinId = typeof payload?.checkinId === 'string' ? payload.checkinId : '';
   if (!checkinId) return json({ error: 'missing checkinId' }, 400);
+  const rawPhase = typeof payload?.phase === 'string' ? payload.phase.toLowerCase().trim() : '';
+  const phase = ALLOWED_PHASES.has(rawPhase) ? rawPhase : null;
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
@@ -295,7 +320,7 @@ Deno.serve(async (req) => {
         model,
         max_tokens: 350,
         system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(effectiveSchema, responses, priorResponses, earlierWeeks, macros, priorMacros) }] }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(effectiveSchema, responses, priorResponses, earlierWeeks, macros, priorMacros, phase) }] }],
       }),
     });
   } catch (e) {
