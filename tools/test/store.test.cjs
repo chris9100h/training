@@ -4323,6 +4323,34 @@ async function testAsync(name, fn) {
   });
   testSession = null; // restore the default for any test appended after this block
 
+  // ── AI Coach opinion on a check-in ───────────────────────────────────────
+  // generateCheckinOpinion mirrors generateDailySummary's exact shape (only
+  // a checkinId is sent, the Edge Function itself does the reads/prompt
+  // building server-side using the caller's own token, per the auth design
+  // in ai-checkin-opinion/index.ts), so the client-side test surface is the
+  // same three cases.
+  await testAsync('generateCheckinOpinion: a mocked success response parses opinion + generatedAt', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: true, json: async () => ({ opinion: 'Solid week\n\nKeep this up.', generatedAt: '2026-07-28T00:00:00.000Z' }) });
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.opinion, 'Solid week\n\nKeep this up.');
+    assert.strictEqual(res.generatedAt, '2026-07-28T00:00:00.000Z');
+  });
+  await testAsync('generateCheckinOpinion: a mocked failure response surfaces the error, does not throw', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: false, status: 403, json: async () => ({ error: 'Check-in not found, or you are not authorized to view it.' }) });
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.error, 'Check-in not found, or you are not authorized to view it.');
+  });
+  await testAsync('generateCheckinOpinion: no session (signed out) reports a network error, does not throw', async () => {
+    testSession = null;
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, false);
+  });
+  testSession = null; // restore the default for any test appended after this block
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

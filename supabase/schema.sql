@@ -399,7 +399,9 @@ CREATE TABLE public.zane_checkins (
   cardio_pace_feeling integer,
   cardio_effort integer,
   performance_vs_last_week text,
-  responses jsonb  -- all field values keyed by field key; primary storage since Migration 0065
+  responses jsonb,  -- all field values keyed by field key; primary storage since Migration 0065
+  ai_opinion text,
+  ai_opinion_generated_at timestamp with time zone
 );
 
 -- ── Constraints (primary keys, unique, foreign keys, checks) ───────────────────

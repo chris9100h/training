@@ -11,6 +11,7 @@ const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
+const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -5042,6 +5043,7 @@ async function loadCheckins(coachingId) {
       hunger: resp.hunger, sleepQuality: resp.sleep_quality,
       lifeStress: resp.life_stress, workStress: resp.work_stress, tiredness: resp.tiredness,
       issuesNotes: resp.issues_notes, generalNote: resp.general_note,
+      aiOpinion: r.ai_opinion ?? null, aiOpinionGeneratedAt: r.ai_opinion_generated_at ?? null,
     };
   });
 }
@@ -6133,6 +6135,18 @@ function splitHeadlineBody(text) {
   const nl = trimmed.indexOf('\n');
   if (nl === -1) return { headline: null, body: trimmed };
   return { headline: trimmed.slice(0, nl).trim(), body: trimmed.slice(nl + 1).replace(/^\s+/, '') };
+}
+// AI Coach opinion on a check-in (ai-checkin-opinion Edge Function). Unlike
+// generateDailySummary, the client sends only the checkinId, not an
+// assembled payload: the function itself reads the check-in's responses,
+// schema, prior check-in, and macros server-side using the caller's own
+// bearer token, so RLS (not client-supplied data) decides what's read.
+async function generateCheckinOpinion(checkinId) {
+  const res = await fnFetch(AI_CHECKIN_OPINION_URL, { checkinId });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, opinion: data.opinion ?? '', generatedAt: data.generatedAt };
 }
 
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
@@ -8185,7 +8199,7 @@ window.LB = {
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
-  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,

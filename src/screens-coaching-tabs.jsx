@@ -477,9 +477,25 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
+  const [opinionBusy, setOpinionBusy] = useStateC(false);
+  const [opinionError, setOpinionError] = useStateC(null);
+  // onGenerated is only passed at the two REAL check-in call sites (this
+  // week's own card, past check-ins), never the schema-builder's fake sample
+  // or the in-progress week's live preview (ci.id doesn't exist there
+  // either): there's nothing real to generate an opinion about in either case.
+  const showAiOpinion = !!ci.id && !!onGenerated;
+  async function generateOpinion() {
+    setOpinionBusy(true);
+    setOpinionError(null);
+    const res = await LB.generateCheckinOpinion(ci.id);
+    setOpinionBusy(false);
+    if (!res.ok) { setOpinionError(res.error || 'Could not generate. Try again.'); return; }
+    onGenerated();
+  }
+  const { headline: opinionHeadline, body: opinionBody } = LB.splitHeadlineBody(ci.aiOpinion || '');
   const cardRef = useRefC(null);
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const responses = ci.responses || {};
@@ -768,6 +784,30 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {extraKeys.map(k => <StatPill key={k} label={k.replace(/_/g, ' ')} value={String(responses[k])} />)}
               </div>
+            </div>
+          )}
+
+          {/* AI Coach opinion: same block, same data, for whichever side (client
+              or coach) is looking at this exact card, since this component is
+              the one shared render both already use. */}
+          {showAiOpinion && (
+            <div>
+              <div className="knurl" style={{ margin: '0 0 6px' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>AI COACH</div>
+              {ci.aiOpinionGeneratedAt ? (
+                <div>
+                  {opinionHeadline && <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 4 }}>{opinionHeadline}</div>}
+                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{opinionBody}</div>
+                </div>
+              ) : (
+                <div>
+                  <button onClick={generateOpinion} disabled={opinionBusy}
+                    style={{ width: '100%', background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, color: opinionBusy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, cursor: opinionBusy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    {opinionBusy ? 'Generating…' : 'Get AI take on this check-in'}
+                  </button>
+                  {opinionError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{opinionError}</div>}
+                </div>
+              )}
             </div>
           )}
 
@@ -1392,7 +1432,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
         ) : null}
 
         {past.length > 0 && (
@@ -1413,7 +1453,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
                   </div>
                 ))}
               </div>
