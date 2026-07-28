@@ -2506,6 +2506,72 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
 }
 
+// Own copy per file (same convention as mdShiftDate/fdShiftDate): shifts an
+// ISO date string by N days, local calendar day.
+function hlShiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return LB.fmtISO(d);
+}
+
+// ─── AI Daily Summary card ──────────────────────────────────────────────────
+// User-triggered (button, never automatic) once-a-day AI read on yesterday's
+// tracked data. readOnly (the coach view) renders no button at all: a
+// coach's own tap would resolve server-side to the COACH's own identity, not
+// the client's, and silently write into the wrong account's row rather than
+// erroring loudly, so the affordance simply must not exist there.
+function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }) {
+  const [busy, setBusy] = useStateH(false);
+  const [error, setError] = useStateH(null);
+  const yesterday = hlShiftDate(LB.todayISO(), -1);
+  const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
+  const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
+  const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, yesterday));
+    setBusy(false);
+    if (!res.ok) { setError(res.error || 'Could not generate summary. Try again.'); return; }
+    setStore(s => {
+      const exists = (s.dailyLogs || []).some(l => l.date === yesterday);
+      return {
+        ...s,
+        dailyLogs: exists
+          ? s.dailyLogs.map(l => l.date === yesterday ? { ...l, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt } : l)
+          : [...(s.dailyLogs || []), { id: LB.uid(), date: yesterday, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt }],
+      };
+    });
+  }
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        {dragHandle}
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Yesterday's Summary</span>
+        <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 12, color: UI.inkFaint }} />
+      </div>
+      {log?.aiSummaryGeneratedAt ? (
+        <div>
+          {headline && <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 6 }}>{headline}</div>}
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px' }}>{body}</div>
+        </div>
+      ) : readOnly ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Not generated yet.</div>
+      ) : isEmpty ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged yesterday.</div>
+      ) : (
+        <div>
+          <Btn onClick={generate} disabled={busy} style={{ width: '100%' }}>
+            {busy ? 'Generating…' : 'Get yesterday\'s AI summary'}
+          </Btn>
+          {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
@@ -3585,7 +3651,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
   // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -3741,6 +3807,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
+    aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} />,
     // Targets on top (full width, needs the room for the P/C/F chip row), then
     // Adherence + the macro breakdown paired below it, always full-width as a
     // whole, see fullWidthCardIds.
@@ -3798,7 +3865,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // stays in the 2-col grid no matter what, a card left alone at the end of
   // an odd run just leaves the other half of its row empty instead of
   // stretching to fill it.
-  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup']);
+  const fullWidthCardIds = new Set(['week', 'today', 'aiSummary', 'macroGroup']);
 
   return (
     <Screen>
@@ -3911,7 +3978,7 @@ function HealthClientLogs({ clientStore }) {
   // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
   // cardEls entry below, same grouping as the client's own Health tab, and
   // required for hiddenHealthCards (client setting) to hide it correctly here too.
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -4039,6 +4106,10 @@ function HealthClientLogs({ clientStore }) {
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
         mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(logs, selectedDate).ordinal} />
     ),
+    // Read-only: no Generate button here at all, a coach's own tap would
+    // resolve server-side to the COACH's own identity, not the client's, see
+    // AiSummaryCard's own comment.
+    aiSummary: <AiSummaryCard dragHandle={handle} store={clientStore || {}} readOnly />,
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
         {adherenceCard}
@@ -4116,7 +4187,7 @@ function HealthClientLogs({ clientStore }) {
   // Only Week/Today/the macro group/Weekly Averages ever span full width.
   // Everything else stays in the 2-col grid no matter what, matches the
   // client's own Health tab exactly (see HealthScreen's fullWidthCardIds).
-  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup', 'weekly']);
+  const fullWidthCardIds = new Set(['week', 'today', 'aiSummary', 'macroGroup', 'weekly']);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

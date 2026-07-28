@@ -205,6 +205,8 @@ CREATE TABLE public.zane_daily_logs (
   meal_of_choice     boolean     DEFAULT false,
   meal_of_choice_hour smallint,
   daily_coach_fields jsonb,
+  ai_summary              text,
+  ai_summary_generated_at timestamp with time zone,
   updated_at         timestamp with time zone NOT NULL DEFAULT now(),
   created_at         timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)

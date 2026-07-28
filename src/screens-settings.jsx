@@ -14,6 +14,7 @@ const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 const HEALTH_CARD_TOGGLES = [
   { id: 'week', label: 'Week overview' },
   { id: 'today', label: 'Today' },
+  { id: 'aiSummary', label: 'AI Summary' },
   { id: 'macroGroup', label: 'Macros' },
   { id: 'weight', label: 'Weight' },
   { id: 'cardio', label: 'Cardio' },

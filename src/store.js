@@ -10,6 +10,7 @@ const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
+const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -639,6 +640,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         meal_of_choice_hour: l.mealOfChoiceHour ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
+        ai_summary: l.aiSummary ?? null, ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
       }))
     ));
     stepsDone++;
@@ -1134,7 +1136,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1429,6 +1431,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
       updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
@@ -5976,7 +5979,7 @@ async function endDeload(userId, store, setStore) {
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -5997,6 +6000,7 @@ async function refreshHealthLogs(userId) {
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
       updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
@@ -6028,6 +6032,107 @@ async function refreshHealthLogs(userId) {
     })),
     foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
   };
+}
+
+// ── AI Daily Summary (ai-daily-summary Edge Function) ───────────────────────
+// Self-contained copy of screens-medications.jsx's mdSlotAppliesOn: that file
+// isn't loaded by store.test.cjs's sandbox, and this needs to run there too.
+function dsSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
+  if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
+  if (!(slot.weekdays || []).includes(wd)) return false;
+  if (slot.startDate && dateISO < slot.startDate) return false;
+  if (slot.endDate && dateISO > slot.endDate) return false;
+  return true;
+}
+function dsShiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return fmtISO(d);
+}
+function dsMedsDueTaken(store, dateISO) {
+  const wd = isoWd(new Date(dateISO + 'T12:00:00'));
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
+  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO);
+  const medsById = new Map((store.medications || []).map(m => [m.id, m]));
+  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
+  const taken = dueSlots.filter(slot => {
+    const row = dayLogs.find(l => l.scheduleSlotId === slot.id);
+    return row ? !row.planned : false;
+  });
+  return { due: dueSlots.length, taken: taken.length, takenNames: taken.map(slot => medsById.get(slot.medicationId)?.name).filter(Boolean) };
+}
+// True when `dateISO` has nothing at all to summarize: no point spending an
+// Anthropic call (or even showing the button) on a day nobody tracked
+// anything for. Zero medications DUE counts as empty; zero TAKEN of some due
+// does not (that's a real, summary-worthy fact).
+function dailySummaryDayIsEmpty(store, dateISO) {
+  const log = (store.dailyLogs || []).find(l => l.date === dateISO);
+  const hasDailyLogFields = !!log && (log.weight != null || log.steps != null || log.calories != null || (log.note && log.note.trim()));
+  const hasFood = (store.foodLogs || []).some(l => l.date === dateISO && !l.planned);
+  const hasWater = (store.waterLogs || []).some(l => l.date === dateISO && l.amountMl > 0);
+  const hasGlucose = (store.glucoseLogs || []).some(l => l.date === dateISO);
+  const hasBp = (store.bloodPressureLogs || []).some(l => l.date === dateISO);
+  const hasBodyTemp = (store.bodyTempLogs || []).some(l => l.date === dateISO);
+  const { due } = dsMedsDueTaken(store, dateISO);
+  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && due === 0;
+}
+// Assembles everything the ai-daily-summary Edge Function needs for one day,
+// straight off the already-loaded store, no extra fetch. weightTrend is a
+// 14-day trailing window (this day inclusive), ascending, nulls excluded: a
+// single day's weight can't show a trend, only a short series can.
+function buildDailySummaryPayload(store, dateISO) {
+  const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
+  const trendStart = dsShiftDate(dateISO, -13);
+  const weightTrend = (store.dailyLogs || [])
+    .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
+    .map(l => ({ date: l.date, weight: l.weight }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const foodItems = (store.foodLogs || [])
+    .filter(l => l.date === dateISO && !l.planned)
+    .map(l => ({ name: l.foodName, quantityG: l.quantityG, calories: l.calories }));
+  const meds = dsMedsDueTaken(store, dateISO);
+  return {
+    date: dateISO,
+    weight: log?.weight ?? null,
+    weightTrend,
+    steps: log?.steps ?? null,
+    calories: log?.calories ?? null,
+    protein: log?.protein ?? null,
+    carbs: log?.carbs ?? null,
+    fat: log?.fat ?? null,
+    targets: log?.targetsSnap ?? null,
+    adherence: log?.adherence ?? null,
+    waterMl: log?.waterMl ?? null,
+    foodItems,
+    medsDue: meds.due,
+    medsTaken: meds.taken,
+    medsTakenNames: meds.takenNames,
+    glucose: (store.glucoseLogs || []).filter(l => l.date === dateISO).map(l => ({ valueMmol: l.valueMmol, context: l.context })),
+    bloodPressure: (store.bloodPressureLogs || []).filter(l => l.date === dateISO).map(l => ({ systolic: l.systolic, diastolic: l.diastolic })),
+    bodyTemp: (store.bodyTempLogs || []).filter(l => l.date === dateISO).map(l => ({ valueC: l.valueC })),
+    note: log?.note || log?.offPlanNote || null,
+  };
+}
+// Mirrors scanLabel's exact shape: POST via fnFetch, normalize the response.
+// The stored/returned text is the model's full response as-is (headline
+// line + blank line + body paragraph); splitHeadlineBody below recovers the
+// two parts for display, called identically here and on a summary loaded
+// later from store.dailyLogs, one splitting rule either way.
+async function generateDailySummary(payload) {
+  const res = await fnFetch(AI_DAILY_SUMMARY_URL, payload);
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, summary: data.summary ?? '', generatedAt: data.generatedAt };
+}
+// Headline = text before the first newline, body = the rest with leading
+// blank lines stripped. No newline at all (model ignored the two-part
+// format) -> no headline, the whole trimmed text is the body.
+function splitHeadlineBody(text) {
+  const trimmed = (text || '').trim();
+  const nl = trimmed.indexOf('\n');
+  if (nl === -1) return { headline: null, body: trimmed };
+  return { headline: trimmed.slice(0, nl).trim(), body: trimmed.slice(nl + 1).replace(/^\s+/, '') };
 }
 
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
@@ -8080,6 +8185,7 @@ window.LB = {
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
