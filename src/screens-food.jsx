@@ -478,6 +478,18 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
   if (pref?.stockBaselineG == null || !pref.stockSetAt) return null;
   return Math.max(0, pref.stockBaselineG - fdConsumedSince(foodLogs, pref.foodId, pref.stockSetAt, todayISO));
 }
+// True when the stock baseline predates the boot-window cutoff
+// (LB.FOOD_HISTORY_WINDOW_DAYS): store.foodLogs only ever holds that many
+// days, so any consumption between the baseline and the cutoff is invisible
+// to fdConsumedSince and current stock is a floor, not a fact. Surfaced as a
+// small "~" on the number rather than asserting a precise figure that could
+// be quietly wrong and suppress Running Low.
+function fdStockMaybeIncomplete(pref, todayISO) {
+  if (!pref?.stockSetAt) return false;
+  const cutoff = new Date(todayISO + 'T12:00:00');
+  cutoff.setDate(cutoff.getDate() - LB.FOOD_HISTORY_WINDOW_DAYS);
+  return new Date(pref.stockSetAt) < cutoff;
+}
 // Applies every stored per-food Shopping List preference
 // (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
 // see fdSetShoppingPref) in one pass: a display-name override (for the
@@ -502,6 +514,7 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
       packageSizeG: pref?.packageSizeG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
       effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
+      stockMaybeIncomplete: fdStockMaybeIncomplete(pref, todayISO),
     };
   });
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -530,6 +543,7 @@ function fdBuildInventoryList(store, todayISO) {
       packageSizeG: p.packageSizeG ?? null,
       stockSetAt: p.stockSetAt,
       effectiveStockG: fdEffectiveStockG(p, store.foodLogs, todayISO),
+      stockMaybeIncomplete: fdStockMaybeIncomplete(p, todayISO),
       grams: 0,
       fromProjection: false,
     }))
@@ -631,7 +645,7 @@ function fdSetShoppingPref(setStore, foodId, patch) {
     const list = s.foodShoppingPrefs || [];
     const existing = list.find(p => p.foodId === foodId);
     const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
-    const isDefault = !merged.nameOverride && !merged.excluded && !merged.packageSizeG && merged.stockBaselineG == null;
+    const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
     const next = isDefault
       ? list.filter(p => p.foodId !== foodId)
       : existing
@@ -5502,7 +5516,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
     if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
     setEditItem(item);
     setEditDraft(item.displayName);
-    setPkgDraft(item.packageSizeG ? String(item.packageSizeG) : '');
+    setPkgDraft(item.packageSizeG != null ? String(item.packageSizeG) : '');
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
@@ -5518,7 +5532,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
-    if (pkgDraft !== (editItem.packageSizeG ? String(editItem.packageSizeG) : '')) return true;
+    if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
   // Sheet's backdrop tap calls onClose directly with no dirty-check of its
@@ -5622,7 +5636,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                   // 2 packs against a 1-pack low-stock threshold saved fine,
                   // just showed nothing anywhere to confirm it).
                   ? <div style={{ fontSize: 10, color: low ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
-                      {fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
+                      {item.stockMaybeIncomplete ? '~' : ''}{fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
                     </div>
                   : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))
               : (item.packageSizeG > 0
@@ -5640,7 +5654,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                 </>)
               : (
                   <div style={{ textAlign: 'right' }}>
-                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{fdExactShoppingQty(item.effectiveStockG)}</div>
+                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{item.stockMaybeIncomplete ? '~' : ''}{fdExactShoppingQty(item.effectiveStockG)}</div>
                     <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
                   </div>
                 )}

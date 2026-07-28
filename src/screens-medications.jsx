@@ -258,6 +258,19 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
 function mdIsLowStock(med, effectiveStock) {
   return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
 }
+// True when the stock baseline predates the boot-window cutoff
+// (LB.FOOD_HISTORY_WINDOW_DAYS, reused rather than a second constant):
+// store.medicationLogs only ever holds that many days, so any consumption
+// between the baseline and the cutoff is invisible to mdConsumedSince and
+// current stock is a floor, not a fact. Surfaced as a small "~" on the
+// number rather than asserting a precise figure that could be quietly wrong
+// and suppress Running Low.
+function mdStockMaybeIncomplete(med, todayISO) {
+  if (!med?.stockSetAt) return false;
+  const cutoff = new Date(todayISO + 'T12:00:00');
+  cutoff.setDate(cutoff.getDate() - LB.FOOD_HISTORY_WINDOW_DAYS);
+  return new Date(med.stockSetAt) < cutoff;
+}
 // Whether a medication currently belongs to at least one plan (migration
 // 0221: membership is many-to-many via zane_medication_plan_items, no single
 // medicationPlanId on the medication itself anymore).
@@ -302,6 +315,14 @@ function mdMaterializeSlotEntry(med, slot, dateISO) {
 // taken or ignore. See the effect below for why it can no longer happen
 // simply from the delete itself.
 function mdAutoFillToday(store, setStore, todayISO) {
+  // Every current nav path into this screen already gates on showMeds
+  // (derived from this same flag), but that's a UI-entry-point guard, not a
+  // property of this function itself: a cross-device settings sync landing
+  // mid-session while the screen is still mounted must not keep silently
+  // materializing and syncing new doses for a feature the store just marked
+  // disabled, same as the Food Tracker's own auto-fill effect gating on
+  // planMode first.
+  if (!store.settings?.medsEnabled) return;
   const wd = LB.isoWd(new Date());
   const medsById = new Map((store.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
   const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
@@ -520,8 +541,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const qty = mdNum(logDraft?.doseQtyStr);
     if (!med || !(qty > 0)) return;
     const time = logDraft.hour != null ? `${String(logDraft.hour).padStart(2, '0')}:00` : LB.nowHHMM();
-    const entry = { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
-    setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), entry] }));
+    const hour = logDraft.hour != null ? logDraft.hour : parseInt(time.split(':')[0], 10);
+    // If this medication already has a real, still-due scheduled dose in
+    // this same hour today (materialized by mdAutoFillToday), mark THAT row
+    // taken instead of inserting a second, disconnected entry: otherwise the
+    // Timeline would show a confusing duplicate for the same dose, and the
+    // hero/coach view (which only trust the scheduled row's own
+    // scheduleSlotId) would still read it as not taken.
+    const dueMatch = curDateLogs.find(l => l.medicationId === med.id && l.scheduleSlotId && l.planned
+      && parseInt((l.time || '0:00').split(':')[0], 10) === hour);
+    setStore(s => ({
+      ...s,
+      medicationLogs: dueMatch
+        ? (s.medicationLogs || []).map(l => l.id === dueMatch.id ? { ...l, doseQty: qty, planned: false } : l)
+        : [...(s.medicationLogs || []), { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null }],
+    }));
     setLogDraft(null);
   }
 
@@ -730,7 +764,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function openMedSheet(med) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
-      unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize ? String(med.packageSize) : '',
+      unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
     };
@@ -963,6 +997,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // declaration, nothing left to do here beyond the name/intent this
   // variable carries in the rest of this tab's code.
   const inventoryList = activeMedications;
+  // Computed once per medication per render and reused everywhere below
+  // (lowStockList, mainInventoryList, filteredMedicationsList, renderMedRow,
+  // the stock sheet), instead of every one of those independently re-running
+  // mdEffectiveStock's own full scan over medicationLogs, mirrors the Food
+  // Shopping List's own compute-once-per-item pattern (fdApplyShoppingPrefs).
+  const effectiveStockById = useMemoMd(() => {
+    const map = new Map();
+    activeMedications.forEach(m => map.set(m.id, mdEffectiveStock(m, medicationLogs, today)));
+    return map;
+  }, [activeMedications, medicationLogs, today]);
+  const stockMaybeIncompleteById = useMemoMd(() => {
+    const map = new Map();
+    activeMedications.forEach(m => map.set(m.id, mdStockMaybeIncomplete(m, today)));
+    return map;
+  }, [activeMedications, today]);
 
   // Search + filter sheet shared by BOTH Inventory sub-tabs (Medications and
   // Stock are just two different lenses on the exact same underlying
@@ -1006,8 +1055,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }), [inventoryList, invSearch, stockFilterCategories, stockFilterInPlan, medicationPlanItems]);
 
   const lowStockList = useMemoMd(
-    () => filteredInventoryBase.filter(m => mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))),
-    [filteredInventoryBase, medicationLogs, today],
+    () => filteredInventoryBase.filter(m => mdIsLowStock(m, effectiveStockById.get(m.id))),
+    [filteredInventoryBase, effectiveStockById],
   );
   const [lowStockAcks, setLowStockAcks] = useStateMd(mdReadLowStockAcks);
   const freshLowStock = useMemoMd(
@@ -1022,13 +1071,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   const mainInventoryList = useMemoMd(() => {
-    const rest = filteredInventoryBase.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
+    const rest = filteredInventoryBase.filter(m => !mdIsLowStock(m, effectiveStockById.get(m.id)));
     if (stockFilterTracked === null) return rest;
     return rest.filter(m => {
-      const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
+      const tracked = effectiveStockById.get(m.id) != null;
       return stockFilterTracked === 'tracked' ? tracked : !tracked;
     });
-  }, [filteredInventoryBase, medicationLogs, today, stockFilterTracked]);
+  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
 
   // Same three filters, applied to the Medications sub-tab's own list. No
   // Running Low split exists there (that's Stock-specific), so this is just
@@ -1036,10 +1085,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const filteredMedicationsList = useMemoMd(() => {
     if (stockFilterTracked === null) return filteredInventoryBase;
     return filteredInventoryBase.filter(m => {
-      const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
+      const tracked = effectiveStockById.get(m.id) != null;
       return stockFilterTracked === 'tracked' ? tracked : !tracked;
     });
-  }, [filteredInventoryBase, medicationLogs, today, stockFilterTracked]);
+  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
@@ -1067,7 +1116,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // real buy-quantity estimate to show, the number worth a glance is how
   // much is actually left, not the static per-pack fact.
   function renderMedRow(med) {
-    const effectiveStock = mdEffectiveStock(med, medicationLogs, today);
+    const effectiveStock = effectiveStockById.get(med.id);
     const low = mdIsLowStock(med, effectiveStock);
     return (
       <button key={med.id} onClick={() => openStockSheet(med)} style={{ ...mdQuickRowInner, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, textAlign: 'left' }}>
@@ -1083,7 +1132,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           {effectiveStock != null
             ? (<>
-                <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{mdFmtQty(effectiveStock, med.unitLabel)}</div>
+                <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{stockMaybeIncompleteById.get(med.id) ? '~' : ''}{mdFmtQty(effectiveStock, med.unitLabel)}</div>
                 <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
               </>)
             : <div style={mdEntryMeta}>Not tracked</div>}
@@ -1462,9 +1511,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <Sheet open={!!stockSheet} onClose={() => setStockSheet(null)} title={stockSheet?.name || 'Update stock'} titleColor="var(--accent)">
         {stockSheet && (
           <>
-            {mdEffectiveStock(medications.find(m => m.id === stockSheet.id) || {}, medicationLogs, today) != null && (
+            {effectiveStockById.get(stockSheet.id) != null && (
               <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 12 }}>
-                Current stock: <span className="num">{mdFmtQty(mdEffectiveStock(medications.find(m => m.id === stockSheet.id), medicationLogs, today), stockSheet.unitLabel)}</span>
+                Current stock: <span className="num">{stockMaybeIncompleteById.get(stockSheet.id) ? '~' : ''}{mdFmtQty(effectiveStockById.get(stockSheet.id), stockSheet.unitLabel)}</span>
               </div>
             )}
             <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>

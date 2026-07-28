@@ -264,6 +264,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_template_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_meal_plans').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_shopping_prefs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -905,6 +906,12 @@ async function exportBackup(store, userId) {
     // (same reasoning as the session entries above).
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Same reasoning as zane_food_logs above: store.medicationLogs is
+    // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
+    // deletes every zane_medication_logs row first, so exporting only the
+    // windowed copy would silently drop every dose logged before the window.
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+      .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -915,12 +922,13 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, foodLogsRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, medicationLogsRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
   // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
   if (entriesRes.error) throw entriesRes.error;
   if (foodLogsRes.error) throw foodLogsRes.error;
+  if (medicationLogsRes.error) throw medicationLogsRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -943,6 +951,13 @@ async function exportBackup(store, userId) {
     })),
     // Full history, not the boot window that sits in store.foodLogs.
     foodLogs: (foodLogsRes.data || []).map(mapFoodLogRow),
+    // Full history, not the boot window that sits in store.medicationLogs,
+    // same mapping shape loadFromSupabase uses for this table.
+    medicationLogs: (medicationLogsRes.data || []).map(l => ({
+      id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
+      date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    })),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
       notes: notesRes?.data || [],
@@ -1236,20 +1251,32 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
   if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   if (foodShoppingPrefsRes?.error) throw foodShoppingPrefsRes.error;
-  // Soft-fail, unlike every other collection above: Medications is an
-  // opt-in, off-by-default feature (meds_enabled), so its own plumbing must
-  // never be able to take down boot for the users who never turned it on,
-  // e.g. if these tables' migration hasn't landed on this project yet (the
-  // exact failure mode two earlier incidents on this branch already hit,
-  // for zane_food_shopping_prefs's own new columns). Logged, not thrown; the
-  // mapping below already treats a missing .data as an empty array, so this
-  // load just comes back with nothing for these five collections and
-  // self-heals the next time it succeeds.
-  if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
-  if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
-  if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
-  if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
-  if (medicationPlanItemsRes?.error) console.warn('medication plan items load failed:', medicationPlanItemsRes.error);
+  // Medications is an opt-in, off-by-default feature (meds_enabled). For a
+  // user who never turned it on, soft-fail (log, treat as empty) so these
+  // tables' plumbing, or a migration that hasn't landed on this project yet
+  // (the exact failure mode two earlier incidents on this branch already hit
+  // for zane_food_shopping_prefs's own new columns), can never take down
+  // boot. But a user who HAS opted in gets the same "fail loudly, keep
+  // cache, show retry" treatment as every other collection above: a real
+  // transient error (RLS misconfig, network blip) must not be silently
+  // indistinguishable from "feature not deployed here yet", especially since
+  // these five collections aren't part of the boot merge's resurrection
+  // guard either, so a swallowed error on a background refresh would
+  // silently blank out medication data that was already visible.
+  const medsEnabledAtLoad = !!settRes.data?.meds_enabled;
+  if (medsEnabledAtLoad) {
+    if (medicationPlansRes?.error) throw medicationPlansRes.error;
+    if (medicationsRes?.error) throw medicationsRes.error;
+    if (medicationScheduleSlotsRes?.error) throw medicationScheduleSlotsRes.error;
+    if (medicationLogsRes?.error) throw medicationLogsRes.error;
+    if (medicationPlanItemsRes?.error) throw medicationPlanItemsRes.error;
+  } else {
+    if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
+    if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
+    if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
+    if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
+    if (medicationPlanItemsRes?.error) console.warn('medication plan items load failed:', medicationPlanItemsRes.error);
+  }
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
@@ -2069,7 +2096,12 @@ async function syncStore(prev, next, userId) {
   }
   if (prev.medicationScheduleSlots !== next.medicationScheduleSlots) {
     const { upsert, removed } = diffCollectionById(prev.medicationScheduleSlots, next.medicationScheduleSlots);
-    if (upsert.length) ops.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
+    // preOps, not ops: zane_medication_logs.schedule_slot_id is a hard FK
+    // into this table (same hazard as zane_medications above, one hop
+    // further), and mdAutoFillToday can create a log for a slot added in the
+    // very same diff, so the slot upsert must resolve before any op in
+    // `ops` (including that log's own upsert) fires.
+    if (upsert.length) preOps.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
       id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
       weekdays: s.weekdays || [],
       hour: s.hour, dose_qty: s.doseQty,

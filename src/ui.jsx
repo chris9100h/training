@@ -289,6 +289,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const healthOnPointerDown = (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pressStartRef.current = { x: e.clientX, y: e.clientY };
+    const buttonEl = e.currentTarget;
     cancelPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
@@ -308,7 +309,21 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         activeListenersRef.current = null;
         setReveal(null);
         const pick = resolveHealthOption(ev.clientX, ev.clientY);
-        if (pick) onChange(pick);
+        if (pick) {
+          onChange(pick);
+          // Release landed on a popup chip, a sibling of this button, so no
+          // native click will ever follow to consume suppressClickRef itself
+          // (a click only fires when press and release resolve to the same
+          // element): clear it now, or the next ordinary tap on this button
+          // would be silently swallowed by healthOnClick below.
+          suppressClickRef.current = false;
+        } else if (!buttonEl.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+          // Released somewhere that is neither a popup chip nor the button
+          // itself (e.g. the backdrop): same reasoning, no trailing click is
+          // coming to reset the flag, so reset it here instead of leaving it
+          // stuck for whatever ordinary tap happens to land next.
+          suppressClickRef.current = false;
+        }
       };
       activeListenersRef.current = { onMove, onUp };
       document.addEventListener('pointermove', onMove);
