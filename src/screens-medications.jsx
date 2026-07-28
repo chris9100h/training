@@ -960,7 +960,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
         }}>
-          Filter{stockFilterActiveCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{stockFilterActiveCount}</span>}
+          Filter{stockFilterActiveCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', textShadow: 'none', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{stockFilterActiveCount}</span>}
         </button>
       </div>
     );
