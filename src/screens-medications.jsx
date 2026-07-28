@@ -31,18 +31,25 @@
      sub-sheet) are the one place time itself is entered; there is no
      separate per-slot pause toggle (removed, found confusing): the only
      way to stop a dose is removing the medication from that plan.
-   - Inventory: two sub-tabs, mirroring the Food Shopping List's own
-     Shopping List/Inventory split. Inventory is the stock/low-stock view
-     (its own dedicated stockSheet is the only place stock is entered),
-     every non-archived medication (not just stock-tracked ones, unlike the
-     Shopping List's own Inventory tab: this domain's medication list IS the
-     inventory, there's no separate frequency-filtered "staple" concept
-     sitting in front of it), with a Running Low section for anything
-     that's dipped under its package size, and a Tracked/Not-tracked filter
-     underneath. Medications is the actual create/edit/delete surface for a
-     medication's identity (name, brand, category, unit, package size) ONLY,
-     independent of any plan, same list as Inventory just presented for
-     editing rather than for stock.
+   - Inventory: two sub-tabs, Medications first/default and Stock second,
+     mirroring the Food Shopping List's own Shopping List/Inventory split.
+     Both share one search+filter row (renderSearchAndFilterRow: a name/
+     brand search box plus a Filter sheet for category/in-a-plan/tracked,
+     mirroring the Exercises library's own search+filter pattern exactly),
+     since they're just two lenses on the exact same underlying
+     inventoryList; the sub-tab id for Stock stayed 'inventory' when its
+     label was renamed (only the label changed, not the id, so existing
+     invSubTab checks didn't need touching). Stock is the stock/low-stock
+     view (its own dedicated stockSheet is the only place stock is
+     entered), every non-archived medication (not just stock-tracked ones,
+     unlike the Shopping List's own Inventory tab: this domain's medication
+     list IS the inventory, there's no separate frequency-filtered "staple"
+     concept sitting in front of it), with a Running Low section for
+     anything that's dipped under its package size. Medications is the
+     actual create/edit/delete surface for a medication's identity (name,
+     brand, category, unit, package size) ONLY, independent of any plan,
+     same list as Stock just presented for editing rather than for stock
+     levels.
 
    Identity and schedule are strictly entry-point-specific, never mixed into
    one sheet: medSheet (Inventory > Medications) is name/brand/category/unit/
@@ -798,18 +805,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // screen's Shopping List/Inventory one: Inventory here is the stock/low-
   // stock view (renderMedRow), Medications is the create/edit/delete surface
   // for the medication itself (renderMedListRow), independent of any plan.
-  const [invSubTab, setInvSubTab] = useStateMd('inventory'); // 'inventory' | 'medications'
+  const [invSubTab, setInvSubTab] = useStateMd('medications'); // 'inventory' | 'medications'
   // activeMedications is already alphabetically sorted at its own
   // declaration, nothing left to do here beyond the name/intent this
   // variable carries in the rest of this tab's code.
   const inventoryList = activeMedications;
 
-  // Stock filter sheet, mirrors the Exercises library's own filter sheet
-  // (screens-lib.jsx: GoldSectionLabel sections of checkable Pills, a
-  // Filter button with a gold active-count badge). Category is multi-select
-  // (an array, like that screen's own MUSCLE GROUP filter); Plan and Tracked
-  // are each a nullable single choice (like that screen's own PLAN filter:
-  // tapping the same pill again clears it back to "no filter").
+  // Search + filter sheet shared by BOTH Inventory sub-tabs (Medications and
+  // Stock are just two different lenses on the exact same underlying
+  // inventoryList), mirrors the Exercises library's own search+filter row
+  // (screens-lib.jsx: a Field/TextInput at flex:1 next to a Filter button
+  // with a GoldSectionLabel sheet, gold active-count badge). Category is
+  // multi-select (an array, like that screen's own MUSCLE GROUP filter);
+  // Plan and Tracked are each a nullable single choice (like that screen's
+  // own PLAN filter: tapping the same pill again clears it back to "no
+  // filter"). Search is free text, matched against name/brand, and
+  // deliberately left out of the active-count badge, same as Exercises'
+  // own q not counting toward its activeCount either.
+  const [invSearch, setInvSearch] = useStateMd('');
   const [stockFilterCategories, setStockFilterCategories] = useStateMd([]); // MED_CATEGORIES ids
   const [stockFilterInPlan, setStockFilterInPlan] = useStateMd(null); // 'in' | 'out' | null
   const [stockFilterTracked, setStockFilterTracked] = useStateMd(null); // 'tracked' | 'untracked' | null
@@ -823,21 +836,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setStockFilterInPlan(null);
     setStockFilterTracked(null);
   }
-  // Category and Plan apply to BOTH Running Low and the main list below it,
-  // both are genuine "which medications" questions. Tracked/Not-tracked
-  // stays scoped to the main list only (see mainInventoryList below): Running
-  // Low is definitionally always tracked (it requires a real stock count to
-  // compare against package size), so that axis is either a no-op or
-  // always-empty there depending on which side you pick.
-  const categoryPlanFilteredInventory = useMemoMd(() => inventoryList.filter(m => {
+  // Search, Category and Plan apply everywhere this feeds into: Running Low,
+  // the Stock tab's own list, and the Medications tab's own list, all three
+  // are genuine "which medications" questions no matter which tab is asking.
+  // Tracked/Not-tracked is applied separately per list further down
+  // (mainInventoryList, filteredMedicationsList): Running Low is
+  // definitionally always tracked (it requires a real stock count to compare
+  // against package size), so that axis would be a no-op or always-empty
+  // there depending on which side you pick.
+  const filteredInventoryBase = useMemoMd(() => inventoryList.filter(m => {
+    const ql = invSearch.trim().toUpperCase();
+    const matchSearch = !ql || m.name.toUpperCase().includes(ql) || (m.brand || '').toUpperCase().includes(ql);
     const matchCategory = stockFilterCategories.length === 0 || stockFilterCategories.includes(m.category);
     const matchPlan = stockFilterInPlan === null || (stockFilterInPlan === 'in' ? mdHasPlan(m, medicationPlanItems) : !mdHasPlan(m, medicationPlanItems));
-    return matchCategory && matchPlan;
-  }), [inventoryList, stockFilterCategories, stockFilterInPlan, medicationPlanItems]);
+    return matchSearch && matchCategory && matchPlan;
+  }), [inventoryList, invSearch, stockFilterCategories, stockFilterInPlan, medicationPlanItems]);
 
   const lowStockList = useMemoMd(
-    () => categoryPlanFilteredInventory.filter(m => mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))),
-    [categoryPlanFilteredInventory, medicationLogs, today],
+    () => filteredInventoryBase.filter(m => mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today))),
+    [filteredInventoryBase, medicationLogs, today],
   );
   const [lowStockAcks, setLowStockAcks] = useStateMd(mdReadLowStockAcks);
   const freshLowStock = useMemoMd(
@@ -852,13 +869,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
 
   const mainInventoryList = useMemoMd(() => {
-    const rest = categoryPlanFilteredInventory.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
+    const rest = filteredInventoryBase.filter(m => !mdIsLowStock(m, mdEffectiveStock(m, medicationLogs, today)));
     if (stockFilterTracked === null) return rest;
     return rest.filter(m => {
       const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
       return stockFilterTracked === 'tracked' ? tracked : !tracked;
     });
-  }, [categoryPlanFilteredInventory, medicationLogs, today, stockFilterTracked]);
+  }, [filteredInventoryBase, medicationLogs, today, stockFilterTracked]);
+
+  // Same three filters, applied to the Medications sub-tab's own list. No
+  // Running Low split exists there (that's Stock-specific), so this is just
+  // filteredInventoryBase plus the Tracked axis, nothing carved out.
+  const filteredMedicationsList = useMemoMd(() => {
+    if (stockFilterTracked === null) return filteredInventoryBase;
+    return filteredInventoryBase.filter(m => {
+      const tracked = mdEffectiveStock(m, medicationLogs, today) != null;
+      return stockFilterTracked === 'tracked' ? tracked : !tracked;
+    });
+  }, [filteredInventoryBase, medicationLogs, today, stockFilterTracked]);
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
@@ -908,6 +936,33 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             : <div style={mdEntryMeta}>Not tracked</div>}
         </div>
       </button>
+    );
+  }
+
+  // Shared search box + "Filter" trigger, used by both Inventory sub-tabs
+  // (see the filter state's own comment above): same search, same sheet,
+  // same active-count badge, wherever it's rendered from. Layout mirrors the
+  // Exercises library's own search+filter row (screens-lib.jsx) exactly: a
+  // flex:1 Field/TextInput next to the Filter button, not stacked.
+  function renderSearchAndFilterRow() {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="">
+            <TextInput value={invSearch} onChange={setInvSearch} placeholder="Search…" />
+          </Field>
+        </div>
+        <button onClick={() => setStockFiltersOpen(true)} style={{
+          flexShrink: 0, background: stockFilterActiveCount > 0 ? UI.goldFaint : 'transparent',
+          border: `1px solid ${stockFilterActiveCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+          borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+          color: stockFilterActiveCount > 0 ? UI.gold : UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
+        }}>
+          Filter{stockFilterActiveCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{stockFilterActiveCount}</span>}
+        </button>
+      </div>
     );
   }
 
@@ -1145,18 +1200,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <button onClick={() => setStockFiltersOpen(true)} style={{
-                        flexShrink: 0, background: stockFilterActiveCount > 0 ? UI.goldFaint : 'transparent',
-                        border: `1px solid ${stockFilterActiveCount > 0 ? UI.goldSoft : UI.hairStrong}`,
-                        borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
-                        color: stockFilterActiveCount > 0 ? UI.gold : UI.inkSoft,
-                        fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-                        display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
-                      }}>
-                        Filter{stockFilterActiveCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{stockFilterActiveCount}</span>}
-                      </button>
-                    </div>
+                    {renderSearchAndFilterRow()}
                     {!mainInventoryList.length ? (
                       <div style={mdEmptyHint}>Nothing matches this filter.</div>
                     ) : (
@@ -1182,9 +1226,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   <Empty title="No medications yet" sub="Create one here, then add it to a plan (or several, one at a time) whenever you're ready."
                     icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {inventoryList.map(m => renderMedListRow(m, { showPlanTag: true }))}
-                  </div>
+                  <>
+                    {renderSearchAndFilterRow()}
+                    {!filteredMedicationsList.length ? (
+                      <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {filteredMedicationsList.map(m => renderMedListRow(m, { showPlanTag: true }))}
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
