@@ -477,7 +477,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         scheduleSlotId: slot.id, isPreview: true,
       });
     });
-    Object.keys(map).forEach(h => map[h].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
+    // Alphabetical by medication name first (same convention as every other
+    // name-based list in this module), exact time only as a tie-breaker:
+    // real/preview rows in the same hour otherwise share the same or a
+    // near-identical time, so sorting by time alone barely did anything.
+    Object.keys(map).forEach(h => map[h].sort((a, b) => a.medicationName.localeCompare(b.medicationName) || (a.time || '').localeCompare(b.time || '')));
     return map;
     // medicationPlans is a real dependency, not just an incidental read: an
     // active/inactive toggle must immediately reflect here, otherwise
