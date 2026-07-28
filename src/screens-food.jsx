@@ -478,18 +478,6 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
   if (pref?.stockBaselineG == null || !pref.stockSetAt) return null;
   return Math.max(0, pref.stockBaselineG - fdConsumedSince(foodLogs, pref.foodId, pref.stockSetAt, todayISO));
 }
-// True when the stock baseline predates the boot-window cutoff
-// (LB.FOOD_HISTORY_WINDOW_DAYS): store.foodLogs only ever holds that many
-// days, so any consumption between the baseline and the cutoff is invisible
-// to fdConsumedSince and current stock is a floor, not a fact. Surfaced as a
-// small "~" on the number rather than asserting a precise figure that could
-// be quietly wrong and suppress Running Low.
-function fdStockMaybeIncomplete(pref, todayISO) {
-  if (!pref?.stockSetAt) return false;
-  const cutoff = new Date(todayISO + 'T12:00:00');
-  cutoff.setDate(cutoff.getDate() - LB.FOOD_HISTORY_WINDOW_DAYS);
-  return new Date(pref.stockSetAt) < cutoff;
-}
 // Applies every stored per-food Shopping List preference
 // (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
 // see fdSetShoppingPref) in one pass: a display-name override (for the
@@ -514,7 +502,6 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
       packageSizeG: pref?.packageSizeG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
       effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
-      stockMaybeIncomplete: fdStockMaybeIncomplete(pref, todayISO),
     };
   });
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -529,7 +516,8 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
 // stays identifiable in the Inventory tab even once it ages out of both.
 // Shares fdEffectiveStockG/renderShoppingRow with the Shopping List tab (see
 // ShoppingListScreen), just fed from this list instead of displayList.
-function fdBuildInventoryList(store, todayISO) {
+function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
+  const foodLogs = foodLogsOverride || store.foodLogs;
   return (store.foodShoppingPrefs || [])
     .filter(p => p.stockBaselineG != null)
     .map(p => ({
@@ -542,8 +530,7 @@ function fdBuildInventoryList(store, todayISO) {
       excluded: !!p.excluded,
       packageSizeG: p.packageSizeG ?? null,
       stockSetAt: p.stockSetAt,
-      effectiveStockG: fdEffectiveStockG(p, store.foodLogs, todayISO),
-      stockMaybeIncomplete: fdStockMaybeIncomplete(p, todayISO),
+      effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
       grams: 0,
       fromProjection: false,
     }))
@@ -4263,7 +4250,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
-      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} setStore={setStore} today={today} />
+      <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} setStore={setStore} today={today} userId={userId} />
 
       {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
           buttons. Recomputes its options from the open entry. */}
@@ -5412,12 +5399,31 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 // for the full merge logic), setStore is only for the per-food prefs
 // (fdSetShoppingPref); still no userId/useConfirm like its siblings, it
 // never touches Supabase directly or needs a destructive-action confirm.
-function ShoppingListScreen({ open, onClose, store, setStore, today }) {
+function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // 'list' is the default/most-opened path (see fdBuildInventoryList's own
   // comment): the Running Low section and its banner stay there rather than
   // moving to 'inventory', so the warning still surfaces on the path a user
   // actually opens often, not just the one dedicated to browsing stock.
   const [screenTab, setScreenTab] = useStateFd('list'); // 'list' | 'inventory'
+  // store.foodLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
+  // understates consumption, and so overstates stock, for a baseline set
+  // further back than that (a bulk item bought a few times a year). Lazily
+  // fetched in full from the DB whenever the Inventory tab is actually open,
+  // rather than widening the boot window itself, which every screen would
+  // then pay for on every load. Reset to null on leaving the tab so the next
+  // visit always refetches current data, not a stale snapshot.
+  const [stockBackfill, setStockBackfill] = useStateFd(null);
+  useEffectFd(() => {
+    if (!open || screenTab !== 'inventory') { setStockBackfill(null); return; }
+    const oldestBaseline = (store.foodShoppingPrefs || []).reduce((min, p) => (p.stockSetAt && (!min || p.stockSetAt < min)) ? p.stockSetAt : min, null);
+    if (!oldestBaseline) return;
+    let cancelled = false;
+    LB.fetchFoodLogsSince(userId, oldestBaseline.slice(0, 10))
+      .then(rows => { if (!cancelled) setStockBackfill(rows); })
+      .catch(err => console.error('food stock backfill fetch failed:', err));
+    return () => { cancelled = true; };
+  }, [open, screenTab, store.foodShoppingPrefs, userId]);
+  const logsForStock = stockBackfill || store.foodLogs;
   const [shoppingDays, setShoppingDays] = useStateFd(fdReadShoppingDays);
   function changeShoppingDays(v) {
     const n = Math.max(1, Math.min(30, Math.round(v)));
@@ -5440,8 +5446,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   // 0215), so this needs no local mirror state or localStorage of its own,
   // fdSetShoppingPref below writes straight through setStore.
   const displayList = useMemoFd(
-    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs, store.foodLogs, today),
-    [list, store.foodShoppingPrefs, store.foodLogs, today],
+    () => fdApplyShoppingPrefs(list, store.foodShoppingPrefs, logsForStock, today),
+    [list, store.foodShoppingPrefs, logsForStock, today],
   );
   // What actually feeds the export/screenshot (included only) vs. what's
   // still shown, just set aside, in the list screen's own "Excluded" section.
@@ -5455,8 +5461,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
   // every tracked food, not just this window's staples/projections (see
   // fdBuildInventoryList).
   const inventoryList = useMemoFd(
-    () => open ? fdBuildInventoryList(store, today) : [],
-    [open, store.foodShoppingPrefs, store.foodLogs, today],
+    () => open ? fdBuildInventoryList(store, today, logsForStock) : [],
+    [open, store.foodShoppingPrefs, logsForStock, today],
   );
   // Cuts across displayList for its own "Running Low" section instead
   // (surfaced first regardless of where it'd otherwise sit), so the two
@@ -5636,7 +5642,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                   // 2 packs against a 1-pack low-stock threshold saved fine,
                   // just showed nothing anywhere to confirm it).
                   ? <div style={{ fontSize: 10, color: low ? 'var(--warn)' : UI.inkFaint, fontFamily: UI.fontUi }}>
-                      {item.stockMaybeIncomplete ? '~' : ''}{fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
+                      {fdExactShoppingQty(item.effectiveStockG)} {low ? 'left' : 'in stock'}
                     </div>
                   : (!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>))
               : (item.packageSizeG > 0
@@ -5654,7 +5660,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today }) {
                 </>)
               : (
                   <div style={{ textAlign: 'right' }}>
-                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{item.stockMaybeIncomplete ? '~' : ''}{fdExactShoppingQty(item.effectiveStockG)}</div>
+                    <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{fdExactShoppingQty(item.effectiveStockG)}</div>
                     <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
                   </div>
                 )}

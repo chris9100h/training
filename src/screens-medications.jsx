@@ -258,19 +258,6 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
 function mdIsLowStock(med, effectiveStock) {
   return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
 }
-// True when the stock baseline predates the boot-window cutoff
-// (LB.FOOD_HISTORY_WINDOW_DAYS, reused rather than a second constant):
-// store.medicationLogs only ever holds that many days, so any consumption
-// between the baseline and the cutoff is invisible to mdConsumedSince and
-// current stock is a floor, not a fact. Surfaced as a small "~" on the
-// number rather than asserting a precise figure that could be quietly wrong
-// and suppress Running Low.
-function mdStockMaybeIncomplete(med, todayISO) {
-  if (!med?.stockSetAt) return false;
-  const cutoff = new Date(todayISO + 'T12:00:00');
-  cutoff.setDate(cutoff.getDate() - LB.FOOD_HISTORY_WINDOW_DAYS);
-  return new Date(med.stockSetAt) < cutoff;
-}
 // Whether a medication currently belongs to at least one plan (migration
 // 0221: membership is many-to-many via zane_medication_plan_items, no single
 // medicationPlanId on the medication itself anymore).
@@ -997,6 +984,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // declaration, nothing left to do here beyond the name/intent this
   // variable carries in the rest of this tab's code.
   const inventoryList = activeMedications;
+  // store.medicationLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
+  // understates consumption, and so overstates stock, for a baseline set
+  // further back than that (a bulk supply bought a few times a year). Lazily
+  // fetched in full from the DB whenever the Stock tab is actually open,
+  // rather than widening the boot window itself, which every screen would
+  // then pay for on every load. Reset to null on leaving the tab so the next
+  // visit always refetches current data, not a stale snapshot.
+  const [stockBackfill, setStockBackfill] = useStateMd(null);
+  useEffectMd(() => {
+    if (screenTab !== 'inventory') { setStockBackfill(null); return; }
+    const oldestBaseline = activeMedications.reduce((min, m) => (m.stockSetAt && (!min || m.stockSetAt < min)) ? m.stockSetAt : min, null);
+    if (!oldestBaseline) return;
+    let cancelled = false;
+    LB.fetchMedicationLogsSince(userId, oldestBaseline.slice(0, 10))
+      .then(rows => { if (!cancelled) setStockBackfill(rows); })
+      .catch(err => console.error('medication stock backfill fetch failed:', err));
+    return () => { cancelled = true; };
+  }, [screenTab, activeMedications, userId]);
+  const logsForStock = stockBackfill || medicationLogs;
   // Computed once per medication per render and reused everywhere below
   // (lowStockList, mainInventoryList, filteredMedicationsList, renderMedRow,
   // the stock sheet), instead of every one of those independently re-running
@@ -1004,14 +1010,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // Shopping List's own compute-once-per-item pattern (fdApplyShoppingPrefs).
   const effectiveStockById = useMemoMd(() => {
     const map = new Map();
-    activeMedications.forEach(m => map.set(m.id, mdEffectiveStock(m, medicationLogs, today)));
+    activeMedications.forEach(m => map.set(m.id, mdEffectiveStock(m, logsForStock, today)));
     return map;
-  }, [activeMedications, medicationLogs, today]);
-  const stockMaybeIncompleteById = useMemoMd(() => {
-    const map = new Map();
-    activeMedications.forEach(m => map.set(m.id, mdStockMaybeIncomplete(m, today)));
-    return map;
-  }, [activeMedications, today]);
+  }, [activeMedications, logsForStock, today]);
 
   // Search + filter sheet shared by BOTH Inventory sub-tabs (Medications and
   // Stock are just two different lenses on the exact same underlying
@@ -1132,7 +1133,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           {effectiveStock != null
             ? (<>
-                <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{stockMaybeIncompleteById.get(med.id) ? '~' : ''}{mdFmtQty(effectiveStock, med.unitLabel)}</div>
+                <div className="num" style={{ fontSize: 13, color: low ? 'var(--warn)' : UI.ink }}>{mdFmtQty(effectiveStock, med.unitLabel)}</div>
                 <div style={{ fontSize: 9, color: low ? 'var(--warn)' : UI.inkFaint }}>{low ? 'left' : 'in stock'}</div>
               </>)
             : <div style={mdEntryMeta}>Not tracked</div>}
@@ -1513,7 +1514,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           <>
             {effectiveStockById.get(stockSheet.id) != null && (
               <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 12 }}>
-                Current stock: <span className="num">{stockMaybeIncompleteById.get(stockSheet.id) ? '~' : ''}{mdFmtQty(effectiveStockById.get(stockSheet.id), stockSheet.unitLabel)}</span>
+                Current stock: <span className="num">{mdFmtQty(effectiveStockById.get(stockSheet.id), stockSheet.unitLabel)}</span>
               </div>
             )}
             <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>

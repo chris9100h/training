@@ -3201,6 +3201,33 @@ async function fetchFoodLogsForDates(userId, dates) {
   return byDate;
 }
 
+// Full, unwindowed fetch from a given date to now, for a single stock
+// computation: store.foodLogs is boot-windowed to FOOD_HISTORY_WINDOW_DAYS,
+// which understates consumption (and so overstates current stock) for a
+// baseline set further back than that, e.g. a bulk item bought a few times a
+// year. Fired lazily by the Shopping List's own Inventory tab rather than
+// widening the boot window itself, which every other screen would then pay
+// for on every load.
+async function fetchFoodLogsSince(userId, sinceDateISO) {
+  const { data, error } = await _supabase.from('zane_food_logs')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+    .eq('user_id', userId).gte('date', sinceDateISO);
+  if (error) throw error;
+  return (data || []).map(mapFoodLogRow);
+}
+// Same idea as fetchFoodLogsSince above, for the Medications Inventory tab.
+async function fetchMedicationLogsSince(userId, sinceDateISO) {
+  const { data, error } = await _supabase.from('zane_medication_logs')
+    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+    .eq('user_id', userId).gte('date', sinceDateISO);
+  if (error) throw error;
+  return (data || []).map(l => ({
+    id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
+    date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
+    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+  }));
+}
+
 function isWeekdayPlan(sch) {
   return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
 }
@@ -7998,7 +8025,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates,
+  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
