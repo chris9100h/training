@@ -14,8 +14,24 @@
    crisp bullet points, no tech jargon, no internal names. Leave the array
    empty ([]) to show nothing.
 
-   Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
+   Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] }
+   An item is normally a plain string. { text: string, emphasis: true } opts
+   that one item into a bigger, bolder rendering (WhatsNewModal, app.jsx),
+   e.g. a disclaimer that needs to stand out from the feature bullets
+   around it. Use sparingly, it's meant for one line that genuinely needs
+   the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
+  {
+    id: 'v2.681',
+    date: '2026-07-29',
+    title: 'Your app just got opinions 🧠',
+    items: [
+      "🪄 Yesterday's Summary (Health tab): one tap gets you a quick, casual read on how yesterday went, weight, macros, steps, water, meds, whatever you logged, written like a coach glancing at your day instead of a wall of numbers. Once a day.",
+      '🧠 A real AI Coach opinion on your weekly check-in: tap the button on any check-in, tell it whether you\'re cutting, maintaining or bulking, and it reads your week exactly like a coach reviewing the same form would, including whether your current calorie target still makes sense for that phase. Client and coach see the exact same read, right at the top of the check-in screen.',
+      { text: "Worth remembering: this is a quick AI take, not a replacement for your actual coach.", emphasis: true },
+      '💊 Weekly Prep (Medications, the calendar icon): a pillbox packing list for the week, grouped by compartment instead of by day, so you go through Morning once for the whole week, then Evening, instead of hunting day by day. Set up your own compartments once, tick things off as you pack, and the per-dose amount is big and bold so you can actually read it from across the room while your hands are full of pills.',
+    ],
+  },
   {
     id: 'v2.680',
     date: '2026-07-28',

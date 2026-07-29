@@ -226,12 +226,21 @@ function WhatsNewModal({ entries, onDismiss }) {
               {entry.title}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {(entry.items || []).map((it, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: 7, flexShrink: 0 }} />
-                  <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{it}</div>
-                </div>
-              ))}
+              {/* An item is normally a plain string. { text, emphasis: true }
+                  opts a single item into a bigger, bolder treatment, e.g. a
+                  disclaimer that needs to stand out from the feature bullets
+                  around it, every existing entry is a plain string and keeps
+                  rendering exactly as before. */}
+              {(entry.items || []).map((it, i) => {
+                const emphasis = it && typeof it === 'object';
+                const text = emphasis ? it.text : it;
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: emphasis ? 8 : 7, flexShrink: 0 }} />
+                    <div style={{ fontSize: emphasis ? 15 : 13.5, fontWeight: emphasis ? 700 : 400, color: emphasis ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{text}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}
