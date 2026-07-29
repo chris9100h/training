@@ -186,8 +186,8 @@ Style: short, plain, encouraging but honest, like a coach's quick note back. No 
 
 Output EXACTLY two parts and nothing else:
 1. A short headline, no more than 8 words, no ending punctuation.
-2. A blank line, then one paragraph of 3-5 casual sentences with your actual read on the week, including the macro-fit comment when you have one.
-Do not label the parts (no "Headline:"), do not add a greeting or sign-off.`;
+2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your actual read on the week in the first paragraph, use the next paragraph for the macro-fit comment when you have one or whatever else actually matters, a light week does not need to be padded out to three.
+Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
 
 function buildUserPrompt(
   schema: any[],
