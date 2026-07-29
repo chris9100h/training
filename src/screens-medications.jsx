@@ -136,11 +136,11 @@ const mdListRow = {
 const mdQuickRowInner = { ...mdListRow, flex: 1, minWidth: 0 };
 const mdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const mdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
-// Weekly Prep's own per-day dose count: has to read from across the room
-// while the phone is propped up somewhere and both hands are full of pills,
-// so it gets its own much bigger, bolder, accent treatment instead of
-// mdEntryMeta's small faint one.
-const mdPerDayQty = { fontSize: 18, fontWeight: 700, color: UI.gold, fontFamily: UI.fontUi, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' };
+// Weekly Prep's own per-day dose count: bold and accent instead of
+// mdEntryMeta's small faint treatment so it stands out, but capped at
+// mdEntryName's own size, going any bigger read as oversized/weird next to
+// the medication name it belongs to.
+const mdPerDayQty = { fontSize: 13, fontWeight: 700, color: UI.gold, fontFamily: UI.fontUi, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' };
 const mdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };
 const mdInputStyle = {
   background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
