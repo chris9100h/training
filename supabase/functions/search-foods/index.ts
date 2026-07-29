@@ -44,6 +44,10 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 const DAILY_SEARCH_LIMIT = 400;
 
+// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
+// (isAdmin = store.user?.email === this): unlimited quota for testing.
+const ADMIN_EMAIL = 'office@btc-prime.biz';
+
 // Advisory per-user daily quota (migration 0207). Fails OPEN on purpose: if the
 // RPC errors, times out or the migration has not run yet, the call goes
 // through. A problem with the quota mechanism must never be the reason someone
@@ -66,7 +70,7 @@ async function withinQuota(userId: string, kind: string, limit: number): Promise
   }
 }
 
-async function resolveUser(req: Request): Promise<string | null> {
+async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -76,7 +80,7 @@ async function resolveUser(req: Request): Promise<string | null> {
   }).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response | null> {
@@ -483,12 +487,14 @@ async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
-  const userId = await resolveUser(req);
-  if (!userId) {
+  const caller = await resolveUser(req);
+  if (!caller) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
+  const userId = caller.id;
+  const isAdmin = caller.email === ADMIN_EMAIL;
 
   const body = await req.json().catch(() => ({}));
 
@@ -497,7 +503,7 @@ Deno.serve(async (req) => {
   // 'select', then 'cache'), and the favorites cache repair burned one per
   // unrepaired favorite on every mount, so the limit the user is told about
   // ("400 food searches") was reached at a fraction of that.
-  if (body?.action === 'search' && !await withinQuota(userId, 'search', DAILY_SEARCH_LIMIT)) {
+  if (body?.action === 'search' && !isAdmin && !await withinQuota(userId, 'search', DAILY_SEARCH_LIMIT)) {
     return new Response(JSON.stringify({ error: `That is ${DAILY_SEARCH_LIMIT} food searches today, well past normal use. The limit resets tomorrow.` }), {
       status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

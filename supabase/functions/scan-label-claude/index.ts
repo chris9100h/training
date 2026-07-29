@@ -40,6 +40,10 @@ const MAX_IMAGE_CHARS = 8_000_000;
 
 const DAILY_SCAN_LIMIT = 60;
 
+// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
+// (isAdmin = store.user?.email === this): unlimited quota for testing.
+const ADMIN_EMAIL = 'office@btc-prime.biz';
+
 // Advisory per-user daily quota (migration 0207). Fails OPEN on purpose: if the
 // RPC errors, times out or the migration has not run yet, the call goes
 // through. A problem with the quota mechanism must never be the reason someone
@@ -62,7 +66,7 @@ async function withinQuota(userId: string, kind: string, limit: number): Promise
   }
 }
 
-async function resolveUser(req: Request): Promise<string | null> {
+async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -72,7 +76,7 @@ async function resolveUser(req: Request): Promise<string | null> {
   }).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
 const SYSTEM_PROMPT =
@@ -151,9 +155,11 @@ Deno.serve(async (req) => {
   const json = (body: unknown, status: number) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  const userId = await resolveUser(req);
-  if (!userId) return json({ error: 'unauthorized' }, 401);
-  if (!await withinQuota(userId, 'scan', DAILY_SCAN_LIMIT)) {
+  const caller = await resolveUser(req);
+  if (!caller) return json({ error: 'unauthorized' }, 401);
+  const userId = caller.id;
+  const isAdmin = caller.email === ADMIN_EMAIL;
+  if (!isAdmin && !await withinQuota(userId, 'scan', DAILY_SCAN_LIMIT)) {
     return json({ error: `That is ${DAILY_SCAN_LIMIT} label scans today, well past normal use. The limit resets tomorrow; add the food manually until then.` }, 429);
   }
 

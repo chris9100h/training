@@ -42,6 +42,12 @@ const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
+// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
+// (isAdmin = store.user?.email === this). The admin gets unlimited quota AND can
+// re-generate past the once-a-day gate below, so testing a prompt change never
+// needs a manual DB reset.
+const ADMIN_EMAIL = 'office@btc-prime.biz';
+
 const DAILY_SUMMARY_LIMIT = 5;
 
 // Advisory per-user daily quota (same zane_api_usage/bump_api_usage as
@@ -67,7 +73,7 @@ async function withinQuota(userId: string, kind: string, limit: number): Promise
   }
 }
 
-async function resolveUser(req: Request): Promise<string | null> {
+async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -77,12 +83,12 @@ async function resolveUser(req: Request): Promise<string | null> {
   }).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
 const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that.
 
-If a training session is included, do NOT list exercises with their old-vs-new numbers in sequence, that is a spreadsheet, not a coach talking. Pick out at most the one or two things that actually matter (the standout lift, a stall, something to watch) and say what they mean for the user's progress; fold the rest into a general impression, e.g. "strength moved up across the board" beats naming every single exercise's before and after. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
+If a training session is included, judge the SESSION AS A WHOLE first: overall effort, intensity, and how it fits the user's recent training, not a rundown of individual lifts. Do not cite exercises' old-vs-new numbers in sequence, that is a spreadsheet, not a coach talking, and this applies just as much to a concern or a tip as it does to praise: describe the pattern in plain language (e.g. "your rear delt work added weight but lost reps, so you're ahead of what you can support there yet") instead of quoting the raw kg/rep figures. At most ONE single exercise may get a name-check, and only when it is genuinely the standout or the outlier for the whole session, everything else stays folded into the overall read. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else.
 
@@ -223,8 +229,10 @@ Deno.serve(async (req) => {
   const json = (body: unknown, status: number) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  const userId = await resolveUser(req);
-  if (!userId) return json({ error: 'unauthorized' }, 401);
+  const caller = await resolveUser(req);
+  if (!caller) return json({ error: 'unauthorized' }, 401);
+  const userId = caller.id;
+  const isAdmin = caller.email === ADMIN_EMAIL;
 
   const payload = await req.json().catch(() => ({}));
   const date = typeof payload?.date === 'string' ? payload.date : '';
@@ -251,7 +259,7 @@ Deno.serve(async (req) => {
       const rows = await r.json().catch(() => []);
       if (Array.isArray(rows) && rows[0]) {
         existingId = rows[0].id ?? null;
-        if (rows[0].ai_summary_generated_at) {
+        if (rows[0].ai_summary_generated_at && !isAdmin) {
           return json({ error: 'Already generated for that day.' }, 409);
         }
       }
@@ -261,7 +269,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
   }
 
-  if (!await withinQuota(userId, 'daily_summary', DAILY_SUMMARY_LIMIT)) {
+  if (!isAdmin && !await withinQuota(userId, 'daily_summary', DAILY_SUMMARY_LIMIT)) {
     return json({ error: `That's ${DAILY_SUMMARY_LIMIT} summary attempts today, well past normal use. The limit resets tomorrow.` }, 429);
   }
 

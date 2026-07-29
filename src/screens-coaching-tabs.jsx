@@ -507,11 +507,12 @@ function CheckInPhasePicker({ onPick, busy }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated, isAdmin = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const [opinionBusy, setOpinionBusy] = useStateC(false);
   const [opinionError, setOpinionError] = useStateC(null);
+  const [opinionRetryOpen, setOpinionRetryOpen] = useStateC(false);
   // onGenerated is only passed at the two REAL check-in call sites (this
   // week's own card, past check-ins), never the schema-builder's fake sample
   // or the in-progress week's live preview (ci.id doesn't exist there
@@ -827,7 +828,19 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               {ci.aiOpinionGeneratedAt ? (
                 <div>
                   {opinionHeadline && <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 4 }}>{opinionHeadline}</div>}
-                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{opinionBody}</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px', whiteSpace: 'pre-wrap' }}>{opinionBody}</div>
+                  {isAdmin && (
+                    <div style={{ marginTop: 8 }}>
+                      {opinionRetryOpen ? (
+                        <CheckInPhasePicker onPick={(p) => { setOpinionRetryOpen(false); generateOpinion(p); }} busy={opinionBusy} />
+                      ) : (
+                        <button onClick={() => setOpinionRetryOpen(true)} style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                          <i className="fa-solid fa-rotate-right" />Retry
+                        </button>
+                      )}
+                      {opinionError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{opinionError}</div>}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div>
@@ -875,9 +888,10 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
 // Same AI opinion data as the block inside CheckInCard, surfaced again right
 // at the top of the tab: that block only renders once thisWeek's own card is
 // expanded, which buried it too deep for users to ever find or use.
-function CheckInAiOpinionBanner({ ci, onGenerated }) {
+function CheckInAiOpinionBanner({ ci, onGenerated, isAdmin = false }) {
   const [busy, setBusy] = useStateC(false);
   const [error, setError] = useStateC(null);
+  const [retryOpen, setRetryOpen] = useStateC(false);
   const generate = async (phase) => {
     setBusy(true);
     setError(null);
@@ -896,7 +910,19 @@ function CheckInAiOpinionBanner({ ci, onGenerated }) {
       {ci.aiOpinionGeneratedAt ? (
         <div>
           {headline && <div style={{ fontSize: 14, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 5 }}>{headline}</div>}
-          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{body}</div>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px', whiteSpace: 'pre-wrap' }}>{body}</div>
+          {isAdmin && (
+            <div style={{ marginTop: 8 }}>
+              {retryOpen ? (
+                <CheckInPhasePicker onPick={(p) => { setRetryOpen(false); generate(p); }} busy={busy} />
+              ) : (
+                <button onClick={() => setRetryOpen(true)} style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-rotate-right" />Retry
+                </button>
+              )}
+              {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{error}</div>}
+            </div>
+          )}
         </div>
       ) : (
         <div>
@@ -1295,6 +1321,10 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
 function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, setStore, isSelf = false }) {
+  // Gates the AI-opinion Retry affordance below; server-side (ai-checkin-opinion)
+  // independently enforces the same bypass, this only keeps the button itself
+  // from ever showing to someone it would 409 for.
+  const isAdmin = store?.user?.email === 'office@btc-prime.biz';
   // Local, synchronous store mutations (mirrors workoutTemplates and the coach
   // view's identical handlers: syncStore's diff persists them on the next
   // flush, no dedicated RPC). Only reachable via the self-coaching builder
@@ -1465,7 +1495,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           )}
         </div>
 
-        {thisWeek && <CheckInAiOpinionBanner ci={thisWeek} onGenerated={load} />}
+        {thisWeek && <CheckInAiOpinionBanner ci={thisWeek} onGenerated={load} isAdmin={isAdmin} />}
 
         {previewOpen && previewResponses && (
           <div>
@@ -1497,7 +1527,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} isAdmin={isAdmin} />
         ) : null}
 
         {past.length > 0 && (
@@ -1518,7 +1548,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} isAdmin={isAdmin} />
                   </div>
                 ))}
               </div>
