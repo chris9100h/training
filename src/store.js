@@ -6082,12 +6082,15 @@ function dailySummaryDayIsEmpty(store, dateISO) {
 }
 // Best-effort time of day for a timestamp: createdAt is when the row was
 // saved, not a tracked workout start time (zane_cardio_logs has no such
-// field), but it is the only timestamp available and close enough for a
-// casual "morning run" / "evening ride" read.
-function dsTimeOfDay(iso) {
+// field). That's only a faithful stand-in when the entry was logged the SAME
+// day it's dated for; a backdated entry (today's forgotten cardio logged for
+// yesterday) would otherwise attach today's save time to yesterday's
+// session, actively misleading rather than merely imprecise, so this
+// returns null the moment the two days disagree instead of guessing.
+function dsTimeOfDay(iso, dateISO) {
   if (!iso) return null;
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
+  if (isNaN(d.getTime()) || fmtISO(d) !== dateISO) return null;
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 // Cardio logged on dateISO: compact and purely factual like foodItems, no
@@ -6107,7 +6110,7 @@ function dsCardioForDay(store, dateISO) {
       distance: l.distanceM != null ? fmtDistance(l.distanceM, distUnit, 1) : null,
       effort: l.effort ?? null,
       paceFeeling: l.paceFeeling ?? null,
-      time: dsTimeOfDay(l.createdAt),
+      time: dsTimeOfDay(l.createdAt, dateISO),
       note: l.note ? String(l.note).slice(0, 200) : null,
     }));
 }

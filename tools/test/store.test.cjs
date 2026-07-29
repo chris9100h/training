@@ -4405,6 +4405,18 @@ async function testAsync(name, fn) {
     assert.strictEqual(c.note, 'felt good');
     assert.ok(/^\d{2}:\d{2}$/.test(c.time), 'zero-padded HH:MM, exact value depends on the local timezone');
   });
+  test('buildDailySummaryPayload: cardio time is null for a backdated entry (logged a different day than it happened)', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      // Dated for Y (yesterday's forgotten run), but actually saved a month
+      // later (far enough out to be unambiguous in any timezone): attaching
+      // that save time to Y's session would be wrong, not just imprecise,
+      // so time must come back null rather than guess.
+      cardioLogs: [{ id: 'c1', date: Y, type: 'Running', durationMinutes: 30, createdAt: '2026-08-27T12:00:00Z' }],
+    };
+    const c = LB.buildDailySummaryPayload(store, Y).cardio[0];
+    assert.strictEqual(c.time, null, 'createdAt falls on a different calendar day than Y');
+  });
   test('buildDailySummaryPayload: cardio time/distance are null without a timestamp/distance logged', () => {
     const store = {
       dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
