@@ -101,6 +101,32 @@ function mdShiftDate(dateStr, deltaDays) {
   return LB.fmtISO(d);
 }
 
+// Same "day streak" idiom as Water's own hero (wtStreak, screens-water.jsx),
+// with one deliberate difference: a day with nothing due (due === 0, e.g. a
+// Mon/Wed/Fri-only supplement on a Tuesday) is skipped rather than breaking
+// the streak. Water has the same goal every single day, so a missing day is
+// unambiguously a miss; a medication schedule is inherently day-specific, and
+// due === 0 is the normal, expected shape of an off day, not a lapse. If
+// today's own doses aren't all in yet, start counting from yesterday instead
+// (mirrors wtStreak too): a dose scheduled for tonight shouldn't zero out an
+// otherwise intact streak while the day is still in progress. Capped well
+// past any realistic streak so an empty/near-empty schedule can't spin this
+// loop for years of all-zero days.
+function mdStreak(store, todayISO) {
+  const todayTally = LB.dsMedsDueTaken(store, todayISO);
+  let streak = 0;
+  let offset = (todayTally.due > 0 && todayTally.taken < todayTally.due) ? -1 : 0;
+  for (let guard = 0; guard < 400; guard++) {
+    const dateISO = mdShiftDate(todayISO, offset);
+    const { due, taken } = LB.dsMedsDueTaken(store, dateISO);
+    if (due === 0) { offset--; continue; }
+    if (taken < due) break;
+    streak++;
+    offset--;
+  }
+  return streak;
+}
+
 // ── Style constants (own copies, mirrors screens-food.jsx's fd* helpers) ──
 const mdListRow = {
   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
@@ -518,6 +544,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const scheduled = Object.values(byHour).flat().filter(e => e.scheduleSlotId);
     return { due: scheduled.length, taken: scheduled.filter(e => !e.planned).length };
   }, [byHour]);
+  // Off store/today, not curDate: a streak is always "as of today", browsing
+  // the day-switcher to some other date shouldn't change the number shown.
+  const streak = useMemoMd(() => mdStreak(store, today),
+    [store.medicationScheduleSlots, store.medicationLogs, store.medications, store.medicationPlans, today]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
@@ -1249,8 +1279,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 anything due at all (a medication-free day, or one with
                 nothing scheduled, has no ratio worth showing). The ring
                 itself already carries the taken/due fraction (MdDoseRing),
-                so the text beside it stays to a single status line rather
-                than repeating that same number a second time. */}
+                so the status line stays to a single sentence rather than
+                repeating that same number a second time; the streak below
+                it is Water's own fire-icon idiom (a different, multi-day
+                stat, not a repeat of today's count). */}
             {doseTally.due > 0 && (
               <BracketFrame gold style={{ padding: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
@@ -1261,6 +1293,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                       {doseTally.taken >= doseTally.due
                         ? 'All doses taken'
                         : `${doseTally.due - doseTally.taken} dose${doseTally.due - doseTally.taken === 1 ? '' : 's'} still due`}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+                      <i className="fa-solid fa-fire" style={{ fontSize: 12, color: streak > 0 ? UI.gold : UI.inkFaint }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: streak > 0 ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi }}>
+                        {streak} day{streak === 1 ? '' : 's'} streak
+                      </span>
                     </div>
                   </div>
                 </div>
