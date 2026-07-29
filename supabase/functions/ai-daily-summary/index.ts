@@ -13,11 +13,13 @@
 // already-loaded store data, no extra fetch) and handed to Claude
 // pre-computed: Claude phrases them, it does not recompute or eyeball a
 // trend itself, so a wrong read of "trending down" vs "trending up" is not
-// a failure mode this function has to worry about. The one exception is the
-// per-exercise set-by-set comparison: those are two short, already-labeled
-// lists (today vs last time), well within reading level for prose, so
-// buildTrainingLines hands them over directly instead of pre-computing a
-// verdict per exercise.
+// a failure mode this function has to worry about. The training payload
+// deliberately carries at most two pre-picked "highlight" exercises
+// (LB.dsExerciseHighlights) rather than a full per-exercise breakdown: an
+// earlier version handed over the complete set-by-set list on the theory
+// that two short lists are easy reading, but in practice Claude walked
+// through every exercise in turn no matter how firmly SYSTEM_PROMPT told it
+// not to. Capping the data itself is what actually holds.
 //
 // One action: POST { date, weight, weightTrend, steps, calories, protein,
 // carbs, fat, targets, adherence, waterMl, foodItems, medsDue, medsTaken,
@@ -88,7 +90,7 @@ async function resolveUser(req: Request): Promise<{ id: string; email: string | 
 
 const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that.
 
-If a training session is included, judge the SESSION AS A WHOLE first: overall effort, intensity, and how it fits the user's recent training, not a rundown of individual lifts. Do not cite exercises' old-vs-new numbers in sequence, that is a spreadsheet, not a coach talking, and this applies just as much to a concern or a tip as it does to praise: describe the pattern in plain language (e.g. "your rear delt work added weight but lost reps, so you're ahead of what you can support there yet") instead of quoting the raw kg/rep figures. At most ONE single exercise may get a name-check, and only when it is genuinely the standout or the outlier for the whole session, everything else stays folded into the overall read. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
+If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else.
 
@@ -119,22 +121,14 @@ function daysBetween(earlierISO: string, laterISO: string): number {
   return Math.round((b - a) / 86400000);
 }
 
-function fmtSet(s: Record<string, any>): string {
-  if (s.timeSec != null) return `${s.timeSec}s`;
-  const reps = (s.repsL != null || s.repsR != null) ? `${s.repsL ?? '?'}/${s.repsR ?? '?'}` : (s.reps ?? '?');
-  return s.kg != null ? `${s.kg}kg×${reps}` : `${reps} reps`;
-}
-
-function fmtExercise(ex: Record<string, any>): string {
-  const sets = Array.isArray(ex.sets) && ex.sets.length ? ex.sets.map(fmtSet).join(', ') : 'no working sets logged';
-  return `${ex.name || 'Exercise'}: ${sets}`;
-}
-
 // Renders the training array into prose-ready lines. Per-session totals and
-// the volume delta are simple arithmetic (computed here, same "compute the
-// number, let Claude phrase it" split as fmtWeightTrend above); the
-// per-exercise set lists are handed over as-is for Claude to read off (see
-// the file-header comment for why that's fine here specifically).
+// deltas are simple arithmetic (computed here, same "compute the number, let
+// Claude phrase it" split as fmtWeightTrend above). Deliberately no
+// per-exercise set-by-set listing: LB.dsExerciseHighlights (src/store.js)
+// already boiled that down to at most one riser + one faller by volume %
+// before this payload was ever built, a full itemized list here just
+// invited Claude to walk through every exercise in turn regardless of what
+// the prompt said not to do, capping the data itself is what actually holds.
 function buildTrainingLines(training: any[], dateISO: string): string[] {
   if (!Array.isArray(training) || !training.length) return [];
   const lines: string[] = ['', 'Training logged YESTERDAY:'];
@@ -144,20 +138,18 @@ function buildTrainingLines(training: any[], dateISO: string): string[] {
     if (s.durationMinutes != null) bits.push(`${s.durationMinutes} min`);
     if (s.feel) bits.push(`felt ${s.feel}`);
     lines.push(`- ${label}${s.isDeload ? ' (deload week, deliberately lighter)' : ''}: ${bits.join(', ')}`);
-    for (const ex of (s.exercises || [])) lines.push(`  ${fmtExercise(ex)}`);
     if (s.comparison) {
       const days = daysBetween(s.comparison.date, dateISO);
       const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
       lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs yesterday)` : ''}.`);
-      for (const ex of (s.comparison.exercises || [])) lines.push(`    previously ${fmtExercise(ex)}`);
     } else {
       lines.push(`  No previous "${label}" session on record to compare against.`);
     }
+    if (Array.isArray(s.highlights) && s.highlights.length) {
+      lines.push('  Optional color, mention AT MOST ONE briefly if it actually adds something, never both, never as a list:');
+      for (const h of s.highlights) lines.push(`    ${h.name} trending ${h.pct > 0 ? 'up' : 'down'} ~${Math.abs(h.pct)}% in volume vs last time`);
+    }
   }
-  // Right next to the dense per-exercise figures, not just in SYSTEM_PROMPT:
-  // a reminder placed here, where the list actually is, holds up much better
-  // against the model's pull to just walk down the list in order.
-  lines.push('(These figures are for your own judgment, do not read them back one by one, mention only what actually matters.)');
   return lines;
 }
 

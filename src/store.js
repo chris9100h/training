@@ -6091,23 +6091,41 @@ function dsPreviousSessionForDay(store, dayId, dateISO, excludeSessionId) {
     .filter(s => s.dayId === dayId && s.ended && !s.isDeload && s.id !== excludeSessionId && s.date < dateISO)
     .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
 }
-// Compact { exId, name, sets } list for the training section: working sets
-// only (warm-ups/skipped dropped, same filter as doneSetCount), only
-// exercises with at least one set carrying logged evidence. Capped like
-// foodItems below, a runaway freestyle session shouldn't blow up the prompt.
-function dsSummarizeSessionExercises(session) {
-  const hasEvidence = st => st.done || st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null;
-  return (session.entries || [])
-    .map(e => ({ exId: e.exId, name: e.name, sets: (e.sets || []).filter(st => !st.warmup && !st.skipped && hasEvidence(st)) }))
-    .filter(e => e.sets.length)
-    .slice(0, 15)
-    .map(e => ({ exId: e.exId, name: e.name, sets: e.sets.map(st => ({ kg: st.kg ?? null, reps: st.reps ?? null, repsL: st.repsL ?? null, repsR: st.repsR ?? null, timeSec: st.timeSec ?? null })) }));
+// At most one riser + one faller, by per-exercise volume % change vs the
+// comparison session (matched by exId, same volume math as totalVolume,
+// mobility/cardio excluded the same way). Deliberately NOT a full
+// per-exercise readout: handing the summary prompt a complete list invited
+// it to walk through every exercise one by one no matter how firmly it was
+// told not to, that's the failure this replaces. Capping the DATA itself to
+// at most two candidates is the reliable fix, wording alone wasn't. No
+// comparison session -> no highlights, nothing to diff against.
+function dsExerciseHighlights(store, session, prevSession) {
+  if (!prevSession) return [];
+  const exMap = new Map((store.exercises || []).map(e => [e.id, e]));
+  const bw = bodyweightForDate(store.dailyLogs, session.date);
+  const prevByExId = new Map((prevSession.entries || []).map(e => [e.exId, e]));
+  const deltas = [];
+  for (const entry of (session.entries || [])) {
+    const prevEntry = prevByExId.get(entry.exId);
+    if (!prevEntry) continue;
+    const ex = exMap.get(entry.exId);
+    if (ex && (ex.movement_type === 'mobility' || ex.movement_type === 'cardio')) continue;
+    const curVol = entryVolume(entry, true, ex, bw);
+    const prevVol = entryVolume(prevEntry, true, ex, bw);
+    if (curVol <= 0 || prevVol <= 0) continue;
+    deltas.push({ name: entry.name, pct: Math.round((curVol - prevVol) / prevVol * 100) });
+  }
+  const riser = deltas.filter(d => d.pct > 0).sort((a, b) => b.pct - a.pct)[0] || null;
+  const faller = deltas.filter(d => d.pct < 0).sort((a, b) => a.pct - b.pct)[0] || null;
+  return [riser, faller].filter(Boolean);
 }
 // One session done on dateISO, summarized for the training section and
 // paired with the last session of the same dayId (if any). A comparison
 // session outside HISTORY_WINDOW_DAYS carries only aggregate totals
 // (entries: []): buildDailySummaryPayload deliberately never fetches beyond
-// the already-loaded store, same accepted degradation as elsewhere.
+// the already-loaded store, same accepted degradation as elsewhere (also
+// means highlights silently come back empty against such a session, there
+// are no entries to diff).
 function dsTrainingEntryForSession(store, session, dateISO) {
   const prev = dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
   return {
@@ -6117,12 +6135,11 @@ function dsTrainingEntryForSession(store, session, dateISO) {
     isDeload: !!session.isDeload,
     volumeKg: Math.round(totalVolume(session, store.exercises, store.dailyLogs)),
     doneSets: doneSetCount(session),
-    exercises: dsSummarizeSessionExercises(session),
+    highlights: dsExerciseHighlights(store, session, prev),
     comparison: prev ? {
       date: prev.date,
       volumeKg: Math.round(totalVolume(prev, store.exercises, store.dailyLogs)),
       doneSets: doneSetCount(prev),
-      exercises: dsSummarizeSessionExercises(prev),
     } : null,
   };
 }
