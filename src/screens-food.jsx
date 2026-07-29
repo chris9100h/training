@@ -887,12 +887,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return () => window.removeEventListener('zane-scanner-provider', onChange);
   }, []);
 
-  // "Describe a meal" sheet: free-text -> parse-meal edge function -> staged
-  // items, same review-before-log flow as every other add path below.
+  // "Describe a meal" sheet: free-text -> parse-meal edge function -> each
+  // item is reviewed/adjusted through the normal quantity sheet before
+  // staging (see handleDescribeMeal/mealQueue below), same as every other
+  // add path.
   const [mealDescribeOpen, setMealDescribeOpen] = useStateFd(false);
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
+  // Parsed items still waiting for their turn in the quantity sheet (the one
+  // currently showing has already been shifted off). mealQueueTotal is fixed
+  // for the whole batch, so "item N of total" can be derived without a
+  // separate counter: total - queue.length.
+  const [mealQueue, setMealQueue] = useStateFd([]);
+  const [mealQueueTotal, setMealQueueTotal] = useStateFd(0);
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -2409,7 +2417,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); }
+  // Also drops any not-yet-reviewed rest of a meal-description queue: closing
+  // (backdrop tap, Cancel, back) means the user is backing out of THIS item,
+  // and continuing to pop up further items behind it would be surprising.
+  // Whatever was already confirmed into staged before this point is unaffected.
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setMealQueue([]); setMealQueueTotal(0); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -2631,6 +2643,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         setStaged(list => list.map(e => (e.id === entry.id ? { ...e, foodId: null } : e)));
       });
     }
+    // A meal-description batch (mealQueue) reuses this same sheet for every
+    // item in turn: once this one is staged, pop the next one in instead of
+    // closing, so the user reviews/adjusts each estimate exactly like a
+    // single custom item, just back to back. Empty queue (or no batch at
+    // all) closes as usual.
+    if (mealQueue.length > 0) {
+      const [next, ...rest] = mealQueue;
+      setMealQueue(rest);
+      setFavedId(existingFavId(null, next.foodName));
+      openCustomAsScalable(next);
+      return;
+    }
     closeQtySheet();
   }
 
@@ -2668,18 +2692,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const res = await LB.parseMealText(text);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
-    const time = entryTime();
-    const now = new Date().toISOString();
-    const entries = res.items.map(it => ({
-      id: LB.uid(), date: curDate, time,
-      foodId: null, foodName: it.name, brand: null, source: 'custom',
-      quantityG: it.quantityG, calories: it.calories, protein: it.protein, carbs: it.carbs, fat: it.fat,
+    if (!res.items.length) { setMealParseError('Could not find any food in that description. Try rephrasing, or add it manually.'); return; }
+    // Each parsed item goes through the normal custom-item quantity sheet
+    // (openCustomAsScalable, same one a re-logged custom entry reopens
+    // through) rather than straight into staged: the AI's quantity and
+    // per-100g macros are only ever a starting guess, and this is the one
+    // place in the app that already lets a guess like that be corrected
+    // (name, per-100g macros, and the actual portion) before it's added.
+    const queueItems = res.items.map(it => ({
+      foodName: it.name, brand: null,
+      quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
       fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
-      createdAt: now, planned: false,
     }));
-    setStaged(list => [...list, ...entries]);
     setMealDescribeOpen(false);
     setMealDescription('');
+    setMealQueueTotal(queueItems.length);
+    setMealQueue(queueItems.slice(1));
+    setFavedId(existingFavId(null, queueItems[0].foodName));
+    openCustomAsScalable(queueItems[0]);
   }
 
   // ── Recipes ──
@@ -3786,6 +3816,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)">
         {pendingFood && (
           <>
+            {/* Only set while working through a "Describe a meal" batch: the
+                queue only ever holds items not yet opened, so the current
+                one is total - remaining. */}
+            {mealQueueTotal > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 10 }}>
+                Item {mealQueueTotal - mealQueue.length} of {mealQueueTotal} from your description
+              </div>
+            )}
             {pendingFood.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{pendingFood.brand}</div>}
             {pendingFood.custom && (
               <>
@@ -3935,11 +3973,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      {/* ── Describe a meal: free text -> AI-estimated macros, staged for
-          review like any other add path ── */}
+      {/* ── Describe a meal: free text -> AI-estimated items, each opened in
+          the normal quantity sheet (openCustomAsScalable) to adjust before
+          it's added, one after another ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, portions and all, in plain language. Claude estimates the macros per item (generously where cooking fat isn't specified) so you review before anything's added, same as always.
+          Describe what you ate, portions and all, in plain language. Claude estimates each item's macros (generously where cooking fat isn't specified), then you can adjust the amount or numbers for each one before it's added.
         </div>
         <Field label="What did you eat?" style={{ marginBottom: 12 }}>
           <textarea
