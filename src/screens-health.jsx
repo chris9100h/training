@@ -2555,7 +2555,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
       {log?.aiSummaryGeneratedAt ? (
         <div>
           {headline && <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 6 }}>{headline}</div>}
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px' }}>{body}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{body}</div>
         </div>
       ) : readOnly ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Not generated yet.</div>

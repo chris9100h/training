@@ -94,8 +94,8 @@ Style: plain, direct, opinionated but honest, like a coach's voice note, not a t
 
 Output EXACTLY two parts and nothing else:
 1. A short headline that states your actual verdict on the day, not just a topic label, no more than 8 words, no ending punctuation.
-2. A blank line, then one paragraph (roughly 3-6 sentences) that leads with your assessment and backs it up with only the details that matter, not a full recap.
-Do not label the parts (no "Headline:"), do not add a greeting or sign-off.`;
+2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your verdict in the first paragraph, use the next paragraph for the specifics that actually back it up (training, nutrition, whatever mattered), and only add a third if there's a genuine tip or forward-looking note, a light day does not need to be padded out to three.
+Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
 
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
   if (!Array.isArray(trend) || trend.length < 2) return 'no weight trend available (fewer than 2 points logged recently)';
