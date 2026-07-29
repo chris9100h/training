@@ -390,6 +390,13 @@ function MdDoseRing({ taken, due, size = 104 }) {
   const percent = due > 0 ? Math.min(100, Math.round((taken / due) * 100)) : 0;
   const r = 50, circ = 2 * Math.PI * r;
   const offset = circ * (1 - percent / 100);
+  const label = `${taken}/${due}`;
+  // Unlike WaterRing/FdRing (always a 1-3 digit percent, "100%" is the worst
+  // case), a dose count has no such ceiling: running several plans at once
+  // easily reaches double digits on both sides ("12/12"), which overflowed
+  // the ring at a fixed size. Shrink by label length instead of a fixed
+  // fontSize.
+  const fontSize = label.length <= 3 ? 26 : label.length === 4 ? 22 : label.length === 5 ? 18 : 15;
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
@@ -399,7 +406,7 @@ function MdDoseRing({ taken, due, size = 104 }) {
           style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1)' }} />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <span className="num" style={{ fontSize: 26, fontWeight: 600, color: UI.gold, fontVariantNumeric: 'tabular-nums' }}>{taken}/{due}</span>
+        <span className="num" style={{ fontSize, fontWeight: 600, color: UI.gold, fontVariantNumeric: 'tabular-nums' }}>{label}</span>
         <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>TAKEN</span>
       </div>
     </div>
