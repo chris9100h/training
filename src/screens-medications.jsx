@@ -136,6 +136,11 @@ const mdListRow = {
 const mdQuickRowInner = { ...mdListRow, flex: 1, minWidth: 0 };
 const mdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const mdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
+// Weekly Prep's own per-day dose count: has to read from across the room
+// while the phone is propped up somewhere and both hands are full of pills,
+// so it gets its own much bigger, bolder, accent treatment instead of
+// mdEntryMeta's small faint one.
+const mdPerDayQty = { fontSize: 18, fontWeight: 700, color: UI.gold, fontFamily: UI.fontUi, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' };
 const mdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };
 const mdInputStyle = {
   background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
@@ -2104,8 +2109,13 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
                           <MdCheckbox checked={packed} onToggle={() => toggleCheckAllDays(dates, slot.id)} label={packed ? 'Mark whole week as not packed' : 'Mark whole week as packed'} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={mdEntryName}>{med.name}</div>
-                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)} · {parseFloat((slot.doseQty * dates.length).toFixed(2))} for the week</div>
+                            <div style={mdEntryMeta}>{parseFloat((slot.doseQty * dates.length).toFixed(2))} for the week</div>
                           </div>
+                          {/* Big, bold, accent, right-aligned: the one number
+                              that has to be readable at a glance from across
+                              the room while physically packing the box, the
+                              small meta line next to it is not. */}
+                          <div style={mdPerDayQty}>{mdFmtQty(slot.doseQty, med.unitLabel)} / day</div>
                         </div>
                       );
                     })}
@@ -2123,8 +2133,8 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
                           <MdCheckbox checked={packed} onToggle={() => toggleCheck(day.date, slot.id)} label={packed ? 'Mark as not packed' : 'Mark as packed'} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={mdEntryName}>{med.name}</div>
-                            <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
                           </div>
+                          <div style={mdPerDayQty}>{mdFmtQty(slot.doseQty, med.unitLabel)} / day</div>
                         </div>
                       );
                     })}
