@@ -10,6 +10,8 @@ const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
+const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
+const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -284,6 +286,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_medication_plan_items').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)),
   ];
   // zane_recipe_shares has RLS with no policies, so it is only reachable
   // through an RPC. Without this, every old ?share=<token> link kept serving
@@ -474,6 +477,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     meal_reminder_enabled: sett.mealReminderEnabled ?? false,
     meds_enabled: sett.medsEnabled ?? false,
     medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
+    pillbox_slots: sett.pillboxSlots ?? null,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -637,6 +641,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         meal_of_choice_hour: l.mealOfChoiceHour ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
+        ai_summary: l.aiSummary ?? null, ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
       }))
     ));
     stepsDone++;
@@ -738,6 +743,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
         package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+        exclude_from_pillbox: !!m.excludeFromPillbox,
         updated_at: m.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -1131,7 +1137,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1193,7 +1199,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
     isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
     isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
@@ -1201,6 +1207,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
     isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
+    // foodTemplateDaysRes's backward-looking history window, since packing is
+    // always for the coming days, never the past.
+    isCoachLoad ? null : _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1209,7 +1219,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
          foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes,
-         medicationPlanItemsRes] = await Promise.all(queries);
+         medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1272,12 +1282,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (medicationScheduleSlotsRes?.error) throw medicationScheduleSlotsRes.error;
     if (medicationLogsRes?.error) throw medicationLogsRes.error;
     if (medicationPlanItemsRes?.error) throw medicationPlanItemsRes.error;
+    if (medicationPillboxChecksRes?.error) throw medicationPillboxChecksRes.error;
   } else {
     if (medicationPlansRes?.error) console.warn('medication plans load failed:', medicationPlansRes.error);
     if (medicationsRes?.error) console.warn('medications load failed:', medicationsRes.error);
     if (medicationScheduleSlotsRes?.error) console.warn('medication schedule slots load failed:', medicationScheduleSlotsRes.error);
     if (medicationLogsRes?.error) console.warn('medication logs load failed:', medicationLogsRes.error);
     if (medicationPlanItemsRes?.error) console.warn('medication plan items load failed:', medicationPlanItemsRes.error);
+    if (medicationPillboxChecksRes?.error) console.warn('medication pillbox checks load failed:', medicationPillboxChecksRes.error);
   }
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
@@ -1420,6 +1432,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
       updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
@@ -1473,6 +1486,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
+      excludeFromPillbox: !!m.exclude_from_pillbox,
       createdAt: m.created_at, updatedAt: m.updated_at,
     })),
     medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
@@ -1490,6 +1504,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
       createdAt: it.created_at,
+    })),
+    medicationPillboxChecks: (medicationPillboxChecksRes?.data || []).map(c => ({
+      id: c.id, date: c.date, scheduleSlotId: c.schedule_slot_id,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1608,6 +1625,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
         medsEnabled: sett.meds_enabled ?? false,
         medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
+        pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -2094,6 +2112,7 @@ async function syncStore(prev, next, userId) {
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
       package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+      exclude_from_pillbox: !!m.excludeFromPillbox,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medications').delete().in('id', removed.map(m => m.id)));
@@ -2132,6 +2151,16 @@ async function syncStore(prev, next, userId) {
       id: it.id, user_id: userId, medication_plan_id: it.medicationPlanId, medication_id: it.medicationId,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medication_plan_items').delete().in('id', removed.map(it => it.id)));
+  }
+
+  if (prev.medicationPillboxChecks !== next.medicationPillboxChecks) {
+    const { upsert, removed } = diffCollectionById(prev.medicationPillboxChecks, next.medicationPillboxChecks);
+    // ops, not preOps: schedule_slot_id is a soft reference (no FK), nothing
+    // to race.
+    if (upsert.length) ops.push(_supabase.from('zane_medication_pillbox_checks').upsert(upsert.map(c => ({
+      id: c.id, user_id: userId, date: c.date, schedule_slot_id: c.scheduleSlotId,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_medication_pillbox_checks').delete().in('id', removed.map(c => c.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -2302,6 +2331,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
     prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
+    JSON.stringify(prev.settings?.pillboxSlots) !== JSON.stringify(next.settings?.pillboxSlots) ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
@@ -2335,6 +2365,7 @@ async function syncStore(prev, next, userId) {
       meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       meds_enabled: next.settings?.medsEnabled ?? false,
       medication_reminder_enabled: next.settings?.medicationReminderEnabled ?? false,
+      pillbox_slots: next.settings?.pillboxSlots ?? null,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
@@ -5012,6 +5043,7 @@ async function loadCheckins(coachingId) {
       hunger: resp.hunger, sleepQuality: resp.sleep_quality,
       lifeStress: resp.life_stress, workStress: resp.work_stress, tiredness: resp.tiredness,
       issuesNotes: resp.issues_notes, generalNote: resp.general_note,
+      aiOpinion: r.ai_opinion ?? null, aiOpinionGeneratedAt: r.ai_opinion_generated_at ?? null,
     };
   });
 }
@@ -5949,7 +5981,7 @@ async function endDeload(userId, store, setStore) {
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -5970,6 +6002,7 @@ async function refreshHealthLogs(userId) {
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
       updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
@@ -6001,6 +6034,119 @@ async function refreshHealthLogs(userId) {
     })),
     foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
   };
+}
+
+// ── AI Daily Summary (ai-daily-summary Edge Function) ───────────────────────
+// Self-contained copy of screens-medications.jsx's mdSlotAppliesOn: that file
+// isn't loaded by store.test.cjs's sandbox, and this needs to run there too.
+function dsSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
+  if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
+  if (!(slot.weekdays || []).includes(wd)) return false;
+  if (slot.startDate && dateISO < slot.startDate) return false;
+  if (slot.endDate && dateISO > slot.endDate) return false;
+  return true;
+}
+function dsShiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return fmtISO(d);
+}
+function dsMedsDueTaken(store, dateISO) {
+  const wd = isoWd(new Date(dateISO + 'T12:00:00'));
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
+  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO);
+  const medsById = new Map((store.medications || []).map(m => [m.id, m]));
+  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
+  const taken = dueSlots.filter(slot => {
+    const row = dayLogs.find(l => l.scheduleSlotId === slot.id);
+    return row ? !row.planned : false;
+  });
+  return { due: dueSlots.length, taken: taken.length, takenNames: taken.map(slot => medsById.get(slot.medicationId)?.name).filter(Boolean) };
+}
+// True when `dateISO` has nothing at all to summarize: no point spending an
+// Anthropic call (or even showing the button) on a day nobody tracked
+// anything for. Zero medications DUE counts as empty; zero TAKEN of some due
+// does not (that's a real, summary-worthy fact).
+function dailySummaryDayIsEmpty(store, dateISO) {
+  const log = (store.dailyLogs || []).find(l => l.date === dateISO);
+  const hasDailyLogFields = !!log && (log.weight != null || log.steps != null || log.calories != null || (log.note && log.note.trim()));
+  const hasFood = (store.foodLogs || []).some(l => l.date === dateISO && !l.planned);
+  const hasWater = (store.waterLogs || []).some(l => l.date === dateISO && l.amountMl > 0);
+  const hasGlucose = (store.glucoseLogs || []).some(l => l.date === dateISO);
+  const hasBp = (store.bloodPressureLogs || []).some(l => l.date === dateISO);
+  const hasBodyTemp = (store.bodyTempLogs || []).some(l => l.date === dateISO);
+  const { due } = dsMedsDueTaken(store, dateISO);
+  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && due === 0;
+}
+// Assembles everything the ai-daily-summary Edge Function needs for one day,
+// straight off the already-loaded store, no extra fetch. weightTrend is a
+// 14-day trailing window (this day inclusive), ascending, nulls excluded: a
+// single day's weight can't show a trend, only a short series can.
+function buildDailySummaryPayload(store, dateISO) {
+  const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
+  const trendStart = dsShiftDate(dateISO, -13);
+  const weightTrend = (store.dailyLogs || [])
+    .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
+    .map(l => ({ date: l.date, weight: l.weight }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const foodItems = (store.foodLogs || [])
+    .filter(l => l.date === dateISO && !l.planned)
+    .map(l => ({ name: l.foodName, quantityG: l.quantityG, calories: l.calories }));
+  const meds = dsMedsDueTaken(store, dateISO);
+  return {
+    date: dateISO,
+    weight: log?.weight ?? null,
+    weightTrend,
+    steps: log?.steps ?? null,
+    calories: log?.calories ?? null,
+    protein: log?.protein ?? null,
+    carbs: log?.carbs ?? null,
+    fat: log?.fat ?? null,
+    targets: log?.targetsSnap ?? null,
+    adherence: log?.adherence ?? null,
+    waterMl: log?.waterMl ?? null,
+    foodItems,
+    medsDue: meds.due,
+    medsTaken: meds.taken,
+    medsTakenNames: meds.takenNames,
+    glucose: (store.glucoseLogs || []).filter(l => l.date === dateISO).map(l => ({ valueMmol: l.valueMmol, context: l.context })),
+    bloodPressure: (store.bloodPressureLogs || []).filter(l => l.date === dateISO).map(l => ({ systolic: l.systolic, diastolic: l.diastolic })),
+    bodyTemp: (store.bodyTempLogs || []).filter(l => l.date === dateISO).map(l => ({ valueC: l.valueC })),
+    note: log?.note || log?.offPlanNote || null,
+  };
+}
+// Mirrors scanLabel's exact shape: POST via fnFetch, normalize the response.
+// The stored/returned text is the model's full response as-is (headline
+// line + blank line + body paragraph); splitHeadlineBody below recovers the
+// two parts for display, called identically here and on a summary loaded
+// later from store.dailyLogs, one splitting rule either way.
+async function generateDailySummary(payload) {
+  const res = await fnFetch(AI_DAILY_SUMMARY_URL, payload);
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, summary: data.summary ?? '', generatedAt: data.generatedAt };
+}
+// Headline = text before the first newline, body = the rest with leading
+// blank lines stripped. No newline at all (model ignored the two-part
+// format) -> no headline, the whole trimmed text is the body.
+function splitHeadlineBody(text) {
+  const trimmed = (text || '').trim();
+  const nl = trimmed.indexOf('\n');
+  if (nl === -1) return { headline: null, body: trimmed };
+  return { headline: trimmed.slice(0, nl).trim(), body: trimmed.slice(nl + 1).replace(/^\s+/, '') };
+}
+// AI Coach opinion on a check-in (ai-checkin-opinion Edge Function). Unlike
+// generateDailySummary, the client sends only the checkinId, not an
+// assembled payload: the function itself reads the check-in's responses,
+// schema, prior check-in, and macros server-side using the caller's own
+// bearer token, so RLS (not client-supplied data) decides what's read.
+async function generateCheckinOpinion(checkinId, phase) {
+  const res = await fnFetch(AI_CHECKIN_OPINION_URL, { checkinId, phase });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, opinion: data.opinion ?? '', generatedAt: data.generatedAt };
 }
 
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
@@ -8053,6 +8199,7 @@ window.LB = {
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   refreshHealthLogs,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,

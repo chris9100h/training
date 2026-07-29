@@ -8,6 +8,8 @@ const vm = require('vm');
 const assert = require('assert');
 
 let testFrom; // swapped per test to control what supabase calls "return"
+let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
+let testSession = null; // swapped per test to give fnFetch a bearer token to send
 const rpcLog = []; // records every rpc(name, args) call
 
 function loadStore() {
@@ -15,7 +17,7 @@ function loadStore() {
   const fakeClient = {
     auth: {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-      getSession: async () => ({ data: { session: null } }),
+      getSession: async () => ({ data: { session: testSession } }),
     },
     from: (...args) => testFrom(...args),
     rpc: async (name, args) => { rpcLog.push({ name, args }); return { data: null, error: null }; },
@@ -25,7 +27,7 @@ function loadStore() {
   const sandbox = {
     window: { supabase: { createClient: () => fakeClient }, addEventListener() {} },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
-    console, fetch: async () => ({ ok: true }), setTimeout, clearTimeout, Math, Date, JSON,
+    console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
   };
   sandbox.global = sandbox;
   vm.createContext(sandbox);
@@ -4142,6 +4144,212 @@ async function testAsync(name, fn) {
     const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'discounted', 'full');
     assert.strictEqual(out.repMissCounts.e1_d1, 1, 'the streak is left as-is for an unattempted lift');
   });
+
+  // ── AI Daily Summary ──────────────────────────────────────────────────────
+  // dailySummaryDayIsEmpty / buildDailySummaryPayload / generateDailySummary /
+  // splitHeadlineBody: the pure data-transformation half of the feature (the
+  // Edge Function itself, and any DOM rendering, are verified separately via
+  // a Playwright harness, not here).
+  const Y = '2026-07-27'; // an arbitrary "yesterday" for these fixtures
+
+  test('dailySummaryDayIsEmpty: true for a genuinely empty day', () => {
+    assert.strictEqual(LB.dailySummaryDayIsEmpty({ dailyLogs: [] }, Y), true);
+  });
+  test('dailySummaryDayIsEmpty: false the moment weight is logged', () => {
+    assert.strictEqual(LB.dailySummaryDayIsEmpty({ dailyLogs: [{ date: Y, weight: 80 }] }, Y), false);
+  });
+  test('dailySummaryDayIsEmpty: false with a non-planned food log entry', () => {
+    assert.strictEqual(LB.dailySummaryDayIsEmpty({ dailyLogs: [], foodLogs: [{ date: Y, planned: false }] }, Y), false);
+  });
+  test('dailySummaryDayIsEmpty: a PLANNED (not yet eaten) food entry alone does not count', () => {
+    assert.strictEqual(LB.dailySummaryDayIsEmpty({ dailyLogs: [], foodLogs: [{ date: Y, planned: true }] }, Y), true);
+  });
+  test('dailySummaryDayIsEmpty: false with a water log entry', () => {
+    assert.strictEqual(LB.dailySummaryDayIsEmpty({ dailyLogs: [], waterLogs: [{ date: Y, amountMl: 500 }] }, Y), false);
+  });
+  test('dailySummaryDayIsEmpty: false when a medication is due, even if zero were taken', () => {
+    const store = {
+      dailyLogs: [], medications: [{ id: 'm1', name: 'Vitamin D' }],
+      medicationPlans: [{ id: 'p1', active: true }],
+      medicationScheduleSlots: [{ id: 's1', medicationId: 'm1', medicationPlanId: 'p1', weekdays: [0, 1, 2, 3, 4, 5, 6], hour: 8 }],
+      medicationLogs: [],
+    };
+    assert.strictEqual(LB.dailySummaryDayIsEmpty(store, Y), false);
+  });
+  test('dailySummaryDayIsEmpty: a configured medication that is not due that weekday still counts as empty', () => {
+    const wd = LB.isoWd(new Date(Y + 'T12:00:00'));
+    const otherWd = (wd + 1) % 7;
+    const store = {
+      dailyLogs: [], medications: [{ id: 'm1', name: 'Vitamin D' }],
+      medicationPlans: [{ id: 'p1', active: true }],
+      medicationScheduleSlots: [{ id: 's1', medicationId: 'm1', medicationPlanId: 'p1', weekdays: [otherWd], hour: 8 }],
+      medicationLogs: [],
+    };
+    assert.strictEqual(LB.dailySummaryDayIsEmpty(store, Y), true);
+  });
+
+  test('buildDailySummaryPayload: full day carries every field through', () => {
+    const store = {
+      dailyLogs: [{ date: Y, weight: 82.4, steps: 8000, calories: 2400, protein: 160, carbs: 230, fat: 75, waterMl: 2000, targetsSnap: { calories: 2400, dayType: 'training' }, adherence: 92, note: 'felt good' }],
+      foodLogs: [{ date: Y, planned: false, foodName: 'Chicken', quantityG: 200, calories: 330 }, { date: Y, planned: true, foodName: 'Planned Rice' }],
+      glucoseLogs: [{ date: Y, valueMmol: 5.2, context: 'fasted' }],
+      bloodPressureLogs: [{ date: Y, systolic: 120, diastolic: 80 }],
+      bodyTempLogs: [{ date: Y, valueC: 36.8 }],
+      medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.weight, 82.4);
+    assert.strictEqual(p.steps, 8000);
+    assert.strictEqual(p.calories, 2400);
+    assert.strictEqual(p.adherence, 92);
+    assert.strictEqual(p.waterMl, 2000);
+    assert.strictEqual(p.note, 'felt good');
+    assert.deepStrictEqual(p.targets, { calories: 2400, dayType: 'training' });
+    assert.strictEqual(p.foodItems.length, 1, 'the planned (not yet eaten) entry is excluded');
+    assert.strictEqual(p.foodItems[0].name, 'Chicken');
+    assert.strictEqual(p.glucose.length, 1);
+    assert.strictEqual(p.bloodPressure.length, 1);
+    assert.strictEqual(p.bodyTemp.length, 1);
+  });
+  test('buildDailySummaryPayload: partial day (weight only) leaves everything else null/empty', () => {
+    const store = { dailyLogs: [{ date: Y, weight: 80 }], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [] };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.weight, 80);
+    assert.strictEqual(p.calories, null);
+    assert.strictEqual(p.steps, null);
+    assert.deepStrictEqual(p.foodItems, []);
+    assert.strictEqual(p.targets, null);
+  });
+  test('buildDailySummaryPayload: 14-day weight trend is ascending, nulls excluded, this day inclusive', () => {
+    const store = {
+      dailyLogs: [
+        { date: '2026-07-20', weight: 81 },
+        { date: '2026-07-25', weight: null }, // logged day, no weight: excluded
+        { date: '2026-07-23', weight: 80.5 },
+        { date: Y, weight: 80 },
+        { date: '2026-06-01', weight: 90 }, // way outside the 14-day window
+      ],
+      foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.deepStrictEqual(p.weightTrend.map(x => x.date), ['2026-07-20', '2026-07-23', Y], 'ascending, null-weight day and the out-of-window day both dropped');
+  });
+  test('buildDailySummaryPayload: medication due/taken counts and names', () => {
+    const wd = LB.isoWd(new Date(Y + 'T12:00:00'));
+    const store = {
+      dailyLogs: [], foodLogs: [],
+      medications: [{ id: 'm1', name: 'Zinc' }, { id: 'm2', name: 'Magnesium' }],
+      medicationPlans: [{ id: 'p1', active: true }, { id: 'p2', active: false }],
+      medicationScheduleSlots: [
+        { id: 's1', medicationId: 'm1', medicationPlanId: 'p1', weekdays: [wd], hour: 8 }, // due, active plan
+        { id: 's2', medicationId: 'm2', medicationPlanId: 'p2', weekdays: [wd], hour: 9 }, // due weekday, but plan INACTIVE
+      ],
+      medicationLogs: [{ date: Y, scheduleSlotId: 's1', planned: false }], // taken
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.medsDue, 1, 'only the active-plan slot counts as due');
+    assert.strictEqual(p.medsTaken, 1);
+    assert.deepStrictEqual(p.medsTakenNames, ['Zinc']);
+  });
+  test('buildDailySummaryPayload: a due-but-unlogged dose counts toward due, not taken', () => {
+    const wd = LB.isoWd(new Date(Y + 'T12:00:00'));
+    const store = {
+      dailyLogs: [], foodLogs: [],
+      medications: [{ id: 'm1', name: 'Zinc' }],
+      medicationPlans: [{ id: 'p1', active: true }],
+      medicationScheduleSlots: [{ id: 's1', medicationId: 'm1', medicationPlanId: 'p1', weekdays: [wd], hour: 8 }],
+      medicationLogs: [],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.medsDue, 1);
+    assert.strictEqual(p.medsTaken, 0);
+    assert.deepStrictEqual(p.medsTakenNames, []);
+  });
+  test('buildDailySummaryPayload: a slot whose end date has already passed is not due', () => {
+    const wd = LB.isoWd(new Date(Y + 'T12:00:00'));
+    const store = {
+      dailyLogs: [], foodLogs: [],
+      medications: [{ id: 'm1', name: 'Zinc' }],
+      medicationPlans: [{ id: 'p1', active: true }],
+      medicationScheduleSlots: [{ id: 's1', medicationId: 'm1', medicationPlanId: 'p1', weekdays: [wd], hour: 8, endDate: '2026-01-01' }],
+      medicationLogs: [],
+    };
+    assert.strictEqual(LB.buildDailySummaryPayload(store, Y).medsDue, 0);
+  });
+
+  test('splitHeadlineBody: splits on the first newline, trims each part', () => {
+    const { headline, body } = LB.splitHeadlineBody('Solid day\n\nWeight is trending down, keep it up.');
+    assert.strictEqual(headline, 'Solid day');
+    assert.strictEqual(body, 'Weight is trending down, keep it up.');
+  });
+  test('splitHeadlineBody: no newline at all -> no headline, the whole text is the body', () => {
+    const { headline, body } = LB.splitHeadlineBody('Just one continuous sentence with no break at all.');
+    assert.strictEqual(headline, null);
+    assert.strictEqual(body, 'Just one continuous sentence with no break at all.');
+  });
+  test('splitHeadlineBody: empty/missing text does not throw', () => {
+    // Field-by-field, not deepStrictEqual on the whole object: a plain object
+    // constructed INSIDE the vm sandbox has a different Object.prototype than
+    // one built here, so a whole-object deepStrictEqual fails on identity
+    // even when every field matches (arrays of primitives don't have this
+    // issue, which is why other deepStrictEqual calls in this file are fine).
+    const a = LB.splitHeadlineBody('');
+    assert.strictEqual(a.headline, null);
+    assert.strictEqual(a.body, '');
+    const b = LB.splitHeadlineBody(undefined);
+    assert.strictEqual(b.headline, null);
+    assert.strictEqual(b.body, '');
+  });
+
+  await testAsync('generateDailySummary: a mocked success response parses summary + generatedAt', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: true, json: async () => ({ summary: 'Headline\n\nBody text.', generatedAt: '2026-07-28T00:00:00.000Z' }) });
+    const res = await LB.generateDailySummary({ date: Y });
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.summary, 'Headline\n\nBody text.');
+    assert.strictEqual(res.generatedAt, '2026-07-28T00:00:00.000Z');
+  });
+  await testAsync('generateDailySummary: a mocked failure response surfaces the error, does not throw', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: false, status: 500, json: async () => ({ error: 'Summary writer failed (500). Try again.' }) });
+    const res = await LB.generateDailySummary({ date: Y });
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.error, 'Summary writer failed (500). Try again.');
+  });
+  await testAsync('generateDailySummary: no session (signed out) reports a network error, does not throw', async () => {
+    testSession = null;
+    const res = await LB.generateDailySummary({ date: Y });
+    assert.strictEqual(res.ok, false);
+  });
+  testSession = null; // restore the default for any test appended after this block
+
+  // ── AI Coach opinion on a check-in ───────────────────────────────────────
+  // generateCheckinOpinion mirrors generateDailySummary's exact shape (only
+  // a checkinId is sent, the Edge Function itself does the reads/prompt
+  // building server-side using the caller's own token, per the auth design
+  // in ai-checkin-opinion/index.ts), so the client-side test surface is the
+  // same three cases.
+  await testAsync('generateCheckinOpinion: a mocked success response parses opinion + generatedAt', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: true, json: async () => ({ opinion: 'Solid week\n\nKeep this up.', generatedAt: '2026-07-28T00:00:00.000Z' }) });
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.opinion, 'Solid week\n\nKeep this up.');
+    assert.strictEqual(res.generatedAt, '2026-07-28T00:00:00.000Z');
+  });
+  await testAsync('generateCheckinOpinion: a mocked failure response surfaces the error, does not throw', async () => {
+    testSession = { access_token: 'fake-token' };
+    testFetch = async () => ({ ok: false, status: 403, json: async () => ({ error: 'Check-in not found, or you are not authorized to view it.' }) });
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.error, 'Check-in not found, or you are not authorized to view it.');
+  });
+  await testAsync('generateCheckinOpinion: no session (signed out) reports a network error, does not throw', async () => {
+    testSession = null;
+    const res = await LB.generateCheckinOpinion('ci1');
+    assert.strictEqual(res.ok, false);
+  });
+  testSession = null; // restore the default for any test appended after this block
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

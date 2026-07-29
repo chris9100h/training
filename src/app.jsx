@@ -226,12 +226,21 @@ function WhatsNewModal({ entries, onDismiss }) {
               {entry.title}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {(entry.items || []).map((it, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: 7, flexShrink: 0 }} />
-                  <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{it}</div>
-                </div>
-              ))}
+              {/* An item is normally a plain string. { text, emphasis: true }
+                  opts a single item into a bigger, bolder treatment, e.g. a
+                  disclaimer that needs to stand out from the feature bullets
+                  around it, every existing entry is a plain string and keeps
+                  rendering exactly as before. */}
+              {(entry.items || []).map((it, i) => {
+                const emphasis = it && typeof it === 'object';
+                const text = emphasis ? it.text : it;
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: emphasis ? 8 : 7, flexShrink: 0 }} />
+                    <div style={{ fontSize: emphasis ? 15 : 13.5, fontWeight: emphasis ? 700 : 400, color: emphasis ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{text}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -907,6 +916,9 @@ function App() {
             const serverMedPlanItemIds = new Set((fresh.medicationPlanItems || []).map(i => i.id));
             const baseMedPlanItemIds = base ? new Set((base.medicationPlanItems || []).map(i => i.id)) : null;
             const localOnlyMedPlanItems = (cur.medicationPlanItems || []).filter(x => !serverMedPlanItemIds.has(x.id) && !baseMedPlanItemIds?.has(x.id));
+            const serverMedPillboxCheckIds = new Set((fresh.medicationPillboxChecks || []).map(c => c.id));
+            const baseMedPillboxCheckIds = base ? new Set((base.medicationPillboxChecks || []).map(c => c.id)) : null;
+            const localOnlyMedPillboxChecks = (cur.medicationPillboxChecks || []).filter(x => !serverMedPillboxCheckIds.has(x.id) && !baseMedPillboxCheckIds?.has(x.id));
             // Locally-deleted items (in base but not in cur): exclude from fresh
             // so they aren't resurrected while syncStore deletion is in flight.
             const curExIdSet = new Set((cur.exercises || []).map(e => e.id));
@@ -951,6 +963,8 @@ function App() {
             const delMedLogIds = baseMedLogIds ? new Set([...baseMedLogIds].filter(id => !curMedLogIdSet.has(id))) : null;
             const curMedPlanItemIdSet = new Set((cur.medicationPlanItems || []).map(i => i.id));
             const delMedPlanItemIds = baseMedPlanItemIds ? new Set([...baseMedPlanItemIds].filter(id => !curMedPlanItemIdSet.has(id))) : null;
+            const curMedPillboxCheckIdSet = new Set((cur.medicationPillboxChecks || []).map(c => c.id));
+            const delMedPillboxCheckIds = baseMedPillboxCheckIds ? new Set([...baseMedPillboxCheckIds].filter(id => !curMedPillboxCheckIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
             // so for ids present on both sides we compare updatedAt and keep
             // whichever is newer, this protects an in-flight local session's
@@ -1095,6 +1109,7 @@ function App() {
               medicationScheduleSlots: [...localOnlyMedSlots, ...mergeById(fresh.medicationScheduleSlots || [], cur.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlotIds)],
               medicationLogs: [...localOnlyMedLogs, ...mergeById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds)],
               medicationPlanItems: [...localOnlyMedPlanItems, ...mergeById(fresh.medicationPlanItems || [], cur.medicationPlanItems, base?.medicationPlanItems, delMedPlanItemIds)],
+              medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...mergeById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds)],
               mesoStates,
               planDrafts,
             };

@@ -477,9 +477,55 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit }) {
+// Weight trend alone doesn't reliably say which phase a client is in (it's
+// noisy, and can point the "wrong" way even mid-phase), and there is no
+// stored goal/phase field anywhere in the data model. Asked fresh at
+// generation time instead: shared by CheckInCard's own inline block and
+// CheckInAiOpinionBanner, both of which otherwise duplicate this exact row.
+const CHECKIN_PHASE_OPTIONS = [
+  { value: 'cut', label: 'Cut' },
+  { value: 'maintain', label: 'Maintain' },
+  { value: 'bulk', label: 'Bulk' },
+];
+
+function CheckInPhasePicker({ onPick, busy }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>Which phase are you in?</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {CHECKIN_PHASE_OPTIONS.map(p => (
+          <button key={p.value} onClick={() => onPick(p.value)} disabled={busy}
+            style={{ flex: 1, padding: '8px 4px', borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+              background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)',
+              color: busy ? UI.inkFaint : 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent' }}>
+            {busy ? '…' : p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
+  const [opinionBusy, setOpinionBusy] = useStateC(false);
+  const [opinionError, setOpinionError] = useStateC(null);
+  // onGenerated is only passed at the two REAL check-in call sites (this
+  // week's own card, past check-ins), never the schema-builder's fake sample
+  // or the in-progress week's live preview (ci.id doesn't exist there
+  // either): there's nothing real to generate an opinion about in either case.
+  const showAiOpinion = !!ci.id && !!onGenerated;
+  async function generateOpinion(phase) {
+    setOpinionBusy(true);
+    setOpinionError(null);
+    const res = await LB.generateCheckinOpinion(ci.id, phase);
+    setOpinionBusy(false);
+    if (!res.ok) { setOpinionError(res.error || 'Could not generate. Try again.'); return; }
+    onGenerated();
+  }
+  const { headline: opinionHeadline, body: opinionBody } = LB.splitHeadlineBody(ci.aiOpinion || '');
   const cardRef = useRefC(null);
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const responses = ci.responses || {};
@@ -771,6 +817,27 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             </div>
           )}
 
+          {/* AI Coach opinion: same block, same data, for whichever side (client
+              or coach) is looking at this exact card, since this component is
+              the one shared render both already use. */}
+          {showAiOpinion && (
+            <div>
+              <div className="knurl" style={{ margin: '0 0 6px' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>AI COACH</div>
+              {ci.aiOpinionGeneratedAt ? (
+                <div>
+                  {opinionHeadline && <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 4 }}>{opinionHeadline}</div>}
+                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{opinionBody}</div>
+                </div>
+              ) : (
+                <div>
+                  <CheckInPhasePicker onPick={generateOpinion} busy={opinionBusy} />
+                  {opinionError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{opinionError}</div>}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Actions row, export always visible, edit/delete when handlers are present */}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             {onDelete && (
@@ -799,6 +866,42 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               </button>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Same AI opinion data as the block inside CheckInCard, surfaced again right
+// at the top of the tab: that block only renders once thisWeek's own card is
+// expanded, which buried it too deep for users to ever find or use.
+function CheckInAiOpinionBanner({ ci, onGenerated }) {
+  const [busy, setBusy] = useStateC(false);
+  const [error, setError] = useStateC(null);
+  const generate = async (phase) => {
+    setBusy(true);
+    setError(null);
+    const res = await LB.generateCheckinOpinion(ci.id, phase);
+    setBusy(false);
+    if (!res.ok) { setError(res.error || 'Could not generate. Try again.'); return; }
+    onGenerated();
+  };
+  const { headline, body } = LB.splitHeadlineBody(ci.aiOpinion || '');
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 12, color: UI.inkFaint }} />
+        <span className="micro" style={{ color: UI.inkFaint }}>AI COACH · THIS WEEK</span>
+      </div>
+      {ci.aiOpinionGeneratedAt ? (
+        <div>
+          {headline && <div style={{ fontSize: 14, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 5 }}>{headline}</div>}
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '18px' }}>{body}</div>
+        </div>
+      ) : (
+        <div>
+          <CheckInPhasePicker onPick={generate} busy={busy} />
+          {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>{error}</div>}
         </div>
       )}
     </div>
@@ -1362,6 +1465,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           )}
         </div>
 
+        {thisWeek && <CheckInAiOpinionBanner ci={thisWeek} onGenerated={load} />}
+
         {previewOpen && previewResponses && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
@@ -1392,7 +1497,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
         ) : null}
 
         {past.length > 0 && (
@@ -1413,7 +1518,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} />
                   </div>
                 ))}
               </div>

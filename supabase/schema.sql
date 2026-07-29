@@ -205,6 +205,8 @@ CREATE TABLE public.zane_daily_logs (
   meal_of_choice     boolean     DEFAULT false,
   meal_of_choice_hour smallint,
   daily_coach_fields jsonb,
+  ai_summary              text,
+  ai_summary_generated_at timestamp with time zone,
   updated_at         timestamp with time zone NOT NULL DEFAULT now(),
   created_at         timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)
@@ -295,7 +297,8 @@ CREATE TABLE public.zane_user_settings (
   tz_offset_minutes integer,
   meal_reminder_enabled boolean NOT NULL DEFAULT false,
   meds_enabled boolean NOT NULL DEFAULT false,
-  medication_reminder_enabled boolean NOT NULL DEFAULT false
+  medication_reminder_enabled boolean NOT NULL DEFAULT false,
+  pillbox_slots jsonb
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -396,7 +399,9 @@ CREATE TABLE public.zane_checkins (
   cardio_pace_feeling integer,
   cardio_effort integer,
   performance_vs_last_week text,
-  responses jsonb  -- all field values keyed by field key; primary storage since Migration 0065
+  responses jsonb,  -- all field values keyed by field key; primary storage since Migration 0065
+  ai_opinion text,
+  ai_opinion_generated_at timestamp with time zone
 );
 
 -- ── Constraints (primary keys, unique, foreign keys, checks) ───────────────────
@@ -2594,6 +2599,7 @@ CREATE TABLE zane_medications (
   stock_baseline     numeric,
   stock_set_at       timestamptz,
   archived           boolean     NOT NULL DEFAULT false,
+  exclude_from_pillbox boolean   NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -2681,6 +2687,28 @@ CREATE POLICY "coach can read client medication logs"   ON zane_medication_logs 
 CREATE POLICY "coach can write client medication logs"  ON zane_medication_logs FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
 CREATE POLICY "coach can update client medication logs" ON zane_medication_logs FOR UPDATE USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can delete client medication logs" ON zane_medication_logs FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- Weekly Prep pillbox-packing checklist (migration 0223): which (date,
+-- schedule slot) pairs have already been packed this week, cross-device.
+-- Own-rows-only, no coach access (packing your own pillbox isn't something a
+-- coach needs to see or edit), so no zane_guard_user_id_immutable trigger
+-- either. Derived per-week state, not durable user content: synced but kept
+-- OUT of the personal-data backup, same as zane_food_template_days.
+CREATE TABLE zane_medication_pillbox_checks (
+  id               text        PRIMARY KEY,
+  user_id          uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date             text        NOT NULL,
+  schedule_slot_id text        NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_medication_pillbox_checks_user_idx ON public.zane_medication_pillbox_checks USING btree (user_id, date);
+
+ALTER TABLE zane_medication_pillbox_checks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_medication_pillbox_checks_own"
+  ON zane_medication_pillbox_checks FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
 -- One row per shared recipe, keyed by an unguessable token that doubles as the

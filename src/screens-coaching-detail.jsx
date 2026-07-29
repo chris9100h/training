@@ -1636,7 +1636,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} />)}
+              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} onGenerated={load} />)}
             </div>
           </div>
         </div>
