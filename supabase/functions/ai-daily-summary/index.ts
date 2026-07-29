@@ -7,15 +7,21 @@
 // Unlike scan-label-claude, this is plain text in, plain text out, no vision,
 // no strict JSON: a model instructed to "keep it casual" can and does malform
 // JSON, so the contract here is a simple two-part text format instead (see
-// SYSTEM_PROMPT). All the day's numbers/trends are assembled CLIENT-SIDE
-// (LB.buildDailySummaryPayload, already-loaded store data, no extra fetch)
-// and handed to Claude pre-computed: Claude phrases them, it does not
-// recompute or eyeball a trend itself, so a wrong read of "trending down" vs
-// "trending up" is not a failure mode this function has to worry about.
+// SYSTEM_PROMPT). All the day's numbers/trends, including the training
+// section's totals and its comparison to the last session of the same
+// dayId, are assembled CLIENT-SIDE (LB.buildDailySummaryPayload,
+// already-loaded store data, no extra fetch) and handed to Claude
+// pre-computed: Claude phrases them, it does not recompute or eyeball a
+// trend itself, so a wrong read of "trending down" vs "trending up" is not
+// a failure mode this function has to worry about. The one exception is the
+// per-exercise set-by-set comparison: those are two short, already-labeled
+// lists (today vs last time), well within reading level for prose, so
+// buildTrainingLines hands them over directly instead of pre-computing a
+// verdict per exercise.
 //
 // One action: POST { date, weight, weightTrend, steps, calories, protein,
 // carbs, fat, targets, adherence, waterMl, foodItems, medsDue, medsTaken,
-// medsTakenNames, glucose, bloodPressure, bodyTemp, note }
+// medsTakenNames, glucose, bloodPressure, bodyTemp, note, training }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
 // -> { headline: string|null, body: string, generatedAt: string }
 //
@@ -74,17 +80,21 @@ async function resolveUser(req: Request): Promise<string | null> {
   return user?.id ?? null;
 }
 
-const SYSTEM_PROMPT = `You are a casual, supportive fitness coach texting a quick read on how yesterday went, using a user's tracked health data (weight, macros, steps, water, medication doses) from that one day. The user is reading this today, about yesterday, so always call it "yesterday" when referring to that day, never "today". You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally, the way a coach glancing at an app would.
+const SYSTEM_PROMPT = `You are a knowledgeable, supportive fitness coach giving a proper daily debrief on how yesterday went, using a user's tracked data from that one day: weight, training, macros, steps, water, medication doses. The user is reading this today, about yesterday, so always call it "yesterday" when referring to that day, never "today". You are being given data that has already been computed and checked, including any training comparison against the user's own history; do not recompute or second-guess the numbers or trends you're told, just react to them naturally and specifically, the way an attentive coach reviewing the app would.
+
+If a training session is included, treat it as a first-class part of the read, not an afterthought: say what was trained, and if a comparison to a previous session of the same workout is given, call out concretely what changed (heavier weight, more reps, more sets, less volume, and so on). If no comparison is available, just describe the session on its own. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else.
 
+When something in the data genuinely calls for it (a stalled or regressing lift, a big miss on protein or calories, very little water, skipped doses, and similar), add one concrete, actionable tip or correction, phrased like a coach would say it out loud, not like a lecture. Do not force a tip onto a solid or unremarkable day; a day with nothing notable to flag gets none.
+
 Only comment on trends and numbers you are explicitly given. If something wasn't logged, don't guess why or make up a reason, just leave it out.
 
-Style: short, plain, encouraging but honest, like a text message. No markdown, no bullet points, no emoji, no restating every number back mechanically, and never use an em dash; use a comma or a period instead.
+Style: plain, direct, encouraging but honest, like a coach's voice note, not a one-line text message. No markdown, no bullet points, no emoji, no restating every number back mechanically, and never use an em dash; use a comma or a period instead.
 
 Output EXACTLY two parts and nothing else:
 1. A short headline, no more than 8 words, no ending punctuation.
-2. A blank line, then one paragraph of 2-4 casual sentences with your actual read on the day.
+2. A blank line, then one paragraph of 4-7 sentences with your actual, detailed read on the day, including the training session if one is given.
 Do not label the parts (no "Headline:"), do not add a greeting or sign-off.`;
 
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
@@ -95,6 +105,50 @@ function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string 
   const days = trend.length;
   if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days`;
   return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days`;
+}
+
+function daysBetween(earlierISO: string, laterISO: string): number {
+  const a = new Date(earlierISO + 'T00:00:00Z').getTime();
+  const b = new Date(laterISO + 'T00:00:00Z').getTime();
+  return Math.round((b - a) / 86400000);
+}
+
+function fmtSet(s: Record<string, any>): string {
+  if (s.timeSec != null) return `${s.timeSec}s`;
+  const reps = (s.repsL != null || s.repsR != null) ? `${s.repsL ?? '?'}/${s.repsR ?? '?'}` : (s.reps ?? '?');
+  return s.kg != null ? `${s.kg}kg×${reps}` : `${reps} reps`;
+}
+
+function fmtExercise(ex: Record<string, any>): string {
+  const sets = Array.isArray(ex.sets) && ex.sets.length ? ex.sets.map(fmtSet).join(', ') : 'no working sets logged';
+  return `${ex.name || 'Exercise'}: ${sets}`;
+}
+
+// Renders the training array into prose-ready lines. Per-session totals and
+// the volume delta are simple arithmetic (computed here, same "compute the
+// number, let Claude phrase it" split as fmtWeightTrend above); the
+// per-exercise set lists are handed over as-is for Claude to read off (see
+// the file-header comment for why that's fine here specifically).
+function buildTrainingLines(training: any[], dateISO: string): string[] {
+  if (!Array.isArray(training) || !training.length) return [];
+  const lines: string[] = ['', 'Training logged YESTERDAY:'];
+  for (const s of training) {
+    const label = s.dayName || 'Freestyle session';
+    const bits = [`${s.doneSets ?? '?'} working sets`, `~${s.volumeKg ?? '?'}kg total volume`];
+    if (s.durationMinutes != null) bits.push(`${s.durationMinutes} min`);
+    if (s.feel) bits.push(`felt ${s.feel}`);
+    lines.push(`- ${label}${s.isDeload ? ' (deload week, deliberately lighter)' : ''}: ${bits.join(', ')}`);
+    for (const ex of (s.exercises || [])) lines.push(`  ${fmtExercise(ex)}`);
+    if (s.comparison) {
+      const days = daysBetween(s.comparison.date, dateISO);
+      const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
+      lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs yesterday)` : ''}.`);
+      for (const ex of (s.comparison.exercises || [])) lines.push(`    previously ${fmtExercise(ex)}`);
+    } else {
+      lines.push(`  No previous "${label}" session on record to compare against.`);
+    }
+  }
+  return lines;
 }
 
 function buildUserPrompt(p: Record<string, any>): string {
@@ -128,6 +182,7 @@ function buildUserPrompt(p: Record<string, any>): string {
     lines.push(`Body temperature: ${p.bodyTemp.map((t: any) => `${t.valueC}°C`).join(', ')}`);
   }
   if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
+  lines.push(...buildTrainingLines(p.training, p.date));
   lines.push('', 'Write the headline + paragraph as instructed.');
   return lines.join('\n');
 }
@@ -143,7 +198,8 @@ function payloadIsEmpty(p: Record<string, any>): boolean {
     && !(p.medsDue > 0)
     && !(Array.isArray(p.glucose) && p.glucose.length)
     && !(Array.isArray(p.bloodPressure) && p.bloodPressure.length)
-    && !(Array.isArray(p.bodyTemp) && p.bodyTemp.length);
+    && !(Array.isArray(p.bodyTemp) && p.bodyTemp.length)
+    && !(Array.isArray(p.training) && p.training.length);
 }
 
 // CLAUDE.md's house rule ("no em dashes, ever") is enforced on committed
@@ -220,7 +276,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
+        max_tokens: 500,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(payload) }] }],
       }),

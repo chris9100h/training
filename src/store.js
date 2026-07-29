@@ -6075,13 +6075,62 @@ function dailySummaryDayIsEmpty(store, dateISO) {
   const hasGlucose = (store.glucoseLogs || []).some(l => l.date === dateISO);
   const hasBp = (store.bloodPressureLogs || []).some(l => l.date === dateISO);
   const hasBodyTemp = (store.bodyTempLogs || []).some(l => l.date === dateISO);
+  const hasTraining = isLoggedTrainingDay(store.sessions, dateISO);
   const { due } = dsMedsDueTaken(store, dateISO);
-  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && due === 0;
+  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && !hasTraining && due === 0;
+}
+// Most recent OTHER ended, non-deload session with the same dayId, strictly
+// before dateISO: "last time this exact workout was done", the training
+// section's comparison point. Deload weeks are excluded as a comparison
+// baseline for the same reason recentSessionsForExercise excludes them (a
+// deliberately light week is not a fair progress reference); a dayId-less
+// (freestyle) session has nothing of the same shape to compare against.
+function dsPreviousSessionForDay(store, dayId, dateISO, excludeSessionId) {
+  if (!dayId) return null;
+  return (store.sessions || [])
+    .filter(s => s.dayId === dayId && s.ended && !s.isDeload && s.id !== excludeSessionId && s.date < dateISO)
+    .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+}
+// Compact { exId, name, sets } list for the training section: working sets
+// only (warm-ups/skipped dropped, same filter as doneSetCount), only
+// exercises with at least one set carrying logged evidence. Capped like
+// foodItems below, a runaway freestyle session shouldn't blow up the prompt.
+function dsSummarizeSessionExercises(session) {
+  const hasEvidence = st => st.done || st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null;
+  return (session.entries || [])
+    .map(e => ({ exId: e.exId, name: e.name, sets: (e.sets || []).filter(st => !st.warmup && !st.skipped && hasEvidence(st)) }))
+    .filter(e => e.sets.length)
+    .slice(0, 15)
+    .map(e => ({ exId: e.exId, name: e.name, sets: e.sets.map(st => ({ kg: st.kg ?? null, reps: st.reps ?? null, repsL: st.repsL ?? null, repsR: st.repsR ?? null, timeSec: st.timeSec ?? null })) }));
+}
+// One session done on dateISO, summarized for the training section and
+// paired with the last session of the same dayId (if any). A comparison
+// session outside HISTORY_WINDOW_DAYS carries only aggregate totals
+// (entries: []): buildDailySummaryPayload deliberately never fetches beyond
+// the already-loaded store, same accepted degradation as elsewhere.
+function dsTrainingEntryForSession(store, session, dateISO) {
+  const prev = dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
+  return {
+    dayName: session.dayName || (session.isFreestyle ? 'Freestyle' : null),
+    durationMinutes: session.durationMinutes ?? null,
+    feel: session.feel ?? null,
+    isDeload: !!session.isDeload,
+    volumeKg: Math.round(totalVolume(session, store.exercises, store.dailyLogs)),
+    doneSets: doneSetCount(session),
+    exercises: dsSummarizeSessionExercises(session),
+    comparison: prev ? {
+      date: prev.date,
+      volumeKg: Math.round(totalVolume(prev, store.exercises, store.dailyLogs)),
+      doneSets: doneSetCount(prev),
+      exercises: dsSummarizeSessionExercises(prev),
+    } : null,
+  };
 }
 // Assembles everything the ai-daily-summary Edge Function needs for one day,
 // straight off the already-loaded store, no extra fetch. weightTrend is a
 // 14-day trailing window (this day inclusive), ascending, nulls excluded: a
-// single day's weight can't show a trend, only a short series can.
+// single day's weight can't show a trend, only a short series can. training
+// is one entry per ended session logged that day (usually 0 or 1).
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
@@ -6093,6 +6142,9 @@ function buildDailySummaryPayload(store, dateISO) {
     .filter(l => l.date === dateISO && !l.planned)
     .map(l => ({ name: l.foodName, quantityG: l.quantityG, calories: l.calories }));
   const meds = dsMedsDueTaken(store, dateISO);
+  const training = (store.sessions || [])
+    .filter(s => s.ended && (s.date || '').slice(0, 10) === dateISO)
+    .map(s => dsTrainingEntryForSession(store, s, dateISO));
   return {
     date: dateISO,
     weight: log?.weight ?? null,
@@ -6113,6 +6165,7 @@ function buildDailySummaryPayload(store, dateISO) {
     bloodPressure: (store.bloodPressureLogs || []).filter(l => l.date === dateISO).map(l => ({ systolic: l.systolic, diastolic: l.diastolic })),
     bodyTemp: (store.bodyTempLogs || []).filter(l => l.date === dateISO).map(l => ({ valueC: l.valueC })),
     note: log?.note || log?.offPlanNote || null,
+    training,
   };
 }
 // Mirrors scanLabel's exact shape: POST via fnFetch, normalize the response.

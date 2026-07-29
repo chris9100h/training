@@ -4277,6 +4277,83 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.buildDailySummaryPayload(store, Y).medsDue, 0);
   });
 
+  test('dailySummaryDayIsEmpty: false when a session was trained, even with nothing else logged', () => {
+    const store = { dailyLogs: [], sessions: [{ id: 's1', date: Y, ended: `${Y}T18:00:00Z`, entries: [] }] };
+    assert.strictEqual(LB.dailySummaryDayIsEmpty(store, Y), false);
+  });
+  test('buildDailySummaryPayload: training carries the day\'s session, exercises and totals', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      exercises: [],
+      sessions: [{
+        id: 's1', dayId: 'd1', dayName: 'Push A', date: Y, ended: `${Y}T18:00:00Z`,
+        durationMinutes: 55, feel: 'good',
+        entries: [{
+          exId: 'bench', name: 'Bench Press',
+          sets: [
+            { kg: 80, reps: 8, done: true },
+            { kg: 80, reps: 8, done: true },
+            { kg: 80, reps: 0, done: false, warmup: true }, // warm-up: dropped
+            { kg: 80, reps: 0, done: false, skipped: true }, // skipped: dropped
+          ],
+        }],
+      }],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.training.length, 1);
+    const t = p.training[0];
+    assert.strictEqual(t.dayName, 'Push A');
+    assert.strictEqual(t.durationMinutes, 55);
+    assert.strictEqual(t.feel, 'good');
+    assert.strictEqual(t.doneSets, 2, 'warm-up and skipped sets excluded');
+    assert.strictEqual(t.volumeKg, 80 * 8 * 2);
+    assert.strictEqual(t.exercises.length, 1);
+    assert.strictEqual(t.exercises[0].name, 'Bench Press');
+    assert.strictEqual(t.exercises[0].sets.length, 2);
+    assert.strictEqual(t.comparison, null, 'no earlier session of this dayId to compare against');
+  });
+  test('buildDailySummaryPayload: training pairs with the most recent earlier session of the same dayId', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      exercises: [],
+      sessions: [
+        { id: 'old', dayId: 'd1', dayName: 'Push A', date: '2026-07-13', ended: '2026-07-13T18:00:00Z',
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 75, reps: 8, done: true }] }] },
+        { id: 'mid', dayId: 'd1', dayName: 'Push A', date: '2026-07-20', ended: '2026-07-20T18:00:00Z',
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 77.5, reps: 8, done: true }] }] },
+        { id: 'other-day', dayId: 'd2', dayName: 'Pull A', date: '2026-07-24', ended: '2026-07-24T18:00:00Z',
+          entries: [{ exId: 'row', name: 'Row', sets: [{ kg: 60, reps: 10, done: true }] }] },
+        { id: 'today', dayId: 'd1', dayName: 'Push A', date: Y, ended: `${Y}T18:00:00Z`,
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 80, reps: 8, done: true }] }] },
+      ],
+    };
+    const t = LB.buildDailySummaryPayload(store, Y).training[0];
+    assert.ok(t.comparison, 'the nearer same-dayId session, not the other day\'s or the older one, wins');
+    assert.strictEqual(t.comparison.date, '2026-07-20');
+    assert.strictEqual(t.comparison.volumeKg, 77.5 * 8);
+    assert.strictEqual(t.comparison.exercises[0].name, 'Bench Press');
+  });
+  test('buildDailySummaryPayload: training comparison skips a deload session further back', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      exercises: [],
+      sessions: [
+        { id: 'normal', dayId: 'd1', dayName: 'Push A', date: '2026-07-13', ended: '2026-07-13T18:00:00Z',
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 77.5, reps: 8, done: true }] }] },
+        { id: 'deload', dayId: 'd1', dayName: 'Push A', date: '2026-07-20', ended: '2026-07-20T18:00:00Z', isDeload: true,
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 50, reps: 8, done: true }] }] },
+        { id: 'today', dayId: 'd1', dayName: 'Push A', date: Y, ended: `${Y}T18:00:00Z`,
+          entries: [{ exId: 'bench', name: 'Bench Press', sets: [{ kg: 80, reps: 8, done: true }] }] },
+      ],
+    };
+    const t = LB.buildDailySummaryPayload(store, Y).training[0];
+    assert.strictEqual(t.comparison.date, '2026-07-13', 'the deload week is skipped as a comparison baseline');
+  });
+  test('buildDailySummaryPayload: no training key present when nothing was trained that day', () => {
+    const store = { dailyLogs: [{ date: Y, weight: 80 }], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [] };
+    assert.strictEqual(LB.buildDailySummaryPayload(store, Y).training.length, 0);
+  });
+
   test('splitHeadlineBody: splits on the first newline, trims each part', () => {
     const { headline, body } = LB.splitHeadlineBody('Solid day\n\nWeight is trending down, keep it up.');
     assert.strictEqual(headline, 'Solid day');
