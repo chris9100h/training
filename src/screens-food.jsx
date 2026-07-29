@@ -887,6 +887,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return () => window.removeEventListener('zane-scanner-provider', onChange);
   }, []);
 
+  // "Describe a meal" sheet: free-text -> parse-meal edge function -> staged
+  // items, same review-before-log flow as every other add path below.
+  const [mealDescribeOpen, setMealDescribeOpen] = useStateFd(false);
+  const [mealDescription, setMealDescription] = useStateFd('');
+  const [mealParsing, setMealParsing] = useStateFd(false);
+  const [mealParseError, setMealParseError] = useStateFd(null);
+
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
   // Set while the quantity sheet is editing an ALREADY-LOGGED timeline entry
@@ -2643,6 +2650,38 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
 
+  // "Describe a meal": free text -> parse-meal edge function estimates macros
+  // per item -> each becomes its own staged entry, reviewed the same way as
+  // every other add path (the docked staged panel already handles quantity/
+  // macro review and per-item removal, nothing bespoke needed here). Guards
+  // against closing mid-request so a cancel can't silently stage items into
+  // a sheet the user already thinks they backed out of.
+  function closeMealDescribeSheet() {
+    if (mealParsing) return;
+    setMealDescribeOpen(false);
+  }
+  async function handleDescribeMeal() {
+    const text = mealDescription.trim();
+    if (!text) return;
+    setMealParsing(true);
+    setMealParseError(null);
+    const res = await LB.parseMealText(text);
+    setMealParsing(false);
+    if (!res.ok) { setMealParseError(res.error); return; }
+    const time = entryTime();
+    const now = new Date().toISOString();
+    const entries = res.items.map(it => ({
+      id: LB.uid(), date: curDate, time,
+      foodId: null, foodName: it.name, brand: null, source: 'custom',
+      quantityG: it.quantityG, calories: it.calories, protein: it.protein, carbs: it.carbs, fat: it.fat,
+      fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
+      createdAt: now, planned: false,
+    }));
+    setStaged(list => [...list, ...entries]);
+    setMealDescribeOpen(false);
+    setMealDescription('');
+  }
+
   // ── Recipes ──
   function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
   function editRecipe(recipe) { setRecipeEditorRecipe(recipe); setRecipeEditorOpen(true); }
@@ -3540,6 +3579,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{labelError}</div>}
             </div>
 
+            {/* Skips search entirely: a home-cooked plate with several vague-
+                portion parts (a slice of this, one of that) rarely has a
+                single matching database entry anyway. */}
+            <button onClick={() => { setMealParseError(null); setMealDescription(''); setMealDescribeOpen(true); }} style={{ ...fdActionCard, width: '100%' }}>
+              <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 14 }} />
+              <span>Describe a meal</span>
+            </button>
+
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi }}>{searchError}</div>}
 
             {/* Only offered once a search has actually come up short (or the
@@ -3886,6 +3933,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
           </div>
         )}
+      </Sheet>
+
+      {/* ── Describe a meal: free text -> AI-estimated macros, staged for
+          review like any other add path ── */}
+      <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          Describe what you ate, portions and all, in plain language. Claude estimates the macros per item (generously where cooking fat isn't specified) so you review before anything's added, same as always.
+        </div>
+        <Field label="What did you eat?" style={{ marginBottom: 12 }}>
+          <textarea
+            value={mealDescription}
+            onChange={e => setMealDescription(e.target.value)}
+            placeholder="e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll"
+            rows={4}
+            autoFocus
+            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+        </Field>
+        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={handleDescribeMeal} disabled={mealParsing || !mealDescription.trim()} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
+        </div>
       </Sheet>
 
       {/* ── Repeat yesterday's meal, minus whatever changed ────────────────

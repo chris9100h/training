@@ -12,6 +12,7 @@ const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
+const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -2530,6 +2531,20 @@ async function scanLabel(imageBase64, mimeType, provider) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true, label: data };
+}
+
+// Parses a free-text meal description (via the parse-meal edge function) into
+// estimated food items for FoodScreen's "Describe a meal" sheet. Same
+// contract shape as scanLabel/searchFoods: never throws, { ok: false, error }
+// on any failure. Items are handed back plain (name/quantityG/calories/
+// protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
+// exactly like a manually-typed Custom Item, nothing is written here.
+async function parseMealText(description) {
+  const res = await fnFetch(PARSE_MEAL_URL, { description });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, items: Array.isArray(data.items) ? data.items : [] };
 }
 
 // ── Recipe sharing ──────────────────────────────────────────────────────────
@@ -8289,7 +8304,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
