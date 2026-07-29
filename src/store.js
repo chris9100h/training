@@ -6076,8 +6076,40 @@ function dailySummaryDayIsEmpty(store, dateISO) {
   const hasBp = (store.bloodPressureLogs || []).some(l => l.date === dateISO);
   const hasBodyTemp = (store.bodyTempLogs || []).some(l => l.date === dateISO);
   const hasTraining = isLoggedTrainingDay(store.sessions, dateISO);
+  const hasCardio = (store.cardioLogs || []).some(l => l.date === dateISO);
   const { due } = dsMedsDueTaken(store, dateISO);
-  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && !hasTraining && due === 0;
+  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && !hasTraining && !hasCardio && due === 0;
+}
+// Best-effort time of day for a timestamp: createdAt is when the row was
+// saved, not a tracked workout start time (zane_cardio_logs has no such
+// field), but it is the only timestamp available and close enough for a
+// casual "morning run" / "evening ride" read.
+function dsTimeOfDay(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+// Cardio logged on dateISO: compact and purely factual like foodItems, no
+// comparison/highlight system like training (a cardio session has no
+// sets/reps to trend against, just report what happened). Distance is
+// formatted here rather than left as raw meters for the edge function to
+// phrase (the usual split, see fmtWeightTrend): the km/mi display choice is
+// a per-device localStorage setting (cardioDistUnit), never synced, so only
+// client-side code can ever know which unit to show.
+function dsCardioForDay(store, dateISO) {
+  const distUnit = cardioDistUnit();
+  return (store.cardioLogs || [])
+    .filter(l => l.date === dateISO)
+    .map(l => ({
+      type: l.type || null,
+      durationMinutes: l.durationMinutes ?? null,
+      distance: l.distanceM != null ? fmtDistance(l.distanceM, distUnit, 1) : null,
+      effort: l.effort ?? null,
+      paceFeeling: l.paceFeeling ?? null,
+      time: dsTimeOfDay(l.createdAt),
+      note: l.note ? String(l.note).slice(0, 200) : null,
+    }));
 }
 // Most recent OTHER ended, non-deload session with the same dayId, strictly
 // before dateISO: "last time this exact workout was done", the training
@@ -6147,7 +6179,8 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 // straight off the already-loaded store, no extra fetch. weightTrend is a
 // 14-day trailing window (this day inclusive), ascending, nulls excluded: a
 // single day's weight can't show a trend, only a short series can. training
-// is one entry per ended session logged that day (usually 0 or 1).
+// is one entry per ended session logged that day (usually 0 or 1); cardio is
+// separate (zane_cardio_logs, its own tracker, not part of a lifting session).
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
@@ -6162,6 +6195,7 @@ function buildDailySummaryPayload(store, dateISO) {
   const training = (store.sessions || [])
     .filter(s => s.ended && (s.date || '').slice(0, 10) === dateISO)
     .map(s => dsTrainingEntryForSession(store, s, dateISO));
+  const cardio = dsCardioForDay(store, dateISO);
   return {
     date: dateISO,
     weight: log?.weight ?? null,
@@ -6183,6 +6217,7 @@ function buildDailySummaryPayload(store, dateISO) {
     bodyTemp: (store.bodyTempLogs || []).filter(l => l.date === dateISO).map(l => ({ valueC: l.valueC })),
     note: log?.note || log?.offPlanNote || null,
     training,
+    cardio,
   };
 }
 // Mirrors scanLabel's exact shape: POST via fnFetch, normalize the response.

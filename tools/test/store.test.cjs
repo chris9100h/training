@@ -4382,6 +4382,43 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.buildDailySummaryPayload(store, Y).training.length, 0);
   });
 
+  test('dailySummaryDayIsEmpty: false when only cardio was logged, even with nothing else', () => {
+    const store = { dailyLogs: [], cardioLogs: [{ date: Y, type: 'Running', durationMinutes: 30 }] };
+    assert.strictEqual(LB.dailySummaryDayIsEmpty(store, Y), false);
+  });
+  test('buildDailySummaryPayload: cardio carries type, duration, formatted distance, effort and time', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      cardioLogs: [{
+        id: 'c1', date: Y, type: 'Running', durationMinutes: 32, distanceM: 5200,
+        effort: 7, paceFeeling: 4, note: 'felt good', createdAt: `${Y}T07:15:00Z`,
+      }],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.strictEqual(p.cardio.length, 1);
+    const c = p.cardio[0];
+    assert.strictEqual(c.type, 'Running');
+    assert.strictEqual(c.durationMinutes, 32);
+    assert.strictEqual(c.distance, '5.2 km', 'default km, no logbook-cardio-dist-unit set');
+    assert.strictEqual(c.effort, 7);
+    assert.strictEqual(c.paceFeeling, 4);
+    assert.strictEqual(c.note, 'felt good');
+    assert.ok(/^\d{2}:\d{2}$/.test(c.time), 'zero-padded HH:MM, exact value depends on the local timezone');
+  });
+  test('buildDailySummaryPayload: cardio time/distance are null without a timestamp/distance logged', () => {
+    const store = {
+      dailyLogs: [], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+      cardioLogs: [{ id: 'c1', date: Y, type: 'Cycling', durationMinutes: 45 }],
+    };
+    const c = LB.buildDailySummaryPayload(store, Y).cardio[0];
+    assert.strictEqual(c.time, null);
+    assert.strictEqual(c.distance, null, 'no distanceM logged');
+  });
+  test('buildDailySummaryPayload: no cardio entries on a day none was logged', () => {
+    const store = { dailyLogs: [{ date: Y, weight: 80 }], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [] };
+    assert.strictEqual(LB.buildDailySummaryPayload(store, Y).cardio.length, 0);
+  });
+
   test('splitHeadlineBody: splits on the first newline, trims each part', () => {
     const { headline, body } = LB.splitHeadlineBody('Solid day\n\nWeight is trending down, keep it up.');
     assert.strictEqual(headline, 'Solid day');

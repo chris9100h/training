@@ -23,7 +23,7 @@
 //
 // One action: POST { date, weight, weightTrend, steps, calories, protein,
 // carbs, fat, targets, adherence, waterMl, foodItems, medsDue, medsTaken,
-// medsTakenNames, glucose, bloodPressure, bodyTemp, note, training }
+// medsTakenNames, glucose, bloodPressure, bodyTemp, note, training, cardio }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
 // -> { headline: string|null, body: string, generatedAt: string }
 //
@@ -88,11 +88,13 @@ async function resolveUser(req: Request): Promise<{ id: string; email: string | 
   return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
-const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that.
+const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
 
 If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
 
 The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
+
+If cardio is logged, it is its own separate activity from any strength session, report it as such (type, duration, distance, effort), it does not need to be folded into the training verdict above. One narrow, explicit exception to "never invent a reason" below: a hard or long cardio session can genuinely cause short-term water-weight swings (sweat loss, glycogen use), that is a real, general training fact, not user-specific speculation. If cardio was logged and the weight trend looks like it could plausibly reflect that, you may mention it as gentle context, phrased as a possibility, never as a certain cause. This exception is specifically about cardio and water weight, nothing else, never extend the same kind of reasoning to nutrition, sleep, stress, or any other guess.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else. Blood glucose, blood pressure, and body temperature readings, when given, are for tracking only: if one is genuinely worth a mention, state the number neutrally, never label it high, low, borderline, or concerning, and never guess at what caused it (diet, a calorie deficit, hydration, training, or anything else). You are not given nearly enough to make that call responsibly, and getting it wrong reads as real medical scaremongering over what is often a completely normal number.
 
@@ -155,6 +157,28 @@ function buildTrainingLines(training: any[], dateISO: string): string[] {
   return lines;
 }
 
+// distance arrives pre-formatted with its unit ("5.2 km" / "3.1 mi"), see
+// LB.dsCardioForDay: the km/mi choice is a per-device setting only the
+// client can ever know, this function just places it in the line.
+function fmtCardioEntry(c: Record<string, any>): string {
+  const bits: string[] = [];
+  if (c.durationMinutes != null) bits.push(`${c.durationMinutes} min`);
+  if (c.distance) bits.push(c.distance);
+  if (c.effort != null) bits.push(`effort ${c.effort}/10`);
+  if (c.paceFeeling != null) bits.push(`pace feeling ${c.paceFeeling}/6`);
+  const when = c.time ? ` at ${c.time}` : '';
+  const detail = bits.length ? bits.join(', ') : 'no further detail logged';
+  const noteText = c.note ? ` (note: "${c.note}")` : '';
+  return `${c.type || 'Cardio'}${when}: ${detail}${noteText}`;
+}
+
+function buildCardioLines(cardio: any[]): string[] {
+  if (!Array.isArray(cardio) || !cardio.length) return [];
+  const lines: string[] = ['', 'Cardio logged YESTERDAY:'];
+  for (const c of cardio) lines.push(`- ${fmtCardioEntry(c)}`);
+  return lines;
+}
+
 function buildUserPrompt(p: Record<string, any>): string {
   const lines: string[] = [`One user's health-tracking data for YESTERDAY (${p.date}):`, ''];
   if (p.weight != null) {
@@ -187,6 +211,7 @@ function buildUserPrompt(p: Record<string, any>): string {
   }
   if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
   lines.push(...buildTrainingLines(p.training, p.date));
+  lines.push(...buildCardioLines(p.cardio));
   lines.push('', 'Write the headline + paragraph as instructed.');
   return lines.join('\n');
 }
@@ -203,7 +228,8 @@ function payloadIsEmpty(p: Record<string, any>): boolean {
     && !(Array.isArray(p.glucose) && p.glucose.length)
     && !(Array.isArray(p.bloodPressure) && p.bloodPressure.length)
     && !(Array.isArray(p.bodyTemp) && p.bodyTemp.length)
-    && !(Array.isArray(p.training) && p.training.length);
+    && !(Array.isArray(p.training) && p.training.length)
+    && !(Array.isArray(p.cardio) && p.cardio.length);
 }
 
 // CLAUDE.md's house rule ("no em dashes, ever") is enforced on committed
