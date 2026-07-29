@@ -1,9 +1,12 @@
-name: Deploy Edge Function
+name: Deploy Edge Functions
 
 # Manual only, no push trigger: pick the branch to deploy from via the
 # "Use workflow from" dropdown when running this from the Actions tab (that's
-# a native GitHub Actions feature, nothing to configure here), then type the
-# function's folder name under supabase/functions/.
+# a native GitHub Actions feature, nothing to configure here), then list one
+# or more function folder names under supabase/functions/, separated by
+# commas and/or spaces (e.g. "ai-daily-summary, ai-checkin-opinion"). Each
+# name deploys independently: one bad name doesn't stop the rest, but the run
+# still ends failed overall if any of them did.
 #
 # Needs the SUPABASE_ACCESS_TOKEN repository secret (Supabase dashboard →
 # account menu → Access Tokens → Generate new token). This is a management-
@@ -13,8 +16,8 @@ name: Deploy Edge Function
 on:
   workflow_dispatch:
     inputs:
-      function_name:
-        description: 'Function folder name under supabase/functions/ (e.g. ai-daily-summary)'
+      function_names:
+        description: 'Function folder names under supabase/functions/, comma and/or space separated (e.g. ai-daily-summary, ai-checkin-opinion)'
         required: true
         type: string
 
@@ -28,7 +31,29 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - name: Deploy ${{ inputs.function_name }}
+      - name: Deploy functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase functions deploy "${{ inputs.function_name }}" --project-ref ebbuvdzgstrhrcsbrlez
+          FUNCTION_NAMES: ${{ inputs.function_names }}
+        run: |
+          # Comma and/or whitespace separated; blank entries dropped so a
+          # trailing comma or a double space can't produce an empty function
+          # name. Read from env, not interpolated directly into the script,
+          # so the input string is never parsed as shell syntax.
+          IFS=', ' read -ra names <<< "$FUNCTION_NAMES"
+          failed=()
+          for name in "${names[@]}"; do
+            [ -z "$name" ] && continue
+            echo "::group::Deploy $name"
+            if supabase functions deploy "$name" --project-ref ebbuvdzgstrhrcsbrlez; then
+              echo "$name deployed"
+            else
+              echo "$name FAILED"
+              failed+=("$name")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi

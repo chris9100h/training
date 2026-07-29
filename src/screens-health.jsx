@@ -2523,6 +2523,10 @@ function hlShiftDate(dateStr, deltaDays) {
 function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }) {
   const [busy, setBusy] = useStateH(false);
   const [error, setError] = useStateH(null);
+  // Same admin identity as Settings/Feature Map: gates the Retry button below,
+  // the server independently enforces the same bypass (ai-daily-summary), this
+  // is purely so a non-admin never even sees an affordance that would 409.
+  const isAdmin = store.user?.email === 'office@btc-prime.biz';
   const yesterday = hlShiftDate(LB.todayISO(), -1);
   const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
   const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
@@ -2555,7 +2559,15 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
       {log?.aiSummaryGeneratedAt ? (
         <div>
           {headline && <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 6 }}>{headline}</div>}
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px' }}>{body}</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{body}</div>
+          {isAdmin && !readOnly && (
+            <div style={{ marginTop: 10 }}>
+              <Btn kind="ghost" onClick={generate} disabled={busy} style={{ padding: '6px 14px', fontSize: 11 }}>
+                <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{busy ? 'Retrying…' : 'Retry'}
+              </Btn>
+              {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
+            </div>
+          )}
         </div>
       ) : readOnly ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Not generated yet.</div>

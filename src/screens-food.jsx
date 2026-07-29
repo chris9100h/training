@@ -887,6 +887,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return () => window.removeEventListener('zane-scanner-provider', onChange);
   }, []);
 
+  // "Describe a meal" sheet: free-text -> parse-meal edge function -> a
+  // review list (mealItems) the user picks through before anything is
+  // staged. null = no batch pending (also closes the review sheet, see its
+  // `open` prop below); an empty array can't linger, removing the last item
+  // nulls it out the same way.
+  const [mealDescribeOpen, setMealDescribeOpen] = useStateFd(false);
+  const [mealDescription, setMealDescription] = useStateFd('');
+  const [mealParsing, setMealParsing] = useStateFd(false);
+  const [mealParseError, setMealParseError] = useStateFd(null);
+  const [mealItems, setMealItems] = useStateFd(null);
+  // tempId of the mealItems row currently open in the quantity sheet, or null
+  // for every other reason that sheet opens (fresh add / re-editing an
+  // already-logged entry). Lets confirmLogFood route "Save" back into this
+  // list instead of staging/closing.
+  const [editingMealItemId, setEditingMealItemId] = useStateFd(null);
+
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
   // Set while the quantity sheet is editing an ALREADY-LOGGED timeline entry
@@ -2402,7 +2418,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -2588,6 +2604,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function confirmLogFood(planned = false) {
     const built = buildQtyEntry();
     if (!built) return;
+    // Editing one row of a "Describe a meal" review list: write the edited
+    // amount/macros back into that row and return to the list (still open
+    // underneath, see mealItems' Sheet below), nothing is staged/logged yet.
+    if (editingMealItemId) {
+      const id = editingMealItemId;
+      setMealItems(list => (list || []).map(i => i.tempId === id ? {
+        tempId: id, foodName: built.foodName, quantityG: built.quantityG,
+        protein: built.protein, carbs: built.carbs, fat: built.fat,
+        fiber: built.fiber, sugar: built.sugar, satFat: built.satFat, sodiumMg: built.sodiumMg,
+      } : i));
+      closeQtySheet();
+      return;
+    }
     if (editingEntry) {
       // Editing an entry to Logged (qtyEditPlanned false) can be the first
       // logged entry claiming a day that carries manual Health-tab macros; warn
@@ -2642,6 +2671,94 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     resetCustomForm();
   }
   const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
+
+  // "Describe a meal": free text -> parse-meal edge function estimates macros
+  // per item -> each becomes its own staged entry, reviewed the same way as
+  // every other add path (the docked staged panel already handles quantity/
+  // macro review and per-item removal, nothing bespoke needed here). Guards
+  // against closing mid-request so a cancel can't silently stage items into
+  // a sheet the user already thinks they backed out of.
+  function closeMealDescribeSheet() {
+    if (mealParsing) return;
+    setMealDescribeOpen(false);
+  }
+  async function handleDescribeMeal() {
+    const text = mealDescription.trim();
+    if (!text) return;
+    setMealParsing(true);
+    setMealParseError(null);
+    const res = await LB.parseMealText(text);
+    setMealParsing(false);
+    if (!res.ok) { setMealParseError(res.error); return; }
+    if (!res.items.length) { setMealParseError('Could not find any food in that description. Try rephrasing, or add it manually.'); return; }
+    setMealItems(res.items.map(it => ({
+      tempId: LB.uid(), foodName: it.name,
+      quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
+      fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
+    })));
+    setMealDescribeOpen(false);
+    setMealDescription('');
+  }
+  // Opens one mealItems row in the normal custom-item quantity sheet
+  // (openCustomAsScalable, same one a re-logged custom entry reopens
+  // through): the AI's quantity and per-100g macros are only ever a
+  // starting guess, and this reuses the one place in the app that already
+  // lets a guess like that be corrected (name, per-100g macros, portion)
+  // instead of building a second editor. editingMealItemId routes
+  // confirmLogFood's "Save" back into this row rather than staging it.
+  function editMealItem(item) {
+    setEditingMealItemId(item.tempId);
+    setFavedId(existingFavId(null, item.foodName));
+    openCustomAsScalable(item);
+  }
+  function removeMealItem(tempId) {
+    // Nulls out (not []) once the last row is gone, so the review Sheet
+    // (open={mealItems != null}) closes itself instead of lingering empty.
+    setMealItems(list => {
+      const next = (list || []).filter(i => i.tempId !== tempId);
+      return next.length ? next : null;
+    });
+  }
+  // Cancel/backdrop/back on the review list: same "won't be added" dirty
+  // check requestLeaveFood uses for the main staged batch, scoped to just
+  // this not-yet-staged meal-description batch.
+  async function requestCloseMealReview() {
+    const n = mealItems?.length || 0;
+    if (n && !await confirm(`${n} item${n === 1 ? '' : 's'} from your description won't be added.`, { title: 'Discard items?', ok: 'Discard', cancel: 'Keep reviewing', danger: true })) return;
+    setMealItems(null);
+  }
+  // "Log it" / "Plan it" / "Add N items" on the review list: every row
+  // becomes its own staged entry (same shape/destination as any other add
+  // path), sharing one time/createdAt since they're all the one described
+  // meal. Calories are always derived here, never trusted from the edge
+  // function's own number once it's had a chance to be hand-edited.
+  function commitMealItems(planned) {
+    if (!mealItems || !mealItems.length) return;
+    const time = entryTime();
+    const now = new Date().toISOString();
+    const netCarbs = !!store.settings?.netCarbs;
+    const entries = mealItems.map(i => ({
+      id: LB.uid(), date: curDate, time,
+      foodId: null, foodName: i.foodName, brand: null, source: 'custom',
+      quantityG: i.quantityG,
+      calories: Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0),
+      protein: i.protein, carbs: i.carbs, fat: i.fat,
+      fiber: i.fiber, sugar: i.sugar, satFat: i.satFat, sodiumMg: i.sodiumMg,
+      createdAt: now, planned,
+    }));
+    setStaged(list => [...list, ...entries]);
+    setMealItems(null);
+  }
+  const mealItemsTotals = useMemoFd(() => {
+    const netCarbs = !!store.settings?.netCarbs;
+    const list = mealItems || [];
+    return {
+      calories: Math.round(list.reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0), 0)),
+      protein: fdRound1(list.reduce((a, i) => a + (i.protein || 0), 0)),
+      carbs: fdRound1(list.reduce((a, i) => a + (i.carbs || 0), 0)),
+      fat: fdRound1(list.reduce((a, i) => a + (i.fat || 0), 0)),
+    };
+  }, [mealItems, store.settings?.netCarbs]);
 
   // ── Recipes ──
   function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
@@ -3540,6 +3657,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{labelError}</div>}
             </div>
 
+            {/* Skips search entirely: a home-cooked plate with several vague-
+                portion parts (a slice of this, one of that) rarely has a
+                single matching database entry anyway. */}
+            <button onClick={() => { setMealParseError(null); setMealDescription(''); setMealDescribeOpen(true); }} style={{ ...fdActionCard, width: '100%' }}>
+              <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 14 }} />
+              <span>Describe a meal</span>
+            </button>
+
             {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi }}>{searchError}</div>}
 
             {/* Only offered once a search has actually come up short (or the
@@ -3736,9 +3861,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </div>
 
       {/* ── Quantity sheet ── */}
-      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)">
+      {/* zIndex bumped while editing one row of the "Describe a meal" review
+          list (see mealItems' Sheet further below): that list stays open
+          underneath at the default tier, this sheet must render above it,
+          same "bump the one that must sit on top" rule as every other
+          Sheet-over-Sheet case in this file. */}
+      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)" zIndex={editingMealItemId ? 200 : 100}>
         {pendingFood && (
           <>
+            {editingMealItemId && (
+              <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 10 }}>
+                Editing an item from your description
+              </div>
+            )}
             {pendingFood.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{pendingFood.brand}</div>}
             {pendingFood.custom && (
               <>
@@ -3808,7 +3943,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 ))}
               </div>
             )}
-            {planMode && !editingEntry ? (
+            {editingMealItemId ? (
+              // Plan vs Logged is decided once for the whole batch on the
+              // review list itself (mealItems' Sheet, Plan it/Log it),
+              // never here: this only writes the edit back into that row.
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>Save</Btn>
+              </div>
+            ) : planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
                 <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
@@ -3884,6 +4027,78 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
             <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
+          </div>
+        )}
+      </Sheet>
+
+      {/* ── Describe a meal: free text -> parsed into mealItems, reviewed in
+          the Sheet right below ── */}
+      <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          Describe what you ate, portions and all, in plain language. Claude estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+        </div>
+        <Field label="What did you eat?" style={{ marginBottom: 12 }}>
+          <textarea
+            value={mealDescription}
+            onChange={e => setMealDescription(e.target.value)}
+            placeholder="e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll"
+            rows={4}
+            autoFocus
+            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+        </Field>
+        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={handleDescribeMeal} disabled={mealParsing || !mealDescription.trim()} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
+        </div>
+      </Sheet>
+
+      {/* ── Review list for a parsed meal-description batch: tap a row to
+          adjust it (opens the quantity sheet above at zIndex 200), trash to
+          drop it outright, Plan it/Log it stages every remaining row at
+          once. Nothing from here reaches store.foodLogs until that tap. ── */}
+      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          Tap an item to adjust its amount or numbers. Remove anything that doesn't belong.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+          <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+          <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+          {(mealItems || []).map(i => {
+            const netCarbs = !!store.settings?.netCarbs;
+            const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+            return (
+              <div key={i.tempId} style={fdDraftRow}>
+                <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                  <span style={fdEntryMeta}>
+                    {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                  </span>
+                </button>
+                <button onClick={() => removeMealItem(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {planMode ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} style={{ flex: 1.5 }}>Log it</Btn>}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={() => commitMealItems(false)} style={{ flex: 2 }}>
+              Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
+            </Btn>
           </div>
         )}
       </Sheet>

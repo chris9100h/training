@@ -12,6 +12,7 @@ const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
+const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -1933,6 +1934,7 @@ async function syncStore(prev, next, userId) {
   }
 
   let sessionUpserts = [];
+  let sessionsUpsertOp = null;
   if (prev.sessions !== next.sessions) {
     const upsert = next.sessions.filter(s => {
       const p = prev.sessions.find(x => x.id === s.id);
@@ -1940,7 +1942,16 @@ async function syncStore(prev, next, userId) {
     });
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
-      ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+      // Kept OUT of `ops`: that array is awaited below as one fail-fast batch,
+      // so a single unrelated table failing anywhere in the same diff (a food
+      // log FK, a stale meso-state guard, literally anything) used to throw
+      // before _syncEntryRelational ever ran, even though this upsert itself,
+      // an independent HTTP request, had already landed. That silently
+      // starved workout entries/sets of every retry while some unrelated
+      // write kept failing (confirmed live: session row present with the
+      // correct `ended`, zero rows in zane_session_entries/zane_sets). Tracked
+      // separately so its own result gates entries below, decoupled from ops.
+      sessionsUpsertOp = _supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId)));
       // Sync the relational tables for EVERY changed session, including brand-new
       // ones. Since the JSONB dual-write was dropped (migration 0058), the
       // relational rows are the only copy the spectator/overview RPCs can read;
@@ -2436,9 +2447,28 @@ async function syncStore(prev, next, userId) {
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
   if (preOps.length) await Promise.all(preOps.map(unwrap));
-  await Promise.all(ops.map(unwrap));
-  // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
-  if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
+  // allSettled, not all: ops spans ~25 unrelated tables in one diff, and the
+  // sessions upsert (sessionsUpsertOp, tracked separately above) must get its
+  // own result independent of whatever else in ops fails, otherwise a broken
+  // write anywhere in that list can throw before _syncEntryRelational below
+  // ever runs, blocking workout data with no relation to the actual failure.
+  const [opResults, sessionsErr] = await Promise.all([
+    Promise.allSettled(ops.map(unwrap)),
+    sessionsUpsertOp ? unwrap(sessionsUpsertOp).then(() => null, e => e) : Promise.resolve(null),
+  ]);
+  // Dual-write entries then sets after sessions are committed (FK order:
+  // sessions → entries → sets). Gated on sessionsErr specifically, not on
+  // opResults, so entries/sets still get attempted even when some unrelated
+  // table above failed.
+  let entryErr = null;
+  if (!sessionsErr && sessionUpserts.length) {
+    try { await _syncEntryRelational(sessionUpserts, userId, prev.sessions); }
+    catch (e) { entryErr = e; }
+  }
+  const opFailure = opResults.find(r => r.status === 'rejected');
+  if (sessionsErr) throw sessionsErr;
+  if (entryErr) throw entryErr;
+  if (opFailure) throw opFailure.reason;
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
@@ -2530,6 +2560,20 @@ async function scanLabel(imageBase64, mimeType, provider) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true, label: data };
+}
+
+// Parses a free-text meal description (via the parse-meal edge function) into
+// estimated food items for FoodScreen's "Describe a meal" sheet. Same
+// contract shape as scanLabel/searchFoods: never throws, { ok: false, error }
+// on any failure. Items are handed back plain (name/quantityG/calories/
+// protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
+// exactly like a manually-typed Custom Item, nothing is written here.
+async function parseMealText(description) {
+  const res = await fnFetch(PARSE_MEAL_URL, { description });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, items: Array.isArray(data.items) ? data.items : [] };
 }
 
 // ── Recipe sharing ──────────────────────────────────────────────────────────
@@ -6075,13 +6119,115 @@ function dailySummaryDayIsEmpty(store, dateISO) {
   const hasGlucose = (store.glucoseLogs || []).some(l => l.date === dateISO);
   const hasBp = (store.bloodPressureLogs || []).some(l => l.date === dateISO);
   const hasBodyTemp = (store.bodyTempLogs || []).some(l => l.date === dateISO);
+  const hasTraining = isLoggedTrainingDay(store.sessions, dateISO);
+  const hasCardio = (store.cardioLogs || []).some(l => l.date === dateISO);
   const { due } = dsMedsDueTaken(store, dateISO);
-  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && due === 0;
+  return !hasDailyLogFields && !hasFood && !hasWater && !hasGlucose && !hasBp && !hasBodyTemp && !hasTraining && !hasCardio && due === 0;
+}
+// Best-effort time of day for a timestamp: createdAt is when the row was
+// saved, not a tracked workout start time (zane_cardio_logs has no such
+// field). That's only a faithful stand-in when the entry was logged the SAME
+// day it's dated for; a backdated entry (today's forgotten cardio logged for
+// yesterday) would otherwise attach today's save time to yesterday's
+// session, actively misleading rather than merely imprecise, so this
+// returns null the moment the two days disagree instead of guessing.
+function dsTimeOfDay(iso, dateISO) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime()) || fmtISO(d) !== dateISO) return null;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+// Cardio logged on dateISO: compact and purely factual like foodItems, no
+// comparison/highlight system like training (a cardio session has no
+// sets/reps to trend against, just report what happened). Distance is
+// formatted here rather than left as raw meters for the edge function to
+// phrase (the usual split, see fmtWeightTrend): the km/mi display choice is
+// a per-device localStorage setting (cardioDistUnit), never synced, so only
+// client-side code can ever know which unit to show.
+function dsCardioForDay(store, dateISO) {
+  const distUnit = cardioDistUnit();
+  return (store.cardioLogs || [])
+    .filter(l => l.date === dateISO)
+    .map(l => ({
+      type: l.type || null,
+      durationMinutes: l.durationMinutes ?? null,
+      distance: l.distanceM != null ? fmtDistance(l.distanceM, distUnit, 1) : null,
+      effort: l.effort ?? null,
+      paceFeeling: l.paceFeeling ?? null,
+      time: dsTimeOfDay(l.createdAt, dateISO),
+      note: l.note ? String(l.note).slice(0, 200) : null,
+    }));
+}
+// Most recent OTHER ended, non-deload session with the same dayId, strictly
+// before dateISO: "last time this exact workout was done", the training
+// section's comparison point. Deload weeks are excluded as a comparison
+// baseline for the same reason recentSessionsForExercise excludes them (a
+// deliberately light week is not a fair progress reference); a dayId-less
+// (freestyle) session has nothing of the same shape to compare against.
+function dsPreviousSessionForDay(store, dayId, dateISO, excludeSessionId) {
+  if (!dayId) return null;
+  return (store.sessions || [])
+    .filter(s => s.dayId === dayId && s.ended && !s.isDeload && s.id !== excludeSessionId && s.date < dateISO)
+    .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+}
+// At most one riser + one faller, by per-exercise volume % change vs the
+// comparison session (matched by exId, same volume math as totalVolume,
+// mobility/cardio excluded the same way). Deliberately NOT a full
+// per-exercise readout: handing the summary prompt a complete list invited
+// it to walk through every exercise one by one no matter how firmly it was
+// told not to, that's the failure this replaces. Capping the DATA itself to
+// at most two candidates is the reliable fix, wording alone wasn't. No
+// comparison session -> no highlights, nothing to diff against.
+function dsExerciseHighlights(store, session, prevSession) {
+  if (!prevSession) return [];
+  const exMap = new Map((store.exercises || []).map(e => [e.id, e]));
+  const bw = bodyweightForDate(store.dailyLogs, session.date);
+  const prevByExId = new Map((prevSession.entries || []).map(e => [e.exId, e]));
+  const deltas = [];
+  for (const entry of (session.entries || [])) {
+    const prevEntry = prevByExId.get(entry.exId);
+    if (!prevEntry) continue;
+    const ex = exMap.get(entry.exId);
+    if (ex && (ex.movement_type === 'mobility' || ex.movement_type === 'cardio')) continue;
+    const curVol = entryVolume(entry, true, ex, bw);
+    const prevVol = entryVolume(prevEntry, true, ex, bw);
+    if (curVol <= 0 || prevVol <= 0) continue;
+    deltas.push({ name: entry.name, pct: Math.round((curVol - prevVol) / prevVol * 100) });
+  }
+  const riser = deltas.filter(d => d.pct > 0).sort((a, b) => b.pct - a.pct)[0] || null;
+  const faller = deltas.filter(d => d.pct < 0).sort((a, b) => a.pct - b.pct)[0] || null;
+  return [riser, faller].filter(Boolean);
+}
+// One session done on dateISO, summarized for the training section and
+// paired with the last session of the same dayId (if any). A comparison
+// session outside HISTORY_WINDOW_DAYS carries only aggregate totals
+// (entries: []): buildDailySummaryPayload deliberately never fetches beyond
+// the already-loaded store, same accepted degradation as elsewhere (also
+// means highlights silently come back empty against such a session, there
+// are no entries to diff).
+function dsTrainingEntryForSession(store, session, dateISO) {
+  const prev = dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
+  return {
+    dayName: session.dayName || (session.isFreestyle ? 'Freestyle' : null),
+    durationMinutes: session.durationMinutes ?? null,
+    feel: session.feel ?? null,
+    isDeload: !!session.isDeload,
+    volumeKg: Math.round(totalVolume(session, store.exercises, store.dailyLogs)),
+    doneSets: doneSetCount(session),
+    highlights: dsExerciseHighlights(store, session, prev),
+    comparison: prev ? {
+      date: prev.date,
+      volumeKg: Math.round(totalVolume(prev, store.exercises, store.dailyLogs)),
+      doneSets: doneSetCount(prev),
+    } : null,
+  };
 }
 // Assembles everything the ai-daily-summary Edge Function needs for one day,
 // straight off the already-loaded store, no extra fetch. weightTrend is a
 // 14-day trailing window (this day inclusive), ascending, nulls excluded: a
-// single day's weight can't show a trend, only a short series can.
+// single day's weight can't show a trend, only a short series can. training
+// is one entry per ended session logged that day (usually 0 or 1); cardio is
+// separate (zane_cardio_logs, its own tracker, not part of a lifting session).
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
@@ -6093,6 +6239,10 @@ function buildDailySummaryPayload(store, dateISO) {
     .filter(l => l.date === dateISO && !l.planned)
     .map(l => ({ name: l.foodName, quantityG: l.quantityG, calories: l.calories }));
   const meds = dsMedsDueTaken(store, dateISO);
+  const training = (store.sessions || [])
+    .filter(s => s.ended && (s.date || '').slice(0, 10) === dateISO)
+    .map(s => dsTrainingEntryForSession(store, s, dateISO));
+  const cardio = dsCardioForDay(store, dateISO);
   return {
     date: dateISO,
     weight: log?.weight ?? null,
@@ -6113,6 +6263,8 @@ function buildDailySummaryPayload(store, dateISO) {
     bloodPressure: (store.bloodPressureLogs || []).filter(l => l.date === dateISO).map(l => ({ systolic: l.systolic, diastolic: l.diastolic })),
     bodyTemp: (store.bodyTempLogs || []).filter(l => l.date === dateISO).map(l => ({ valueC: l.valueC })),
     note: log?.note || log?.offPlanNote || null,
+    training,
+    cardio,
   };
 }
 // Mirrors scanLabel's exact shape: POST via fnFetch, normalize the response.
@@ -8181,7 +8333,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,

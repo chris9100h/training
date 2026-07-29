@@ -7,15 +7,23 @@
 // Unlike scan-label-claude, this is plain text in, plain text out, no vision,
 // no strict JSON: a model instructed to "keep it casual" can and does malform
 // JSON, so the contract here is a simple two-part text format instead (see
-// SYSTEM_PROMPT). All the day's numbers/trends are assembled CLIENT-SIDE
-// (LB.buildDailySummaryPayload, already-loaded store data, no extra fetch)
-// and handed to Claude pre-computed: Claude phrases them, it does not
-// recompute or eyeball a trend itself, so a wrong read of "trending down" vs
-// "trending up" is not a failure mode this function has to worry about.
+// SYSTEM_PROMPT). All the day's numbers/trends, including the training
+// section's totals and its comparison to the last session of the same
+// dayId, are assembled CLIENT-SIDE (LB.buildDailySummaryPayload,
+// already-loaded store data, no extra fetch) and handed to Claude
+// pre-computed: Claude phrases them, it does not recompute or eyeball a
+// trend itself, so a wrong read of "trending down" vs "trending up" is not
+// a failure mode this function has to worry about. The training payload
+// deliberately carries at most two pre-picked "highlight" exercises
+// (LB.dsExerciseHighlights) rather than a full per-exercise breakdown: an
+// earlier version handed over the complete set-by-set list on the theory
+// that two short lists are easy reading, but in practice Claude walked
+// through every exercise in turn no matter how firmly SYSTEM_PROMPT told it
+// not to. Capping the data itself is what actually holds.
 //
 // One action: POST { date, weight, weightTrend, steps, calories, protein,
 // carbs, fat, targets, adherence, waterMl, foodItems, medsDue, medsTaken,
-// medsTakenNames, glucose, bloodPressure, bodyTemp, note }
+// medsTakenNames, glucose, bloodPressure, bodyTemp, note, training, cardio }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
 // -> { headline: string|null, body: string, generatedAt: string }
 //
@@ -35,6 +43,12 @@ const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+
+// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
+// (isAdmin = store.user?.email === this). The admin gets unlimited quota AND can
+// re-generate past the once-a-day gate below, so testing a prompt change never
+// needs a manual DB reset.
+const ADMIN_EMAIL = 'office@btc-prime.biz';
 
 const DAILY_SUMMARY_LIMIT = 5;
 
@@ -61,7 +75,7 @@ async function withinQuota(userId: string, kind: string, limit: number): Promise
   }
 }
 
-async function resolveUser(req: Request): Promise<string | null> {
+async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -71,21 +85,29 @@ async function resolveUser(req: Request): Promise<string | null> {
   }).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
-const SYSTEM_PROMPT = `You are a casual, supportive fitness coach texting a quick read on how yesterday went, using a user's tracked health data (weight, macros, steps, water, medication doses) from that one day. The user is reading this today, about yesterday, so always call it "yesterday" when referring to that day, never "today". You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally, the way a coach glancing at an app would.
+const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
 
-You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else.
+If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
 
-Only comment on trends and numbers you are explicitly given. If something wasn't logged, don't guess why or make up a reason, just leave it out.
+The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
 
-Style: short, plain, encouraging but honest, like a text message. No markdown, no bullet points, no emoji, no restating every number back mechanically, and never use an em dash; use a comma or a period instead.
+If cardio is logged, it is its own separate activity from any strength session, report it as such (type, duration, distance, effort), it does not need to be folded into the training verdict above. One narrow, explicit exception to "never invent a reason" below: a hard or long cardio session can genuinely cause short-term water-weight swings (sweat loss, glycogen use), that is a real, general training fact, not user-specific speculation. If cardio was logged and the weight trend looks like it could plausibly reflect that, you may mention it as gentle context, phrased as a possibility, never as a certain cause. This exception is specifically about cardio and water weight, nothing else, never extend the same kind of reasoning to nutrition, sleep, stress, or any other guess.
+
+You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else. Blood glucose, blood pressure, and body temperature readings, when given, are for tracking only: if one is genuinely worth a mention, state the number neutrally, never label it high, low, borderline, or concerning, and never guess at what caused it (diet, a calorie deficit, hydration, training, or anything else). You are not given nearly enough to make that call responsibly, and getting it wrong reads as real medical scaremongering over what is often a completely normal number.
+
+Always land on a genuine, specific verdict, not a generic "good job": what does this day actually tell you about how things are going. Add one concrete, actionable tip only when something EXPLICITLY given directly shows a real problem (adherence well under target, protein or calories clearly missed, a genuine stall or drop in the training comparison, very little water, a skipped dose, and similar), phrased like a coach would say it out loud, not like a lecture. Never manufacture a concern out of a number that is simply present but not actually off. When in doubt, say nothing about it, a clean day gets a real opinion, it does not need a tip attached.
+
+Only comment on trends and numbers you are explicitly given, and take them at face value: never invent a reason, a cause, or a backstory for any of them, including gaps, dips, or single readings. If something wasn't logged, don't guess why, just leave it out.
+
+Style: plain, direct, opinionated but honest, like a coach's voice note, not a text message and not a report. No markdown, no bullet points, no emoji, no walking through every metric in order, and never use an em dash; use a comma or a period instead.
 
 Output EXACTLY two parts and nothing else:
-1. A short headline, no more than 8 words, no ending punctuation.
-2. A blank line, then one paragraph of 2-4 casual sentences with your actual read on the day.
-Do not label the parts (no "Headline:"), do not add a greeting or sign-off.`;
+1. A short headline that states your actual verdict on the day, not just a topic label, no more than 8 words, no ending punctuation.
+2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your verdict in the first paragraph, use the next paragraph for the specifics that actually back it up (training, nutrition, whatever mattered), and only add a third if there's a genuine tip or forward-looking note, a light day does not need to be padded out to three.
+Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
 
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
   if (!Array.isArray(trend) || trend.length < 2) return 'no weight trend available (fewer than 2 points logged recently)';
@@ -95,6 +117,66 @@ function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string 
   const days = trend.length;
   if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days`;
   return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days`;
+}
+
+function daysBetween(earlierISO: string, laterISO: string): number {
+  const a = new Date(earlierISO + 'T00:00:00Z').getTime();
+  const b = new Date(laterISO + 'T00:00:00Z').getTime();
+  return Math.round((b - a) / 86400000);
+}
+
+// Renders the training array into prose-ready lines. Per-session totals and
+// deltas are simple arithmetic (computed here, same "compute the number, let
+// Claude phrase it" split as fmtWeightTrend above). Deliberately no
+// per-exercise set-by-set listing: LB.dsExerciseHighlights (src/store.js)
+// already boiled that down to at most one riser + one faller by volume %
+// before this payload was ever built, a full itemized list here just
+// invited Claude to walk through every exercise in turn regardless of what
+// the prompt said not to do, capping the data itself is what actually holds.
+function buildTrainingLines(training: any[], dateISO: string): string[] {
+  if (!Array.isArray(training) || !training.length) return [];
+  const lines: string[] = ['', 'Training logged YESTERDAY:'];
+  for (const s of training) {
+    const label = s.dayName || 'Freestyle session';
+    const bits = [`${s.doneSets ?? '?'} working sets`, `~${s.volumeKg ?? '?'}kg total volume`];
+    if (s.durationMinutes != null) bits.push(`${s.durationMinutes} min`);
+    if (s.feel) bits.push(`felt ${s.feel}`);
+    lines.push(`- ${label}${s.isDeload ? ' (deload week, deliberately lighter)' : ''}: ${bits.join(', ')}`);
+    if (s.comparison) {
+      const days = daysBetween(s.comparison.date, dateISO);
+      const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
+      lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs yesterday)` : ''}.`);
+    } else {
+      lines.push(`  No previous "${label}" session on record to compare against.`);
+    }
+    if (Array.isArray(s.highlights) && s.highlights.length) {
+      lines.push('  Optional color, mention AT MOST ONE briefly if it actually adds something, never both, never as a list:');
+      for (const h of s.highlights) lines.push(`    ${h.name} trending ${h.pct > 0 ? 'up' : 'down'} ~${Math.abs(h.pct)}% in volume vs last time`);
+    }
+  }
+  return lines;
+}
+
+// distance arrives pre-formatted with its unit ("5.2 km" / "3.1 mi"), see
+// LB.dsCardioForDay: the km/mi choice is a per-device setting only the
+// client can ever know, this function just places it in the line.
+function fmtCardioEntry(c: Record<string, any>): string {
+  const bits: string[] = [];
+  if (c.durationMinutes != null) bits.push(`${c.durationMinutes} min`);
+  if (c.distance) bits.push(c.distance);
+  if (c.effort != null) bits.push(`effort ${c.effort}/10`);
+  if (c.paceFeeling != null) bits.push(`pace feeling ${c.paceFeeling}/6`);
+  const when = c.time ? ` at ${c.time}` : '';
+  const detail = bits.length ? bits.join(', ') : 'no further detail logged';
+  const noteText = c.note ? ` (note: "${c.note}")` : '';
+  return `${c.type || 'Cardio'}${when}: ${detail}${noteText}`;
+}
+
+function buildCardioLines(cardio: any[]): string[] {
+  if (!Array.isArray(cardio) || !cardio.length) return [];
+  const lines: string[] = ['', 'Cardio logged YESTERDAY:'];
+  for (const c of cardio) lines.push(`- ${fmtCardioEntry(c)}`);
+  return lines;
 }
 
 function buildUserPrompt(p: Record<string, any>): string {
@@ -128,6 +210,8 @@ function buildUserPrompt(p: Record<string, any>): string {
     lines.push(`Body temperature: ${p.bodyTemp.map((t: any) => `${t.valueC}°C`).join(', ')}`);
   }
   if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
+  lines.push(...buildTrainingLines(p.training, p.date));
+  lines.push(...buildCardioLines(p.cardio));
   lines.push('', 'Write the headline + paragraph as instructed.');
   return lines.join('\n');
 }
@@ -143,7 +227,9 @@ function payloadIsEmpty(p: Record<string, any>): boolean {
     && !(p.medsDue > 0)
     && !(Array.isArray(p.glucose) && p.glucose.length)
     && !(Array.isArray(p.bloodPressure) && p.bloodPressure.length)
-    && !(Array.isArray(p.bodyTemp) && p.bodyTemp.length);
+    && !(Array.isArray(p.bodyTemp) && p.bodyTemp.length)
+    && !(Array.isArray(p.training) && p.training.length)
+    && !(Array.isArray(p.cardio) && p.cardio.length);
 }
 
 // CLAUDE.md's house rule ("no em dashes, ever") is enforced on committed
@@ -163,8 +249,10 @@ Deno.serve(async (req) => {
   const json = (body: unknown, status: number) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  const userId = await resolveUser(req);
-  if (!userId) return json({ error: 'unauthorized' }, 401);
+  const caller = await resolveUser(req);
+  if (!caller) return json({ error: 'unauthorized' }, 401);
+  const userId = caller.id;
+  const isAdmin = caller.email === ADMIN_EMAIL;
 
   const payload = await req.json().catch(() => ({}));
   const date = typeof payload?.date === 'string' ? payload.date : '';
@@ -191,7 +279,7 @@ Deno.serve(async (req) => {
       const rows = await r.json().catch(() => []);
       if (Array.isArray(rows) && rows[0]) {
         existingId = rows[0].id ?? null;
-        if (rows[0].ai_summary_generated_at) {
+        if (rows[0].ai_summary_generated_at && !isAdmin) {
           return json({ error: 'Already generated for that day.' }, 409);
         }
       }
@@ -201,7 +289,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
   }
 
-  if (!await withinQuota(userId, 'daily_summary', DAILY_SUMMARY_LIMIT)) {
+  if (!isAdmin && !await withinQuota(userId, 'daily_summary', DAILY_SUMMARY_LIMIT)) {
     return json({ error: `That's ${DAILY_SUMMARY_LIMIT} summary attempts today, well past normal use. The limit resets tomorrow.` }, 429);
   }
 
@@ -220,7 +308,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
+        max_tokens: 500,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(payload) }] }],
       }),

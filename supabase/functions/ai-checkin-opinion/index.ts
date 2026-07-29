@@ -38,6 +38,12 @@ const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 const CHECKIN_OPINION_LIMIT = 5;
 const ALLOWED_PHASES = new Set(['cut', 'maintain', 'bulk']);
 
+// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
+// (isAdmin = store.user?.email === this). The admin gets unlimited quota AND can
+// re-generate past the once-per-check-in gate below, so testing a prompt change
+// never needs a manual DB reset.
+const ADMIN_EMAIL = 'office@btc-prime.biz';
+
 // Same shape/reasoning as ai-daily-summary's withinQuota: advisory, fails
 // OPEN, only a backstop against a retry storm, not the real once-per-check-in
 // gate (that's ai_opinion_generated_at, checked further down).
@@ -58,7 +64,7 @@ async function withinQuota(userId: string, kind: string, limit: number): Promise
   }
 }
 
-async function resolveUser(token: string): Promise<string | null> {
+async function resolveUser(token: string): Promise<{ id: string; email: string | null } | null> {
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
@@ -67,7 +73,7 @@ async function resolveUser(token: string): Promise<string | null> {
   }).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
 // A PostgREST GET using the CALLER'S OWN token: RLS decides what comes back,
@@ -180,8 +186,8 @@ Style: short, plain, encouraging but honest, like a coach's quick note back. No 
 
 Output EXACTLY two parts and nothing else:
 1. A short headline, no more than 8 words, no ending punctuation.
-2. A blank line, then one paragraph of 3-5 casual sentences with your actual read on the week, including the macro-fit comment when you have one.
-Do not label the parts (no "Headline:"), do not add a greeting or sign-off.`;
+2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your actual read on the week in the first paragraph, use the next paragraph for the macro-fit comment when you have one or whatever else actually matters, a light week does not need to be padded out to three.
+Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
 
 function buildUserPrompt(
   schema: any[],
@@ -245,8 +251,10 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   const callerToken = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const userId = await resolveUser(callerToken);
-  if (!userId) return json({ error: 'unauthorized' }, 401);
+  const caller = await resolveUser(callerToken);
+  if (!caller) return json({ error: 'unauthorized' }, 401);
+  const userId = caller.id;
+  const isAdmin = caller.email === ADMIN_EMAIL;
 
   const payload = await req.json().catch(() => ({}));
   const checkinId = typeof payload?.checkinId === 'string' ? payload.checkinId : '';
@@ -267,7 +275,7 @@ Deno.serve(async (req) => {
     `zane_checkins?id=eq.${encodeURIComponent(checkinId)}&select=id,coaching_id,responses,ai_opinion_generated_at`);
   const checkin = checkinRows[0];
   if (!checkin) return json({ error: 'Check-in not found, or you are not authorized to view it.' }, 403);
-  if (checkin.ai_opinion_generated_at) return json({ error: 'Already generated for that check-in.' }, 409);
+  if (checkin.ai_opinion_generated_at && !isAdmin) return json({ error: 'Already generated for that check-in.' }, 409);
 
   const responses = checkin.responses || {};
   const coachingId = checkin.coaching_id;
@@ -299,7 +307,7 @@ Deno.serve(async (req) => {
   const macros = macroRows[0] || null;
   const priorMacros = macroRows[1] || null;
 
-  if (!await withinQuota(userId, 'checkin_opinion', CHECKIN_OPINION_LIMIT)) {
+  if (!isAdmin && !await withinQuota(userId, 'checkin_opinion', CHECKIN_OPINION_LIMIT)) {
     return json({ error: `That's ${CHECKIN_OPINION_LIMIT} check-in opinions today, well past normal use. The limit resets tomorrow.` }, 429);
   }
 

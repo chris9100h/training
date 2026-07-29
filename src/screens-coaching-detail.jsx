@@ -1507,6 +1507,10 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
 function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId, clientUnit }) {
+  // Gates the AI-opinion Retry affordance below (this is the COACH's own
+  // identity, looking at a client's check-ins); server-side (ai-checkin-opinion)
+  // independently enforces the same bypass by caller email either way.
+  const isAdmin = store?.user?.email === 'office@btc-prime.biz';
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [builderOpen, setBuilderOpen] = useStateC(false);
 
@@ -1636,7 +1640,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} onGenerated={load} />)}
+              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} onGenerated={load} isAdmin={isAdmin} />)}
             </div>
           </div>
         </div>
