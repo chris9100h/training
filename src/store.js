@@ -1934,6 +1934,7 @@ async function syncStore(prev, next, userId) {
   }
 
   let sessionUpserts = [];
+  let sessionsUpsertOp = null;
   if (prev.sessions !== next.sessions) {
     const upsert = next.sessions.filter(s => {
       const p = prev.sessions.find(x => x.id === s.id);
@@ -1941,7 +1942,16 @@ async function syncStore(prev, next, userId) {
     });
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
-      ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+      // Kept OUT of `ops`: that array is awaited below as one fail-fast batch,
+      // so a single unrelated table failing anywhere in the same diff (a food
+      // log FK, a stale meso-state guard, literally anything) used to throw
+      // before _syncEntryRelational ever ran, even though this upsert itself,
+      // an independent HTTP request, had already landed. That silently
+      // starved workout entries/sets of every retry while some unrelated
+      // write kept failing (confirmed live: session row present with the
+      // correct `ended`, zero rows in zane_session_entries/zane_sets). Tracked
+      // separately so its own result gates entries below, decoupled from ops.
+      sessionsUpsertOp = _supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId)));
       // Sync the relational tables for EVERY changed session, including brand-new
       // ones. Since the JSONB dual-write was dropped (migration 0058), the
       // relational rows are the only copy the spectator/overview RPCs can read;
@@ -2437,9 +2447,28 @@ async function syncStore(prev, next, userId) {
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
   if (preOps.length) await Promise.all(preOps.map(unwrap));
-  await Promise.all(ops.map(unwrap));
-  // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
-  if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
+  // allSettled, not all: ops spans ~25 unrelated tables in one diff, and the
+  // sessions upsert (sessionsUpsertOp, tracked separately above) must get its
+  // own result independent of whatever else in ops fails, otherwise a broken
+  // write anywhere in that list can throw before _syncEntryRelational below
+  // ever runs, blocking workout data with no relation to the actual failure.
+  const [opResults, sessionsErr] = await Promise.all([
+    Promise.allSettled(ops.map(unwrap)),
+    sessionsUpsertOp ? unwrap(sessionsUpsertOp).then(() => null, e => e) : Promise.resolve(null),
+  ]);
+  // Dual-write entries then sets after sessions are committed (FK order:
+  // sessions → entries → sets). Gated on sessionsErr specifically, not on
+  // opResults, so entries/sets still get attempted even when some unrelated
+  // table above failed.
+  let entryErr = null;
+  if (!sessionsErr && sessionUpserts.length) {
+    try { await _syncEntryRelational(sessionUpserts, userId, prev.sessions); }
+    catch (e) { entryErr = e; }
+  }
+  const opFailure = opResults.find(r => r.status === 'rejected');
+  if (sessionsErr) throw sessionsErr;
+  if (entryErr) throw entryErr;
+  if (opFailure) throw opFailure.reason;
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
