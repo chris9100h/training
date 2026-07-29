@@ -74,7 +74,7 @@ async function resolveUser(req: Request): Promise<string | null> {
   return user?.id ?? null;
 }
 
-const SYSTEM_PROMPT = `You are a casual, supportive fitness coach texting a quick read on ONE day of a user's tracked health data (weight, macros, steps, water, medication doses). You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally, the way a coach glancing at an app would.
+const SYSTEM_PROMPT = `You are a casual, supportive fitness coach texting a quick read on how yesterday went, using a user's tracked health data (weight, macros, steps, water, medication doses) from that one day. The user is reading this today, about yesterday, so always call it "yesterday" when referring to that day, never "today". You are being given data that has already been computed and checked; do not recompute or second-guess the numbers or trends you're told, just react to them naturally, the way a coach glancing at an app would.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else.
 
@@ -98,7 +98,7 @@ function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string 
 }
 
 function buildUserPrompt(p: Record<string, any>): string {
-  const lines: string[] = [`One user's health-tracking data for ${p.date}:`, ''];
+  const lines: string[] = [`One user's health-tracking data for YESTERDAY (${p.date}):`, ''];
   if (p.weight != null) {
     lines.push(`Weight: ${p.weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
   } else {
