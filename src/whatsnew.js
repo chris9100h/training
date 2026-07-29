@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.684',
+    date: '2026-07-29',
+    title: 'Just tell it what you ate 🍝',
+    items: [
+      '🍝 Describe a meal (Food tab, the new action card): typed out "two eggs, a slice of toast and a thin slice of ham" into three separate searches was never fun. Now you just describe the whole plate in one go, in plain language, and it reads it the way an experienced dietitian would eyeball a quick verbal estimate, no barcode or database entry required. Built for the stuff no nutrition database has ever heard of.',
+      "🥪 Multi-part meals come back as separate items, not one mystery blob: describe a loaded sandwich or a full plate and you get back bread, protein, cheese, sauce, whatever's actually on it, each as its own line instead of one lumped guess.",
+      "✅ Nothing gets logged behind your back: everything lands in a review list first, totals and all. Tap any item to adjust the amount, bin the ones you don't want, then Plan it or Log it for the whole batch at once.",
+      { text: "Worth knowing: it's a smart, judgment-based estimate for whatever's on your plate, home-cooked or eaten out. The more specific you are about amounts, the sharper the guess.", emphasis: true },
+    ],
+  },
+  {
     id: 'v2.681',
     date: '2026-07-29',
     title: 'Your app just got opinions 🧠',
