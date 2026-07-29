@@ -21,6 +21,14 @@
 // calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] }
 //
 // Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses).
+//
+// Web search tool: lets the model look up real nutrition data when the
+// description names a chain/restaurant or a packaged product, instead of
+// guessing from scratch. Server-side tool, no client-side loop needed, the
+// existing text-only content extraction below already skips over the
+// search-result blocks it adds to the response. Using the basic
+// web_search_20250305 (not the newer _20260209 dynamic-filtering variant):
+// DEFAULT_MODEL is Haiku, which the newer variant does not support.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +88,8 @@ const SYSTEM_PROMPT = `You estimate nutrition for a home-logged meal from a shor
 Break the description into separate food items. For each, estimate a realistic quantity in grams and its macros, using everyday judgment for vague portions the same way a dietitian eyeballing a plate would (a thin slice of a dense sliced meat is roughly 30-40 g, a bread roll is roughly 50-60 g, one egg is roughly 50-60 g, and so on). Never drop an item just because an exact amount wasn't given, make a reasonable assumption instead.
 
 Critical calibration: whenever the preparation involves unspecified added fat (fried, pan-fried, sauteed, roasted, breaded, buttered, a potato pancake/fritter/hash brown, and similar), estimate GENEROUSLY rather than a lean textbook version. Real home cooking uses more oil or butter than a minimal recipe would strictly need, people chronically under-count hidden fats, and it is better to slightly over-count calories here than to under-count them. This only calibrates HOW MUCH fat to assume for a named preparation, it is never a reason to invent an item that was not mentioned at all.
+
+When the description names a specific restaurant, fast-food chain, or packaged/branded product (e.g. "Subway", "McDonald's", a named chocolate bar), use the web search tool to look up that chain's or product's real published nutrition information before estimating, and base the item on what you find rather than a generic guess. Search only for items that are actually named this way; a home-cooked or generically-described item still gets the everyday-judgment estimate above, never a search.
 
 Return exactly this JSON shape:
 {
@@ -171,6 +181,7 @@ Deno.serve(async (req) => {
         model,
         max_tokens: 1200,
         system: SYSTEM_PROMPT,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
         messages: [{ role: 'user', content: [{ type: 'text', text: `Meal description:\n${description}` }] }],
       }),
     });
