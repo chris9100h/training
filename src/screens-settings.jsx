@@ -388,12 +388,21 @@ function ChangelogSheet({ open, onClose }) {
       {/* Entry -> its message */}
       <SettingsSheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8 }}>
-          {(selected?.items || []).map((item, j) => (
-            <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <span style={{ color: 'var(--accent)', fontSize: 11, marginTop: 3, flexShrink: 0 }}>•</span>
-              <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{item}</span>
-            </div>
-          ))}
+          {/* An item is normally a plain string; { text, emphasis: true } opts
+              one item into a bolder treatment (same contract and shape as
+              WhatsNewModal, app.jsx, which is where this shape was introduced,
+              this sheet renders the identical window.WHATS_NEW data and must
+              handle it the same way, rendering the raw object crashes React). */}
+          {(selected?.items || []).map((item, j) => {
+            const emphasis = item && typeof item === 'object';
+            const text = emphasis ? item.text : item;
+            return (
+              <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <span style={{ color: 'var(--accent)', fontSize: 11, marginTop: 3, flexShrink: 0 }}>•</span>
+                <span style={{ fontSize: emphasis ? 14 : 13, fontWeight: emphasis ? 700 : 400, color: emphasis ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{text}</span>
+              </div>
+            );
+          })}
         </div>
       </SettingsSheet>
     </>
