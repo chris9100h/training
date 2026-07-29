@@ -21,19 +21,6 @@
 // calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] }
 //
 // Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses).
-//
-// Web search tool (admin-only, see ADMIN_WEB_SEARCH_ADDENDUM below): lets
-// the model look up real nutrition data for a named brand instead of
-// guessing. Real per-search API cost, not just tokens, is too much to put
-// in front of every user before the app has a monetization model, so both
-// the tool itself and its prompt instructions are only ever included when
-// the caller is admin, and even then only fire on an explicit
-// "Brand: description" opening line, never on a brand mentioned in
-// passing. Server-side tool, no client-side loop needed, the existing
-// text-only content extraction below already skips over the search-result
-// blocks it adds to the response. Using the basic web_search_20250305 (not
-// the newer _20260209 dynamic-filtering variant): DEFAULT_MODEL is Haiku,
-// which the newer variant does not support.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -101,17 +88,6 @@ Return exactly this JSON shape:
   ]
 }
 protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null for anything you genuinely cannot estimate, never invent a precise-looking number you don't believe. Never include a calories/kcal field, it is computed separately from the macros, not from you. If the description names no identifiable food or drink at all, return {"items": []}.`;
-
-// Appended only for the admin caller, and only ever sent alongside the
-// web_search tool below: real per-search API cost (not just tokens) makes
-// this an admin-testing capability, not something silently on for every
-// user's casual meal description, until there's a monetization model that
-// could absorb it. The trigger is deliberately narrow (an explicit
-// "Brand: description" opening line) so a normal description that happens
-// to mention a brand name in passing never fires a search by accident.
-const ADMIN_WEB_SEARCH_ADDENDUM = `
-
-Web search is available, but only ever use it when the description's FIRST line is exactly "<Brand>: <description>", a real restaurant, fast-food chain, or packaged product name followed by a colon (e.g. "Subway: 30cm chicken teriyaki with cheese and sweet onion sauce", "McDonalds: Big Mac menu large"). In that case only: decompose the order into separate items exactly as above (a Subway sandwich is still its bread, its protein, its cheese, and its sauce as separate items, never one combined line for "the sandwich"), then for each decomposed item use the web search tool to look up that specific item's own real published nutrition (search the bread on its own, the filling on its own, and so on), basing its numbers on what you find rather than a generic guess. If the description does not open with this exact "Brand: ..." form, never call web search, no matter what brand or restaurant names appear anywhere else in the text.`;
 
 // Pull the first balanced JSON object out of the model's text, tolerant of an
 // accidental ```json fence or a stray sentence around it. Same helper as
@@ -181,7 +157,6 @@ Deno.serve(async (req) => {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   if (!apiKey) return json({ error: 'Meal parsing is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
   const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
-  const systemPrompt = isAdmin ? SYSTEM_PROMPT + ADMIN_WEB_SEARCH_ADDENDUM : SYSTEM_PROMPT;
 
   let resp: Response;
   try {
@@ -195,8 +170,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model,
         max_tokens: 1200,
-        system: systemPrompt,
-        ...(isAdmin ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }] } : {}),
+        system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: [{ type: 'text', text: `Meal description:\n${description}` }] }],
       }),
     });
