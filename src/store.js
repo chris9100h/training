@@ -5550,7 +5550,7 @@ function minRestRatio(trainingDays) {
 // restRatio (optional): rest-day calories as a fraction of training-day
 // calories. Clamped into [minRestRatio(trainingDays), 1]; omitted means the
 // automatic split, so it keeps following the day count instead of freezing.
-function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg, restRatio }) {
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, proteinG, fatPerKg, fatG, restRatio }) {
   const w = Number(weightKg);
   const t = Number(tdee);
   if (!(w > 0) || !(t > 0)) return null;
@@ -5577,14 +5577,23 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
   const trainingCal = cycles ? Math.round((daily * 7) / (days + ratio * (7 - days))) : daily;
   const restCal = cycles ? Math.round(trainingCal * ratio) : daily;
 
-  const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
+  // proteinG/fatG (optional): a FIXED gram amount, same number every day
+  // regardless of bodyweight, for anyone whose protein/fat is a settled
+  // number they dial calories around via carbs alone rather than a ratio
+  // that quietly drifts with the scale. Takes priority over the per-kg
+  // inputs when given.
+  const protein = Number(proteinG) > 0
+    ? Math.round(Number(proteinG))
+    : Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
   // With the low-fat option, exactly what was asked for. Otherwise 25% of
   // calories, computed off the average day so the gram figure is the same on
   // both, and never under the floor: dropping fat that low to buy carbs is not
   // a trade to make on the user's behalf, only one they can make themselves.
-  const fat = Number(fatPerKg) > 0
-    ? Math.round(w * Number(fatPerKg))
-    : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
+  const fat = Number(fatG) > 0
+    ? Math.round(Number(fatG))
+    : Number(fatPerKg) > 0
+      ? Math.round(w * Number(fatPerKg))
+      : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
   const pf = protein * 4 + fat * 9;
   const carbsFor = (cal) => Math.max(0, Math.round((cal - pf) / 4));
 
@@ -5651,16 +5660,25 @@ function rebalanceMacros(current, key, value, opts = {}) {
   next[key] = Math.max(0, Number(value) || 0);
 
   const locked = new Set(Array.isArray(opts.locked) ? opts.locked : []);
-  const fatTarget = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
-    ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
-    : null;
+  // fatG/proteinG (fixed grams, see macroTargetsFromGoal) hold that macro the
+  // same way the per-kg fat figure already did: pinned to its target whenever
+  // some OTHER field is the one being edited, free to take a direct edit of
+  // its own field for that one keystroke same as before.
+  const fatTarget = Number(opts.fatG) > 0
+    ? Math.round(Number(opts.fatG))
+    : (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
+      ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
+      : null;
+  const proteinTarget = Number(opts.proteinG) > 0 ? Math.round(Number(opts.proteinG)) : null;
   const fatPinned = fatTarget != null && key !== 'fat' && !locked.has('fat');
+  const proteinPinned = proteinTarget != null && key !== 'protein' && !locked.has('protein');
   if (fatPinned) next.fat = fatTarget;
+  if (proteinPinned) next.protein = proteinTarget;
 
   const target = Number(opts.targetCalories);
   if (!(target > 0)) return out(next);
 
-  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned));
+  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned) && !(k === 'protein' && proteinPinned));
   if (!free.length) return out(next);
 
   const heldCal = KEYS.filter(k => !free.includes(k)).reduce((a, k) => a + next[k] * KCAL[k], 0);
