@@ -1080,6 +1080,25 @@ function mapEntryRows(entryRows) {
   }));
 }
 
+// Full training history for the "Export Training CSV" button (Settings →
+// Data): store.sessions is windowed to HISTORY_WINDOW_DAYS in memory (see
+// docs/internals.md), so entries/sets for anything older have to be fetched
+// fresh, same reasoning and same query shape as exportBackup uses for the
+// JSON backup.
+async function fetchFullTrainingHistory(store, userId) {
+  const { data, error } = await _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx');
+  if (error) throw error;
+  const bySession = {};
+  for (const e of (data || [])) {
+    if (!bySession[e.session_id]) bySession[e.session_id] = [];
+    bySession[e.session_id].push(e);
+  }
+  return store.sessions.map(s => ({
+    ...s,
+    entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
+  }));
+}
+
 // The Macros/Adherence/Targets Health cards merged into one composite
 // 'macroGroup' card; isCardVisible (screens-health.jsx, both the user's own
 // tab and the coach's read-only client view) only ever checks the array for
@@ -8349,7 +8368,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
+  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,

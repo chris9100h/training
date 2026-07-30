@@ -9,6 +9,14 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 // Short "time since" label for the admin sign-up feed.
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
+// Same noon-anchored day-shift screens-health.jsx's healthShiftISO uses (avoids
+// a DST-boundary date landing on the wrong day), kept local to this file since
+// it's the only date-range picker in Settings.
+function settingsShiftISO(base, days) {
+  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
+  return LB.fmtISO(d);
+}
+
 // Health-tab card visibility toggles: id must match screens-health.jsx's
 // DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
 const HEALTH_CARD_TOGGLES = [
@@ -714,6 +722,11 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
+  const [exportingCSV, setExportingCSV] = useStateSet(false);
+  const [csvSheet, setCsvSheet] = useStateSet(false);
+  const [csvRange, setCsvRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
+  const [csvFrom, setCsvFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
+  const [csvTo, setCsvTo] = useStateSet(() => LB.todayISO());
   // Weight axis only: 'mixed' is kg on the weight side, and the picker below
   // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
   // user with neither button selected and a bogus unit mismatch on import.
@@ -1305,6 +1318,73 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setBackupOk(false);
       await confirm(`Could not create the backup: ${err?.message || 'Unknown error'}. Nothing was downloaded, so do not restore over this data yet.`, { title: 'Backup failed', ok: 'OK' });
       return false;
+    }
+  };
+  // One row per session x exercise, sets as trailing columns ("100x10"),
+  // so a session with a different set count than the next just has a
+  // shorter row instead of forcing a fixed grid. Only completed, non-warmup,
+  // non-skipped sets count: a set the user never actually did has nothing
+  // meaningful to put in the cell.
+  const doExportTrainingCSV = async () => {
+    setExportingCSV(true);
+    try {
+      const today = LB.todayISO();
+      const from = csvRange === '7' ? settingsShiftISO(today, -6)
+        : csvRange === '30' ? settingsShiftISO(today, -29)
+        : csvRange === 'custom' ? csvFrom
+        : null; // 'all' -> no lower bound
+      const to = csvRange === 'custom' ? csvTo : today;
+
+      const allSessions = await LB.fetchFullTrainingHistory(store, userId);
+      const sessions = from ? allSessions.filter(s => (s.date || '') >= from && (s.date || '') <= to) : allSessions;
+      const esc = v => {
+        if (v == null || v === '') return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      // Purely data-driven off the set's own fields, not the exercise's
+      // log_mode: covers weight+reps, reps-only, checkbox and time-based
+      // exercises alike, and assisted/drop-set/myo-rep sets (kg can be
+      // negative, or already the top-set number of a technique chain) fall
+      // out of the same formula without special-casing each one.
+      const formatSet = (st) => {
+        if (st.timeSec != null) return `${st.timeSec}s`;
+        const reps = (st.repsL != null || st.repsR != null) ? `${st.repsL ?? '-'}/${st.repsR ?? '-'}` : (st.reps ?? '');
+        if (st.kg == null) return reps !== '' ? String(reps) : 'done';
+        return `${st.kg}x${reps}`;
+      };
+
+      const rows = [];
+      let maxSets = 0;
+      [...sessions]
+        .sort((a, b) => `${a.date || ''}${a.startedAt || ''}`.localeCompare(`${b.date || ''}${b.startedAt || ''}`))
+        .forEach(s => {
+          (s.entries || []).forEach(en => {
+            const cells = (en.sets || []).filter(st => st.done && !st.skipped && !st.warmup).map(formatSet);
+            if (!cells.length) return;
+            maxSets = Math.max(maxSets, cells.length);
+            rows.push([s.date || '', s.dayName || '', en.name || '', ...cells]);
+          });
+        });
+
+      if (!rows.length) {
+        await confirm('No completed training sets found in this range.', { title: 'Nothing to export', ok: 'OK' });
+        return;
+      }
+
+      const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
+      const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const suffix = csvRange === 'custom' ? `${csvFrom}-${csvTo}` : csvRange === 'all' ? 'all' : `${csvRange}d`;
+      const a = document.createElement('a'); a.href = url; a.download = `training-history-${suffix}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setCsvSheet(false);
+    } catch (err) {
+      await confirm(`Could not export training history: ${err?.message || 'Unknown error'}`, { title: 'Export failed', ok: 'OK' });
+    } finally {
+      setExportingCSV(false);
     }
   };
   const runImport = () => {
@@ -2682,7 +2762,64 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
             <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
+          <Btn kind="ghost" onClick={() => setCsvSheet(true)}>Export Training CSV</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Export Training CSV Sheet ══ */}
+      <SettingsSheet open={csvSheet} onClose={exportingCSV ? () => {} : () => setCsvSheet(false)} title="Export Training CSV">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>TIME RANGE</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: '7', label: '7 Days' },
+                { key: '30', label: '30 Days' },
+                { key: 'custom', label: 'Custom' },
+                { key: 'all', label: 'All Time' },
+              ].map(p => (
+                <button key={p.key} onClick={() => setCsvRange(p.key)} style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  background: csvRange === p.key ? 'var(--accent)' : UI.bgInset,
+                  color: csvRange === p.key ? 'var(--accent-ink)' : UI.inkSoft,
+                  textShadow: 'none',
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>{p.label}</button>
+              ))}
+            </div>
+            {csvRange === 'custom' && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
+                  <input type="date" value={csvFrom} max={csvTo}
+                    onChange={e => e.target.value && setCsvFrom(e.target.value)}
+                    style={{
+                      width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+                      colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+                      padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
+                    }} />
+                </div>
+                <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
+                  <input type="date" value={csvTo} min={csvFrom} max={LB.todayISO()}
+                    onChange={e => e.target.value && setCsvTo(e.target.value)}
+                    style={{
+                      width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+                      colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+                      padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
+                    }} />
+                </div>
+              </div>
+            )}
+          </div>
+          <Btn onClick={doExportTrainingCSV} disabled={exportingCSV} style={{ width: '100%' }}>
+            {exportingCSV ? 'Exporting…' : 'Export CSV'}
+          </Btn>
         </div>
       </SettingsSheet>
 
