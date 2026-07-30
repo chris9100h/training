@@ -1380,8 +1380,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (groupStart !== -1 && rows.length - 1 > groupStart) mergeSpans.push([groupStart, rows.length - 1]);
 
     const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
+    // Pad every row out to the full header width: XLSX/PDF both render one
+    // cell per column, and a row with fewer sets than the widest session
+    // would otherwise leave trailing cells missing entirely (not just empty)
+    // in both, which drops their border/gridline instead of just looking blank.
+    const paddedRows = rows.map(r => r.length < header.length ? [...r, ...Array(header.length - r.length).fill('')] : r);
     const suffix = exportRange === 'custom' ? `${exportFrom}-${exportTo}` : exportRange === 'all' ? 'all' : `${exportRange}d`;
-    return { header, rows, mergeSpans, suffix };
+    return { header, rows: paddedRows, mergeSpans, suffix };
   };
 
   const downloadBlob = (blob, filename) => {
@@ -1403,25 +1408,57 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `training-history-${suffix}.csv`);
   };
 
+  // ExcelJS, not SheetJS: SheetJS's free/community build parses cell styles
+  // but silently drops them on write (confirmed by inspecting the raw
+  // styles.xml it produces: no border/fill/alignment ever makes it in, even
+  // with cellStyles:true), so borders and vertical centering were simply not
+  // achievable with it. ExcelJS writes real styles in its open build.
   const exportTrainingXLSX = async ({ header, rows, mergeSpans, suffix }) => {
-    const XLSX = await window.__ensureXLSX();
-    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    // +1 on every row: sheet row 0 is the header, `rows` index 0 is sheet row 1.
-    ws['!merges'] = mergeSpans.flatMap(([s, e]) => [
-      { s: { r: s + 1, c: 0 }, e: { r: e + 1, c: 0 } },
-      { s: { r: s + 1, c: 1 }, e: { r: e + 1, c: 1 } },
-    ]);
-    ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 26 }, ...header.slice(3).map(() => ({ wch: 10 }))];
+    const ExcelJS = await window.__ensureXLSX();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Training');
+    ws.columns = [{ width: 12 }, { width: 10 }, { width: 26 }, ...header.slice(3).map(() => ({ width: 10 }))];
+
+    const thinGray = { style: 'thin', color: { argb: 'FF999999' } };
+    const border = { top: thinGray, bottom: thinGray, left: thinGray, right: thinGray };
+    const accentArgb = 'FF' + (getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961').replace('#', '').toUpperCase();
+
+    const headerRow = ws.addRow(header);
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: accentArgb } };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      cell.border = border;
+    });
+    // rows are already padded to header.length by buildTrainingExportRows,
+    // so a plain eachCell (no includeEmpty) already reaches every column:
+    // includeEmpty only walks a row's OWN cellCount, not the sheet's column
+    // count, so a genuinely short row would otherwise leave trailing cells
+    // (and their borders) missing entirely rather than just blank.
+    rows.forEach(r => {
+      const row = ws.addRow(r);
+      row.eachCell(cell => {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        cell.border = border;
+      });
+    });
+
+    // +2 on every row: ExcelJS is 1-indexed and row 1 is the header, so
+    // `rows` index 0 is sheet row 2.
+    mergeSpans.forEach(([s, e]) => {
+      ws.mergeCells(s + 2, 1, e + 2, 1);
+      ws.mergeCells(s + 2, 2, e + 2, 2);
+    });
+
     // Filter dropdowns on the header row, the closest thing to Ctrl+T this
-    // library's free tier can do: a real Excel Table (ListObject, what
-    // Ctrl+T actually creates) does not allow merged cells inside its range,
-    // and that would mean giving up the Date/Day session merges above, so
-    // this stays a plain range with autofilter rather than a Table.
-    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: header.length - 1 } }) };
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Training');
-    const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    downloadBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `training-history-${suffix}.xlsx`);
+    // still gets you: a real Excel Table (ListObject, what Ctrl+T actually
+    // creates) does not allow merged cells inside its range, and that would
+    // mean giving up the Date/Day session merges above, so this stays a
+    // plain styled range with autofilter rather than a Table.
+    ws.autoFilter = { from: 'A1', to: { row: 1 + rows.length, column: header.length } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `training-history-${suffix}.xlsx`);
   };
 
   const exportTrainingPDF = ({ header, rows, mergeSpans }) => {
