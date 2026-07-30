@@ -2535,9 +2535,32 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
         }}>{hasTargets ? 'EDIT' : 'SET'}</button>
       </div>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>{sourceLabel}</div>
-      {appliedDaysAgo != null && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
-          {appliedDaysAgo <= 0 ? 'Algorithm estimate applied today.' : appliedDaysAgo === 1 ? 'Algorithm estimate applied yesterday.' : `Algorithm estimate applied ${appliedDaysAgo} days ago.`}
+      {/* The actual numbers, not just the date: a "when" alone gives nothing
+          to weigh against what's active in the Targets card right below,
+          which is the direct comparison this exists for. Deliberately reads
+          from the lastAppliedTargets SNAPSHOT, not the live macroTargets, so
+          it keeps showing what the algorithm said even after a later
+          hand-edit or a coach taking over moves the active numbers away
+          from it. */}
+      {calc.lastAppliedTargets && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>
+            Last algorithm estimate{appliedDaysAgo != null ? (appliedDaysAgo <= 0 ? ', today' : appliedDaysAgo === 1 ? ', yesterday' : `, ${appliedDaysAgo}d ago`) : ''}
+          </div>
+          {['Training', 'Rest'].map(suffix => (
+            <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '2px 0' }}>
+              <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
+              <span className="num" style={{ fontSize: 13, color: UI.ink, fontWeight: 400 }}>
+                {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 8, color: UI.inkFaint, marginLeft: 1 }}>kcal</span>
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ display: 'flex', gap: 7 }}>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {calc.lastAppliedTargets[`protein${suffix}`]}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {calc.lastAppliedTargets[`carbs${suffix}`]}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {calc.lastAppliedTargets[`fat${suffix}`]}</span>
+              </span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -2682,7 +2705,11 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
         macroCalc: {
           ...s.settings.macroCalc,
           lastCheckinAt: LB.todayISO(),
-          ...(applyTargets && newTargets ? { lastAppliedAt: LB.todayISO() } : {}),
+          // A snapshot, not a pointer at macroTargets: the point is showing
+          // what the algorithm actually said next to whatever is active NOW,
+          // and macroTargets can drift away from this (a hand-edit, a coach
+          // taking over) without this record changing to match it.
+          ...(applyTargets && newTargets ? { lastAppliedAt: LB.todayISO(), lastAppliedTargets: newTargets } : {}),
         },
       },
     }));
