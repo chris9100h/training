@@ -87,7 +87,7 @@ Return exactly this JSON shape:
     { "name": string, "quantityG": number, "protein": number, "carbs": number, "fat": number, "fiber": number or null, "sugar": number or null, "satFat": number or null, "sodiumMg": number or null }
   ]
 }
-protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null for anything you genuinely cannot estimate, never invent a precise-looking number you don't believe. Never include a calories/kcal field, it is computed separately from the macros, not from you. If the description names no identifiable food or drink at all, return {"items": []}.`;
+protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null for anything you genuinely cannot estimate, never invent a precise-looking number you don't believe. Never include a calories/kcal field, it is computed separately from the macros, not from you. Never use an em dash in a name; use a comma or a period instead. If the description names no identifiable food or drink at all, return {"items": []}.`;
 
 // Pull the first balanced JSON object out of the model's text, tolerant of an
 // accidental ```json fence or a stray sentence around it. Same helper as
@@ -132,6 +132,16 @@ function errReason(raw: string): string {
     if (typeof m === 'string' && m.trim()) return m.trim().slice(0, 160);
   } catch (_) { /* not JSON */ }
   return raw.trim().slice(0, 160);
+}
+
+// Same backstop as ai-daily-summary/ai-checkin-opinion: CLAUDE.md's "no em
+// dashes" rule is enforced on committed source by tools/check-emdash.cjs,
+// which can't touch runtime LLM output, so a prompt instruction alone isn't
+// a guarantee, replace any that slip through. Matches by Unicode escape
+// (U+2014), not the literal character, so check-emdash.cjs's grep has
+// nothing to flag in this file.
+function stripEmDash(s: string): string {
+  return s.replace(/\u2014/g, ', ');
 }
 
 Deno.serve(async (req) => {
@@ -202,7 +212,7 @@ Deno.serve(async (req) => {
       const carbs = Math.max(0, num(it?.carbs) ?? 0);
       const fat = Math.max(0, num(it?.fat) ?? 0);
       return {
-        name,
+        name: stripEmDash(name),
         quantityG: Math.max(0, num(it?.quantityG) ?? 100),
         calories: caloriesFromMacros(protein, carbs, fat),
         protein, carbs, fat,

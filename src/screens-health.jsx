@@ -1347,7 +1347,9 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           ))}
         </div>
       }>
-        {go && (
+        {/* Food is an independently-toggleable tab now: this shortcut only
+            makes sense when there's actually a Food tab to land on. */}
+        {go && store.settings?.showFoodTab && (
           <button onClick={() => go({ name: 'food', date })} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '0 0 10px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
             Log food <i className="fa-solid fa-arrow-right" style={{ fontSize: 9 }} />
           </button>
@@ -3844,9 +3846,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
-    water: (
+    // Water is an independently-toggleable tab now: this card is just a
+    // shortcut into it, so treat a disabled tab the same as the
+    // no-data-yet cases below (glucose/bloodPressure/bodyTemp), null hides
+    // it via isCardVisible without needing a separate empty state.
+    water: store.settings?.showWaterTab ? (
       <WaterCard waterSeries={waterSeries} waterAvg={waterAvg} waterLogs={store.waterLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} onOpen={() => go({ name: 'water' })} compact />
-    ),
+    ) : null,
     cardio: (
       <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
         headline={cardioTotal ? cardioTotal : null} sub={cardioTotal ? 'min total' : null}>
@@ -3934,12 +3940,14 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
               <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '20px' }}>All Health cards are hidden.</div>
+              {/* Breadcrumb follows the current nested path: Health lives inside
+                  the Health & Nutrition hub now, one level deeper than before. */}
               <button onClick={() => go({ name: 'settings' })} style={{
                 background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
                 borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-              }}>Settings → Health → Cards</button>
+              }}>Settings → Health & Nutrition → Health → Cards</button>
             </div>
           ) : (
             // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);

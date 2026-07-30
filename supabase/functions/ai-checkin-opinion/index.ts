@@ -100,6 +100,11 @@ const CHECKIN_DEFAULT_SCHEMA_FALLBACK_NOTE = 'the app\'s default check-in form';
 // guess whether a rising or falling number is the good outcome.
 function resolveFieldLine(field: any, value: unknown): string | null {
   if (value == null || value === '') return null;
+  // Free text has no length bound anywhere upstream (a plain textarea in
+  // CheckInCard's form): cap it here before it reaches the prompt, same
+  // 2000-char cap used app-wide for free text (ai-daily-summary's note,
+  // parse-meal's description).
+  if (typeof value === 'string' && value.length > 2000) value = value.slice(0, 2000);
   if (field.type === 'choice' && Array.isArray(field.options)) {
     const opt = field.options.find((o: any) => String(o.value) === String(value));
     return `${field.label}: ${opt ? opt.label : value}`;
@@ -244,6 +249,34 @@ function stripEmDash(s: string): string {
   return s.replace(/\u2014/g, ', ');
 }
 
+// Best-effort rollback for a claim that didn't pan out (Anthropic failed, or
+// the content write after it failed): resets the gate back to NULL so the
+// user can simply retry, exactly as if this request had never claimed it.
+// Without this, a transient failure AFTER a successful claim would leave
+// ai_opinion_generated_at permanently set with no ai_opinion text ever
+// written, locking the user out of ever generating an opinion for that
+// check-in. Failure here is only logged, it must never change the error
+// already being returned to the caller for the real failure that triggered
+// it. Needs the service-role key, same as the claim and the final write: a
+// coach only has READ access to zane_checkins under checkins_coach_read.
+async function releaseClaim(base: string, serviceKey: string, checkinId: string): Promise<void> {
+  try {
+    const r = await fetch(`${base}/rest/v1/zane_checkins?id=eq.${encodeURIComponent(checkinId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${serviceKey}`,
+        'apikey': serviceKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({ ai_opinion_generated_at: null }),
+    });
+    if (!r.ok) console.error('[ai-checkin-opinion] claim release failed', r.status);
+  } catch (e) {
+    console.error('[ai-checkin-opinion] claim release error:', e);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -315,6 +348,50 @@ Deno.serve(async (req) => {
   if (!apiKey) return json({ error: 'AI opinions are not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
   const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
 
+  // Atomic claim, performed right before the (slow, paid) Anthropic call: the
+  // read above is only a fast-path check, two concurrent requests could both
+  // pass it before either writes, both then paying for a full Anthropic
+  // call. A conditional UPDATE, only when still NULL, closes that race: at
+  // most one concurrent caller can affect a row, the loser gets the same 409
+  // as the already-generated case above, without ever calling Anthropic.
+  // Needs the service-role key, same as the final write below: a coach only
+  // has READ access to zane_checkins under checkins_coach_read. Admin
+  // intentionally skips the claim entirely (and the rollback below): the
+  // gate doesn't apply to admin, same as the read's 409 bypass above.
+  if (!isAdmin) {
+    const claimedAt = new Date().toISOString();
+    let claimResp: Response;
+    try {
+      claimResp = await fetch(
+        `${base}/rest/v1/zane_checkins?id=eq.${encodeURIComponent(checkinId)}&ai_opinion_generated_at=is.null`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${serviceKey}`,
+            'apikey': serviceKey,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({ ai_opinion_generated_at: claimedAt }),
+        },
+      );
+    } catch (e) {
+      console.error('[ai-checkin-opinion] claim fetch error:', e);
+      return json({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
+    }
+    if (!claimResp.ok) {
+      console.error('[ai-checkin-opinion] claim error', claimResp.status, await claimResp.text().catch(() => ''));
+      return json({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
+    }
+    const claimedRows = await claimResp.json().catch(() => []);
+    if (!Array.isArray(claimedRows) || !claimedRows.length) {
+      // Someone else's request already flipped ai_opinion_generated_at
+      // between our read above and this UPDATE: same outcome as the
+      // already-generated case above.
+      return json({ error: 'Already generated for that check-in.' }, 409);
+    }
+  }
+
   let resp: Response;
   try {
     resp = await fetch(ANTHROPIC_URL, {
@@ -333,12 +410,14 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error('[ai-checkin-opinion] anthropic fetch error:', e);
+    if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
     return json({ error: 'Could not reach the opinion writer. Try again.' }, 502);
   }
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
     console.error('[ai-checkin-opinion] anthropic error', resp.status, detail);
+    if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
     return json({ error: `Opinion writer failed (${resp.status}). Try again.` }, 502);
   }
 
@@ -347,14 +426,20 @@ Deno.serve(async (req) => {
   const text = Array.isArray(content)
     ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
     : '';
-  if (!text.trim()) return json({ error: 'Got an empty response. Try again.' }, 422);
+  if (!text.trim()) {
+    if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
+    return json({ error: 'Got an empty response. Try again.' }, 422);
+  }
 
   const opinion = stripEmDash(text).trim();
   const generatedAt = new Date().toISOString();
 
   // The row is guaranteed to already exist (we just read it above), so this
   // is a plain UPDATE, not an upsert: no id to invent, unlike ai-daily-summary
-  // where the target zane_daily_logs row might not exist yet.
+  // where the target zane_daily_logs row might not exist yet. Also
+  // guaranteed to still be ours: the claim above already transitioned
+  // ai_opinion_generated_at away from NULL, so no is.null filter needed
+  // here, a concurrent caller would already have lost at the claim.
   try {
     const r = await fetch(`${base}/rest/v1/zane_checkins?id=eq.${encodeURIComponent(checkinId)}`, {
       method: 'PATCH',
@@ -369,10 +454,12 @@ Deno.serve(async (req) => {
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
       console.error('[ai-checkin-opinion] update error', r.status, detail);
+      if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
       return json({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
     }
   } catch (e) {
     console.error('[ai-checkin-opinion] update fetch error:', e);
+    if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
     return json({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
   }
 

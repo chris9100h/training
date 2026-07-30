@@ -135,8 +135,13 @@ function daysBetween(earlierISO: string, laterISO: string): number {
 // the prompt said not to do, capping the data itself is what actually holds.
 function buildTrainingLines(training: any[], dateISO: string): string[] {
   if (!Array.isArray(training) || !training.length) return [];
+  // Capped the same way foodItems/note further down are: any authenticated
+  // user can call this endpoint directly with an oversized body, bypassing
+  // the UI's naturally-bounded payload (a real day has 0-1 sessions, rarely
+  // 2), which would otherwise drive Anthropic cost/latency for free.
+  const capped = training.slice(0, 10);
   const lines: string[] = ['', 'Training logged YESTERDAY:'];
-  for (const s of training) {
+  for (const s of capped) {
     const label = s.dayName || 'Freestyle session';
     const bits = [`${s.doneSets ?? '?'} working sets`, `~${s.volumeKg ?? '?'}kg total volume`];
     if (s.durationMinutes != null) bits.push(`${s.durationMinutes} min`);
@@ -174,40 +179,63 @@ function fmtCardioEntry(c: Record<string, any>): string {
 
 function buildCardioLines(cardio: any[]): string[] {
   if (!Array.isArray(cardio) || !cardio.length) return [];
+  // Same reasoning as buildTrainingLines' cap above.
+  const capped = cardio.slice(0, 10);
   const lines: string[] = ['', 'Cardio logged YESTERDAY:'];
-  for (const c of cardio) lines.push(`- ${fmtCardioEntry(c)}`);
+  for (const c of capped) lines.push(`- ${fmtCardioEntry(c)}`);
   return lines;
+}
+
+// A client-supplied scalar must never reach the prompt as-is unless it's
+// actually the number it claims to be. Most of the fields below interpolate
+// directly into the prompt string with no Math.*() call to naturally bound
+// them first (unlike adherence's Math.round), so a smuggled oversized string
+// or object in a numeric field would otherwise land in the prompt unchanged,
+// the same size/cost risk the array caps above and below guard against.
+// Mirrors the existing typeof === 'string' checks on note/date.
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 function buildUserPrompt(p: Record<string, any>): string {
   const lines: string[] = [`One user's health-tracking data for YESTERDAY (${p.date}):`, ''];
-  if (p.weight != null) {
-    lines.push(`Weight: ${p.weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
+  const weight = num(p.weight);
+  if (weight != null) {
+    lines.push(`Weight: ${weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
   } else {
     lines.push('Weight: not logged that day.');
   }
   if (p.targets?.dayType) lines.push(`Day type: ${p.targets.dayType}`);
-  if (p.calories != null || p.protein != null || p.carbs != null || p.fat != null) {
-    lines.push(`Nutrition: ${p.calories ?? '?'} kcal, ${p.protein ?? '?'}g protein, ${p.carbs ?? '?'}g carbs, ${p.fat ?? '?'}g fat`);
+  const calories = num(p.calories);
+  const protein = num(p.protein);
+  const carbs = num(p.carbs);
+  const fat = num(p.fat);
+  if (calories != null || protein != null || carbs != null || fat != null) {
+    lines.push(`Nutrition: ${calories ?? '?'} kcal, ${protein ?? '?'}g protein, ${carbs ?? '?'}g carbs, ${fat ?? '?'}g fat`);
   }
   if (p.targets) {
-    lines.push(`Targets: ${p.targets.calories ?? '?'} kcal, ${p.targets.protein ?? '?'}g protein, ${p.targets.carbs ?? '?'}g carbs, ${p.targets.fat ?? '?'}g fat`);
+    lines.push(`Targets: ${num(p.targets.calories) ?? '?'} kcal, ${num(p.targets.protein) ?? '?'}g protein, ${num(p.targets.carbs) ?? '?'}g carbs, ${num(p.targets.fat) ?? '?'}g fat`);
   }
-  if (p.adherence != null) lines.push(`Macro adherence: ${Math.round(p.adherence)}%`);
-  if (p.steps != null) lines.push(`Steps: ${p.steps}`);
-  if (p.waterMl != null) lines.push(`Water: ${p.waterMl} ml`);
+  const adherence = num(p.adherence);
+  if (adherence != null) lines.push(`Macro adherence: ${Math.round(adherence)}%`);
+  const steps = num(p.steps);
+  if (steps != null) lines.push(`Steps: ${steps}`);
+  const waterMl = num(p.waterMl);
+  if (waterMl != null) lines.push(`Water: ${waterMl} ml`);
   if (Array.isArray(p.foodItems) && p.foodItems.length) {
     lines.push(`Logged: ${p.foodItems.slice(0, 12).map((f: any) => f.name).filter(Boolean).join(', ')}`);
   }
-  if (p.medsDue > 0) lines.push(`Medications: ${p.medsTaken} of ${p.medsDue} scheduled doses taken`);
+  const medsDue = num(p.medsDue);
+  const medsTaken = num(p.medsTaken);
+  if (medsDue != null && medsDue > 0) lines.push(`Medications: ${medsTaken ?? 0} of ${medsDue} scheduled doses taken`);
   if (Array.isArray(p.glucose) && p.glucose.length) {
-    lines.push(`Blood glucose readings: ${p.glucose.map((g: any) => `${g.valueMmol} mmol/L${g.context ? ` (${g.context})` : ''}`).join(', ')}`);
+    lines.push(`Blood glucose readings: ${p.glucose.slice(0, 30).map((g: any) => `${g.valueMmol} mmol/L${g.context ? ` (${g.context})` : ''}`).join(', ')}`);
   }
   if (Array.isArray(p.bloodPressure) && p.bloodPressure.length) {
-    lines.push(`Blood pressure: ${p.bloodPressure.map((b: any) => `${b.systolic}/${b.diastolic}`).join(', ')}`);
+    lines.push(`Blood pressure: ${p.bloodPressure.slice(0, 30).map((b: any) => `${b.systolic}/${b.diastolic}`).join(', ')}`);
   }
   if (Array.isArray(p.bodyTemp) && p.bodyTemp.length) {
-    lines.push(`Body temperature: ${p.bodyTemp.map((t: any) => `${t.valueC}°C`).join(', ')}`);
+    lines.push(`Body temperature: ${p.bodyTemp.slice(0, 30).map((t: any) => `${t.valueC}°C`).join(', ')}`);
   }
   if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
   lines.push(...buildTrainingLines(p.training, p.date));
@@ -243,6 +271,32 @@ function stripEmDash(s: string): string {
   return s.replace(/\u2014/g, ', ');
 }
 
+// Best-effort rollback for a claim that didn't pan out (Anthropic failed, or
+// the content write after it failed): resets the gate back to NULL so the
+// user can simply retry, exactly as if this request had never claimed it.
+// Without this, a transient failure AFTER a successful claim would leave
+// ai_summary_generated_at permanently set with no ai_summary text ever
+// written, locking the user out of ever generating a summary for that day.
+// Failure here is only logged, it must never change the error already being
+// returned to the caller for the real failure that triggered it.
+async function releaseClaim(base: string, serviceKey: string, rowId: string): Promise<void> {
+  try {
+    const r = await fetch(`${base}/rest/v1/zane_daily_logs?id=eq.${rowId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${serviceKey}`,
+        'apikey': serviceKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({ ai_summary_generated_at: null }),
+    });
+    if (!r.ok) console.error('[ai-daily-summary] claim release failed', r.status);
+  } catch (e) {
+    console.error('[ai-daily-summary] claim release error:', e);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -257,18 +311,29 @@ Deno.serve(async (req) => {
   const payload = await req.json().catch(() => ({}));
   const date = typeof payload?.date === 'string' ? payload.date : '';
   if (!date) return json({ error: 'missing date' }, 400);
+  // Loose sanity bound, not a strict "must be exactly yesterday" check: exact
+  // "yesterday" is inherently client-timezone-dependent, the server can't
+  // know the user's local timezone precisely. This is only a backstop
+  // against a badly wrong client clock or a future client regression, since
+  // the prompt below unconditionally tells the model to treat this date as
+  // yesterday (see SYSTEM_PROMPT and buildUserPrompt). An unparseable date
+  // makes daysBetween return NaN, which isNaN() below also rejects.
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const dayDiff = daysBetween(date, todayUTC);
+  if (isNaN(dayDiff) || Math.abs(dayDiff) > 3) return json({ error: 'invalid date' }, 400);
   if (payloadIsEmpty(payload)) return json({ error: 'Nothing logged that day, nothing to summarize.' }, 400);
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   if (!base || !serviceKey) return json({ error: 'Not set up yet (missing SUPABASE_SERVICE_ROLE_KEY).' }, 503);
 
-  // Pre-read: (a) the authoritative once-a-day gate has to live server-side,
-  // a client-only check is trivially bypassed by calling this endpoint
-  // directly, (b) hands back the row's existing id so the write below
-  // doesn't invent a fresh one for a row that already exists, which would
-  // otherwise risk losing a concurrent unsynced edit to some OTHER field on
-  // the same day the next time the client's cache-first merge runs.
+  // Pre-read: (a) a fast-path reject for the obvious already-generated case,
+  // (b) hands back the row's existing id, if any, so the atomic claim below
+  // knows whether to UPDATE an existing row or INSERT a fresh one. This is
+  // NOT the authoritative gate by itself: two concurrent requests can both
+  // pass it before either claims, see the atomic claim further down for the
+  // part that actually has to live server-side and can't be bypassed by
+  // calling this endpoint directly.
   let existingId: string | null = null;
   try {
     const r = await fetch(
@@ -297,6 +362,85 @@ Deno.serve(async (req) => {
   if (!apiKey) return json({ error: 'AI summaries are not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
   const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
 
+  // Atomic claim, performed right before the (slow, paid) Anthropic call:
+  // the pre-read above only rejects the OBVIOUS already-done case, two
+  // concurrent requests can both sail through it before either writes, both
+  // then paying for a full Anthropic call. This is the real gate. A
+  // conditional UPDATE (only when still NULL) if a row already exists,
+  // otherwise a plain INSERT that leans on the user_id+date UNIQUE
+  // constraint (see the on_conflict=user_id,date upsert further down) to
+  // reject a concurrent duplicate. Either way exactly one concurrent caller
+  // can win; the loser gets the same 409 as the already-generated case
+  // above, without ever calling Anthropic. Admin intentionally skips the
+  // claim entirely (and the rollback below): the gate doesn't apply to
+  // admin, same as the pre-read's 409 bypass above.
+  const claimedAt = new Date().toISOString();
+  let rowId: string;
+  let claimed = false;
+  if (isAdmin) {
+    rowId = existingId ?? crypto.randomUUID();
+  } else if (existingId) {
+    let claimResp: Response;
+    try {
+      claimResp = await fetch(
+        `${base}/rest/v1/zane_daily_logs?id=eq.${existingId}&ai_summary_generated_at=is.null`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${serviceKey}`,
+            'apikey': serviceKey,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({ ai_summary_generated_at: claimedAt }),
+        },
+      );
+    } catch (e) {
+      console.error('[ai-daily-summary] claim fetch error:', e);
+      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+    }
+    if (!claimResp.ok) {
+      console.error('[ai-daily-summary] claim error', claimResp.status, await claimResp.text().catch(() => ''));
+      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+    }
+    const claimedRows = await claimResp.json().catch(() => []);
+    if (!Array.isArray(claimedRows) || !claimedRows.length) {
+      // Someone else's request already flipped ai_summary_generated_at
+      // between our pre-read and this UPDATE: same outcome as the
+      // already-generated case above.
+      return json({ error: 'Already generated for that day.' }, 409);
+    }
+    rowId = existingId;
+    claimed = true;
+  } else {
+    rowId = crypto.randomUUID();
+    let insertResp: Response;
+    try {
+      insertResp = await fetch(`${base}/rest/v1/zane_daily_logs`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${serviceKey}`,
+          'apikey': serviceKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({ id: rowId, user_id: userId, date, ai_summary_generated_at: claimedAt }),
+      });
+    } catch (e) {
+      console.error('[ai-daily-summary] claim insert error:', e);
+      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+    }
+    if (!insertResp.ok) {
+      // A concurrent request won the race and inserted this user_id+date row
+      // first (the UNIQUE constraint rejects our duplicate insert): same
+      // outcome as the already-generated case above.
+      if (insertResp.status === 409) return json({ error: 'Already generated for that day.' }, 409);
+      console.error('[ai-daily-summary] claim insert error', insertResp.status, await insertResp.text().catch(() => ''));
+      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+    }
+    claimed = true;
+  }
+
   let resp: Response;
   try {
     resp = await fetch(ANTHROPIC_URL, {
@@ -315,12 +459,14 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error('[ai-daily-summary] anthropic fetch error:', e);
+    if (claimed) await releaseClaim(base, serviceKey, rowId);
     return json({ error: 'Could not reach the summary writer. Try again.' }, 502);
   }
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
     console.error('[ai-daily-summary] anthropic error', resp.status, detail);
+    if (claimed) await releaseClaim(base, serviceKey, rowId);
     return json({ error: `Summary writer failed (${resp.status}). Try again.` }, 502);
   }
 
@@ -329,7 +475,10 @@ Deno.serve(async (req) => {
   const text = Array.isArray(content)
     ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
     : '';
-  if (!text.trim()) return json({ error: 'Got an empty response. Try again.' }, 422);
+  if (!text.trim()) {
+    if (claimed) await releaseClaim(base, serviceKey, rowId);
+    return json({ error: 'Got an empty response. Try again.' }, 422);
+  }
 
   // Store the full text as-is (headline + blank line + body): the client
   // re-splits it the same way (LB.splitHeadlineBody) whether it's this fresh
@@ -338,8 +487,12 @@ Deno.serve(async (req) => {
   const summary = stripEmDash(text).trim();
   const generatedAt = new Date().toISOString();
 
+  // The row is now guaranteed to already exist, either it already did
+  // (existingId) or the claim above just inserted it (rowId): still an
+  // upsert (not a plain PATCH) so a first-ever ADMIN regenerate on a
+  // still-rowless day also works, since admin's rowId can be a fresh uuid
+  // that was never actually inserted anywhere by the claim step it skipped.
   try {
-    const id = existingId ?? crypto.randomUUID();
     const r = await fetch(`${base}/rest/v1/zane_daily_logs?on_conflict=user_id,date`, {
       method: 'POST',
       headers: {
@@ -349,17 +502,19 @@ Deno.serve(async (req) => {
         'Prefer': 'resolution=merge-duplicates,return=minimal',
       },
       body: JSON.stringify({
-        id, user_id: userId, date,
+        id: rowId, user_id: userId, date,
         ai_summary: summary, ai_summary_generated_at: generatedAt,
       }),
     });
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
       console.error('[ai-daily-summary] upsert error', r.status, detail);
+      if (claimed) await releaseClaim(base, serviceKey, rowId);
       return json({ error: 'Generated the summary but could not save it. Try again.' }, 502);
     }
   } catch (e) {
     console.error('[ai-daily-summary] upsert fetch error:', e);
+    if (claimed) await releaseClaim(base, serviceKey, rowId);
     return json({ error: 'Generated the summary but could not save it. Try again.' }, 502);
   }
 

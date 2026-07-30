@@ -471,10 +471,19 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // and materialize it right back, so a delete could never stick while its
   // slot is still due today. Same exclusion the Food Tracker's own
   // template-day effect makes for store.foodLogs, for the same reason.
+  // store.medicationPlans IS a dependency though: mdAutoFillToday reads it
+  // to build activePlanIds and gate every slot on its plan's active flag.
+  // Without it, togglePlanActive reactivating a paused plan would update the
+  // Timeline's own live preview (byHour already depends on medicationPlans
+  // separately) but never re-run this effect, so the real log row never
+  // materializes. If the user logs that dose by hand in the meantime,
+  // saveLogDraft finds no materialized row to merge into and inserts an
+  // ad-hoc one instead, and the next time this effect does run it still
+  // sees the slot as unrepresented and materializes a genuine duplicate.
   useEffectMd(() => {
     mdAutoFillToday(store, setStore, today);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.medicationScheduleSlots, store.medications, today]);
+  }, [store.medicationScheduleSlots, store.medications, store.medicationPlans, today]);
 
   // ─────────────────────────── Timeline tab ───────────────────────────
   // Same structure as the Food Tracker's own Log tab (screens-food.jsx): a
@@ -970,6 +979,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft || !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
+    // A reversed range (From after To) would otherwise save silently and
+    // just never fire: mdSlotAppliesOn rejects every date once startDate is
+    // after endDate, so the slot would sit there looking scheduled but dead.
+    // Only meaningful once both ends are actually set, an open-ended range
+    // (only one of the two) is fine as-is.
+    if (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate) return;
     const nowISO = new Date().toISOString();
     // Gated on the fields' own values, NOT on phaseOpen: phaseOpen only
     // controls whether the date-range section is visually expanded.
@@ -995,7 +1010,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     }
     setSlotDraft(null);
   }
-  function deleteSlot(slot) {
+  // Same confirm guard as deletePlan/deleteMedication/deleteLogEntry above:
+  // this was the one destructive action in the file with no confirmation at
+  // all, so a stray tap on the row's small "x" button could wipe a dosing
+  // time with no way back.
+  async function deleteSlot(slot) {
+    if (!await confirm('Delete this dosing time?', { title: 'Delete time', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.id !== slot.id) }));
   }
   function toggleWeekday(wd) {
@@ -1056,14 +1076,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // then pay for on every load. Reset to null on leaving the tab so the next
   // visit always refetches current data, not a stale snapshot.
   const [stockBackfill, setStockBackfill] = useStateMd(null);
+  // Surfaced below near renderMedRow's own stock numbers: a silent,
+  // console-only failure here left stockBackfill null forever with no
+  // visible sign the numbers on screen are the understated boot-windowed
+  // ones, not the real backfilled totals. Reset at the top of every run, not
+  // just on the failure path, so a fresh attempt (e.g. reopening this tab)
+  // always clears a stale warning from an earlier try.
+  const [stockBackfillError, setStockBackfillError] = useStateMd(false);
   useEffectMd(() => {
+    setStockBackfillError(false);
     if (screenTab !== 'inventory') { setStockBackfill(null); return; }
     const oldestBaseline = activeMedications.reduce((min, m) => (m.stockSetAt && (!min || m.stockSetAt < min)) ? m.stockSetAt : min, null);
     if (!oldestBaseline) return;
     let cancelled = false;
     LB.fetchMedicationLogsSince(userId, oldestBaseline.slice(0, 10))
       .then(rows => { if (!cancelled) setStockBackfill(rows); })
-      .catch(err => console.error('medication stock backfill fetch failed:', err));
+      .catch(err => {
+        console.error('medication stock backfill fetch failed:', err);
+        if (!cancelled) setStockBackfillError(true);
+      });
     return () => { cancelled = true; };
   }, [screenTab, activeMedications, userId]);
   const logsForStock = stockBackfill || medicationLogs;
@@ -1491,6 +1522,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <SubTabBar tabs={[{ id: 'medications', label: 'Medications' }, { id: 'inventory', label: 'Stock' }]} active={invSubTab} onChange={setInvSubTab} style={{ padding: 0, marginBottom: 4 }} />
             {invSubTab === 'inventory' ? (
               <>
+                {stockBackfillError && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <i className="fa-solid fa-triangle-exclamation" title="Stock estimate may be outdated. Retry by reopening this tab." style={{ fontSize: 10, color: UI.inkFaint }} />
+                    <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Stock estimate may be outdated</span>
+                  </div>
+                )}
                 {freshLowStock.length > 0 && (
                   <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
@@ -1876,16 +1913,26 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               Limit to a date range (for a staged cycle)
             </button>
             {slotDraft.phaseOpen && (
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
-                  <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
-                </Field>
-                <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
-                  <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
-                </Field>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
+                    <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
+                  </Field>
+                  <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
+                    <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
+                  </Field>
+                </div>
+                {/* Same reversed-range check as saveSlotDraft's own guard,
+                    surfaced here so the user sees why Save is stuck instead
+                    of just finding out the button won't respond. */}
+                {slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate && (
+                  <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                    "To" must be on or after "From".
+                  </div>
+                )}
               </div>
             )}
-            <Btn onClick={saveSlotDraft} disabled={!slotDraft.weekdays.length || !mdNum(slotDraft.doseQtyStr)} style={{ width: '100%' }}>Save</Btn>
+            <Btn onClick={saveSlotDraft} disabled={!slotDraft.weekdays.length || !mdNum(slotDraft.doseQtyStr) || (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate)} style={{ width: '100%' }}>Save</Btn>
           </>
         )}
       </Sheet>

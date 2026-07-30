@@ -269,7 +269,7 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Enable the Health tab',
-    body: 'The Health tab is hidden by default. Go to Settings → Health and turn on the "Health tab" toggle to pin it to the bottom navigation.',
+    body: 'The Health tab is hidden by default. Go to Settings → Health & Nutrition → Health and turn on the "Show tab" toggle to pin it to the bottom navigation.',
     visual: 'healthEnable',
   },
   {
@@ -386,7 +386,7 @@ window.TOURS.statusModes = [
   {
     target: null,
     title: 'Sick & Vacation',
-    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights, they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
+    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights, they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health & Nutrition → Sick & Vacation periods.",
     visual: 'statusSickVacation',
   },
   {

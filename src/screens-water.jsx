@@ -450,11 +450,13 @@ function WaterScreen({ store, setStore, go, userId }) {
         {capturing && window.__gridEnabled && <SvgGrid style={{ zIndex: -1 }} />}
         {/* Hero. Ring first (left), stats second (right): matches the Food
             Log's own hero (FdHeroContent, screens-food.jsx), which this one
-            had drifted from by putting the ring on the right instead. */}
+            had drifted from by putting the ring on the right instead. No
+            justifyContent and flex:1 on the stats block, same as Food's hero,
+            so the two stay grouped instead of spreading apart on wide screens. */}
         <BracketFrame gold style={{ padding: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             <WaterRing percent={percent} />
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>Today</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
                 <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{wtAmt(total)}</span>
@@ -706,24 +708,10 @@ function WaterBreakdownRow({ icon, name, value, color }) {
 }
 
 // Settings body: goal, window, bottle tracker, reminders, custom drinks, coffee sizes.
-// Own copy of Settings' NavRow (screens-settings.jsx): same flat, divided
-// list (a .knurl hairline between rows, no box around each one) as every
-// other Settings sub-sheet (Health, Food), so this hub reads as the app's
-// one standard sub-category list instead of a visually distinct style.
-function WaterNavRow({ label, hint, onTap, first = false }) {
-  return (
-    <>
-      {!first && <div className="knurl" />}
-      <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
-        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {hint != null && <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
-          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
-        </div>
-      </button>
-    </>
-  );
-}
+// Rows below use the shared NavRow (screens-settings.jsx loads earlier in
+// index.html's SOURCES, so it's already a plain callable global here) instead
+// of a local copy, same flat divided-list look as every other Settings
+// sub-sheet (Health, Food).
 // Settings top-level hub: drills into Goal, Bottle Tracker, Reminders and
 // Drinks instead of one long scroll through all four at once. Shared by the
 // Water tracker's own settings sheet and Settings > Health & Nutrition >
@@ -736,10 +724,10 @@ function WaterSettingsHubBody({ settings, onOpenGoal, onOpenBottle, onOpenRemind
     + ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes.length : 0);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <WaterNavRow label="Daily Goal" first hint={`${UI.waterToEntry(settings.waterGoalMl || 2000)} ${UI.waterEntryUnit()}`} onTap={onOpenGoal} />
-      <WaterNavRow label="Bottle Tracker" hint={bottleEnabled ? 'On' : 'Off'} onTap={onOpenBottle} />
-      <WaterNavRow label="Reminders" hint={reminderOn ? 'On' : 'Off'} onTap={onOpenReminders} />
-      <WaterNavRow label="Drinks & Coffee" hint={drinkCount > 0 ? `${drinkCount} set` : null} onTap={onOpenDrinks} />
+      <NavRow label="Daily Goal" first hint={`${UI.waterToEntry(settings.waterGoalMl || 2000)} ${UI.waterEntryUnit()}`} onTap={onOpenGoal} />
+      <NavRow label="Bottle Tracker" hint={bottleEnabled ? 'On' : 'Off'} onTap={onOpenBottle} />
+      <NavRow label="Reminders" hint={reminderOn ? 'On' : 'Off'} onTap={onOpenReminders} />
+      <NavRow label="Drinks & Coffee" hint={drinkCount > 0 ? `${drinkCount} set` : null} onTap={onOpenDrinks} />
     </div>
   );
 }

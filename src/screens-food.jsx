@@ -277,6 +277,16 @@ const FD_SHOPPING_DAYS_DEFAULT = 7;
 // using the raw day-span) keeps a single very-recent occurrence from being
 // read as "needed every single day".
 const FD_SHOPPING_RATE_FLOOR_DAYS = 7;
+// Upper bound for the package-size/stock-baseline draft fields in the
+// Shopping List edit sheet (saveEdit, below): fdDecimalFilter only strips
+// non-numeric characters, it never caps magnitude, so a stray extra digit or
+// a pasted barcode-length number would otherwise sail straight into the DB.
+// 100kg is far past any real package or stash a user would actually track,
+// so this only ever catches garbage input, never a genuine bulk-buyer.
+const FD_SHOPPING_QTY_MAX_G = 100000;
+function fdClampQtyG(n) {
+  return n == null ? null : Math.min(FD_SHOPPING_QTY_MAX_G, n);
+}
 
 function fdNormFoodName(name) {
   return (name || '').trim().toLowerCase();
@@ -426,11 +436,17 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   const out = [];
   keys.forEach(key => {
     const p = proj.get(key);
-    if (p) {
-      if (p.totalGrams > 0) out.push({ key, foodId: p.foodId || null, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
+    // Only a projection that actually produced a positive quantity skips the
+    // history fallback below: a recipe-scaled occurrence that rounds to 0g
+    // is not a real future need, but it's also not a reason to suppress a
+    // food that's genuinely a historical staple, same as if there had been
+    // no projection entry for this key at all.
+    if (p && p.totalGrams > 0) {
+      out.push({ key, foodId: p.foodId || null, foodName: p.foodName, brand: p.brand || null, grams: p.totalGrams, fromProjection: true });
       return;
     }
     const h = hist.get(key);
+    if (!h) return; // projection-only key (rounded to 0g) with no history to fall back to
     if (h.count < FD_SHOPPING_STAPLE_MIN && !favKeys.has(key)) return;
     const daysSpan = Math.max(FD_SHOPPING_RATE_FLOOR_DAYS, fdDaysBetween(h.firstDate, todayISO) + 1);
     const grams = (h.totalGrams / daysSpan) * shoppingDays;
@@ -455,14 +471,26 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
 // timezone designator parses as local too, so this compares correctly
 // against sinceISO (a real UTC instant) without needing the browser's own
 // UTC offset at all.
-function fdConsumedSince(foodLogs, foodId, sinceISO, todayISO) {
+// Matches a leaf the same way fdReconcileShoppingTally folds the demand
+// tally above: a leaf carrying its own foodId only ever counts against that
+// exact id, a foodId-less leaf (a Custom Item, or a recipe-exploded
+// ingredient predating the recipeItems snapshot) falls back to a
+// normalized-name match instead. Without this fallback, logging the same
+// product as a Custom Item silently never counted against its tracked
+// stock, understating consumption the same way the demand tally did before
+// that reconcile step existed.
+function fdLeafMatchesFood(leaf, foodId, foodName) {
+  if (leaf.foodId) return leaf.foodId === foodId;
+  return fdNormFoodName(leaf.foodName) === fdNormFoodName(foodName);
+}
+function fdConsumedSince(foodLogs, foodId, foodName, sinceISO, todayISO) {
   const sinceMoment = new Date(sinceISO);
   let total = 0;
   (foodLogs || []).forEach(entry => {
     if (entry.planned || entry.date > todayISO) return;
     if (new Date(`${entry.date}T${entry.time || '00:00'}:00`) < sinceMoment) return;
     fdExplodeForShopping(entry).forEach(leaf => {
-      if (leaf.foodId === foodId) total += leaf.quantityG || 0;
+      if (fdLeafMatchesFood(leaf, foodId, foodName)) total += leaf.quantityG || 0;
     });
   });
   return total;
@@ -476,7 +504,7 @@ function fdConsumedSince(foodLogs, foodId, sinceISO, todayISO) {
 // this takes the pref row itself rather than an already-merged item.
 function fdEffectiveStockG(pref, foodLogs, todayISO) {
   if (pref?.stockBaselineG == null || !pref.stockSetAt) return null;
-  return Math.max(0, pref.stockBaselineG - fdConsumedSince(foodLogs, pref.foodId, pref.stockSetAt, todayISO));
+  return Math.max(0, pref.stockBaselineG - fdConsumedSince(foodLogs, pref.foodId, pref.foodName, pref.stockSetAt, todayISO));
 }
 // Applies every stored per-food Shopping List preference
 // (zane_food_shopping_prefs, synced cross-device via store.foodShoppingPrefs,
@@ -564,20 +592,31 @@ function fdWriteLowStockAcks(v) {
 // down to a misleading 0.
 function fdRoundShoppingQty(grams) {
   if (!(grams > 0)) return '0g';
-  if (grams >= 1000) return `${fdRound1(grams / 1000)}kg`;
+  // Rounds to the nearest 5/25 FIRST, then checks the rounded value against
+  // the 1000g cutoff, not the raw one: deciding off the raw value let
+  // something like 990g round up to 1000g but still print as "1000g"
+  // instead of switching to "1kg".
   const unit = grams < 50 ? 5 : 25;
-  return `${Math.round(grams / unit) * unit || unit}g`;
+  const rounded = Math.round(grams / unit) * unit || unit;
+  if (rounded >= 1000) return `${fdRound1(rounded / 1000)}kg`;
+  return `${rounded}g`;
 }
 // A package size is a fact printed on the product, not an estimate: unlike
-// fdRoundShoppingQty above, this never rounds the number itself, only picks
-// g vs kg and how many decimals to show (found via a real 372g wrap pack
-// that fdRoundShoppingQty's nearest-25 rule was silently showing as 375g).
-// 3 decimals in kg is always exact for a whole-gram input (1g = 0.001kg),
-// parseFloat drops any trailing zeros so a round kg value still reads "1kg".
+// fdRoundShoppingQty above, this never rounds to a coarser display grid, only
+// picks g vs kg and how many decimals to show (found via a real 372g wrap
+// pack that fdRoundShoppingQty's nearest-25 rule was silently showing as
+// 375g). Rounded to 1 decimal first (matching fdDecimalFilter's own
+// input-side cap) purely to clean up float noise from summing many logged
+// quantities, e.g. "741.23000000000001g" reading as "741.2g": that's noise
+// cleanup, not the estimate-rounding fdRoundShoppingQty does, a whole-gram
+// package fact like 372 passes through unchanged either way. parseFloat
+// drops any trailing zeros in the kg branch so a round kg value still reads
+// "1kg".
 function fdExactShoppingQty(grams) {
   if (!(grams > 0)) return '0g';
-  if (grams < 1000) return `${grams}g`;
-  return `${parseFloat((grams / 1000).toFixed(3))}kg`;
+  const g = Math.round(grams * 10) / 10;
+  if (g < 1000) return `${g}g`;
+  return `${parseFloat((g / 1000).toFixed(3))}kg`;
 }
 // Package-aware buy quantity. With no package size set, the plain rounded
 // estimate above, unchanged, as `headline` with no `sub`. With one, the whole
@@ -1773,7 +1812,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // uses, so an accidental tap here doesn't silently drop everything picked.
   async function requestLeaveFood() {
     if (staged.length && !await confirm(`${staged.length} picked item${staged.length === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
-    go({ name: 'health' });
+    // Health is an independently-toggleable tab now, not guaranteed on: fall
+    // back to Home instead of navigating into a hidden tab.
+    go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' });
   }
 
   // Time stamped on a newly logged entry: the timeline hour the user tapped
@@ -3353,7 +3394,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
                 projectedAdherence={projectedAdherence}
                 unscored={isMealOfChoice ? 'Meal of choice' : null}
-                onSetTargets={() => go({ name: 'health', openMacroTargets: true })} />
+                // Health is an independently-toggleable tab now: only route into
+                // it if it's actually enabled, else Home is the safe fallback.
+                onSetTargets={() => go(store.settings?.showHealthTab ? { name: 'health', openMacroTargets: true } : { name: 'home' })} />
             </BracketFrame>
 
 
@@ -5629,21 +5672,29 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // store.foodLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
   // understates consumption, and so overstates stock, for a baseline set
   // further back than that (a bulk item bought a few times a year). Lazily
-  // fetched in full from the DB whenever the Inventory tab is actually open,
-  // rather than widening the boot window itself, which every screen would
-  // then pay for on every load. Reset to null on leaving the tab so the next
-  // visit always refetches current data, not a stale snapshot.
+  // fetched in full from the DB whenever the Shopping List screen is open at
+  // all, not gated to the Inventory tab: the Running Low section/banner
+  // render on the default 'list' tab too (see screenTab's own comment
+  // above), so gating this fetch on 'inventory' left it reading stale,
+  // boot-windowed stock on the very tab most people actually see it on.
+  // Reset to null on closing the screen so the next open always refetches
+  // current data, not a stale snapshot.
   const [stockBackfill, setStockBackfill] = useStateFd(null);
+  // Surfaces a failed fetch (network hiccup, etc.) instead of silently
+  // falling back to logsForStock's boot-windowed data with no visible sign
+  // the stock numbers on screen might be understating consumption.
+  const [stockBackfillError, setStockBackfillError] = useStateFd(false);
   useEffectFd(() => {
-    if (!open || screenTab !== 'inventory') { setStockBackfill(null); return; }
+    if (!open) { setStockBackfill(null); setStockBackfillError(false); return; }
     const oldestBaseline = (store.foodShoppingPrefs || []).reduce((min, p) => (p.stockSetAt && (!min || p.stockSetAt < min)) ? p.stockSetAt : min, null);
     if (!oldestBaseline) return;
     let cancelled = false;
+    setStockBackfillError(false);
     LB.fetchFoodLogsSince(userId, oldestBaseline.slice(0, 10))
       .then(rows => { if (!cancelled) setStockBackfill(rows); })
-      .catch(err => console.error('food stock backfill fetch failed:', err));
+      .catch(err => { console.error('food stock backfill fetch failed:', err); if (!cancelled) setStockBackfillError(true); });
     return () => { cancelled = true; };
-  }, [open, screenTab, store.foodShoppingPrefs, userId]);
+  }, [open, store.foodShoppingPrefs, userId]);
   const logsForStock = stockBackfill || store.foodLogs;
   const [shoppingDays, setShoppingDays] = useStateFd(fdReadShoppingDays);
   function changeShoppingDays(v) {
@@ -5777,7 +5828,11 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // Blank, or typed back to exactly the original: same as no override, no
     // point leaving a no-op override sitting in the DB forever.
     const nameOverride = (!trimmed || trimmed === editItem.foodName) ? null : trimmed;
-    const packageSizeG = fdNum(pkgDraft);
+    // fdClampQtyG upper-bounds both gram fields: fdDecimalFilter only strips
+    // non-numeric characters, it never caps magnitude, so an accidental
+    // extra digit or a pasted barcode-length number would otherwise sail
+    // straight into the DB as-is.
+    const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
     const patch = { nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
@@ -5795,7 +5850,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     } else if (stockDraft.trim()) {
       stockTyped = fdNum(stockDraft);
     }
-    if (stockTyped != null) { patch.stockBaselineG = stockTyped; patch.stockSetAt = new Date().toISOString(); }
+    if (stockTyped != null) { patch.stockBaselineG = fdClampQtyG(stockTyped); patch.stockSetAt = new Date().toISOString(); }
     fdSetShoppingPref(setStore, editItem.foodId, patch);
     closeEdit();
   }
@@ -6057,6 +6112,18 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         </div>
       </div>
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {stockBackfillError && inventoryList.length > 0 && (
+          // Companion to the backfill fetch's catch above: a failed fetch
+          // leaves logsForStock on the boot-windowed fallback, so the stock
+          // numbers below (in either tab) could be silently understating
+          // consumption. Only shown when there's actually tracked stock to
+          // doubt (inventoryList requires a baseline set), not on every
+          // fetch failure regardless of relevance.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 10px' }} title="Stock estimate may be outdated">
+            <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '14px' }}>Stock estimate may be outdated</span>
+          </div>
+        )}
         {screenTab === 'list' ? (
           <>
             {freshLowStock.length > 0 && (

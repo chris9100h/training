@@ -2091,13 +2091,18 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodShoppingPrefs !== next.foodShoppingPrefs) {
     const { upsert, removed } = diffCollectionById(prev.foodShoppingPrefs, next.foodShoppingPrefs);
+    // onConflict on the real natural key (migration 0215's UNIQUE(user_id,
+    // food_id)), not the default primary-key id: each device mints its own
+    // local id (LB.uid()) for what can be the same logical row, so an
+    // id-conflict upsert 23505s on a second device's first write and
+    // flushSync retries it forever (same pattern as zane_checkins below).
     if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
       id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
       excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
       stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
       food_name: p.foodName, brand: p.brand ?? null,
       updated_at: p.updatedAt ?? new Date().toISOString(),
-    }))));
+    })), { onConflict: 'user_id,food_id' }));
     if (removed.length) ops.push(_supabase.from('zane_food_shopping_prefs').delete().in('id', removed.map(p => p.id)));
   }
 
@@ -4975,6 +4980,19 @@ function checkinWeekStart() {
 // responses = plain object with snake_case keys matching the form schema fields.
 // Writes both the responses jsonb column and backward-compat fixed columns.
 async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false, schema = null) {
+  // Free-text fields have no length bound in the UI (a plain textarea) or
+  // guaranteed anywhere upstream: cap them here too, as defense in depth
+  // independent of the edge function's own cap (ai-checkin-opinion's
+  // resolveFieldLine), same 2000-char limit used app-wide for free text
+  // (ai-daily-summary's note, parse-meal's description).
+  const clampCheckinText = v => (typeof v === 'string' && v.length > 2000) ? v.slice(0, 2000) : v;
+  responses = {
+    ...responses,
+    off_plan_notes: clampCheckinText(responses.off_plan_notes),
+    goal_note: clampCheckinText(responses.goal_note),
+    issues_notes: clampCheckinText(responses.issues_notes),
+    general_note: clampCheckinText(responses.general_note),
+  };
   const weekStart = weekStartArg || checkinWeekStart();
   const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {

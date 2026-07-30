@@ -507,10 +507,10 @@ function CheckInPhasePicker({ onPick, busy }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated, isAdmin = false }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit, onGenerated, isAdmin = false, busy, onGenerateStart, onGenerateError }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
-  const [opinionBusy, setOpinionBusy] = useStateC(false);
+  const [ownOpinionBusy, setOwnOpinionBusy] = useStateC(false);
   const [opinionError, setOpinionError] = useStateC(null);
   const [opinionRetryOpen, setOpinionRetryOpen] = useStateC(false);
   // onGenerated is only passed at the two REAL check-in call sites (this
@@ -518,12 +518,27 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   // or the in-progress week's live preview (ci.id doesn't exist there
   // either): there's nothing real to generate an opinion about in either case.
   const showAiOpinion = !!ci.id && !!onGenerated;
+  // Only this week's card is wired up with onGenerateStart (see the
+  // ClientCheckInTab call site): it renders right below
+  // CheckInAiOpinionBanner for the SAME check-in, so both need to share one
+  // in-flight flag, otherwise a user can tap Generate on the banner, expand
+  // the card before that request resolves, and fire a second concurrent
+  // generateCheckinOpinion call. Every other render site (past check-ins,
+  // the coach's full check-in list, the schema builder's sample) has no
+  // banner sibling to race against and keeps tracking busy locally, exactly
+  // as before.
+  const hasSharedBusy = typeof onGenerateStart === 'function';
+  const opinionBusy = hasSharedBusy ? busy : ownOpinionBusy;
   async function generateOpinion(phase) {
-    setOpinionBusy(true);
+    if (hasSharedBusy) onGenerateStart(); else setOwnOpinionBusy(true);
     setOpinionError(null);
     const res = await LB.generateCheckinOpinion(ci.id, phase);
-    setOpinionBusy(false);
-    if (!res.ok) { setOpinionError(res.error || 'Could not generate. Try again.'); return; }
+    if (!hasSharedBusy) setOwnOpinionBusy(false);
+    if (!res.ok) {
+      setOpinionError(res.error || 'Could not generate. Try again.');
+      if (hasSharedBusy) onGenerateError();
+      return;
+    }
     onGenerated();
   }
   const { headline: opinionHeadline, body: opinionBody } = LB.splitHeadlineBody(ci.aiOpinion || '');
@@ -888,16 +903,22 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
 // Same AI opinion data as the block inside CheckInCard, surfaced again right
 // at the top of the tab: that block only renders once thisWeek's own card is
 // expanded, which buried it too deep for users to ever find or use.
-function CheckInAiOpinionBanner({ ci, onGenerated, isAdmin = false }) {
-  const [busy, setBusy] = useStateC(false);
+function CheckInAiOpinionBanner({ ci, busy, onGenerateStart, onGenerateError, onGenerated, isAdmin = false }) {
   const [error, setError] = useStateC(null);
   const [retryOpen, setRetryOpen] = useStateC(false);
+  // busy is owned by ClientCheckInTab and shared with this week's CheckInCard,
+  // the only other affordance for this exact check-in's opinion, so the two
+  // can never both have a generateCheckinOpinion call in flight at once (see
+  // CheckInCard's hasSharedBusy comment for the full picture).
   const generate = async (phase) => {
-    setBusy(true);
+    onGenerateStart();
     setError(null);
     const res = await LB.generateCheckinOpinion(ci.id, phase);
-    setBusy(false);
-    if (!res.ok) { setError(res.error || 'Could not generate. Try again.'); return; }
+    if (!res.ok) {
+      setError(res.error || 'Could not generate. Try again.');
+      onGenerateError();
+      return;
+    }
     onGenerated();
   };
   const { headline, body } = LB.splitHeadlineBody(ci.aiOpinion || '');
@@ -1049,7 +1070,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
         <textarea placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)}
-          rows={field.rows || 2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+          rows={field.rows || 2} maxLength={2000} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
       </>
     );
   }
@@ -1360,6 +1381,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [previewOpen, setPreviewOpen] = useStateC(false);
+  // Check-in id with an AI-opinion generate request currently in flight.
+  // Shared between CheckInAiOpinionBanner and this week's own CheckInCard
+  // below: they're two independent "Generate" affordances for the SAME
+  // check-in, and used to each track busy privately, letting a user fire
+  // both concurrently (tap the banner, expand the card before it resolves,
+  // tap again). One shared flag makes that impossible.
+  const [generatingCheckinId, setGeneratingCheckinId] = useStateC(null);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
@@ -1495,7 +1523,16 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           )}
         </div>
 
-        {thisWeek && <CheckInAiOpinionBanner ci={thisWeek} onGenerated={load} isAdmin={isAdmin} />}
+        {thisWeek && (
+          <CheckInAiOpinionBanner
+            ci={thisWeek}
+            busy={generatingCheckinId === thisWeek.id}
+            onGenerateStart={() => setGeneratingCheckinId(thisWeek.id)}
+            onGenerateError={() => setGeneratingCheckinId(null)}
+            onGenerated={() => { setGeneratingCheckinId(null); load(); }}
+            isAdmin={isAdmin}
+          />
+        )}
 
         {previewOpen && previewResponses && (
           <div>
@@ -1527,7 +1564,18 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} isAdmin={isAdmin} />
+          <CheckInCard
+            ci={thisWeek} prevCi={past[0]} schema={resolvedSchema}
+            onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined}
+            onDelete={checkinEnabled && !deleting ? () => handleDelete(thisWeek) : undefined}
+            confirmingDelete={confirmDelete === thisWeek.id}
+            coachingMacrosHistory={coachingMacrosHistory}
+            busy={generatingCheckinId === thisWeek.id}
+            onGenerateStart={() => setGeneratingCheckinId(thisWeek.id)}
+            onGenerateError={() => setGeneratingCheckinId(null)}
+            onGenerated={() => { setGeneratingCheckinId(null); load(); }}
+            isAdmin={isAdmin}
+          />
         ) : null}
 
         {past.length > 0 && (

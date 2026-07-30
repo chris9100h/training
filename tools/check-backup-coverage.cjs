@@ -9,12 +9,17 @@
 // check-db-docs.cjs and with the live DB by check-db-live.cjs). Parsed with the
 // shared helper in tools/lib/sql-schema.cjs — one parser, no second truth.
 //
-// Two checks per table:
-//   IMPORT  — actually runs importFromBackup() in a vm sandbox with a recording
+// Three checks:
+//   IMPORT  : actually runs importFromBackup() in a vm sandbox with a recording
 //             Supabase stub and captures which columns each upsert writes. Robust
 //             against columns built inside helpers (sessionToRow, _syncEntryRelational).
-//   EXPORT  — parses the .select('…') lists in store.js: a column that is never
+//   EXPORT  : parses the .select('…') lists in store.js: a column that is never
 //             SELECTed never reaches the store, so it is absent from the export.
+//   SYNC    : zane_user_settings only. IMPORT/EXPORT only prove a setting round-trips
+//             through a backup file, not that it actually propagates live between a
+//             user's devices. Parses settingsChanged's diff and syncStore's live
+//             upsert in src/store.js and flags a setting loadFromSupabase maps into
+//             the store that either spot never mentions.
 //
 // On drift it prints exactly what is missing AND a ready-to-paste prompt for
 // Claude to fix it, then exits non-zero.
@@ -82,6 +87,12 @@ const PER_TABLE_ALLOW = {
 };
 const allowed = (table, col) =>
   GLOBAL_ALLOW.has(col) || (PER_TABLE_ALLOW[table] && PER_TABLE_ALLOW[table].has(col));
+
+// Settings columns with no live-sync counterpart by design: they still round-trip
+// through backup import/export (checked above), just never through syncStore.
+const SETTINGS_SYNC_ALLOW = new Set([
+  'vip_background', // admin-granted only (set_user_vip_background RPC); the client itself never writes it
+]);
 
 // ── Schema truth ─────────────────────────────────────────────────────────────
 const schemaTables = parseSchemaTables(read('supabase/schema.sql'));
@@ -164,6 +175,52 @@ function parseSelectedColumns(src) {
   return { selected, star };
 }
 
+// ── SYNC coverage: does a setting loadFromSupabase maps actually reach live
+// cross-device sync (settingsChanged's diff + syncStore's upsert), not just a
+// backup round-trip? ─────────────────────────────────────────────────────────
+
+// zane_user_settings columns loadFromSupabase actually maps into the store,
+// db column -> store field. Scoped to the function body rather than
+// src.matchAll over the whole file: the generic "key: sett.col" shape only
+// means what we think it means there, other tables' row mappers elsewhere in
+// this file use their own "l."/"m."/"p." variables and could otherwise collide.
+function parseLoadedSettingsColumns(src) {
+  const start = src.indexOf('async function loadFromSupabase(');
+  const end = src.indexOf('\nasync function autoArchiveMissedDays(', start);
+  const body = src.slice(start, end);
+  const map = new Map(); // db column -> store field
+  // ".*?" so a wrapped value (normalizeHiddenHealthCards(sett.x), the
+  // Array.isArray(sett.x) ? sett.x : [] ternaries) still resolves to its own
+  // key instead of being skipped for not being a bare "key: sett.x".
+  for (const m of body.matchAll(/^\s*(\w+):\s*.*?\bsett\.(\w+)/gm)) map.set(m[2], m[1]);
+  return map;
+}
+
+// Store-field keys (camelCase) referenced in syncStore's settingsChanged diff:
+// both "next.settings?.x" and top-level "next.x" for the handful of
+// settings-table columns modeled outside store.settings (activeScheduleId,
+// statusMode, and similar plan-position/status fields).
+function parseSettingsChangedKeys(src) {
+  const start = src.indexOf('const settingsChanged =');
+  const end = src.indexOf(';', start);
+  const expr = src.slice(start, end);
+  return new Set([...expr.matchAll(/next\.(?:settings\?\.)?(\w+)/g)].map(m => m[1]));
+}
+
+// DB columns (snake_case) actually written by syncStore's live upsert: the
+// unconditional settingsRow literal, plus columns added afterwards only when
+// changed (water/plan-position fields, gated so a stale device can't clobber
+// a fresher cross-device value, see the comments in syncStore itself).
+function parseSyncUpsertColumns(src) {
+  const fnStart = src.indexOf('async function syncStore(');
+  const start = src.indexOf('const settingsRow = {', fnStart);
+  const end = src.indexOf('.upsert(settingsRow)', start);
+  const body = src.slice(start, end);
+  const cols = new Set([...body.matchAll(/^\s*(\w+):/gm)].map(m => m[1]));
+  for (const m of body.matchAll(/\bsettingsRow\.(\w+)\s*=/g)) cols.add(m[1]);
+  return cols;
+}
+
 // ── Run ───────────────────────────────────────────────────────────────────────
 (async () => {
   const storeSrc = read('src/store.js');
@@ -206,11 +263,29 @@ function parseSelectedColumns(src) {
     if (missExport.length) exportGaps[table] = missExport;
   }
 
-  const hasGaps = unclassified.length || Object.keys(importGaps).length || Object.keys(exportGaps).length;
+  // SYNC gaps: a zane_user_settings column loadFromSupabase maps into the
+  // store, but settingsChanged and/or syncStore's live upsert never mention,
+  // so a change to it round-trips through a backup yet never reaches another
+  // device.
+  const settingsChangedGaps = [];
+  const settingsUpsertGaps = [];
+  const loadedSettings = parseLoadedSettingsColumns(storeSrc);
+  const changedKeys = parseSettingsChangedKeys(storeSrc);
+  const upsertCols = parseSyncUpsertColumns(storeSrc);
+  for (const [dbCol, field] of loadedSettings) {
+    if (allowed('zane_user_settings', dbCol) || SETTINGS_SYNC_ALLOW.has(dbCol)) continue;
+    if (!changedKeys.has(field)) settingsChangedGaps.push(dbCol);
+    if (!upsertCols.has(dbCol)) settingsUpsertGaps.push(dbCol);
+  }
+  settingsChangedGaps.sort();
+  settingsUpsertGaps.sort();
+
+  const hasGaps = unclassified.length || Object.keys(importGaps).length || Object.keys(exportGaps).length
+    || settingsChangedGaps.length || settingsUpsertGaps.length;
 
   if (!hasGaps) {
     const n = BACKUP_ENUM.length + PASSTHROUGH.length;
-    console.log(`check-backup-coverage OK: ${n} backup tables round-trip every column (${Object.keys(EXCLUDED).length} tables excluded by design)`);
+    console.log(`check-backup-coverage OK: ${n} backup tables round-trip every column (${Object.keys(EXCLUDED).length} tables excluded by design), and every loaded setting stays wired into live sync`);
     return;
   }
 
@@ -229,6 +304,16 @@ function parseSelectedColumns(src) {
   if (Object.keys(exportGaps).length) {
     console.error('EXPORT gaps (loadFromSupabase never SELECTs these, so they are not exported):');
     for (const [t, cols] of Object.entries(exportGaps)) console.error(`  - ${t}: ${cols.join(', ')}`);
+    console.error('');
+  }
+  if (settingsChangedGaps.length) {
+    console.error('SETTINGSCHANGED gaps (syncStore never diffs these, so a change never triggers a live sync):');
+    console.error(`  - zane_user_settings: ${settingsChangedGaps.join(', ')}`);
+    console.error('');
+  }
+  if (settingsUpsertGaps.length) {
+    console.error('SYNC UPSERT gaps (syncStore never writes these, so a change never reaches the server live):');
+    console.error(`  - zane_user_settings: ${settingsUpsertGaps.join(', ')}`);
     console.error('');
   }
 
@@ -263,9 +348,20 @@ function parseSelectedColumns(src) {
     for (const [t, cols] of Object.entries(exportGaps)) p.push(`  - ${t}: ${cols.join(', ')}`);
     p.push('');
   }
+  if (settingsChangedGaps.length || settingsUpsertGaps.length) {
+    p.push('SYNC: these zane_user_settings columns are mapped by loadFromSupabase but never');
+    p.push('propagate live between devices. In syncStore() (src/store.js), add:');
+    if (settingsChangedGaps.length) p.push(`  - the settingsChanged diff: ${settingsChangedGaps.join(', ')}`);
+    if (settingsUpsertGaps.length) p.push(`  - the settingsRow upsert: ${settingsUpsertGaps.join(', ')}`);
+    p.push('  A new setting needs all FOUR spots: loadFromSupabase (DB->store), the');
+    p.push('  settingsChanged check in syncStore, the settings upsert in syncStore, AND the');
+    p.push('  settingsRow in importFromBackup (see CLAUDE.md, "Store").');
+    p.push('');
+  }
   p.push('If a column is intentionally excluded, do NOT map it: instead add it to the');
-  p.push('allowlist (GLOBAL_ALLOW / PER_TABLE_ALLOW) or EXCLUDED in');
-  p.push('tools/check-backup-coverage.cjs with a short reason.');
+  p.push('allowlist (GLOBAL_ALLOW / PER_TABLE_ALLOW), SETTINGS_SYNC_ALLOW (settings with no');
+  p.push('live-sync counterpart by design), or EXCLUDED in tools/check-backup-coverage.cjs');
+  p.push('with a short reason.');
   p.push('');
   p.push('Then verify:  node tools/check-backup-coverage.cjs   (must print OK)');
   p.push(line);
