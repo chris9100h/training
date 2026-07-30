@@ -5747,6 +5747,106 @@ function statusModeForDate(state, dateStr) {
   return hit ? hit.mode : null;
 }
 
+// ── Adaptive TDEE recalibration (weekly check-in, migration-free) ──────────
+// estimateTdee above is a formula run once from static inputs (height/weight/
+// age/activity) and never revisited. This is the opposite approach and the
+// weekly companion to it: no body formula at all, just what actually
+// happened. Over a trailing window it weighs what was eaten against what
+// bodyweight did, and solves for the maintenance calories that explain the
+// difference (the MacroFactor-style "expenditure = intake ± energy stored"
+// method). Deliberately does NOT fold in any training/steps/RPE-derived burn
+// estimate: avgCalories below already IS the intake side of the equation, and
+// the weight trend already reflects however much was actually burned,
+// exercise included. Adding a separate exercise-based burn number on top
+// would double-count that and is exactly the inaccuracy this design avoids.
+//
+// Pure: reads store.dailyLogs/statusMode/statusPeriods/settings.unit, writes
+// nothing, decides nothing about targets. Callers turn a success result into
+// a new target set via macroTargetsFromGoal, same as the one-time estimator.
+//
+// Returns one of:
+//   { ok: true, tdee, avgCalories, weightChangeKg, daySpan }
+//   { ok: false, reason: 'insufficient_data' }
+// weightChangeKg is always true kilograms regardless of settings.unit (like
+// every other *Kg field in this file, e.g. macroCalc.weightKg), positive
+// means weight went UP over the window. Never extrapolates a number past the
+// thresholds below: callers must branch on `ok` and show the reason, not
+// treat a missing tdee as 0.
+const ADAPTIVE_TDEE_WINDOW_DAYS = 14;
+const ADAPTIVE_TDEE_MIN_CALORIE_DAYS = 5;
+const ADAPTIVE_TDEE_MIN_WEIGH_INS = 2;
+const ADAPTIVE_TDEE_MIN_WEIGH_SPAN_DAYS = 5;
+// Real physical conversion factor (kg per lb), distinct from screens-health.jsx's
+// own top-level LBS_TO_KG: that file and this one share one global scope as
+// classic scripts, so a second top-level const of the same name would throw
+// "already been declared" and take the whole file down with it (see CLAUDE.md).
+const KG_PER_LB = 0.45359237;
+
+function estimateAdaptiveTdee(store, todayStr) {
+  const today = todayStr || todayISO();
+  const winStart = (() => {
+    const d = new Date(today + 'T12:00:00');
+    d.setDate(d.getDate() - (ADAPTIVE_TDEE_WINDOW_DAYS - 1));
+    return fmtISO(d);
+  })();
+  const dayDiff = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
+
+  // Sick/vacation/deload days carry neither reliable intake nor a meaningful
+  // weight signal (routine and hydration both swing), so they drop out of
+  // both sides of the calculation entirely rather than diluting it.
+  const windowLogs = (store?.dailyLogs || [])
+    .filter(l => l.date >= winStart && l.date <= today)
+    .filter(l => !statusModeForDate(store, l.date));
+
+  const calorieDays = windowLogs.filter(l => Number(l.calories) > 0);
+  if (calorieDays.length < ADAPTIVE_TDEE_MIN_CALORIE_DAYS) return { ok: false, reason: 'insufficient_data' };
+  const avgCalories = calorieDays.reduce((s, l) => s + Number(l.calories), 0) / calorieDays.length;
+
+  // zane_daily_logs is UNIQUE on (user_id, date), so this is already one
+  // weigh-in per calendar day, chronological order below is all that's needed.
+  const weighIns = windowLogs
+    .filter(l => l.weight != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const n = weighIns.length;
+  const overallSpan = n >= 2 ? dayDiff(weighIns[0].date, weighIns[n - 1].date) : 0;
+  if (n < ADAPTIVE_TDEE_MIN_WEIGH_INS || overallSpan < ADAPTIVE_TDEE_MIN_WEIGH_SPAN_DAYS) {
+    return { ok: false, reason: 'insufficient_data' };
+  }
+
+  // Split chronologically into a first and second half. On an odd count the
+  // single middle entry is dropped from both rather than assigned to either,
+  // which is what keeps the split symmetric.
+  const half = Math.floor(n / 2);
+  const firstHalf = weighIns.slice(0, half);
+  const secondHalf = weighIns.slice(n - half);
+  const avgOf = list => list.reduce((s, l) => s + Number(l.weight), 0) / list.length;
+  // store.dailyLogs weight is in the DISPLAY unit (lbs users log lbs
+  // straight, no conversion, see CLAUDE.md's weight-unit note), but
+  // weightChangeKg has to be TRUE kg for the KCAL_PER_KG physical constant
+  // below to mean anything. weightAxisUnit collapses 'mixed' (kg weight +
+  // mi distance) onto the kg axis same as everywhere else that checks this.
+  const isLbs = weightAxisUnit(store?.settings?.unit) === 'lbs';
+  const weightChangeNative = avgOf(secondHalf) - avgOf(firstHalf);
+  const weightChangeKg = isLbs ? weightChangeNative * KG_PER_LB : weightChangeNative;
+  const daySpan = Math.max(1, dayDiff(firstHalf[0].date, secondHalf[secondHalf.length - 1].date));
+
+  // Sign check: eating avgCalories/day while LOSING weight (weightChangeKg <
+  // 0) means more was burned than eaten, so real maintenance sits ABOVE
+  // avgCalories. -(negative)/daySpan is positive, so it adds to avgCalories.
+  // Eating avgCalories/day while GAINING weight does the opposite. Both fall
+  // out of this one line without a branch.
+  const tdee = avgCalories - (weightChangeKg * KCAL_PER_KG) / daySpan;
+
+  return {
+    ok: true,
+    tdee: Math.round(tdee),
+    avgCalories: Math.round(avgCalories),
+    weightChangeKg: Math.round(weightChangeKg * 100) / 100,
+    daySpan,
+  };
+}
+
 // The budget a meal of choice inherits: the day's target minus everything else
 // already on the day, floored at zero per macro. Pass PROJECTED totals (logged
 // plus still-planned), not just logged: a shake planned for 21:00 is spoken
@@ -8439,6 +8539,7 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
+  estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,

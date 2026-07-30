@@ -1986,6 +1986,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
       settings: {
         ...s.settings,
         macroCalc: {
+          ...s.settings.macroCalc,
           birthYear: healthInt(form.birthYear), heightCm: healthInt(form.heightCm),
           sex: form.sex ?? null, activity: form.activity, goal: form.goal,
           rateKgPerWeek: form.goal === 'maintain' ? 0 : form.rateKgPerWeek,
@@ -2399,6 +2400,250 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
           proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
         })} />
       {confirmEl}
+    </Sheet>
+  );
+}
+
+// ─── Macro target source + weekly check-in ─────────────────────────────────
+// Everything about WHERE the active targets come from, and (personal targets
+// only: a coach's numbers already win, see effectiveMacroTargets, so
+// recalibrating personal ones changes nothing while coach macros are active)
+// whether a data-driven refresh is due. Split out from the (now purely
+// display) Macro Targets card below it so this stays the one place in the
+// group with an action in it. Deliberately kept visually quiet in every
+// state except "due": that row is the one thing here that must never lose a
+// fight for attention against the coach-info / SET-EDIT clutter.
+function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin }) {
+  const calc = store.settings?.macroCalc || {};
+  const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'From your active plan' : 'From your coach';
+  const showAutomation = !coachHasMacros;
+  // apply() in MacroEstimatorSheet always writes a goal (defaulting to
+  // 'maintain'), so its presence is what tells apart "the estimator has run
+  // at least once" from macros the user typed by hand, which is what
+  // macroTargetsFromGoal needs to produce a real training/rest split instead
+  // of silently defaulting to a flat maintain-style number.
+  const estimatorConfigured = calc.goal != null;
+  const checkinEnabled = showAutomation && estimatorConfigured && !!calc.checkinEnabled;
+
+  // Recomputed from scratch on every relevant store change rather than cached
+  // anywhere: cheap (14 days of logs), and a value that decides whether a
+  // "ready" CTA appears must never go stale behind a click.
+  const adaptive = useMemoH(
+    () => checkinEnabled ? LB.estimateAdaptiveTdee(store, LB.todayISO()) : null,
+    [checkinEnabled, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit]
+  );
+
+  const enableCheckins = () => {
+    setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, checkinEnabled: true } } }));
+  };
+
+  // 'insufficient' | 'waiting' | 'due' | null (automation off or not offered).
+  // Never checked in yet is folded straight into 'due' the moment there is
+  // enough data: the first check-in shouldn't wait an extra week beyond that.
+  let status = null, daysUntil = null;
+  if (checkinEnabled) {
+    if (!adaptive?.ok) status = 'insufficient';
+    else {
+      const since = calc.lastCheckinAt ? healthDayDiff(calc.lastCheckinAt, LB.todayISO()) : null;
+      if (since == null || since >= 7) status = 'due';
+      else { status = 'waiting'; daysUntil = 7 - since; }
+    }
+  }
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {dragHandle}
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Targets</span>
+        <button data-reorder-ignore="true" onClick={onSetTarget} style={{
+          background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
+          borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
+          fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+        }}>{hasTargets ? 'EDIT' : 'SET'}</button>
+      </div>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>{sourceLabel}</div>
+
+      {status === 'insufficient' && (
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
+          Building your baseline, log a bit more and check back.
+        </div>
+      )}
+      {status === 'waiting' && (
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10 }}>
+          Next check-in in {daysUntil} day{daysUntil === 1 ? '' : 's'}.
+        </div>
+      )}
+      {status === 'due' && (
+        <button data-reorder-ignore="true" onClick={onOpenCheckin} style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 12,
+          padding: '10px 12px', background: `rgba(var(--accent-rgb),0.16)`,
+          border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6,
+          color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
+          cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+        }}>
+          <i className="fa-solid fa-bolt" style={{ fontSize: 13 }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>Weekly check-in ready</span>
+          <i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} />
+        </button>
+      )}
+      {showAutomation && !estimatorConfigured && (
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10 }}>
+          Run the estimator once to enable weekly check-ins.
+        </div>
+      )}
+      {showAutomation && estimatorConfigured && !checkinEnabled && (
+        <button data-reorder-ignore="true" onClick={enableCheckins} style={{
+          display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
+          marginTop: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+        }}>
+          <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 10, color: 'var(--accent)' }} />
+          Enable weekly check-ins
+        </button>
+      )}
+    </Card>
+  );
+}
+
+// The sheet the "Weekly check-in ready" CTA opens. A read-only report (window
+// average calories, weight trend, the freshly solved maintenance figure) plus
+// the one real decision: apply the recalibrated targets or skip this week.
+// Skipping still counts as "handled", same as Apply: lastCheckinAt moves to
+// today either way, that is what stops the nag, not whether the numbers
+// actually changed. Never applies anything on its own; see MacroEstimatorSheet
+// for the same "estimate is a prefill, not a save" philosophy this mirrors.
+function WeeklyCheckinSheet({ open, onClose, store, setStore }) {
+  const calc = store.settings?.macroCalc || {};
+  const isLbs = UI.unit() === 'lbs';
+  const toKg = w => (isLbs ? Number(w) * LBS_TO_KG : Number(w));
+  const fromKg = kg => (isLbs ? kg / LBS_TO_KG : kg);
+
+  const adaptive = useMemoH(
+    () => open ? LB.estimateAdaptiveTdee(store, LB.todayISO()) : null,
+    [open, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit]
+  );
+
+  // What the ORIGINAL one-time estimate said, for a sense of higher/lower than
+  // before. Not itself persisted (only its inputs are, in macroCalc), so
+  // recomputed here from those exact inputs via the same formula.
+  const originalTdee = useMemoH(() => {
+    if (!(calc.heightCm > 0) || !(calc.birthYear > 0) || !calc.sex || !(calc.weightKg > 0)) return null;
+    const age = new Date().getFullYear() - calc.birthYear;
+    return LB.estimateTdee({ weightKg: calc.weightKg, heightCm: calc.heightCm, age, sex: calc.sex, activity: calc.activity })?.tdee ?? null;
+  }, [calc.heightCm, calc.birthYear, calc.sex, calc.weightKg, calc.activity]);
+
+  // Same call MacroEstimatorSheet's own apply() feeds into, just with the
+  // freshly solved tdee and the freshest known bodyweight instead of a
+  // hand-typed one; every other input is reused verbatim from macroCalc.
+  const newTargets = useMemoH(() => {
+    if (!adaptive?.ok) return null;
+    const loggedWeight = LB.latestBodyweight(store);
+    const weightKg = loggedWeight != null ? toKg(loggedWeight) : calc.weightKg;
+    if (!(weightKg > 0)) return null;
+    return LB.macroTargetsFromGoal({
+      tdee: adaptive.tdee, weightKg,
+      goal: calc.goal, rateKgPerWeek: calc.goal === 'maintain' ? 0 : calc.rateKgPerWeek,
+      trainingDays: calc.trainingDays, fatPerKg: calc.fatPerKg,
+      restRatio: calc.restRatioPct != null ? calc.restRatioPct / 100 : null,
+    });
+  }, [adaptive, store.dailyLogs, calc.weightKg, calc.goal, calc.rateKgPerWeek, calc.trainingDays, calc.fatPerKg, calc.restRatioPct, isLbs]);
+
+  const tdeeDelta = (adaptive?.ok && originalTdee != null) ? adaptive.tdee - originalTdee : null;
+  const weightDeltaDisplay = adaptive?.ok ? Math.round(Math.abs(fromKg(adaptive.weightChangeKg)) * 10) / 10 : null;
+  const weightDir = !adaptive?.ok ? null : adaptive.weightChangeKg > 0.05 ? 'up' : adaptive.weightChangeKg < -0.05 ? 'down' : 'steady';
+
+  // Both actions count as "handled this week": only Apply also touches
+  // macroTargets, lastCheckinAt moves to today either way.
+  const finish = (applyTargets) => {
+    setStore(s => ({
+      ...s,
+      settings: {
+        ...s.settings,
+        ...(applyTargets && newTargets ? { macroTargets: newTargets } : {}),
+        macroCalc: { ...s.settings.macroCalc, lastCheckinAt: LB.todayISO() },
+      },
+    }));
+    onClose();
+  };
+
+  const chip = (k, v) => (
+    <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
+      <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
+    </span>
+  );
+  const dayRow = (label, suffix) => (
+    <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+      <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{label}</span>
+      <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
+        {newTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+      </span>
+      <span style={{ flex: 1 }} />
+      <span style={{ display: 'flex', gap: 9 }}>
+        {chip('P', newTargets[`protein${suffix}`])}
+        {chip('C', newTargets[`carbs${suffix}`])}
+        {chip('F', newTargets[`fat${suffix}`])}
+      </span>
+    </div>
+  );
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Weekly check-in">
+      {!adaptive?.ok ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Not enough data yet.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 18 }}>
+            Based on your last 14 days of logging (sick, vacation and deload days excluded).
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
+            <div style={{ flex: 1 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Avg calories</div>
+              <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
+                {adaptive.avgCalories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="micro" style={{ marginBottom: 6 }}>Weight trend</div>
+              <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
+                {weightDir === 'steady' ? 'Steady' : `${weightDir === 'up' ? 'Up' : 'Down'} ${weightDeltaDisplay}`}
+                {weightDir !== 'steady' && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>{UI.unit()}</span>}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginBottom: 18, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>New maintenance estimate</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <span className="num" style={{ fontSize: 24, color: 'var(--accent)', fontWeight: 400 }}>
+                {adaptive.tdee}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+              </span>
+              {tdeeDelta != null && Math.abs(tdeeDelta) >= 20 && (
+                <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                  {tdeeDelta > 0 ? `${tdeeDelta} higher` : `${Math.abs(tdeeDelta)} lower`} than your last estimate
+                </span>
+              )}
+            </div>
+          </div>
+          {newTargets ? (
+            <>
+              {dayRow('Training', 'Training')}
+              <div style={{ height: 0.5, background: UI.hair }} />
+              {dayRow('Rest', 'Rest')}
+              <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+                <Btn kind="ghost" onClick={() => finish(false)} style={{ flex: 1 }}>Skip for now</Btn>
+                <Btn onClick={() => finish(true)} style={{ flex: 1 }}>Apply</Btn>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
+                Log a bodyweight to see the recalibrated targets.
+              </div>
+              <Btn kind="ghost" onClick={() => finish(false)} style={{ width: '100%' }}>Skip for now</Btn>
+            </>
+          )}
+        </>
+      )}
     </Sheet>
   );
 }
@@ -3276,6 +3521,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [selectedDate, setSelectedDate] = useStateH(today);
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
+  const [checkinOpen, setCheckinOpen] = useStateH(false);
   // The Food tab sends users here when their day has no macro target to score
   // against (go({ name: 'health', openMacroTargets: true })): opening the sheet
   // straight away is the whole point of that trip, arriving on the Health tab
@@ -3735,12 +3981,6 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
-        <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
-          background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
-          borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
-          fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
-          WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-        }}>{effectiveTargets ? 'EDIT' : 'SET'}</button>
       </div>
       {effectiveTargets ? (
         macroTargetAvg ? (
@@ -3795,12 +4035,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // expandableCards further down, which the sheet renders from by this id).
   const expandBtn = id => () => setExpandedCardId(id);
 
-  // The 3 macro cards live together in the macroGroup composite below (target
-  // kcal/P/C/F, adherence trend, macro breakdown) so hide/move/reorder always
-  // treats them as one unit, leaving one behind orphans the other two (an
-  // adherence trend with no targets to compare against isn't useful alone).
+  // The 4 macro cards live together in the macroGroup composite below (source
+  // + check-in, target kcal/P/C/F, adherence trend, macro breakdown) so hide/
+  // move/reorder always treats them as one unit, leaving one behind orphans
+  // the others (an adherence trend with no targets to compare against isn't
+  // useful alone).
+  const macroSourceCard = (
+    <MacroSourceCard store={store} setStore={setStore} dragHandle={handle}
+      coachHasMacros={coachHasMacros} fromCoach={fromCoach} selfCoachedMacros={selfCoachedMacros}
+      hasTargets={!!effectiveTargets} onSetTarget={() => setTargetOpen(true)} onOpenCheckin={() => setCheckinOpen(true)} />
+  );
   const macroTargetsCard = (
-    <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
+    <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf}>
       {targetRow}
     </HealthChartCard>
   );
@@ -3822,11 +4068,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
     aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} />,
-    // Targets on top (full width, needs the room for the P/C/F chip row), then
-    // Adherence + the macro breakdown paired below it, always full-width as a
-    // whole, see fullWidthCardIds.
+    // Source + check-in first (the one card with an action in it), then the
+    // now purely-display Targets card (full width, needs the room for the
+    // P/C/F chip row), then Adherence + the macro breakdown paired below it,
+    // always full-width as a whole, see fullWidthCardIds.
     macroGroup: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {macroSourceCard}
         {macroTargetsCard}
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
           {macroAdherenceCard}
@@ -3970,6 +4218,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
+      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );

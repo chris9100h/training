@@ -713,6 +713,88 @@ async function testAsync(name, fn) {
     assert.ok(lean.fatTraining >= Math.round(90 * LB.FAT_FLOOR_PER_KG));
   });
 
+  test('estimateAdaptiveTdee: sign convention, losing weight implies a higher real TDEE than intake', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.avgCalories, 2000);
+    assert.strictEqual(r.weightChangeKg, -1);
+    assert.strictEqual(r.daySpan, 13);
+    // Burned more than eaten (lost weight), so real maintenance sits above intake.
+    assert.strictEqual(r.tdee, 2592);
+    assert.ok(r.tdee > r.avgCalories);
+  });
+
+  test('estimateAdaptiveTdee: mirror, gaining weight implies a lower real TDEE than intake', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 79;
+    days[13].weight = 80;
+    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.weightChangeKg, 1);
+    assert.strictEqual(r.tdee, 1408);
+    assert.ok(r.tdee < r.avgCalories);
+  });
+
+  test('estimateAdaptiveTdee: insufficient data below every threshold', () => {
+    const fullCalories = [];
+    for (let d = 1; d <= 14; d++) fullCalories.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+
+    // Too few days with calories logged (needs 5+), even with good weigh-ins.
+    const fewCalorieDays = fullCalories.map((l, i) => {
+      const base = i < 3 ? l : { ...l, calories: null };
+      return i === 0 ? { ...base, weight: 80 } : i === 13 ? { ...base, weight: 79 } : base;
+    });
+    // LB.xxx return values come out of the vm sandbox in loadStore(), a
+    // different realm than this file's own object literals, so compare via
+    // JSON.stringify rather than assert.deepStrictEqual (same pattern as
+    // estimateTdee/macroTargetsFromGoal's own comparisons above): deepStrictEqual
+    // treats cross-realm plain objects as unequal despite identical own props.
+    const insufficient = JSON.stringify({ ok: false, reason: 'insufficient_data' });
+    assert.strictEqual(JSON.stringify(LB.estimateAdaptiveTdee({ dailyLogs: fewCalorieDays }, '2025-01-14')), insufficient);
+
+    // Only one weigh-in (needs 2+).
+    const oneWeighIn = fullCalories.map((l, i) => (i === 0 ? { ...l, weight: 80 } : l));
+    assert.strictEqual(JSON.stringify(LB.estimateAdaptiveTdee({ dailyLogs: oneWeighIn }, '2025-01-14')), insufficient);
+
+    // Two weigh-ins, but only 2 days apart (needs 5+ days span).
+    const closeWeighIns = fullCalories.map((l, i) => (i === 0 ? { ...l, weight: 80 } : i === 2 ? { ...l, weight: 79.8 } : l));
+    assert.strictEqual(JSON.stringify(LB.estimateAdaptiveTdee({ dailyLogs: closeWeighIns }, '2025-01-14')), insufficient);
+  });
+
+  test('estimateAdaptiveTdee: an odd weigh-in count drops the middle entry from both halves', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[6].weight = 500; // wild outlier, must not survive into either half
+    days[13].weight = 79;
+    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    // Identical to the clean 2-weigh-in case above: the outlier never counted.
+    assert.strictEqual(r.weightChangeKg, -1);
+    assert.strictEqual(r.tdee, 2592);
+  });
+
+  test('estimateAdaptiveTdee: sick/vacation/deload days drop out of the calorie average entirely', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[6].calories = 50; // 2025-01-07, barely ate while sick
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const state = {
+      dailyLogs: days,
+      statusPeriods: [{ mode: 'sick', startedAt: '2025-01-06T00:00:00.000Z', endedAt: '2025-01-08T00:00:00.000Z' }],
+    };
+    const r = LB.estimateAdaptiveTdee(state, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    // The sick day's 50kcal never enters the average, only the 13 normal days do.
+    assert.strictEqual(r.avgCalories, 2000);
+  });
+
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
     // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
     assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
