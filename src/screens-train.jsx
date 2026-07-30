@@ -399,7 +399,7 @@ function calcPlates(weight, plateSet) {
   return { plates: result, remainder: rem };
 }
 
-function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
+function PlateCalcSheet({ open, onClose, initialWeight, availablePlates, onApply }) {
   const [tab, setTab] = useStateT(0);
   const [raw, setRaw] = useStateT('');
   const [fresh, setFresh] = useStateT(false);
@@ -523,9 +523,18 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             <div style={{ fontFamily: UI.fontNum, fontSize: 40, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em' }}>
               {pulleyResult}
             </div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em', marginTop: 6 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em', marginTop: 6, marginBottom: 14 }}>
               SET TODAY'S STACK TO THIS
             </div>
+            <button onClick={() => onApply?.(pulleyResult)} style={{
+              padding: '8px 20px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+              color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em',
+              fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
+              textShadow: 'none',
+            }}>
+              USE THIS WEIGHT
+            </button>
           </div>
         ) : (
           <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.12em', paddingBottom: 8 }}>
@@ -4828,6 +4837,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // Plate Calculator's Pulley tab hands back a converted number; write it
+  // through the same kbApply path typing/kbAdjust use so it lands in
+  // whichever kg field (plain set, drop, myo, av, stretch) is actually
+  // active, then close the sheet, same as picking a value on the keypad.
+  const applyPlateCalcResult = (value) => {
+    if (!kbFieldRef.current) return;
+    const { field, setIdx } = kbFieldRef.current;
+    const newRaw = String(value).replace('.', ',');
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
+    setKbRaw(newRaw);
+    kbApply(newRaw, field, setIdx);
+    setPlateCalcOpen(false);
+  };
+
   const saveExNote = () => {
     const trimmed = exNoteVal.trim();
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: trimmed, note_pinned: trimmed ? exNotePinned : false } : e) }));
@@ -8694,6 +8718,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         availablePlates={UI.unit() === 'lbs'
           ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
+        onApply={applyPlateCalcResult}
       />
 
       {/* Pinned exercise note, must acknowledge on exercise start (note_pinned) */}
