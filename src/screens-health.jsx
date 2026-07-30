@@ -502,7 +502,7 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, onOpen, children }) {
+function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, onOpen, headerExtra, children }) {
   return (
     // height:100% so cards sharing a 2-col grid row match the tallest sibling
     // (a card without a headline/sub row, e.g. no data in range, would otherwise
@@ -517,6 +517,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        {headerExtra}
         {onOpen && (
           <button data-reorder-ignore="true" onClick={onOpen} aria-label="Open tracker" style={{
             background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
@@ -2467,16 +2468,17 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   );
 }
 
-// ─── Macro target source + weekly check-in ─────────────────────────────────
-// Everything about WHERE the active targets come from, and (personal targets
-// only: a coach's numbers already win, see effectiveMacroTargets, so
-// recalibrating personal ones changes nothing while coach macros are active)
-// whether a data-driven refresh is due. Split out from the (now purely
-// display) Macro Targets card below it so this stays the one place in the
-// group with an action in it. Deliberately kept visually quiet in every
-// state except "due": that row is the one thing here that must never lose a
-// fight for attention against the coach-info / SET-EDIT clutter.
-function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenSettings }) {
+// ─── Macro targets (active split + algorithm estimate) ─────────────────────
+// One card, not two: the active targets (accent-framed box, the numbers
+// actually in effect) and the algorithm's last estimate (plain-framed box
+// below it, a reference to compare against, not something live on its own).
+// Used to be a separate source/check-in card sitting above a purely-display
+// Macro Targets card, merged back together since two accent-bordered cards
+// stacked on top of each other read as competing for attention rather than
+// one thing. Deliberately kept visually quiet in every automation state
+// except "due": that row is the one thing in the lower box that must never
+// lose a fight for attention against the coach-info / SET-EDIT clutter.
+function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenSettings, children }) {
   const calc = store.settings?.macroCalc || {};
   const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
   // Offered while coached too now: a coach's numbers still always win (see
@@ -2523,113 +2525,114 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
   const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
 
   return (
-    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {dragHandle}
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Targets</span>
+    <HealthChartCard title="Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={dragHandle}
+      headerExtra={
         <button data-reorder-ignore="true" onClick={onSetTarget} style={{
           background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent', flexShrink: 0,
         }}>{hasTargets ? 'EDIT' : 'SET'}</button>
-      </div>
-      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>{sourceLabel}</div>
-      {/* The actual numbers, not just the date: a "when" alone gives nothing
-          to weigh against what's active in the Targets card right below,
-          which is the direct comparison this exists for. Deliberately reads
-          from the lastAppliedTargets SNAPSHOT, not the live macroTargets, so
-          it keeps showing what the algorithm said even after a later
-          hand-edit or a coach taking over moves the active numbers away
-          from it. */}
-      {calc.lastAppliedTargets && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>
-            Last algorithm estimate{appliedDaysAgo != null ? (appliedDaysAgo <= 0 ? ', today' : appliedDaysAgo === 1 ? ', yesterday' : `, ${appliedDaysAgo}d ago`) : ''}
+      }>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, marginBottom: 10 }}>{sourceLabel}</div>
+      {children}
+      {/* Plain-framed on purpose, unlike the accent-framed box above: this is
+          a reference to compare against, not the numbers actually in effect.
+          Deliberately reads from the lastAppliedTargets SNAPSHOT, not the
+          live macroTargets, so it keeps showing what the algorithm said even
+          after a later hand-edit or a coach taking over moves the active
+          numbers away from it. */}
+      <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>ALGORITHM ESTIMATE</span>
+          {appliedDaysAgo != null && (
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+              {appliedDaysAgo <= 0 ? 'applied today' : appliedDaysAgo === 1 ? 'applied yesterday' : `applied ${appliedDaysAgo}d ago`}
+            </span>
+          )}
+        </div>
+        {calc.lastAppliedTargets && ['Training', 'Rest'].map(suffix => (
+          <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+            <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
+            <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
+              {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+            </span>
+            <span style={{ flex: 1 }} />
+            <span style={{ display: 'flex', gap: 9 }}>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {calc.lastAppliedTargets[`protein${suffix}`]}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {calc.lastAppliedTargets[`carbs${suffix}`]}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {calc.lastAppliedTargets[`fat${suffix}`]}</span>
+            </span>
           </div>
-          {['Training', 'Rest'].map(suffix => (
-            <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
-              <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
-              <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
-                {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
-              </span>
-              <span style={{ flex: 1 }} />
-              <span style={{ display: 'flex', gap: 9 }}>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {calc.lastAppliedTargets[`protein${suffix}`]}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {calc.lastAppliedTargets[`carbs${suffix}`]}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {calc.lastAppliedTargets[`fat${suffix}`]}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+        ))}
 
-      {status === 'insufficient' && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
-          Building your baseline, log a bit more and check back.
-        </div>
-      )}
-      {status === 'waiting' && (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 10 }}>
-          <span style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-            Next check-in in {daysUntil} day{daysUntil === 1 ? '' : 's'}.
-          </span>
-          {/* Skipping (or applying) only ever moves the automatic nag by a
-              week, it was never meant to also lock the sheet itself behind
-              that timer: without this, "Skip for now" had no way back in
-              until the week was up. */}
+        {status === 'insufficient' && (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
+            Building your baseline, log a bit more and check back.
+          </div>
+        )}
+        {status === 'waiting' && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 10 }}>
+            <span style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+              Next check-in in {daysUntil} day{daysUntil === 1 ? '' : 's'}.
+            </span>
+            {/* Skipping (or applying) only ever moves the automatic nag by a
+                week, it was never meant to also lock the sheet itself behind
+                that timer: without this, "Skip for now" had no way back in
+                until the week was up. */}
+            <button data-reorder-ignore="true" onClick={onOpenCheckin} style={{
+              background: 'none', border: 'none', padding: 0, color: 'var(--accent)',
+              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent', textShadow: 'none', flexShrink: 0,
+            }}>Check in now</button>
+          </div>
+        )}
+        {status === 'due' && (
           <button data-reorder-ignore="true" onClick={onOpenCheckin} style={{
-            background: 'none', border: 'none', padding: 0, color: 'var(--accent)',
-            fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent', textShadow: 'none', flexShrink: 0,
-          }}>Check in now</button>
-        </div>
-      )}
-      {status === 'due' && (
-        <button data-reorder-ignore="true" onClick={onOpenCheckin} style={{
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 12,
-          padding: '10px 12px', background: `rgba(var(--accent-rgb),0.16)`,
-          border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6,
-          color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
-          cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
-        }}>
-          <i className="fa-solid fa-bolt" style={{ fontSize: 13 }} />
-          <span style={{ flex: 1, textAlign: 'left' }}>{coachHasMacros ? 'Second opinion ready' : 'Weekly check-in ready'}</span>
-          <i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} />
-        </button>
-      )}
-      {showAutomation && !estimatorConfigured && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10 }}>
-          {coachHasMacros ? 'Run the estimator once to see a second opinion.' : 'Run the estimator once to enable weekly check-ins.'}
-        </div>
-      )}
-      {showAutomation && estimatorConfigured && !checkinEnabled && (
-        <button data-reorder-ignore="true" onClick={enableCheckins} style={{
-          display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
-          marginTop: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
-          WebkitTapHighlightColor: 'transparent', textShadow: 'none',
-        }}>
-          <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 10, color: 'var(--accent)' }} />
-          {coachHasMacros ? 'Enable second opinions' : 'Enable weekly check-ins'}
-        </button>
-      )}
-      {/* Rate, protein/fat mode, rest-day closeness: everything the check-in
-          itself recalibrates against, without a detour through the estimate's
-          own weight/height/age fields to get there. Opens the same estimator
-          MacroTargetSheet's own "Estimate targets for me" does, just reached
-          directly since this is now where someone actively relying on the
-          automation is already standing. */}
-      {checkinEnabled && (
-        <button data-reorder-ignore="true" onClick={onOpenSettings} style={{
-          display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
-          marginTop: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
-          WebkitTapHighlightColor: 'transparent', textShadow: 'none',
-        }}>
-          <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)' }} />
-          Adjust rate, protein & fat
-        </button>
-      )}
-    </Card>
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 10,
+            padding: '10px 12px', background: `rgba(var(--accent-rgb),0.16)`,
+            border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6,
+            color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-bolt" style={{ fontSize: 13 }} />
+            <span style={{ flex: 1, textAlign: 'left' }}>{coachHasMacros ? 'Second opinion ready' : 'Weekly check-in ready'}</span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} />
+          </button>
+        )}
+        {showAutomation && !estimatorConfigured && (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10 }}>
+            {coachHasMacros ? 'Run the estimator once to see a second opinion.' : 'Run the estimator once to enable weekly check-ins.'}
+          </div>
+        )}
+        {showAutomation && estimatorConfigured && !checkinEnabled && (
+          <button data-reorder-ignore="true" onClick={enableCheckins} style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
+            marginTop: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 10, color: 'var(--accent)' }} />
+            {coachHasMacros ? 'Enable second opinions' : 'Enable weekly check-ins'}
+          </button>
+        )}
+        {/* Rate, protein/fat mode, rest-day closeness: everything the check-in
+            itself recalibrates against, without a detour through the estimate's
+            own weight/height/age fields to get there. Opens the same estimator
+            MacroTargetSheet's own "Estimate targets for me" does, just reached
+            directly since this is now where someone actively relying on the
+            automation is already standing. */}
+        {checkinEnabled && (
+          <button data-reorder-ignore="true" onClick={onOpenSettings} style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
+            marginTop: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)' }} />
+            Adjust rate, protein & fat
+          </button>
+        )}
+      </div>
+    </HealthChartCard>
   );
 }
 
@@ -4158,9 +4161,14 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   );
   const targetLabel = macroTargetAvg
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
-    : `DAILY TARGETS${fromCoach ? (selfCoachedMacros ? ' · FROM YOUR PLAN' : ' · FROM COACH') : ''}`;
+    : 'DAILY TARGETS';
+  // Accent-framed on purpose: these are the numbers actually in effect, the
+  // one thing in the merged Targets card that must read as authoritative
+  // next to the plain-framed algorithm-estimate box below it (source line
+  // right above already says whose targets these are, no need to repeat it
+  // in the label here too).
   const targetRow = (
-    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
       </div>
@@ -4217,21 +4225,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // expandableCards further down, which the sheet renders from by this id).
   const expandBtn = id => () => setExpandedCardId(id);
 
-  // The 4 macro cards live together in the macroGroup composite below (source
-  // + check-in, target kcal/P/C/F, adherence trend, macro breakdown) so hide/
+  // The 3 macro cards live together in the macroGroup composite below
+  // (targets + algorithm estimate, adherence trend, macro breakdown) so hide/
   // move/reorder always treats them as one unit, leaving one behind orphans
   // the others (an adherence trend with no targets to compare against isn't
   // useful alone).
   const macroSourceCard = (
-    <MacroSourceCard store={store} setStore={setStore} dragHandle={handle}
+    <MacroSourceCard store={store} setStore={setStore} dragHandle={handle} tf={tf} setTf={setTf}
       coachHasMacros={coachHasMacros} fromCoach={fromCoach} selfCoachedMacros={selfCoachedMacros}
       hasTargets={!!effectiveTargets} onSetTarget={() => setTargetOpen(true)} onOpenCheckin={() => setCheckinOpen(true)}
-      onOpenSettings={() => setAutomationSettingsOpen(true)} />
-  );
-  const macroTargetsCard = (
-    <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf}>
+      onOpenSettings={() => setAutomationSettingsOpen(true)}>
       {targetRow}
-    </HealthChartCard>
+    </MacroSourceCard>
   );
   const macroAdherenceCard = (
     <HealthChartCard title="Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} onExpand={expandBtn('macroAdherence')}
@@ -4251,14 +4256,12 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
     aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} />,
-    // Source + check-in first (the one card with an action in it), then the
-    // now purely-display Targets card (full width, needs the room for the
-    // P/C/F chip row), then Adherence + the macro breakdown paired below it,
-    // always full-width as a whole, see fullWidthCardIds.
+    // Targets first (full width, needs the room for the P/C/F chip rows),
+    // then Adherence + the macro breakdown paired below it, always full-width
+    // as a whole, see fullWidthCardIds.
     macroGroup: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {macroSourceCard}
-        {macroTargetsCard}
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
           {macroAdherenceCard}
           {macrosCard}
