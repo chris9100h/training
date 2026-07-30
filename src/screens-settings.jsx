@@ -1468,12 +1468,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     // just omits the Date/Day <td>s entirely (standard HTML table merge).
     const rowSpanAt = new Map(mergeSpans.map(([s, e]) => [s, e - s + 1]));
     const mergedAway = new Set(mergeSpans.flatMap(([s, e]) => Array.from({ length: e - s }, (_, i) => s + i + 1)));
+    // Zebra striping is applied per <td> here, not via a `tr:nth-child`
+    // background rule: a rowspan cell has no background of its own, so a
+    // row-level stripe painted on the <tr> it visually overlaps shows
+    // through it, and the merged Date/Day cell ends up striped internally
+    // instead of reading as one solid block. Explicit white on Date/Day
+    // sidesteps that entirely, regardless of what the row underneath does.
     const bodyRows = rows.map((r, i) => {
-      const restCells = r.slice(2).map(c => `<td>${escHtml(c)}</td>`).join('');
+      const stripe = i % 2 === 1 ? ' style="background:#f7f7f7"' : '';
+      const restCells = r.slice(2).map(c => `<td${stripe}>${escHtml(c)}</td>`).join('');
       if (mergedAway.has(i)) return `<tr>${restCells}</tr>`;
       const span = rowSpanAt.get(i) || 1;
       const spanAttr = span > 1 ? ` rowspan="${span}"` : '';
-      return `<tr><td${spanAttr}>${escHtml(r[0])}</td><td${spanAttr}>${escHtml(r[1])}</td>${restCells}</tr>`;
+      return `<tr><td${spanAttr} style="background:#fff">${escHtml(r[0])}</td><td${spanAttr} style="background:#fff">${escHtml(r[1])}</td>${restCells}</tr>`;
     }).join('');
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Training Export</title>
@@ -1484,7 +1491,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         table{border-collapse:collapse;width:100%;font-size:11px;border:1px solid #999}
         th,td{border:1px solid #999;padding:5px 8px;text-align:left;vertical-align:top}
         th{background:${accent};color:#fff;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
-        tbody tr:nth-child(even){background:#f7f7f7}
       </style>
     </head><body>
       <div style="padding:8px 0 14px;text-align:center;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Training Export</div>
