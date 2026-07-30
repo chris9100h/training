@@ -5768,6 +5768,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   }, [displayList, inventoryList]);
   const includedForDisplay = useMemoFd(() => includedList.filter(i => !fdIsLowStock(i)), [includedList]);
   const excludedForDisplay = useMemoFd(() => excludedList.filter(i => !fdIsLowStock(i)), [excludedList]);
+  // Collapsed by default: the Excluded section is set-aside stuff the user
+  // already decided not to buy, not something that needs to compete for
+  // attention with the actual shopping list every time this screen opens.
+  const [excludedOpen, setExcludedOpen] = useStateFd(false);
 
   // One-time "Running Low" banner: shows only for a dip the user hasn't
   // already seen (see fdReadLowStockAcks), dismissing marks every currently-
@@ -6191,11 +6195,16 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 {excludedForDisplay.length > 0 && (
                   <>
                     <div className="knurl" style={{ margin: '16px 0 10px' }} />
-                    <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi, textAlign: 'center' }}>Excluded</div>
+                    <button onClick={() => setExcludedOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi }}>Excluded ({excludedForDisplay.length})</span>
+                      <i className={`fa-solid fa-chevron-${excludedOpen ? 'down' : 'right'}`} style={{ fontSize: 11, color: 'var(--accent)' }} />
+                    </button>
                     <div className="knurl" style={{ margin: '10px 0' }} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {excludedForDisplay.map(item => renderShoppingRow(item))}
-                    </div>
+                    {excludedOpen && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {excludedForDisplay.map(item => renderShoppingRow(item))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
