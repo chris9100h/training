@@ -1335,8 +1335,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         : null; // 'all' -> no lower bound
       const to = csvRange === 'custom' ? csvTo : today;
 
+      // s.date is a full timestamptz ("2026-07-29T10:00:00+00:00"), not a bare
+      // date: sliced to the first 10 chars both for the range compare (else a
+      // session with a non-midnight time sorts past a plain-date `to` bound
+      // and silently drops off the end of its own day) and for display.
       const allSessions = await LB.fetchFullTrainingHistory(store, userId);
-      const sessions = from ? allSessions.filter(s => (s.date || '') >= from && (s.date || '') <= to) : allSessions;
+      const sessions = from ? allSessions.filter(s => (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to) : allSessions;
       const esc = v => {
         if (v == null || v === '') return '';
         const s = String(v);
@@ -1356,6 +1360,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       const rows = [];
       let maxSets = 0;
+      let lastSessionId = null;
       [...sessions]
         .sort((a, b) => `${a.date || ''}${a.startedAt || ''}`.localeCompare(`${b.date || ''}${b.startedAt || ''}`))
         .forEach(s => {
@@ -1363,7 +1368,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const cells = (en.sets || []).filter(st => st.done && !st.skipped && !st.warmup).map(formatSet);
             if (!cells.length) return;
             maxSets = Math.max(maxSets, cells.length);
-            rows.push([s.date || '', s.dayName || '', en.name || '', ...cells]);
+            // Date/Day repeat only on a session's first exported row, blank
+            // after that, so a multi-exercise session reads as one visual
+            // block instead of restating the same date on every line.
+            const isNewSession = s.id !== lastSessionId;
+            rows.push([isNewSession ? (s.date || '').slice(0, 10) : '', isNewSession ? (s.dayName || '') : '', en.name || '', ...cells]);
+            lastSessionId = s.id;
           });
         });
 
@@ -1374,7 +1384,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
       const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      // Leading BOM: without it, Excel guesses the system codepage instead of
+      // UTF-8 and mangles any non-ASCII character in an exercise name (seen
+      // first-hand: a "20 in a name rendered as "20â€œ).
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const suffix = csvRange === 'custom' ? `${csvFrom}-${csvTo}` : csvRange === 'all' ? 'all' : `${csvRange}d`;
       const a = document.createElement('a'); a.href = url; a.download = `training-history-${suffix}.csv`;
