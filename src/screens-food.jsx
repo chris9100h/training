@@ -3225,28 +3225,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={dayMenu} onClose={() => setDayMenu(false)} title={dayLabel}>
         <button onClick={() => { setDayMenu(false); setMocSheet({ name: mocName || '', hour: mocHour }); }}
           disabled={!dayTarget}
-          style={{ ...fdTemplateBtn, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
-          <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
-          <span style={{ flex: 1, textAlign: 'left' }}>
-            {isMealOfChoice ? 'Meal of choice, set' : 'Make this a meal of choice day'}
-          </span>
-          <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+          style={{ ...fdTemplateBtn, flexDirection: 'column', alignItems: 'stretch', gap: 8, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            <span style={{ flex: 1, textAlign: 'left' }}>
+              {isMealOfChoice ? 'Meal of choice, set' : 'Make this a meal of choice day'}
+            </span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+          </div>
+          {/* Always shown, including the first one and including zero: the point
+              of a counter you dose by is that it is there before you decide, not
+              only once you are already over. */}
+          <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'left' }}>
+            {isMealOfChoice
+              ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
+              : mocWeek.count === 0
+                ? 'None yet this week.'
+                : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 400, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'left' }}>
+            {dayTarget
+              ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
+              : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
+          </div>
         </button>
-        {/* Always shown, including the first one and including zero: the point
-            of a counter you dose by is that it is there before you decide, not
-            only once you are already over. */}
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
-          {isMealOfChoice
-            ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
-            : mocWeek.count === 0
-              ? 'None yet this week.'
-              : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
-        </div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
-          {dayTarget
-            ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
-            : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
-        </div>
         <button onClick={() => { setDayMenu(false); setStatsOpen(true); }} style={{ ...fdTemplateBtn, marginTop: 8 }}>
           <i className="fa-solid fa-chart-column" style={{ fontSize: 13, color: 'var(--accent)' }} />
           <span style={{ flex: 1, textAlign: 'left' }}>Stats</span>
@@ -6646,24 +6648,52 @@ function FdStatsBody({ store }) {
   }, [period, from, to]);
 
   const s = useMemoFd(() => {
-    const adhByDate = {}, calByDate = {}, macroByDate = {};
+    const adhByDate = {}, calByDate = {}, macroByDate = {}, mocDates = new Set();
     (store.dailyLogs || []).forEach(l => {
       if (l.date < range.from || l.date > range.to) return;
       if (l.adherence != null) adhByDate[l.date] = l.adherence;
       if (l.calories) { calByDate[l.date] = l.calories; macroByDate[l.date] = l; }
+      // A meal-of-choice day is deliberately unscored (dailyLogAdherence
+      // always nulls its adherence, see store.js), so it must not read as a
+      // missed day here either: excluded from the goal-hit rate's own
+      // denominator and skipped (neither breaking nor extending) by the
+      // streak below, rather than counting as 0% the way a genuinely
+      // untracked day correctly does.
+      if (l.mealOfChoice) mocDates.add(l.date);
     });
     const dates = fdDateRange(range.from, range.to);
-    const days = dates.map(d => ({ date: d, value: adhByDate[d] || 0 }));
+    const days = dates.map(d => ({ date: d, value: adhByDate[d] || 0, moc: mocDates.has(d) }));
+    const scorable = days.filter(d => !d.moc);
     const loggedDates = dates.filter(d => calByDate[d] > 0);
-    const goalDays = days.filter(d => d.value >= FD_STATS_GOAL_ADHERENCE);
+    const goalDays = scorable.filter(d => d.value >= FD_STATS_GOAL_ADHERENCE);
     const avgCal = loggedDates.length ? Math.round(loggedDates.reduce((a, d) => a + calByDate[d], 0) / loggedDates.length) : 0;
-    const rate = days.length ? Math.round((goalDays.length / days.length) * 100) : 0;
+    const rate = scorable.length ? Math.round((goalDays.length / scorable.length) * 100) : 0;
     let best = 0, cur = 0;
-    days.forEach(d => { if (d.value >= FD_STATS_GOAL_ADHERENCE) { cur++; best = Math.max(best, cur); } else cur = 0; });
+    days.forEach(d => {
+      if (d.moc) return;
+      if (d.value >= FD_STATS_GOAL_ADHERENCE) { cur++; best = Math.max(best, cur); } else cur = 0;
+    });
     const avgMacros = loggedDates.length ? {
       protein: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].protein || 0), 0) / loggedDates.length),
       carbs: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].carbs || 0), 0) / loggedDates.length),
       fat: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].fat || 0), 0) / loggedDates.length),
+    } : null;
+    // Average GOAL macros over the same logged days, from each day's own
+    // frozen targetsSnap (the target it was actually scored against at save
+    // time, see dailyLogAdherence): a raw achieved average means little on
+    // its own without something to compare it to, and a single "today's
+    // target" reference would be wrong for a period spanning both training
+    // and rest days, or a target the user changed partway through.
+    const goalSum = { protein: 0, carbs: 0, fat: 0, n: 0 };
+    loggedDates.forEach(d => {
+      const snap = macroByDate[d].targetsSnap;
+      if (!snap || (snap.protein == null && snap.carbs == null && snap.fat == null)) return;
+      goalSum.protein += snap.protein || 0; goalSum.carbs += snap.carbs || 0; goalSum.fat += snap.fat || 0; goalSum.n++;
+    });
+    const avgGoalMacros = goalSum.n ? {
+      protein: Math.round(goalSum.protein / goalSum.n),
+      carbs: Math.round(goalSum.carbs / goalSum.n),
+      fat: Math.round(goalSum.fat / goalSum.n),
     } : null;
     // Top logged food: counts actually-eaten log rows as-is (not recipe-
     // exploded like the Shopping List's own tally), one count per entry,
@@ -6680,7 +6710,7 @@ function FdStatsBody({ store }) {
     });
     let top = null;
     counts.forEach(row => { if (!top || row.count > top.count) top = row; });
-    return { days, loggedDays: loggedDates.length, goalDays: goalDays.length, avgCal, rate, best, avgMacros, top };
+    return { days, loggedDays: loggedDates.length, goalDays: goalDays.length, avgCal, rate, best, avgMacros, avgGoalMacros, top };
   }, [store.dailyLogs, store.foodLogs, range]);
 
   const segBtn = (id, label) => (
@@ -6729,6 +6759,12 @@ function FdStatsBody({ store }) {
         <Card style={{ padding: 14 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Average macros this period</div>
           <FdMacroBits protein={s.avgMacros.protein} carbs={s.avgMacros.carbs} fat={s.avgMacros.fat} strong />
+          {s.avgGoalMacros && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>Average goal</div>
+              <FdMacroBits protein={s.avgGoalMacros.protein} carbs={s.avgGoalMacros.carbs} fat={s.avgGoalMacros.fat} />
+            </div>
+          )}
         </Card>
       )}
     </div>
