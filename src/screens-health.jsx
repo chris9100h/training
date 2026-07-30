@@ -2415,8 +2415,12 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 // fight for attention against the coach-info / SET-EDIT clutter.
 function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin }) {
   const calc = store.settings?.macroCalc || {};
-  const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'From your active plan' : 'From your coach';
-  const showAutomation = !coachHasMacros;
+  const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
+  // Offered while coached too now: a coach's numbers still always win (see
+  // effectiveMacroTargets, unchanged), Apply below only ever touches the
+  // dormant personal target, this is purely a second opinion to weigh
+  // against the coach's own numbers, not a way to override them.
+  const showAutomation = true;
   // apply() in MacroEstimatorSheet always writes a goal (defaulting to
   // 'maintain'), so its presence is what tells apart "the estimator has run
   // at least once" from macros the user typed by hand, which is what
@@ -2451,7 +2455,7 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
   }
 
   return (
-    <Card style={{ padding: 16 }}>
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {dragHandle}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Targets</span>
@@ -2483,13 +2487,13 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
           cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           <i className="fa-solid fa-bolt" style={{ fontSize: 13 }} />
-          <span style={{ flex: 1, textAlign: 'left' }}>Weekly check-in ready</span>
+          <span style={{ flex: 1, textAlign: 'left' }}>{coachHasMacros ? 'Second opinion ready' : 'Weekly check-in ready'}</span>
           <i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} />
         </button>
       )}
       {showAutomation && !estimatorConfigured && (
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 10 }}>
-          Run the estimator once to enable weekly check-ins.
+          {coachHasMacros ? 'Run the estimator once to see a second opinion.' : 'Run the estimator once to enable weekly check-ins.'}
         </div>
       )}
       {showAutomation && estimatorConfigured && !checkinEnabled && (
@@ -2499,7 +2503,7 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
           WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 10, color: 'var(--accent)' }} />
-          Enable weekly check-ins
+          {coachHasMacros ? 'Enable second opinions' : 'Enable weekly check-ins'}
         </button>
       )}
     </Card>
@@ -2513,7 +2517,7 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
 // today either way, that is what stops the nag, not whether the numbers
 // actually changed. Never applies anything on its own; see MacroEstimatorSheet
 // for the same "estimate is a prefill, not a save" philosophy this mirrors.
-function WeeklyCheckinSheet({ open, onClose, store, setStore }) {
+function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, coachingMacros }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
   const toKg = w => (isLbs ? Number(w) * LBS_TO_KG : Number(w));
@@ -2572,23 +2576,27 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore }) {
       <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
     </span>
   );
-  const dayRow = (label, suffix) => (
-    <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+  // targets: whichever target set (the algo's newTargets, or coachingMacros
+  // for the comparison block below) to read this row's numbers from.
+  // groupKey disambiguates the two Training/Rest row pairs when both render.
+  const dayRow = (label, suffix, targets, groupKey) => (
+    <div key={`${groupKey}-${suffix}`} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
       <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{label}</span>
       <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
-        {newTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+        {targets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
       </span>
       <span style={{ flex: 1 }} />
       <span style={{ display: 'flex', gap: 9 }}>
-        {chip('P', newTargets[`protein${suffix}`])}
-        {chip('C', newTargets[`carbs${suffix}`])}
-        {chip('F', newTargets[`fat${suffix}`])}
+        {chip('P', targets[`protein${suffix}`])}
+        {chip('C', targets[`carbs${suffix}`])}
+        {chip('F', targets[`fat${suffix}`])}
       </span>
     </div>
   );
+  const showCoachCompare = coachHasMacros && LB.hasMacroTargets(coachingMacros);
 
   return (
-    <Sheet open={open} onClose={onClose} title="Weekly check-in">
+    <Sheet open={open} onClose={onClose} title={coachHasMacros ? 'Second opinion' : 'Weekly check-in'}>
       {!adaptive?.ok ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Not enough data yet.</div>
       ) : (
@@ -2626,9 +2634,23 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore }) {
           </div>
           {newTargets ? (
             <>
-              {dayRow('Training', 'Training')}
+              {showCoachCompare && (
+                <>
+                  <div className="micro" style={{ color: 'var(--accent)', marginBottom: 4 }}>Your coach</div>
+                  {dayRow('Training', 'Training', coachingMacros, 'coach')}
+                  <div style={{ height: 0.5, background: UI.hair }} />
+                  {dayRow('Rest', 'Rest', coachingMacros, 'coach')}
+                  <div className="micro" style={{ color: UI.inkFaint, margin: '14px 0 4px' }}>The algorithm suggests</div>
+                </>
+              )}
+              {dayRow('Training', 'Training', newTargets, 'algo')}
               <div style={{ height: 0.5, background: UI.hair }} />
-              {dayRow('Rest', 'Rest')}
+              {dayRow('Rest', 'Rest', newTargets, 'algo')}
+              {coachHasMacros && (
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 12 }}>
+                  Applying only updates your personal targets. Your coach's numbers stay active either way.
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
                 <Btn kind="ghost" onClick={() => finish(false)} style={{ flex: 1 }}>Skip for now</Btn>
                 <Btn onClick={() => finish(true)} style={{ flex: 1 }}>Apply</Btn>
@@ -4218,7 +4240,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} />
+      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );
