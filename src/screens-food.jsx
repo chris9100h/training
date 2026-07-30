@@ -26,6 +26,19 @@ function fdShiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return LB.fmtISO(d);
 }
+// Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
+// Used by the Stats sheet to build a chart series with a bar (or gap) for
+// every day in the period, not just days that happen to have a log.
+function fdDateRange(from, to) {
+  const out = [];
+  const cur = new Date(from + 'T12:00:00'), end = new Date(to + 'T12:00:00');
+  let guard = 0;
+  while (cur <= end && guard < 1000) {
+    out.push(LB.fmtISO(cur));
+    cur.setDate(cur.getDate() + 1); guard++;
+  }
+  return out;
+}
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
 // Splits `total` into `n` whole-number parts as evenly as possible, remainder
@@ -301,6 +314,11 @@ const FD_SHOPPING_RATE_FLOOR_DAYS = 7;
 // 100kg is far past any real package or stash a user would actually track,
 // so this only ever catches garbage input, never a genuine bulk-buyer.
 const FD_SHOPPING_QTY_MAX_G = 100000;
+// Same green threshold fdAdherenceColor/screens-health.jsx's adherenceColor
+// already use for "on target": the Stats sheet's streak/goal-hit KPIs and
+// chart target line reuse it rather than inventing a second definition of
+// "good" for the same metric.
+const FD_STATS_GOAL_ADHERENCE = 90;
 function fdClampQtyG(n) {
   return n == null ? null : Math.min(FD_SHOPPING_QTY_MAX_G, n);
 }
@@ -923,6 +941,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
+  const [statsOpen, setStatsOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -3228,6 +3247,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
             : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
         </div>
+        <button onClick={() => { setDayMenu(false); setStatsOpen(true); }} style={{ ...fdTemplateBtn, marginTop: 8 }}>
+          <i className="fa-solid fa-chart-column" style={{ fontSize: 13, color: 'var(--accent)' }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>Stats</span>
+          <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+        </button>
+      </Sheet>
+
+      <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="Stats" titleColor="var(--accent)">
+        <FdStatsBody store={store} />
       </Sheet>
 
       {/* Naming is optional but it is the ONLY thing the coach sees: the name
@@ -6593,6 +6621,119 @@ const FD_PICKER_TABS = [
   { id: 'favorites', label: 'Favorites' },
   { id: 'recent', label: 'Recent' },
 ];
+
+// Stats sheet body: 7/30/90/custom history of macro adherence with
+// drag-to-inspect bars (reuses HealthBarChart, same as Water's own stats
+// sheet), KPIs, and an average-macros breakdown. Charts adherence (0-100,
+// store.dailyLogs, see dailyLogAdherence in store.js) rather than raw
+// calories: HealthBarChart's target line is a single scalar for the whole
+// period, but the actual calorie target can differ by training/rest day or
+// change over time (targetsSnap freezes a day's target as of when it was
+// scored), so only the already-normalized adherence score stays meaningful
+// across an arbitrary date range. A day with no macro target (or nothing
+// logged) has adherence: null, treated as 0 for both the chart and the KPIs
+// below, same as Water treats an unlogged day as 0ml: an untracked day is
+// not a hit, not a gap in the data.
+function FdStatsBody({ store }) {
+  const [period, setPeriod] = useStateFd(30);
+  const [from, setFrom] = useStateFd(fdShiftDate(LB.todayISO(), -29));
+  const [to, setTo] = useStateFd(LB.todayISO());
+  const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
+
+  const range = useMemoFd(() => {
+    if (period === 'custom') return (from > to) ? { from: to, to: from } : { from, to };
+    return { from: fdShiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
+  }, [period, from, to]);
+
+  const s = useMemoFd(() => {
+    const adhByDate = {}, calByDate = {}, macroByDate = {};
+    (store.dailyLogs || []).forEach(l => {
+      if (l.date < range.from || l.date > range.to) return;
+      if (l.adherence != null) adhByDate[l.date] = l.adherence;
+      if (l.calories) { calByDate[l.date] = l.calories; macroByDate[l.date] = l; }
+    });
+    const dates = fdDateRange(range.from, range.to);
+    const days = dates.map(d => ({ date: d, value: adhByDate[d] || 0 }));
+    const loggedDates = dates.filter(d => calByDate[d] > 0);
+    const goalDays = days.filter(d => d.value >= FD_STATS_GOAL_ADHERENCE);
+    const avgCal = loggedDates.length ? Math.round(loggedDates.reduce((a, d) => a + calByDate[d], 0) / loggedDates.length) : 0;
+    const rate = days.length ? Math.round((goalDays.length / days.length) * 100) : 0;
+    let best = 0, cur = 0;
+    days.forEach(d => { if (d.value >= FD_STATS_GOAL_ADHERENCE) { cur++; best = Math.max(best, cur); } else cur = 0; });
+    const avgMacros = loggedDates.length ? {
+      protein: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].protein || 0), 0) / loggedDates.length),
+      carbs: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].carbs || 0), 0) / loggedDates.length),
+      fat: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].fat || 0), 0) / loggedDates.length),
+    } : null;
+    // Top logged food: counts actually-eaten log rows as-is (not recipe-
+    // exploded like the Shopping List's own tally), one count per entry,
+    // normalized name groups casing/whitespace variants of the same food
+    // the way fdShoppingKey does, display uses whichever raw name the group
+    // was first seen under.
+    const counts = new Map();
+    (store.foodLogs || []).forEach(e => {
+      if (e.planned || !e.foodName || e.date < range.from || e.date > range.to) return;
+      const key = fdNormFoodName(e.foodName);
+      const row = counts.get(key) || { name: e.foodName, count: 0 };
+      row.count++;
+      counts.set(key, row);
+    });
+    let top = null;
+    counts.forEach(row => { if (!top || row.count > top.count) top = row; });
+    return { days, loggedDays: loggedDates.length, goalDays: goalDays.length, avgCal, rate, best, avgMacros, top };
+  }, [store.dailyLogs, store.foodLogs, range]);
+
+  const segBtn = (id, label) => (
+    <button onClick={() => setPeriod(id)} style={{
+      flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
+      background: period === id ? 'var(--accent)' : 'transparent',
+      color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
+      textShadow: period === id ? 'none' : 'var(--text-lift)',
+      fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
+    }}>{label}</button>
+  );
+  const statCard = (label, value, sub) => (
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '11px 12px', minWidth: 0 }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 5 }}>{label}</div>
+      <div className="num" style={{ fontSize: 19, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {value}{sub && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 4, fontFamily: UI.fontUi }}>{sub}</span>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 14 }}>
+        {segBtn(7, '7D')}{segBtn(30, '30D')}{segBtn(90, '90D')}{segBtn('custom', 'Custom')}
+      </div>
+      {period === 'custom' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ ...fdInputStyle, colorScheme: timeColorScheme }} /></Field>
+          <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...fdInputStyle, colorScheme: timeColorScheme }} /></Field>
+        </div>
+      )}
+      <div style={{ marginBottom: 20 }}>
+        <HealthBarChart series={s.days} from={range.from} to={range.to}
+          format={v => `${Math.round(v)}%`} target={FD_STATS_GOAL_ADHERENCE}
+          color={UI.ok} colorSoft="rgba(var(--ok-rgb),0.35)" />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {statCard('Best streak', `🔥 ${s.best}`, 'days')}
+        {statCard('Goal hit', `${s.rate}`, '%')}
+        {statCard('Goal days', `${s.goalDays}`, 'days')}
+        {statCard('Days logged', `${s.loggedDays}`, 'days')}
+        {statCard('Avg / day', `${s.avgCal}`, 'kcal')}
+        {statCard('Top food', s.top ? s.top.name : 'None', s.top ? `${s.top.count}x` : null)}
+      </div>
+      {s.avgMacros && (
+        <Card style={{ padding: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Average macros this period</div>
+          <FdMacroBits protein={s.avgMacros.protein} carbs={s.avgMacros.carbs} fat={s.avgMacros.fat} strong />
+        </Card>
+      )}
+    </div>
+  );
+}
 
 // Multi-select ingredient picker for the recipe editor. Tapping a search
 // result / favorite / recent item opens a quantity step (same idiom as

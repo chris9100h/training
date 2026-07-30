@@ -606,12 +606,33 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // scheduleSlotId) would still read it as not taken.
     const dueMatch = curDateLogs.find(l => l.medicationId === med.id && l.scheduleSlotId && l.planned
       && parseInt((l.time || '0:00').split(':')[0], 10) === hour);
-    setStore(s => ({
-      ...s,
-      medicationLogs: dueMatch
-        ? (s.medicationLogs || []).map(l => l.id === dueMatch.id ? { ...l, doseQty: qty, planned: false } : l)
-        : [...(s.medicationLogs || []), { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null }],
-    }));
+    if (dueMatch) {
+      setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === dueMatch.id ? { ...l, doseQty: qty, planned: false } : l) }));
+      setLogDraft(null);
+      return;
+    }
+    // mdAutoFillToday only ever materializes TODAY's due slots (see its own
+    // comment), so dueMatch above can never find a real row on any other
+    // date, even when the Timeline's own live preview (byHour below) is
+    // already showing this exact dose as due. Without this, logging a
+    // previewed dose on a past or future day always fell through to the
+    // disconnected ad-hoc branch, leaving the original preview stuck "due"
+    // forever and permanently undercounting that day's taken/due tally even
+    // though the dose really was logged. Re-derive the same due-slot
+    // answer byHour's own preview already computes and, if this logged dose
+    // matches one, materialize the CANONICAL row for it (mdMaterializeSlotEntry,
+    // the same deterministic id auto-fill itself would use) already marked
+    // taken, instead of a random-id row with no scheduleSlotId.
+    const wd = LB.isoWd(new Date(curDate + 'T12:00:00'));
+    const existingSlotIds = new Set(curDateLogs.filter(l => l.scheduleSlotId).map(l => l.scheduleSlotId));
+    const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
+    const dueSlot = scheduleSlots.find(slot =>
+      slot.medicationId === med.id && slot.hour === hour && !existingSlotIds.has(slot.id) &&
+      mdSlotAppliesOn(slot, curDate, wd, activePlanIds));
+    const entry = dueSlot
+      ? { ...mdMaterializeSlotEntry(med, dueSlot, curDate), doseQty: qty, planned: false }
+      : { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
+    setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), entry] }));
     setLogDraft(null);
   }
 

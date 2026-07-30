@@ -6066,7 +6066,15 @@ async function endDeload(userId, store, setStore) {
 
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
+  // Medications (migration 0218/0221) mirrors the exact SELECT/mapping
+  // loadFromSupabase uses for these 6 tables, kept in sync by hand since
+  // this is a second, lighter fetch path rather than a shared helper: the
+  // boot merge already handles all 6 correctly (see app.jsx), this
+  // function was just never extended to include them when it was written,
+  // so a coach push or another device's dose log landing in the 30s-30min
+  // background window was invisible until a full reload.
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
+         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -6074,8 +6082,15 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error
+      || medicationPlansRes.error || medicationsRes.error || medicationScheduleSlotsRes.error || medicationLogsRes.error || medicationPlanItemsRes.error || medicationPillboxChecksRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -6119,6 +6134,38 @@ async function refreshHealthLogs(userId) {
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
     foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
+    medicationPlans: (medicationPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
+      coachId: p.coach_id ?? null, active: !!p.active, createdAt: p.created_at, updatedAt: p.updated_at,
+    })),
+    medications: (medicationsRes?.data || []).map(m => ({
+      id: m.id, name: m.name, brand: m.brand ?? null,
+      category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
+      packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
+      stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
+      excludeFromPillbox: !!m.exclude_from_pillbox,
+      createdAt: m.created_at, updatedAt: m.updated_at,
+    })),
+    medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
+      id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
+      weekdays: s.weekdays || [],
+      hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
+      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      createdAt: s.created_at, updatedAt: s.updated_at,
+    })),
+    medicationLogs: (medicationLogsRes?.data || []).map(l => ({
+      id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
+      date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    })),
+    medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
+      id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
+      createdAt: it.created_at,
+    })),
+    medicationPillboxChecks: (medicationPillboxChecksRes?.data || []).map(c => ({
+      id: c.id, date: c.date, scheduleSlotId: c.schedule_slot_id,
+    })),
   };
 }
 
