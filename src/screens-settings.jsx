@@ -1412,6 +1412,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       { s: { r: s + 1, c: 1 }, e: { r: e + 1, c: 1 } },
     ]);
     ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 26 }, ...header.slice(3).map(() => ({ wch: 10 }))];
+    // Filter dropdowns on the header row, the closest thing to Ctrl+T this
+    // library's free tier can do: a real Excel Table (ListObject, what
+    // Ctrl+T actually creates) does not allow merged cells inside its range,
+    // and that would mean giving up the Date/Day session merges above, so
+    // this stays a plain range with autofilter rather than a Table.
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: header.length - 1 } }) };
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Training');
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -1435,11 +1441,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Training Export</title>
       <style>
-        *{margin:0;padding:0;box-sizing:border-box}
+        *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
         @page{margin:12mm}
         body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a1a}
-        table{border-collapse:collapse;width:100%;font-size:11px}
-        th,td{border:1px solid #ddd;padding:5px 8px;text-align:left;vertical-align:top}
+        table{border-collapse:collapse;width:100%;font-size:11px;border:1px solid #999}
+        th,td{border:1px solid #999;padding:5px 8px;text-align:left;vertical-align:top}
         th{background:${accent};color:#fff;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
         tbody tr:nth-child(even){background:#f7f7f7}
       </style>
