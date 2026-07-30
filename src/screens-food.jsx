@@ -48,6 +48,23 @@ function fdEvenSplitFloat(total, n) {
   parts[n - 1] = Math.round((parts[n - 1] + drift) * 100) / 100;
   return parts;
 }
+// Next hour at or after `preferred` (wrapping to the start of the day if the
+// day runs out) with no existing entries (byHour) and not already claimed by
+// another meal in this same split (`taken`), so the default proposal for a
+// new split meal never silently lands on top of an unrelated existing entry
+// or on top of another new meal's own hour. Without this a preferred hour
+// past 19 clamps straight to 23 with no free-hour search at all, which for a
+// preferred hour of exactly 23 (a stack starting at 19+) proposes putting
+// the new meal on the SAME hour as the one being split. Falls back to
+// `preferred` itself only if every hour of the day is already taken, same
+// degraded "user has to fix it by hand" outcome the unconditional clamp
+// always had, just no longer the common case.
+function fdNextFreeHour(preferred, byHour, taken) {
+  const isFree = h => !(byHour[h] || []).length && !taken.includes(h);
+  for (let h = preferred; h <= 23; h++) if (isFree(h)) return h;
+  for (let h = 0; h < preferred; h++) if (isFree(h)) return h;
+  return preferred;
+}
 // Scales a food-log entry's amount/macros/ingredient-snapshot by `scale`, for
 // "split into multiple meals": a fixed-composition food or recipe batch
 // scales every field (and each recipeItems ingredient) linearly by the same
@@ -408,6 +425,39 @@ function fdShoppingProjectionTally(store, todayISO, days) {
   }
   return fdReconcileShoppingTally(tally);
 }
+// fdReconcileShoppingTally only folds a name-keyed row into an id-keyed one
+// WITHIN a single tally. A food logged standalone (real food_id, lands in
+// hist) that's ALSO only ever eaten via a projected recipe slot (no
+// food_id, lands in proj under a name key) survives reconciliation in both
+// tallies as two separate rows under two different keys, since neither
+// tally on its own has both variants to fold together. Re-keys any such
+// name-keyed row (in either tally) to the matching id-keyed key when the
+// SAME food (by normalized name) has a real food_id in EITHER tally,
+// backfilling foodId/brand onto the moved row so it still carries its real
+// product identity. Deliberately does NOT merge totalGrams/count/firstDate
+// across hist and proj, a projection's quantity must stay only the
+// projection's own total (see fdBuildShoppingList below). Mutates hist/proj
+// in place; called once per fdBuildShoppingList run, before the two tallies
+// are merged into a single key set.
+function fdUnifyShoppingKeys(hist, proj) {
+  const idRowByName = new Map();
+  [hist, proj].forEach(tally => tally.forEach(row => { if (row.foodId) idRowByName.set(fdNormFoodName(row.foodName), row); }));
+  [hist, proj].forEach(tally => {
+    const renames = [];
+    tally.forEach((row, key) => {
+      if (row.foodId) return;
+      const idRow = idRowByName.get(fdNormFoodName(row.foodName));
+      if (!idRow) return;
+      const idKey = fdShoppingKey(idRow.foodId, idRow.foodName);
+      if (idKey === key) return;
+      renames.push([key, idKey, { ...row, foodId: idRow.foodId, brand: row.brand || idRow.brand }]);
+    });
+    // A tally already has its own row under idKey only if fdReconcileShoppingTally
+    // missed it, which it doesn't: within one tally there's at most one row
+    // per normalized name, so this rename never collides with an existing entry.
+    renames.forEach(([oldKey, newKey, newRow]) => { tally.delete(oldKey); tally.set(newKey, newRow); });
+  });
+}
 // Merges the two signals without ever double-counting a food: a projected
 // food's quantity is the projection's own total for the window, full stop,
 // never added to the historical estimate (a template slot is a definite
@@ -432,6 +482,7 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   const favKeys = fdFavoriteShoppingKeys(store.foodFavorites);
   const hist = fdShoppingHistoryTally(store.foodLogs, todayISO);
   const proj = fdShoppingProjectionTally(store, todayISO, shoppingDays);
+  fdUnifyShoppingKeys(hist, proj);
   const keys = new Set([...hist.keys(), ...proj.keys()]);
   const out = [];
   keys.forEach(key => {
@@ -1159,7 +1210,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (entries.length >= 2) {
       const qtys = {};
       entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
-      const nextHours = [Math.min(23, h + 4)];
+      const nextHours = [fdNextFreeHour(Math.min(23, h + 4), byHour, [h])];
       splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
       setSplitCount(2);
       setSplitHours(nextHours);
@@ -1193,7 +1244,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setSplitCount(n);
     setSplitHours(prev => {
       const next = prev.slice(0, n - 1);
-      while (next.length < n - 1) next.push(Math.min(23, (next[next.length - 1] ?? splitHour) + 4));
+      while (next.length < n - 1) {
+        const base = next[next.length - 1] ?? splitHour;
+        next.push(fdNextFreeHour(Math.min(23, base + 4), byHour, [splitHour, ...next]));
+      }
       return next;
     });
     setSplitQtys(prev => {
@@ -2779,6 +2833,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (n && !await confirm(`${n} item${n === 1 ? '' : 's'} from your description won't be added.`, { title: 'Discard items?', ok: 'Discard', cancel: 'Keep reviewing', danger: true })) return;
     setMealItems(null);
   }
+  // Blocks "Log it"/"Plan it"/"Add N items" while any row is still at a 0g
+  // (or otherwise missing) amount: editMealItem (via openCustomAsScalable)
+  // is the only way to fix a row's quantity, an untouched 0g AI estimate
+  // would otherwise commit a phantom entry with nothing to catch it, unlike
+  // every sibling add path (see customValid above) which already guards this.
+  const mealItemsValid = !!mealItems && mealItems.length > 0 && mealItems.every(i => i.quantityG > 0);
   // "Log it" / "Plan it" / "Add N items" on the review list: every row
   // becomes its own staged entry (same shape/destination as any other add
   // path), sharing one time/createdAt since they're all the one described
@@ -4144,13 +4204,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => commitMealItems(false)} style={{ flex: 2 }}>
+            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 2 }}>
               Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
             </Btn>
           </div>
