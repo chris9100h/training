@@ -722,11 +722,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
-  const [exportingCSV, setExportingCSV] = useStateSet(false);
-  const [csvSheet, setCsvSheet] = useStateSet(false);
-  const [csvRange, setCsvRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
-  const [csvFrom, setCsvFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
-  const [csvTo, setCsvTo] = useStateSet(() => LB.todayISO());
+  const [exportingTraining, setExportingTraining] = useStateSet(false);
+  const [trainingExportSheet, setTrainingExportSheet] = useStateSet(false);
+  const [exportFormat, setExportFormat] = useStateSet('csv'); // 'csv' | 'xlsx' | 'pdf'
+  const [exportRange, setExportRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
+  const [exportFrom, setExportFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
+  const [exportTo, setExportTo] = useStateSet(() => LB.todayISO());
   // Weight axis only: 'mixed' is kg on the weight side, and the picker below
   // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
   // user with neither button selected and a bogus unit mismatch on import.
@@ -1320,84 +1321,158 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       return false;
     }
   };
-  // One row per session x exercise, sets as trailing columns ("100x10"),
-  // so a session with a different set count than the next just has a
-  // shorter row instead of forcing a fixed grid. Only completed, non-warmup,
-  // non-skipped sets count: a set the user never actually did has nothing
-  // meaningful to put in the cell.
-  const doExportTrainingCSV = async () => {
-    setExportingCSV(true);
-    try {
-      const today = LB.todayISO();
-      const from = csvRange === '7' ? settingsShiftISO(today, -6)
-        : csvRange === '30' ? settingsShiftISO(today, -29)
-        : csvRange === 'custom' ? csvFrom
-        : null; // 'all' -> no lower bound
-      const to = csvRange === 'custom' ? csvTo : today;
+  // Shared by all three export formats: fetch + range-filter + flatten to one
+  // row per session x exercise, sets as trailing columns ("100x10"). Only
+  // completed, non-warmup, non-skipped sets count: a set the user never
+  // actually did has nothing meaningful to put in the cell. mergeSpans
+  // records, in `rows` index space, which runs of rows belong to the same
+  // session (Date/Day blanked after the first row of a run, same as CSV used
+  // to do standalone) so XLSX/PDF can turn that into a real merged/rowspanned
+  // cell instead of the blank-repeat trick CSV has to fall back on.
+  const buildTrainingExportRows = async () => {
+    const today = LB.todayISO();
+    const from = exportRange === '7' ? settingsShiftISO(today, -6)
+      : exportRange === '30' ? settingsShiftISO(today, -29)
+      : exportRange === 'custom' ? exportFrom
+      : null; // 'all' -> no lower bound
+    const to = exportRange === 'custom' ? exportTo : today;
 
-      // s.date is a full timestamptz ("2026-07-29T10:00:00+00:00"), not a bare
-      // date: sliced to the first 10 chars both for the range compare (else a
-      // session with a non-midnight time sorts past a plain-date `to` bound
-      // and silently drops off the end of its own day) and for display.
-      const allSessions = await LB.fetchFullTrainingHistory(store, userId);
-      const sessions = from ? allSessions.filter(s => (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to) : allSessions;
-      const esc = v => {
-        if (v == null || v === '') return '';
-        const s = String(v);
-        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      // Purely data-driven off the set's own fields, not the exercise's
-      // log_mode: covers weight+reps, reps-only, checkbox and time-based
-      // exercises alike, and assisted/drop-set/myo-rep sets (kg can be
-      // negative, or already the top-set number of a technique chain) fall
-      // out of the same formula without special-casing each one.
-      const formatSet = (st) => {
-        if (st.timeSec != null) return `${st.timeSec}s`;
-        const reps = (st.repsL != null || st.repsR != null) ? `${st.repsL ?? '-'}/${st.repsR ?? '-'}` : (st.reps ?? '');
-        if (st.kg == null) return reps !== '' ? String(reps) : 'done';
-        return `${st.kg}x${reps}`;
-      };
+    // s.date is a full timestamptz ("2026-07-29T10:00:00+00:00"), not a bare
+    // date: sliced to the first 10 chars both for the range compare (else a
+    // session with a non-midnight time sorts past a plain-date `to` bound
+    // and silently drops off the end of its own day) and for display.
+    const allSessions = await LB.fetchFullTrainingHistory(store, userId);
+    const sessions = from ? allSessions.filter(s => (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to) : allSessions;
 
-      const rows = [];
-      let maxSets = 0;
-      let lastSessionId = null;
-      [...sessions]
-        .sort((a, b) => `${a.date || ''}${a.startedAt || ''}`.localeCompare(`${b.date || ''}${b.startedAt || ''}`))
-        .forEach(s => {
-          (s.entries || []).forEach(en => {
-            const cells = (en.sets || []).filter(st => st.done && !st.skipped && !st.warmup).map(formatSet);
-            if (!cells.length) return;
-            maxSets = Math.max(maxSets, cells.length);
-            // Date/Day repeat only on a session's first exported row, blank
-            // after that, so a multi-exercise session reads as one visual
-            // block instead of restating the same date on every line.
-            const isNewSession = s.id !== lastSessionId;
-            rows.push([isNewSession ? (s.date || '').slice(0, 10) : '', isNewSession ? (s.dayName || '') : '', en.name || '', ...cells]);
-            lastSessionId = s.id;
-          });
+    // Purely data-driven off the set's own fields, not the exercise's
+    // log_mode: covers weight+reps, reps-only, checkbox and time-based
+    // exercises alike, and assisted/drop-set/myo-rep sets (kg can be
+    // negative, or already the top-set number of a technique chain) fall
+    // out of the same formula without special-casing each one.
+    const formatSet = (st) => {
+      if (st.timeSec != null) return `${st.timeSec}s`;
+      const reps = (st.repsL != null || st.repsR != null) ? `${st.repsL ?? '-'}/${st.repsR ?? '-'}` : (st.reps ?? '');
+      if (st.kg == null) return reps !== '' ? String(reps) : 'done';
+      return `${st.kg}x${reps}`;
+    };
+
+    const rows = [];
+    const mergeSpans = []; // [startIdx, endIdx] into `rows`, inclusive, for sessions spanning >1 row
+    let maxSets = 0;
+    let lastSessionId = null;
+    let groupStart = -1;
+    [...sessions]
+      .sort((a, b) => `${a.date || ''}${a.startedAt || ''}`.localeCompare(`${b.date || ''}${b.startedAt || ''}`))
+      .forEach(s => {
+        (s.entries || []).forEach(en => {
+          const cells = (en.sets || []).filter(st => st.done && !st.skipped && !st.warmup).map(formatSet);
+          if (!cells.length) return;
+          maxSets = Math.max(maxSets, cells.length);
+          const isNewSession = s.id !== lastSessionId;
+          if (isNewSession) {
+            if (groupStart !== -1 && rows.length - 1 > groupStart) mergeSpans.push([groupStart, rows.length - 1]);
+            groupStart = rows.length;
+          }
+          rows.push([isNewSession ? (s.date || '').slice(0, 10) : '', isNewSession ? (s.dayName || '') : '', en.name || '', ...cells]);
+          lastSessionId = s.id;
         });
+      });
+    if (groupStart !== -1 && rows.length - 1 > groupStart) mergeSpans.push([groupStart, rows.length - 1]);
 
-      if (!rows.length) {
+    const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
+    const suffix = exportRange === 'custom' ? `${exportFrom}-${exportTo}` : exportRange === 'all' ? 'all' : `${exportRange}d`;
+    return { header, rows, mergeSpans, suffix };
+  };
+
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportTrainingCSV = ({ header, rows, suffix }) => {
+    const esc = v => {
+      if (v == null || v === '') return '';
+      const s = String(v);
+      return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
+    // Leading BOM: without it, Excel guesses the system codepage instead of
+    // UTF-8 and mangles any non-ASCII character in an exercise name.
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `training-history-${suffix}.csv`);
+  };
+
+  const exportTrainingXLSX = async ({ header, rows, mergeSpans, suffix }) => {
+    const XLSX = await window.__ensureXLSX();
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    // +1 on every row: sheet row 0 is the header, `rows` index 0 is sheet row 1.
+    ws['!merges'] = mergeSpans.flatMap(([s, e]) => [
+      { s: { r: s + 1, c: 0 }, e: { r: e + 1, c: 0 } },
+      { s: { r: s + 1, c: 1 }, e: { r: e + 1, c: 1 } },
+    ]);
+    ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 26 }, ...header.slice(3).map(() => ({ wch: 10 }))];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Training');
+    const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    downloadBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `training-history-${suffix}.xlsx`);
+  };
+
+  const exportTrainingPDF = ({ header, rows, mergeSpans }) => {
+    const escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Mirror of the XLSX merges, expressed as native <td rowspan> instead:
+    // the span's first row carries the rowspan, every other row in the span
+    // just omits the Date/Day <td>s entirely (standard HTML table merge).
+    const rowSpanAt = new Map(mergeSpans.map(([s, e]) => [s, e - s + 1]));
+    const mergedAway = new Set(mergeSpans.flatMap(([s, e]) => Array.from({ length: e - s }, (_, i) => s + i + 1)));
+    const bodyRows = rows.map((r, i) => {
+      const restCells = r.slice(2).map(c => `<td>${escHtml(c)}</td>`).join('');
+      if (mergedAway.has(i)) return `<tr>${restCells}</tr>`;
+      const span = rowSpanAt.get(i) || 1;
+      const spanAttr = span > 1 ? ` rowspan="${span}"` : '';
+      return `<tr><td${spanAttr}>${escHtml(r[0])}</td><td${spanAttr}>${escHtml(r[1])}</td>${restCells}</tr>`;
+    }).join('');
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Training Export</title>
+      <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        @page{margin:12mm}
+        body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a1a}
+        table{border-collapse:collapse;width:100%;font-size:11px}
+        th,td{border:1px solid #ddd;padding:5px 8px;text-align:left;vertical-align:top}
+        th{background:${accent};color:#fff;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
+        tbody tr:nth-child(even){background:#f7f7f7}
+      </style>
+    </head><body>
+      <div style="padding:8px 0 14px;text-align:center;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Training Export</div>
+      <table><thead><tr>${header.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
+      <script>
+        var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
+        if(!isIOS){window.onload=function(){window.print()};}
+      <\/script>
+    </body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const doExportTraining = async () => {
+    setExportingTraining(true);
+    try {
+      const built = await buildTrainingExportRows();
+      if (!built.rows.length) {
         await confirm('No completed training sets found in this range.', { title: 'Nothing to export', ok: 'OK' });
         return;
       }
-
-      const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
-      const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
-      // Leading BOM: without it, Excel guesses the system codepage instead of
-      // UTF-8 and mangles any non-ASCII character in an exercise name (seen
-      // first-hand: a "20 in a name rendered as "20â€œ).
-      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const suffix = csvRange === 'custom' ? `${csvFrom}-${csvTo}` : csvRange === 'all' ? 'all' : `${csvRange}d`;
-      const a = document.createElement('a'); a.href = url; a.download = `training-history-${suffix}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setCsvSheet(false);
+      if (exportFormat === 'csv') exportTrainingCSV(built);
+      else if (exportFormat === 'xlsx') await exportTrainingXLSX(built);
+      else exportTrainingPDF(built);
+      setTrainingExportSheet(false);
     } catch (err) {
       await confirm(`Could not export training history: ${err?.message || 'Unknown error'}`, { title: 'Export failed', ok: 'OK' });
     } finally {
-      setExportingCSV(false);
+      setExportingTraining(false);
     }
   };
   const runImport = () => {
@@ -2775,14 +2850,33 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
             <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
-          <Btn kind="ghost" onClick={() => setCsvSheet(true)}>Export Training CSV</Btn>
+          <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
         </div>
       </SettingsSheet>
 
-      {/* ══ Export Training CSV Sheet ══ */}
-      <SettingsSheet open={csvSheet} onClose={exportingCSV ? () => {} : () => setCsvSheet(false)} title="Export Training CSV">
+      {/* ══ Export Training Sheet ══ */}
+      <SettingsSheet open={trainingExportSheet} onClose={exportingTraining ? () => {} : () => setTrainingExportSheet(false)} title="Export Training">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>FORMAT</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: 'csv', label: 'CSV' },
+                { key: 'xlsx', label: 'Excel' },
+                { key: 'pdf', label: 'PDF' },
+              ].map(f => (
+                <button key={f.key} onClick={() => setExportFormat(f.key)} style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  background: exportFormat === f.key ? 'var(--accent)' : UI.bgInset,
+                  color: exportFormat === f.key ? 'var(--accent-ink)' : UI.inkSoft,
+                  textShadow: 'none',
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>{f.label}</button>
+              ))}
+            </div>
+          </div>
           <div>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>TIME RANGE</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -2792,22 +2886,22 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 { key: 'custom', label: 'Custom' },
                 { key: 'all', label: 'All Time' },
               ].map(p => (
-                <button key={p.key} onClick={() => setCsvRange(p.key)} style={{
+                <button key={p.key} onClick={() => setExportRange(p.key)} style={{
                   flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
-                  background: csvRange === p.key ? 'var(--accent)' : UI.bgInset,
-                  color: csvRange === p.key ? 'var(--accent-ink)' : UI.inkSoft,
+                  background: exportRange === p.key ? 'var(--accent)' : UI.bgInset,
+                  color: exportRange === p.key ? 'var(--accent-ink)' : UI.inkSoft,
                   textShadow: 'none',
                   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                   WebkitTapHighlightColor: 'transparent',
                 }}>{p.label}</button>
               ))}
             </div>
-            {csvRange === 'custom' && (
+            {exportRange === 'custom' && (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
-                  <input type="date" value={csvFrom} max={csvTo}
-                    onChange={e => e.target.value && setCsvFrom(e.target.value)}
+                  <input type="date" value={exportFrom} max={exportTo}
+                    onChange={e => e.target.value && setExportFrom(e.target.value)}
                     style={{
                       width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
                       colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
@@ -2818,8 +2912,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
-                  <input type="date" value={csvTo} min={csvFrom} max={LB.todayISO()}
-                    onChange={e => e.target.value && setCsvTo(e.target.value)}
+                  <input type="date" value={exportTo} min={exportFrom} max={LB.todayISO()}
+                    onChange={e => e.target.value && setExportTo(e.target.value)}
                     style={{
                       width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
                       colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
@@ -2830,8 +2924,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             )}
           </div>
-          <Btn onClick={doExportTrainingCSV} disabled={exportingCSV} style={{ width: '100%' }}>
-            {exportingCSV ? 'Exporting…' : 'Export CSV'}
+          <Btn onClick={doExportTraining} disabled={exportingTraining} style={{ width: '100%' }}>
+            {exportingTraining ? 'Exporting…' : `Export ${exportFormat.toUpperCase()}`}
           </Btn>
         </div>
       </SettingsSheet>

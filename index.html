@@ -1291,6 +1291,23 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return window.__h2cPromise;
   };
 
+  // Lazily load SheetJS the first time an XLSX export is actually requested
+  // (Settings → Data → Export Training). Same pattern as html2canvas above.
+  window.__ensureXLSX = function () {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!window.__xlsxPromise) {
+      window.__xlsxPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+        s.crossOrigin = 'anonymous';
+        s.onload = function () { resolve(window.XLSX); };
+        s.onerror = function () { reject(new Error('XLSX library failed to load')); };
+        document.head.appendChild(s);
+      });
+    }
+    return window.__xlsxPromise;
+  };
+
   // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build
   // of the ZBar C library) the first time the food scanner is opened. iOS
   // Safari has no native BarcodeDetector (WebKit has never shipped it), and
