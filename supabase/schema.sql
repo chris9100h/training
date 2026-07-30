@@ -2579,14 +2579,14 @@ CREATE POLICY "zane_food_template_days_own"
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- Per-food Shopping List preferences (migration 0215): display-name override,
--- exclude flag, and package size in grams, one row per (user, food). Simple
--- owned collection like favorites/recipes, no coach access. A row with all
--- three unset has no reason to exist, the client deletes it instead of
+-- exclude flag, and package size in grams, one row per (user, shopping_key).
+-- Simple owned collection like favorites/recipes, no coach access. A row with
+-- all fields unset has no reason to exist, the client deletes it instead of
 -- leaving a no-op row behind.
 CREATE TABLE zane_food_shopping_prefs (
   id              text        PRIMARY KEY,
   user_id         uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  food_id         text        NOT NULL REFERENCES public.zane_foods(id) ON DELETE CASCADE,
+  food_id         text        REFERENCES public.zane_foods(id) ON DELETE CASCADE, -- nullable since 0227
   name_override   text,
   excluded        boolean     NOT NULL DEFAULT false,
   package_size_g  numeric,
@@ -2596,7 +2596,8 @@ CREATE TABLE zane_food_shopping_prefs (
   stock_set_at    timestamptz,                          -- 0216
   food_name       text        NOT NULL,                 -- 0217, snapshot at write time
   brand           text,                                 -- 0217
-  UNIQUE (user_id, food_id)
+  shopping_key    text        NOT NULL,                 -- 0227, identity/unique column, replaces food_id in that role
+  UNIQUE (user_id, shopping_key)
 );
 
 CREATE INDEX zane_food_shopping_prefs_user_idx ON public.zane_food_shopping_prefs USING btree (user_id);

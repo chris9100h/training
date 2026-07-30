@@ -516,12 +516,15 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
 // optional; a food with no matching pref row gets none of them. Adds
 // displayName/overridden (so the row can skip its own brand subtitle
 // instead of showing it twice) to every item, then re-sorts by whatever
-// ends up actually displayed. Recipe-exploded/custom items without a foodId
-// can never have a pref row, nothing stable to key one on.
+// ends up actually displayed. Matches on item.key, the same
+// fdShoppingKey(foodId, foodName) both fdBuildShoppingList's demand tally
+// and the pref row's own shopping_key (migration 0227) use, so a
+// recipe-exploded ingredient or Custom Item with no real foodId still finds
+// its pref row via a normalized-name fallback instead of never matching one.
 function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
-  const byFoodId = new Map((prefs || []).map(p => [p.foodId, p]));
+  const byKey = new Map((prefs || []).map(p => [p.shoppingKey, p]));
   const out = list.map(item => {
-    const pref = item.foodId ? byFoodId.get(item.foodId) : null;
+    const pref = byKey.get(item.key);
     return {
       ...item,
       displayName: pref?.nameOverride || item.foodName,
@@ -549,7 +552,7 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
   return (store.foodShoppingPrefs || [])
     .filter(p => p.stockBaselineG != null)
     .map(p => ({
-      key: `id:${p.foodId}`,
+      key: p.shoppingKey,
       foodId: p.foodId,
       foodName: p.foodName,
       brand: p.brand || null,
@@ -661,21 +664,29 @@ function fdWriteShoppingDays(v) {
 // toggleExclusion) always includes the item's current foodName/brand in
 // patch, this is the only place that writes this table, so the snapshot can
 // never silently go stale relative to what the list itself shows for the
-// same foodId. Needed so the Inventory tab (fdBuildInventoryList) can show a
+// same key. Needed so the Inventory tab (fdBuildInventoryList) can show a
 // name for a tracked item independent of fdBuildShoppingList's own
 // staple/projection filter. setStore drives it through the normal syncStore
 // diff/upsert like any other collection, so this doesn't touch Supabase
 // directly.
-function fdSetShoppingPref(setStore, foodId, patch) {
+// Keyed on fdShoppingKey(item.foodId, item.foodName) (migration 0227), not
+// item.foodId alone: a recipe-exploded ingredient or a Custom Item (Describe
+// a meal's AI estimates always log foodId: null, see commitMealItems above)
+// has no real product match, but still needs somewhere to persist an
+// exclude/rename/stock preference. The same key fdBuildShoppingList already
+// tallies demand under, so a name-keyed pref matches its item exactly the
+// way an id-keyed one always has.
+function fdSetShoppingPref(setStore, item, patch) {
+  const key = fdShoppingKey(item.foodId, item.foodName);
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
-    const existing = list.find(p => p.foodId === foodId);
-    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    const existing = list.find(p => p.shoppingKey === key);
+    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
     const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
     const next = isDefault
-      ? list.filter(p => p.foodId !== foodId)
+      ? list.filter(p => p.shoppingKey !== key)
       : existing
-        ? list.map(p => p.foodId === foodId ? merged : p)
+        ? list.map(p => p.shoppingKey === key ? merged : p)
         : [...list, merged];
     return { ...s, foodShoppingPrefs: next };
   });
@@ -5791,7 +5802,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
   function openEdit(item) {
-    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
     setEditItem(item);
     setEditDraft(item.displayName);
     setPkgDraft(item.packageSizeG != null ? String(item.packageSizeG) : '');
@@ -5851,20 +5861,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
       stockTyped = fdNum(stockDraft);
     }
     if (stockTyped != null) { patch.stockBaselineG = fdClampQtyG(stockTyped); patch.stockSetAt = new Date().toISOString(); }
-    fdSetShoppingPref(setStore, editItem.foodId, patch);
+    fdSetShoppingPref(setStore, editItem, patch);
     closeEdit();
   }
   async function resetEdit() {
     if (!editItem) return;
     if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
-    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
+    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
   // The checkbox's own handler, independent of the edit sheet: toggles
   // straight from either list section, no sheet involved.
   function toggleExclusion(item) {
-    if (!item.foodId) return;
-    fdSetShoppingPref(setStore, item.foodId, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
+    fdSetShoppingPref(setStore, item, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
   }
   // Shared row for both includedList and excludedList below: same layout,
   // just dimmed with the checkbox unchecked once excluded. The checkbox is a
@@ -5899,12 +5908,11 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         {!inventoryMode && (
           <FdCheckbox
             checked={!item.excluded}
-            disabled={!item.foodId}
             label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
             onToggle={() => toggleExclusion(item)}
           />
         )}
-        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
+        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
