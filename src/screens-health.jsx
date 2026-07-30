@@ -2516,6 +2516,11 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
       else { status = 'waiting'; daysUntil = 7 - since; }
     }
   }
+  // Plain historical marker, not tied to checkinEnabled: whether the
+  // algorithm's numbers are currently active or not (a coach could have
+  // taken over since, or automation could since be off), "I did tap Apply on
+  // this date" stays true, and that's the thing to confirm here.
+  const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
 
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
@@ -2530,6 +2535,11 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
         }}>{hasTargets ? 'EDIT' : 'SET'}</button>
       </div>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>{sourceLabel}</div>
+      {appliedDaysAgo != null && (
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+          {appliedDaysAgo <= 0 ? 'Algorithm estimate applied today.' : appliedDaysAgo === 1 ? 'Algorithm estimate applied yesterday.' : `Algorithm estimate applied ${appliedDaysAgo} days ago.`}
+        </div>
+      )}
 
       {status === 'insufficient' && (
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
@@ -2658,14 +2668,22 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
     : null;
 
   // Both actions count as "handled this week": only Apply also touches
-  // macroTargets, lastCheckinAt moves to today either way.
+  // macroTargets, lastCheckinAt moves to today either way. lastAppliedAt is
+  // separate and only ever set on an actual Apply, a plain historical marker
+  // ("the algorithm's numbers were last accepted on this date") for
+  // MacroSourceCard to surface, not something a later Skip should touch or
+  // clear.
   const finish = (applyTargets) => {
     setStore(s => ({
       ...s,
       settings: {
         ...s.settings,
         ...(applyTargets && newTargets ? { macroTargets: newTargets } : {}),
-        macroCalc: { ...s.settings.macroCalc, lastCheckinAt: LB.todayISO() },
+        macroCalc: {
+          ...s.settings.macroCalc,
+          lastCheckinAt: LB.todayISO(),
+          ...(applyTargets && newTargets ? { lastAppliedAt: LB.todayISO() } : {}),
+        },
       },
     }));
     onClose();
