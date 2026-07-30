@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.685',
+    date: '2026-07-30',
+    title: 'Your numbers, your way 📊',
+    items: [
+      "📤 Export your training history: Settings → Data → Export Training. Pick CSV, a properly formatted spreadsheet, or a clean PDF, then the last 7 days, 30 days, a custom range, or everything. Every session, exercise, set, rep and weight, grouped and readable, not a wall of raw numbers.",
+      "📊 Food Stats (Food → the day menu → Stats): your macro adherence over time as a chart, your longest goal-hit streak, how many days you actually hit target, average calories and macros for the period next to what you were actually aiming for, and which food you reached for most. 7, 30, 90 days, or your own range.",
+      "🏋️ Pulley ratio converter: the Plate Calculator has a third tab now. Tell it the ratio you trained with and the one your machine actually has, and it works out the equivalent weight, one tap applies it straight to your set.",
+      "✨ Smaller fixes: the Shopping List now works for AI-described meals and recipe ingredients too (exclude, rename, track stock, whatever you need, and its Excluded section tucks itself away by default now), a food that showed up twice on the list shows once now, and a favorite keeps its full nutrition info (sugar, saturated fat, sodium) after you reload the app.",
+    ],
+  },
+  {
     id: 'v2.684',
     date: '2026-07-29',
     title: 'Just tell it what you ate 🍝',
