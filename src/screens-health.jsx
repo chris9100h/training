@@ -1767,7 +1767,12 @@ function EstimatorInput({ pinned, style = {}, ...rest }) {
   );
 }
 
-function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
+// standalone: opened directly from MacroSourceCard's "Adjust rate, protein &
+// fat" rather than nested inside MacroTargetSheet's own "Estimate targets for
+// me". Same sheet either way, just clearer copy: nested, this is a preview
+// the PARENT sheet's own Save still has to confirm; standalone, this tap IS
+// the save, there is no second screen after it.
+function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalone }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
   // "g of fat per kg" reads as an odd fraction in pounds, so the field is shown
@@ -2163,7 +2168,9 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
   // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
     <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
-      {hint('A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
+      {hint(standalone
+        ? 'Rate, protein, fat and training split all live here, whatever you set feeds both this estimate and your weekly automatic check-ins.'
+        : 'A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
         { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
 
       <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
@@ -2351,7 +2358,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply }) {
         </Card>
       )}
 
-      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>Use these numbers</Btn>
+      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>{standalone ? 'Save automation settings' : 'Use these numbers'}</Btn>
     </Sheet>
   );
 }
@@ -2586,7 +2593,7 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
           WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)' }} />
-          Adjust automation settings
+          Adjust rate, protein & fat
         </button>
       )}
     </Card>
@@ -2640,6 +2647,15 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
   const tdeeDelta = (adaptive?.ok && originalTdee != null) ? adaptive.tdee - originalTdee : null;
   const weightDeltaDisplay = adaptive?.ok ? Math.round(Math.abs(fromKg(adaptive.weightChangeKg)) * 10) / 10 : null;
   const weightDir = !adaptive?.ok ? null : adaptive.weightChangeKg > 0.05 ? 'up' : adaptive.weightChangeKg < -0.05 ? 'down' : 'steady';
+  // The week-average figure for each target set, the only thing directly
+  // comparable to "New maintenance estimate" above: Training/Rest alone
+  // don't say anything on their own without knowing how many of each a week
+  // actually has (calc.trainingDays), same reasoning weeklyAverageCalories
+  // exists for everywhere else in the app.
+  const algoAvg = newTargets ? LB.weeklyAverageCalories(newTargets.caloriesTraining, newTargets.caloriesRest, calc.trainingDays) : null;
+  const coachAvg = (coachHasMacros && LB.hasMacroTargets(coachingMacros))
+    ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
+    : null;
 
   // Both actions count as "handled this week": only Apply also touches
   // macroTargets, lastCheckinAt moves to today either way.
@@ -2677,7 +2693,15 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
       </span>
     </div>
   );
-  const showCoachCompare = coachHasMacros && LB.hasMacroTargets(coachingMacros);
+  const showCoachCompare = coachAvg != null;
+  const avgLine = (value) => (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+      <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Average</span>
+      <span className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 400 }}>
+        {value}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+      </span>
+    </div>
+  );
 
   return (
     <Sheet open={open} onClose={onClose} title={coachHasMacros ? 'Second opinion' : 'Weekly check-in'}>
@@ -2721,12 +2745,14 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
               {showCoachCompare && (
                 <>
                   <div className="micro" style={{ color: 'var(--accent)', marginBottom: 4 }}>Your coach</div>
+                  {avgLine(coachAvg)}
                   {dayRow('Training', 'Training', coachingMacros, 'coach')}
                   <div style={{ height: 0.5, background: UI.hair }} />
                   {dayRow('Rest', 'Rest', coachingMacros, 'coach')}
                   <div className="micro" style={{ color: UI.inkFaint, margin: '14px 0 4px' }}>The algorithm suggests</div>
                 </>
               )}
+              {avgLine(algoAvg)}
               {dayRow('Training', 'Training', newTargets, 'algo')}
               <div style={{ height: 0.5, background: UI.hair }} />
               {dayRow('Rest', 'Rest', newTargets, 'algo')}
@@ -4331,7 +4357,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros} />
-      <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore}
+      <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
         onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
