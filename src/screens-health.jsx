@@ -2548,16 +2548,16 @@ function MacroSourceCard({ store, setStore, dragHandle, coachHasMacros, fromCoac
             Last algorithm estimate{appliedDaysAgo != null ? (appliedDaysAgo <= 0 ? ', today' : appliedDaysAgo === 1 ? ', yesterday' : `, ${appliedDaysAgo}d ago`) : ''}
           </div>
           {['Training', 'Rest'].map(suffix => (
-            <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '2px 0' }}>
-              <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
-              <span className="num" style={{ fontSize: 13, color: UI.ink, fontWeight: 400 }}>
-                {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 8, color: UI.inkFaint, marginLeft: 1 }}>kcal</span>
+            <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+              <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
+              <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
+                {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
               </span>
               <span style={{ flex: 1 }} />
-              <span style={{ display: 'flex', gap: 7 }}>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {calc.lastAppliedTargets[`protein${suffix}`]}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {calc.lastAppliedTargets[`carbs${suffix}`]}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 10, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {calc.lastAppliedTargets[`fat${suffix}`]}</span>
+              <span style={{ display: 'flex', gap: 9 }}>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {calc.lastAppliedTargets[`protein${suffix}`]}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {calc.lastAppliedTargets[`carbs${suffix}`]}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {calc.lastAppliedTargets[`fat${suffix}`]}</span>
               </span>
             </div>
           ))}
