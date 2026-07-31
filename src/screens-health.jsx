@@ -2507,6 +2507,17 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   const enableCheckins = () => {
     setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, checkinEnabled: true } } }));
   };
+  const isLbs = UI.unit() === 'lbs';
+  // Gain/cut with no rate on record yet: macroTargetsFromGoal (store.js)
+  // reads a missing rateKgPerWeek as 0, which silently produces MAINTENANCE
+  // calories the moment the weekly check-in applies, despite the goal
+  // saying otherwise. Rather than picking a rate for the user invisibly,
+  // park the goal here and ask (rateModalGoal holds which one is pending),
+  // committed together in confirmGoalRate below. Maintain never needs a
+  // rate (WeeklyCheckinSheet already forces it to 0), so it always applies
+  // immediately. Already has a rate on file (a previous estimator run, or a
+  // previous answer here)? Don't ask again, just switch.
+  const [rateModalGoal, setRateModalGoal] = useStateH(null);
   // Standalone, independent of the estimator: a user on manual or coached
   // targets who has never run (and may never run) the full estimator can
   // still tell the app cut/maintain/gain directly. Consumed by the AI daily
@@ -2514,7 +2525,12 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   // direction correctly instead of defaulting to "down is good", and
   // prefills MacroEstimatorSheet's own goal step if it's ever opened later.
   const setGoal = goal => {
+    if (goal !== 'maintain' && !calc.rateKgPerWeek) { setRateModalGoal(goal); return; }
     setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, goal } } }));
+  };
+  const confirmGoalRate = rateKgPerWeek => {
+    setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, goal: rateModalGoal, rateKgPerWeek } } }));
+    setRateModalGoal(null);
   };
 
   // 'insufficient' | 'waiting' | 'due' | null (automation off or not offered).
@@ -2536,6 +2552,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
 
   return (
+    <>
     <HealthChartCard title="Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={dragHandle}
       headerExtra={
         <button data-reorder-ignore="true" onClick={onSetTarget} style={{
@@ -2659,6 +2676,24 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
         )}
       </div>
     </HealthChartCard>
+    {/* Only reached when gain/cut is picked with no rate on file yet, see
+        setGoal above: asks once, up front, rather than silently defaulting
+        a number the user never chose. */}
+    <Sheet open={!!rateModalGoal} onClose={() => setRateModalGoal(null)} title="How fast?" titleColor="var(--accent)">
+      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+        Pick a weekly rate for {rateModalGoal === 'gain' ? 'gaining' : 'losing'}. You can fine-tune this any time from the full estimator.
+      </div>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+        {(isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => (
+          <button key={r} onClick={() => confirmGoalRate(isLbs ? r * LBS_TO_KG : r)} style={{
+            flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
+            WebkitTapHighlightColor: 'transparent',
+          }}>{r} {UI.unit()}</button>
+        ))}
+      </div>
+    </Sheet>
+    </>
   );
 }
 
