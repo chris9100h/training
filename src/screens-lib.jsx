@@ -3393,13 +3393,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return LB.e1rm(st.kg, prReps(st, exId));
   };
   const prMap = {};
-  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess =>
+  // Whether any comparison-candidate session below (same filter) is windowed-out
+  // rather than genuinely empty: entries: [] with aggExercises > 0 means the session
+  // HAD sets that just aren't loaded locally (see docs/internals.md's History-Windowing
+  // section), not that it trained nothing. aggExercises is only a total count with no
+  // per-exercise breakdown, so there is no way to tell which specific exId such a gap
+  // might be hiding numbers for, any exercise in the viewed session could be the one.
+  // Left unguarded, a windowed-out prior session silently contributes zero to prMap,
+  // so whatever was lifted here would falsely read as a brand new PR. isPR below
+  // abstains (no badge at all) for every exercise in this session once a single such
+  // gap turns up among the candidates, rather than risk showing a false positive.
+  let prMapHasGap = false;
+  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
+    if (!(sess.entries || []).length && (sess.aggExercises || 0) > 0) { prMapHasGap = true; return; }
     sess.entries.forEach(e => e.sets.forEach(st => {
       const val = prValueOf(st, e.exId);
       if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
       prMap[e.exId] = val;
-    }))
-  );
+    }));
+  });
   const sessionBestMap = {};
   s.entries.forEach(e => e.sets.forEach(st => {
     const val = prValueOf(st, e.exId);
@@ -3411,6 +3423,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     if (val == null) return false;
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
+    // A windowed-out prior session means prMap was built without that session's
+    // numbers, so "best" here can't be trusted as truly the best. Abstain instead
+    // of showing a badge we can't back up (see prMapHasGap above).
+    if (prMapHasGap) return false;
     const best = prMap[exId];
     // No prior history for this exercise at all, nothing to beat, so the
     // first-ever session with it isn't a PR (matches the two other isPR
