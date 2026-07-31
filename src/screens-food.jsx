@@ -7453,18 +7453,17 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             }}>{curItem.foodName}</span>
           </div>
 
-          {/* Hero: this ingredient's own macros at the currently typed amount,
-              same "BracketFrame gold + 40px num + FdMacroGhosts" idiom
-              RecipeEditorScreen's own "Whole batch" block already established,
-              training's equivalent of a big focused live number under the name. */}
-          <BracketFrame gold style={{ padding: 20 }}>
-            <div className="micro" style={{ marginBottom: 4 }}>This ingredient</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{curItem.calories}</span>
-              <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
-            </div>
-            <FdMacroGhosts protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat} style={{ marginTop: 12 }} />
-          </BracketFrame>
+          {/* Whole batch leads: the more consequential number while stepping
+              through ingredients (does this dish still hit target?), so it
+              gets the prominent hero treatment (gold number, accent glow).
+              Starts equal to the saved recipe (items is cloned from
+              recipe.items on open) and live-updates with every amount edit
+              or add/swap/remove action. */}
+          <FdMacroHero label="Whole batch" calories={batchTotals.calories} protein={batchTotals.protein} carbs={batchTotals.carbs} fat={batchTotals.fat} prominent />
+
+          {/* This ingredient's own macros at the currently typed amount, the
+              secondary, compact card right below the primary one above. */}
+          <FdMacroHero label="This ingredient" calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat} />
 
           {curItem.note && (
             <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
@@ -7476,22 +7475,6 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
           <Field label="Amount (g)">
             <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
-
-          {/* Secondary, compact readout: the whole recipe's running total,
-              same gold BracketFrame family as the hero above so it reads as
-              related, but visibly smaller so the hero keeps priority. Starts
-              equal to the saved recipe's own totals (items is cloned from
-              recipe.items on open) and live-updates with every amount edit
-              or add/swap/remove action, so the user always sees what each
-              change does to the whole dish, not just this one ingredient. */}
-          <BracketFrame gold style={{ padding: 14 }}>
-            <div className="micro" style={{ marginBottom: 4 }}>Whole batch</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span className="num" style={{ fontSize: 22, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{batchTotals.calories}</span>
-              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
-            </div>
-            <FdMacroGhosts protein={batchTotals.protein} carbs={batchTotals.carbs} fat={batchTotals.fat} size={11} style={{ marginTop: 8 }} />
-          </BracketFrame>
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
@@ -8905,6 +8888,36 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
       {cell('C', carbs)}
       {cell('F', fat)}
     </div>
+  );
+}
+// Centered "hero" macro readout for Cooking Mode's two per-screen cards
+// (this ingredient / the whole batch): calories big, P/C/F below in
+// FD_MACRO_COLORS, the same protein/carbs/fat colors the rest of the Log
+// tab already uses (FdMacroBits), not FdMacroGhosts' neutral UI.inkSoft.
+// A dedicated component rather than reusing FdMacroGhosts here: that one is
+// also RecipeEditorScreen's own "Whole batch" card, and giving IT colors
+// too was not asked for, out of scope. `prominent` is the one of the two
+// cards that should read as the primary focus: bigger numbers, the
+// calorie figure in UI.gold instead of UI.ink, a faint accent fill and glow.
+function FdMacroHero({ label, calories, protein, carbs, fat, prominent }) {
+  const numSize = prominent ? 44 : 24;
+  const macroSize = prominent ? 13 : 11;
+  return (
+    <BracketFrame gold style={{
+      padding: prominent ? 22 : 14, textAlign: 'center',
+      ...(prominent ? { borderRadius: 8, background: 'rgba(var(--accent-rgb),0.06)', boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.18)' } : null),
+    }}>
+      <div className="micro-gold" style={{ marginBottom: 4 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
+        <span className="num" style={{ fontSize: numSize, fontWeight: 300, color: prominent ? UI.gold : UI.ink, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+        <span style={{ fontSize: prominent ? 15 : 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: prominent ? 12 : 8 }}>
+        <span className="num" style={{ fontSize: macroSize, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
+        <span className="num" style={{ fontSize: macroSize, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
+        <span className="num" style={{ fontSize: macroSize, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
+      </div>
+    </BracketFrame>
   );
 }
 // The "what you're about to log" readout: kcal on the left, macros on the
