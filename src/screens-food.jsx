@@ -3282,6 +3282,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const now = new Date().toISOString();
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === recipeId ? { ...r, items, cookedWeightG, updatedAt: now } : r) }));
   }
+  // Every other use of this Sheet (plain log, plan, edit an existing entry)
+  // stays a free backdrop-tap-to-close, low stakes, a couple seconds of typing
+  // to redo. Reached via Cooking Mode it is not: a whole ingredient-by-
+  // ingredient walkthrough sits behind it, so a stray tap outside the sheet
+  // gets a confirm instead of silently dropping back to the recipe list. The
+  // cook itself is never actually lost either way, fdClearCookingDraft only
+  // ever fires on an explicit commit or an untouched first-step exit (see
+  // CookingModeScreen), a discard here just leaves that draft in place for
+  // "Cook it" to resume later.
+  async function requestCloseRecipeLogPrompt() {
+    if (recipeLogPrompt?.fromCookingMode) {
+      const ok = await confirm("Your cooked batch isn't logged yet. It's saved, Cook it will offer to resume right where you left off.",
+        { title: 'Discard for now?', ok: 'Discard', cancel: 'Keep editing', danger: true });
+      if (!ok) return;
+    }
+    setRecipeLogPrompt(null);
+    setEditingEntry(null);
+  }
 
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
   // hour is pending, so the target time is always visible and cancelable.
@@ -4701,7 +4719,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           comment for why a literal higher zIndex is unsafe here). Do not
           move this Sheet below CookingModeScreen's render call, or reorder
           either one, without re-reading that comment first. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
+      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
           // Always share the LIVE recipe. When this sheet is opened from an
           // already-logged entry (openEditRecipeEntry) the prompt holds a
@@ -7113,6 +7131,18 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   const startedAtRef = useRefFd(null);
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const pickerModeRef = useRefFd('add'); // 'add' | 'swap': which toolbar button opened FdIngredientPicker
+  // Keeps the active chip centered in the strip as currentIdx moves, same
+  // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
+  // without it the strip only scrolls by hand and the active chip silently
+  // runs off-screen on a longer ingredient list.
+  const chipRowRef = useRefFd(null);
+  useEffectFd(() => {
+    const row = chipRowRef.current;
+    if (!row || step !== 'ingredients') return;
+    const chip = row.querySelector(`[data-chip-idx="${currentIdx}"]`);
+    if (!chip) return;
+    row.scrollLeft = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
+  }, [currentIdx, step]);
   const [diffOpen, setDiffOpen] = useStateFd(false);
   const [diffList, setDiffList] = useStateFd([]);
   // Whether this open resumed a saved draft (vs. a from-scratch cook):
@@ -7202,6 +7232,18 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   }
 
   const rawGramsTotal = useMemoFd(() => items.reduce((a, i) => a + (i.quantityG || 0), 0), [items]);
+  // Whole-batch running total, same math as RecipeEditorScreen's own
+  // `totals`: recomputed straight off the live `items` state, so it starts
+  // equal to the saved recipe (items is cloned from recipe.items on open)
+  // and updates itself for free on every amount/add/swap/remove action,
+  // no separate "recompute on change" wiring needed.
+  const netCarbs = !!store.settings?.netCarbs;
+  const batchTotals = useMemoFd(() => ({
+    calories: fdRecipeItemsCalories(items, netCarbs),
+    protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
+    carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
+    fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
+  }), [items, netCarbs]);
   const curItem = items[currentIdx] || null;
   // Continuous shrink instead of training's fixed length breakpoints: a
   // straight-line falloff past a comfortable short-name length, clamped to
@@ -7386,9 +7428,9 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
         </div>
 
         {/* Chip row, tap a chip to jump straight to that ingredient. */}
-        <div style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {items.map((it, i) => (
-            <button key={it.id} onClick={() => goToIndex(i)} style={{
+            <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
               flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
               border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
               background: i === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
@@ -7411,6 +7453,19 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             }}>{curItem.foodName}</span>
           </div>
 
+          {/* Hero: this ingredient's own macros at the currently typed amount,
+              same "BracketFrame gold + 40px num + FdMacroGhosts" idiom
+              RecipeEditorScreen's own "Whole batch" block already established,
+              training's equivalent of a big focused live number under the name. */}
+          <BracketFrame gold style={{ padding: 20 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>This ingredient</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{curItem.calories}</span>
+              <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+            </div>
+            <FdMacroGhosts protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat} style={{ marginTop: 12 }} />
+          </BracketFrame>
+
           {curItem.note && (
             <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
               <div className="micro-gold" style={{ marginBottom: 4 }}>Note</div>
@@ -7422,8 +7477,21 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
 
-          <FdMacroPreview calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat}
-            sugar={curItem.sugar} satFat={curItem.satFat} sodiumMg={curItem.sodiumMg} marginBottom={0} />
+          {/* Secondary, compact readout: the whole recipe's running total,
+              same gold BracketFrame family as the hero above so it reads as
+              related, but visibly smaller so the hero keeps priority. Starts
+              equal to the saved recipe's own totals (items is cloned from
+              recipe.items on open) and live-updates with every amount edit
+              or add/swap/remove action, so the user always sees what each
+              change does to the whole dish, not just this one ingredient. */}
+          <BracketFrame gold style={{ padding: 14 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>Whole batch</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span className="num" style={{ fontSize: 22, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{batchTotals.calories}</span>
+              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+            </div>
+            <FdMacroGhosts protein={batchTotals.protein} carbs={batchTotals.carbs} fat={batchTotals.fat} size={11} style={{ marginTop: 8 }} />
+          </BracketFrame>
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
