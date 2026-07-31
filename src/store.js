@@ -6432,14 +6432,24 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 // Assembles everything the ai-daily-summary Edge Function needs for one day,
 // straight off the already-loaded store, no extra fetch. weightTrend is a
 // 14-day trailing window (this day inclusive), ascending, nulls excluded: a
-// single day's weight can't show a trend, only a short series can. training
-// is one entry per ended session logged that day (usually 0 or 1); cardio is
-// separate (zane_cardio_logs, its own tracker, not part of a lifting session).
+// single day's weight can't show a trend, only a short series can. Sick/
+// vacation/deload days drop out (routine and hydration both swing on those),
+// same exclusion estimateAdaptiveTdee already applies to this exact signal,
+// kept consistent rather than feeding the summary a noisier series than the
+// check-in feature would trust. training is one entry per ended session
+// logged that day (usually 0 or 1); cardio is separate (zane_cardio_logs,
+// its own tracker, not part of a lifting session). goal ('cut'/'maintain'/
+// 'gain', see macroTargetsFromGoal) is only ever set once the estimator has
+// run at least once (MacroSourceCard's estimatorConfigured gate), null for
+// everyone else (manual targets, coached without ever running it): the
+// Edge Function must never guess a direction to judge the weight trend
+// against when this is null, "down" is not universally "good".
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
   const weightTrend = (store.dailyLogs || [])
     .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
+    .filter(l => !statusModeForDate(store, l.date))
     .map(l => ({ date: l.date, weight: l.weight }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const foodItems = (store.foodLogs || [])
@@ -6454,6 +6464,7 @@ function buildDailySummaryPayload(store, dateISO) {
     date: dateISO,
     weight: log?.weight ?? null,
     weightTrend,
+    goal: store.settings?.macroCalc?.goal ?? null,
     steps: log?.steps ?? null,
     calories: log?.calories ?? null,
     protein: log?.protein ?? null,

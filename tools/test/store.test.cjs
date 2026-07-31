@@ -4316,6 +4316,30 @@ async function testAsync(name, fn) {
     const p = LB.buildDailySummaryPayload(store, Y);
     assert.deepStrictEqual(p.weightTrend.map(x => x.date), ['2026-07-20', '2026-07-23', Y], 'ascending, null-weight day and the out-of-window day both dropped');
   });
+  test('buildDailySummaryPayload: sick/vacation/deload days drop out of the weight trend', () => {
+    const store = {
+      dailyLogs: [
+        { date: '2026-07-20', weight: 81 },
+        { date: '2026-07-22', weight: 100 }, // sick day, wildly off, must be excluded even though it has a logged weight
+        { date: '2026-07-23', weight: 80.5 },
+        { date: Y, weight: 80 },
+      ],
+      // Generous 2-day UTC span bracketing the 22nd (same margin the
+      // estimateAdaptiveTdee sick-day test above uses): keeps this
+      // timezone-robust, the exact statusModeForDate boundary check isn't
+      // what this test is about.
+      statusPeriods: [{ mode: 'sick', startedAt: '2026-07-21T00:00:00.000Z', endedAt: '2026-07-23T00:00:00.000Z' }],
+      foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [],
+    };
+    const p = LB.buildDailySummaryPayload(store, Y);
+    assert.deepStrictEqual(p.weightTrend.map(x => x.date), ['2026-07-20', '2026-07-23', Y], 'only the sick day is dropped, same exclusion estimateAdaptiveTdee already applies to this signal');
+  });
+  test('buildDailySummaryPayload: goal passes through from macroCalc, null when unset', () => {
+    const store = { dailyLogs: [{ date: Y, weight: 80 }], foodLogs: [], medications: [], medicationPlans: [], medicationScheduleSlots: [], medicationLogs: [] };
+    assert.strictEqual(LB.buildDailySummaryPayload(store, Y).goal, null, 'no macroCalc at all (never ran the estimator)');
+    const storeWithGoal = { ...store, settings: { macroCalc: { goal: 'gain' } } };
+    assert.strictEqual(LB.buildDailySummaryPayload(storeWithGoal, Y).goal, 'gain');
+  });
   test('buildDailySummaryPayload: medication due/taken counts and names', () => {
     const wd = LB.isoWd(new Date(Y + 'T12:00:00'));
     const store = {

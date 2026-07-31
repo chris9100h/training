@@ -21,9 +21,10 @@
 // through every exercise in turn no matter how firmly SYSTEM_PROMPT told it
 // not to. Capping the data itself is what actually holds.
 //
-// One action: POST { date, weight, weightTrend, steps, calories, protein,
-// carbs, fat, targets, adherence, waterMl, foodItems, medsDue, medsTaken,
-// medsTakenNames, glucose, bloodPressure, bodyTemp, note, training, cardio }
+// One action: POST { date, weight, weightTrend, goal, steps, calories,
+// protein, carbs, fat, targets, adherence, waterMl, foodItems, medsDue,
+// medsTaken, medsTakenNames, glucose, bloodPressure, bodyTemp, note,
+// training, cardio }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
 // -> { headline: string|null, body: string, generatedAt: string }
 //
@@ -94,6 +95,8 @@ If a training session is included, lead with the SESSION AS A WHOLE: overall eff
 
 The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
 
+You are told the user's current goal, cutting, gaining, or maintaining, or that no goal was specified. Judge the weight trend's direction ONLY against that: for a cut, a decrease is the desired direction and an increase is what's worth flagging; for a gain, the reverse, an increase is desired and a decrease is worth flagging; for maintain, staying flat IS the goal, so it is a material move in EITHER direction that's worth a mention, not a decrease specifically. Never default to treating a falling number as inherently good progress, that reflex is only correct for a subset of users and is actively wrong, even a little insulting, for someone deliberately gaining. If no goal was given, report the weight trend as a plain fact only (the number and its direction), never characterize it as good, bad, on track, or the right or wrong direction, you were not given enough to make that call.
+
 If cardio is logged, it is its own separate activity from any strength session, report it as such (type, duration, distance, effort), it does not need to be folded into the training verdict above. One narrow, explicit exception to "never invent a reason" below: a hard or long cardio session can genuinely cause short-term water-weight swings (sweat loss, glycogen use), that is a real, general training fact, not user-specific speculation. If cardio was logged and the weight trend looks like it could plausibly reflect that, you may mention it as gentle context, phrased as a possibility, never as a certain cause. This exception is specifically about cardio and water weight, nothing else, never extend the same kind of reasoning to nutrition, sleep, stress, or any other guess.
 
 You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else. Blood glucose, blood pressure, and body temperature readings, when given, are for tracking only: if one is genuinely worth a mention, state the number neutrally, never label it high, low, borderline, or concerning, and never guess at what caused it (diet, a calorie deficit, hydration, training, or anything else). You are not given nearly enough to make that call responsibly, and getting it wrong reads as real medical scaremongering over what is often a completely normal number.
@@ -109,14 +112,24 @@ Output EXACTLY two parts and nothing else:
 2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your verdict in the first paragraph, use the next paragraph for the specifics that actually back it up (training, nutrition, whatever mattered), and only add a third if there's a genuine tip or forward-looking note, a light day does not need to be padded out to three.
 Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
 
+// First-half-average vs second-half-average, NOT first-vs-last: a single
+// noisy weigh-in on either end of the window (water, timing) would otherwise
+// swing the whole read. Same smoothing src/store.js's estimateAdaptiveTdee
+// already uses for this exact 14-day weight signal (the weekly check-in
+// feature), kept consistent rather than quietly inventing a second,
+// disagreeing definition of "trend" for the same underlying number. On an
+// odd count the single middle entry is dropped from both halves rather than
+// assigned to either, same as there.
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
   if (!Array.isArray(trend) || trend.length < 2) return 'no weight trend available (fewer than 2 points logged recently)';
-  const first = trend[0].weight;
-  const last = trend[trend.length - 1].weight;
-  const delta = last - first;
-  const days = trend.length;
-  if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days`;
-  return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days`;
+  const n = trend.length;
+  const half = Math.floor(n / 2);
+  if (half < 1) return 'no weight trend available (fewer than 2 points logged recently)';
+  const avgOf = (list: Array<{ weight: number }>) => list.reduce((s, l) => s + l.weight, 0) / list.length;
+  const delta = avgOf(trend.slice(n - half)) - avgOf(trend.slice(0, half));
+  const days = n;
+  if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days (first-half vs second-half average)`;
+  return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days (first-half vs second-half average, not a single-day comparison)`;
 }
 
 function daysBetween(earlierISO: string, laterISO: string): number {
@@ -197,11 +210,29 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+// 'cut' | 'maintain' | 'gain' | null (see macroTargetsFromGoal in
+// src/store.js), only ever set once the user has run the macro estimator at
+// least once. null covers everyone else (manual targets, coached without
+// ever running it), see buildUserPrompt's own explicit "not told" line for
+// why that case needs spelling out rather than just omitting the goal line.
+function fmtGoal(goal: unknown): string | null {
+  if (goal === 'cut') return 'losing weight (a cut)';
+  if (goal === 'gain') return 'gaining weight (a bulk)';
+  if (goal === 'maintain') return 'maintaining their current weight';
+  return null;
+}
+
 function buildUserPrompt(p: Record<string, any>): string {
   const lines: string[] = [`One user's health-tracking data for YESTERDAY (${p.date}):`, ''];
   const weight = num(p.weight);
   if (weight != null) {
     lines.push(`Weight: ${weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
+    // Directly beneath the trend line, only shown alongside it: the trend is
+    // only ever interpreted relative to this, see SYSTEM_PROMPT's explicit
+    // instruction never to default to "down is good" or "up is good" on
+    // its own.
+    const goalText = fmtGoal(p.goal);
+    lines.push(goalText ? `User's current goal: ${goalText}.` : `User's current goal: not specified, do not assume one.`);
   } else {
     lines.push('Weight: not logged that day.');
   }
