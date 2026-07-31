@@ -3530,7 +3530,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.ink }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
@@ -3601,7 +3601,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4a9fe0', display: 'inline-block' }} />
               <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Diastolic</span>
             </span>
-            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>· dashed = 120/80 normal</span>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.ink }}>· dashed = 120/80 normal</span>
           </div>
           {sortedReadings.length > 0 && (
             <>
@@ -3610,7 +3610,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.ink }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
