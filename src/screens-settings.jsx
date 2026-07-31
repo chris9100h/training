@@ -9,6 +9,14 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 // Short "time since" label for the admin sign-up feed.
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
+// Same noon-anchored day-shift screens-health.jsx's healthShiftISO uses (avoids
+// a DST-boundary date landing on the wrong day), kept local to this file since
+// it's the only date-range picker in Settings.
+function settingsShiftISO(base, days) {
+  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
+  return LB.fmtISO(d);
+}
+
 // Health-tab card visibility toggles: id must match screens-health.jsx's
 // DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
 const HEALTH_CARD_TOGGLES = [
@@ -714,6 +722,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
+  const [exportingTraining, setExportingTraining] = useStateSet(false);
+  const [trainingExportSheet, setTrainingExportSheet] = useStateSet(false);
+  const [exportFormat, setExportFormat] = useStateSet('csv'); // 'csv' | 'xlsx' | 'pdf'
+  const [exportRange, setExportRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
+  const [exportFrom, setExportFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
+  const [exportTo, setExportTo] = useStateSet(() => LB.todayISO());
   // Weight axis only: 'mixed' is kg on the weight side, and the picker below
   // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
   // user with neither button selected and a bogus unit mismatch on import.
@@ -1305,6 +1319,209 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setBackupOk(false);
       await confirm(`Could not create the backup: ${err?.message || 'Unknown error'}. Nothing was downloaded, so do not restore over this data yet.`, { title: 'Backup failed', ok: 'OK' });
       return false;
+    }
+  };
+  // Shared by all three export formats: fetch + range-filter + flatten to one
+  // row per session x exercise, sets as trailing columns ("100x10"). Only
+  // completed, non-warmup, non-skipped sets count: a set the user never
+  // actually did has nothing meaningful to put in the cell. mergeSpans
+  // records, in `rows` index space, which runs of rows belong to the same
+  // session (Date/Day blanked after the first row of a run, same as CSV used
+  // to do standalone) so XLSX/PDF can turn that into a real merged/rowspanned
+  // cell instead of the blank-repeat trick CSV has to fall back on.
+  const buildTrainingExportRows = async () => {
+    const today = LB.todayISO();
+    const from = exportRange === '7' ? settingsShiftISO(today, -6)
+      : exportRange === '30' ? settingsShiftISO(today, -29)
+      : exportRange === 'custom' ? exportFrom
+      : null; // 'all' -> no lower bound
+    const to = exportRange === 'custom' ? exportTo : today;
+
+    // s.date is a full timestamptz ("2026-07-29T10:00:00+00:00"), not a bare
+    // date: sliced to the first 10 chars both for the range compare (else a
+    // session with a non-midnight time sorts past a plain-date `to` bound
+    // and silently drops off the end of its own day) and for display.
+    const allSessions = await LB.fetchFullTrainingHistory(store, userId);
+    const sessions = from ? allSessions.filter(s => (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to) : allSessions;
+
+    // Purely data-driven off the set's own fields, not the exercise's
+    // log_mode: covers weight+reps, reps-only, checkbox and time-based
+    // exercises alike, and assisted/drop-set/myo-rep sets (kg can be
+    // negative, or already the top-set number of a technique chain) fall
+    // out of the same formula without special-casing each one.
+    const formatSet = (st) => {
+      if (st.timeSec != null) return `${st.timeSec}s`;
+      const reps = (st.repsL != null || st.repsR != null) ? `${st.repsL ?? '-'}/${st.repsR ?? '-'}` : (st.reps ?? '');
+      if (st.kg == null) return reps !== '' ? String(reps) : 'done';
+      return `${st.kg}x${reps}`;
+    };
+
+    const rows = [];
+    const mergeSpans = []; // [startIdx, endIdx] into `rows`, inclusive, for sessions spanning >1 row
+    let maxSets = 0;
+    let lastSessionId = null;
+    let groupStart = -1;
+    [...sessions]
+      .sort((a, b) => `${a.date || ''}${a.startedAt || ''}`.localeCompare(`${b.date || ''}${b.startedAt || ''}`))
+      .forEach(s => {
+        (s.entries || []).forEach(en => {
+          const cells = (en.sets || []).filter(st => st.done && !st.skipped && !st.warmup).map(formatSet);
+          if (!cells.length) return;
+          maxSets = Math.max(maxSets, cells.length);
+          const isNewSession = s.id !== lastSessionId;
+          if (isNewSession) {
+            if (groupStart !== -1 && rows.length - 1 > groupStart) mergeSpans.push([groupStart, rows.length - 1]);
+            groupStart = rows.length;
+          }
+          rows.push([isNewSession ? (s.date || '').slice(0, 10) : '', isNewSession ? (s.dayName || '') : '', en.name || '', ...cells]);
+          lastSessionId = s.id;
+        });
+      });
+    if (groupStart !== -1 && rows.length - 1 > groupStart) mergeSpans.push([groupStart, rows.length - 1]);
+
+    const header = ['Date', 'Day', 'Exercise', ...Array.from({ length: maxSets }, (_, i) => `Set ${i + 1}`)];
+    // Pad every row out to the full header width: XLSX/PDF both render one
+    // cell per column, and a row with fewer sets than the widest session
+    // would otherwise leave trailing cells missing entirely (not just empty)
+    // in both, which drops their border/gridline instead of just looking blank.
+    const paddedRows = rows.map(r => r.length < header.length ? [...r, ...Array(header.length - r.length).fill('')] : r);
+    const suffix = exportRange === 'custom' ? `${exportFrom}-${exportTo}` : exportRange === 'all' ? 'all' : `${exportRange}d`;
+    return { header, rows: paddedRows, mergeSpans, suffix };
+  };
+
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportTrainingCSV = ({ header, rows, suffix }) => {
+    const esc = v => {
+      if (v == null || v === '') return '';
+      const s = String(v);
+      return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
+    // Leading BOM: without it, Excel guesses the system codepage instead of
+    // UTF-8 and mangles any non-ASCII character in an exercise name.
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `training-history-${suffix}.csv`);
+  };
+
+  // ExcelJS, not SheetJS: SheetJS's free/community build parses cell styles
+  // but silently drops them on write (confirmed by inspecting the raw
+  // styles.xml it produces: no border/fill/alignment ever makes it in, even
+  // with cellStyles:true), so borders and vertical centering were simply not
+  // achievable with it. ExcelJS writes real styles in its open build.
+  const exportTrainingXLSX = async ({ header, rows, mergeSpans, suffix }) => {
+    const ExcelJS = await window.__ensureXLSX();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Training');
+    ws.columns = [{ width: 12 }, { width: 10 }, { width: 26 }, ...header.slice(3).map(() => ({ width: 10 }))];
+
+    const thinGray = { style: 'thin', color: { argb: 'FF999999' } };
+    const border = { top: thinGray, bottom: thinGray, left: thinGray, right: thinGray };
+    const accentArgb = 'FF' + (getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961').replace('#', '').toUpperCase();
+
+    const headerRow = ws.addRow(header);
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: accentArgb } };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      cell.border = border;
+    });
+    // rows are already padded to header.length by buildTrainingExportRows,
+    // so a plain eachCell (no includeEmpty) already reaches every column:
+    // includeEmpty only walks a row's OWN cellCount, not the sheet's column
+    // count, so a genuinely short row would otherwise leave trailing cells
+    // (and their borders) missing entirely rather than just blank.
+    rows.forEach(r => {
+      const row = ws.addRow(r);
+      row.eachCell(cell => {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        cell.border = border;
+      });
+    });
+
+    // +2 on every row: ExcelJS is 1-indexed and row 1 is the header, so
+    // `rows` index 0 is sheet row 2.
+    mergeSpans.forEach(([s, e]) => {
+      ws.mergeCells(s + 2, 1, e + 2, 1);
+      ws.mergeCells(s + 2, 2, e + 2, 2);
+    });
+
+    // Filter dropdowns on the header row, the closest thing to Ctrl+T this
+    // still gets you: a real Excel Table (ListObject, what Ctrl+T actually
+    // creates) does not allow merged cells inside its range, and that would
+    // mean giving up the Date/Day session merges above, so this stays a
+    // plain styled range with autofilter rather than a Table.
+    ws.autoFilter = { from: 'A1', to: { row: 1 + rows.length, column: header.length } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `training-history-${suffix}.xlsx`);
+  };
+
+  const exportTrainingPDF = ({ header, rows, mergeSpans }) => {
+    const escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Mirror of the XLSX merges, expressed as native <td rowspan> instead:
+    // the span's first row carries the rowspan, every other row in the span
+    // just omits the Date/Day <td>s entirely (standard HTML table merge).
+    const rowSpanAt = new Map(mergeSpans.map(([s, e]) => [s, e - s + 1]));
+    const mergedAway = new Set(mergeSpans.flatMap(([s, e]) => Array.from({ length: e - s }, (_, i) => s + i + 1)));
+    // Zebra striping is applied per <td> here, not via a `tr:nth-child`
+    // background rule: a rowspan cell has no background of its own, so a
+    // row-level stripe painted on the <tr> it visually overlaps shows
+    // through it, and the merged Date/Day cell ends up striped internally
+    // instead of reading as one solid block. Explicit white on Date/Day
+    // sidesteps that entirely, regardless of what the row underneath does.
+    const bodyRows = rows.map((r, i) => {
+      const stripe = i % 2 === 1 ? ' style="background:#f7f7f7"' : '';
+      const restCells = r.slice(2).map(c => `<td${stripe}>${escHtml(c)}</td>`).join('');
+      if (mergedAway.has(i)) return `<tr>${restCells}</tr>`;
+      const span = rowSpanAt.get(i) || 1;
+      const spanAttr = span > 1 ? ` rowspan="${span}"` : '';
+      return `<tr><td${spanAttr} style="background:#fff">${escHtml(r[0])}</td><td${spanAttr} style="background:#fff">${escHtml(r[1])}</td>${restCells}</tr>`;
+    }).join('');
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Training Export</title>
+      <style>
+        *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        @page{margin:12mm}
+        body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a1a}
+        table{border-collapse:collapse;width:100%;font-size:11px;border:1px solid #999}
+        th,td{border:1px solid #999;padding:5px 8px;text-align:left;vertical-align:top}
+        th{background:${accent};color:#fff;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
+      </style>
+    </head><body>
+      <div style="padding:8px 0 14px;text-align:center;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Training Export</div>
+      <table><thead><tr>${header.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
+      <script>
+        var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
+        if(!isIOS){window.onload=function(){window.print()};}
+      <\/script>
+    </body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const doExportTraining = async () => {
+    setExportingTraining(true);
+    try {
+      const built = await buildTrainingExportRows();
+      if (!built.rows.length) {
+        await confirm('No completed training sets found in this range.', { title: 'Nothing to export', ok: 'OK' });
+        return;
+      }
+      if (exportFormat === 'csv') exportTrainingCSV(built);
+      else if (exportFormat === 'xlsx') await exportTrainingXLSX(built);
+      else exportTrainingPDF(built);
+      setTrainingExportSheet(false);
+    } catch (err) {
+      await confirm(`Could not export training history: ${err?.message || 'Unknown error'}`, { title: 'Export failed', ok: 'OK' });
+    } finally {
+      setExportingTraining(false);
     }
   };
   const runImport = () => {
@@ -2682,7 +2899,83 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
             <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
+          <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Export Training Sheet ══ */}
+      <SettingsSheet open={trainingExportSheet} onClose={exportingTraining ? () => {} : () => setTrainingExportSheet(false)} title="Export Training">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>FORMAT</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: 'csv', label: 'CSV' },
+                { key: 'xlsx', label: 'Excel' },
+                { key: 'pdf', label: 'PDF' },
+              ].map(f => (
+                <button key={f.key} onClick={() => setExportFormat(f.key)} style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  background: exportFormat === f.key ? 'var(--accent)' : UI.bgInset,
+                  color: exportFormat === f.key ? 'var(--accent-ink)' : UI.inkSoft,
+                  textShadow: 'none',
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>{f.label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>TIME RANGE</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: '7', label: '7 Days' },
+                { key: '30', label: '30 Days' },
+                { key: 'custom', label: 'Custom' },
+                { key: 'all', label: 'All Time' },
+              ].map(p => (
+                <button key={p.key} onClick={() => setExportRange(p.key)} style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  background: exportRange === p.key ? 'var(--accent)' : UI.bgInset,
+                  color: exportRange === p.key ? 'var(--accent-ink)' : UI.inkSoft,
+                  textShadow: 'none',
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>{p.label}</button>
+              ))}
+            </div>
+            {exportRange === 'custom' && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
+                  <input type="date" value={exportFrom} max={exportTo}
+                    onChange={e => e.target.value && setExportFrom(e.target.value)}
+                    style={{
+                      width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+                      colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+                      padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
+                    }} />
+                </div>
+                <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16, flexShrink: 0 }}>→</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
+                  <input type="date" value={exportTo} min={exportFrom} max={LB.todayISO()}
+                    onChange={e => e.target.value && setExportTo(e.target.value)}
+                    style={{
+                      width: '100%', minWidth: 0, boxSizing: 'border-box', WebkitAppearance: 'none',
+                      colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
+                      padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none',
+                    }} />
+                </div>
+              </div>
+            )}
+          </div>
+          <Btn onClick={doExportTraining} disabled={exportingTraining} style={{ width: '100%' }}>
+            {exportingTraining ? 'Exporting…' : `Export ${exportFormat.toUpperCase()}`}
+          </Btn>
         </div>
       </SettingsSheet>
 

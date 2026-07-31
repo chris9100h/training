@@ -1349,7 +1349,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!weekdayMode && !cycleWeekView) setSelectedSlot(dayCount - 1);
   };
   const goForward = () => {
-    if (weekOffset >= 0) return;
+    // Capped at exactly one step past today, not unbounded like goBack's real
+    // minOffset (the plan's actual start date): a rotation-based plan repeats
+    // forever, so there's no natural "end" to bound against the way there's a
+    // natural beginning, and a single step ahead is all a user asked for.
+    if (weekOffset >= 1) return;
     const next = weekOffset + 1;
     setWeekOffset(next);
     if (next === 0) {
@@ -1528,6 +1532,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         if (weekNum >= 0) return `WEEK ${weekNum}`;
       }
       if (weekOffset === 0) return 'THIS WEEK';
+      if (weekOffset === 1) return 'NEXT WEEK';
       if (weekOffset === -1) return 'LAST WEEK';
       return `${-weekOffset} WEEKS AGO`;
     }
@@ -3002,12 +3007,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             )}
           </div>
           {!isFlex && (
-            <button onClick={goForward} disabled={weekOffset === 0} style={{
+            <button onClick={goForward} disabled={weekOffset >= 1} style={{
               width: 30, height: 30, borderRadius: 4,
               background: 'transparent',
-              border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
-              color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
-              cursor: weekOffset === 0 ? 'default' : 'pointer',
+              border: `1px solid ${weekOffset >= 1 ? 'transparent' : UI.hairStrong}`,
+              color: weekOffset >= 1 ? UI.inkGhost : UI.inkSoft,
+              cursor: weekOffset >= 1 ? 'default' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>

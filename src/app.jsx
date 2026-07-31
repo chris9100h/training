@@ -481,6 +481,12 @@ function App() {
           const serverTempIds     = new Set((fresh.bodyTempLogs || []).map(l => l.id));
           const serverWaterIds    = new Set((fresh.waterLogs || []).map(l => l.id));
           const serverFoodIds     = new Set((fresh.foodLogs || []).map(l => l.id));
+          const serverMedPlanIds = new Set((fresh.medicationPlans || []).map(p => p.id));
+          const serverMedIds = new Set((fresh.medications || []).map(m => m.id));
+          const serverMedSlotIds = new Set((fresh.medicationScheduleSlots || []).map(s => s.id));
+          const serverMedLogIds = new Set((fresh.medicationLogs || []).map(l => l.id));
+          const serverMedPlanItemIds = new Set((fresh.medicationPlanItems || []).map(it => it.id));
+          const serverMedPillboxCheckIds = new Set((fresh.medicationPillboxChecks || []).map(c => c.id));
           // For ids on both sides keep the local row when it carries an unsynced
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
@@ -499,6 +505,12 @@ function App() {
           const baseTempIds    = baseIdSet(base?.bodyTempLogs);
           const baseWaterIds   = baseIdSet(base?.waterLogs);
           const baseFoodIds    = baseIdSet(base?.foodLogs);
+          const baseMedPlanIds = baseIdSet(base?.medicationPlans);
+          const baseMedIds = baseIdSet(base?.medications);
+          const baseMedSlotIds = baseIdSet(base?.medicationScheduleSlots);
+          const baseMedLogIds = baseIdSet(base?.medicationLogs);
+          const baseMedPlanItemIds = baseIdSet(base?.medicationPlanItems);
+          const baseMedPillboxCheckIds = baseIdSet(base?.medicationPillboxChecks);
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
           const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date) && !baseDailyIds?.has(l.id));
@@ -508,6 +520,12 @@ function App() {
           const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id) && !baseTempIds?.has(l.id));
           const localOnlyWater   = (s.waterLogs || []).filter(l => !serverWaterIds.has(l.id) && !baseWaterIds?.has(l.id));
           const localOnlyFood    = (s.foodLogs || []).filter(l => !serverFoodIds.has(l.id) && !baseFoodIds?.has(l.id));
+          const localOnlyMedPlans = (s.medicationPlans || []).filter(l => !serverMedPlanIds.has(l.id) && !baseMedPlanIds?.has(l.id));
+          const localOnlyMeds = (s.medications || []).filter(l => !serverMedIds.has(l.id) && !baseMedIds?.has(l.id));
+          const localOnlyMedSlots = (s.medicationScheduleSlots || []).filter(l => !serverMedSlotIds.has(l.id) && !baseMedSlotIds?.has(l.id));
+          const localOnlyMedLogs = (s.medicationLogs || []).filter(l => !serverMedLogIds.has(l.id) && !baseMedLogIds?.has(l.id));
+          const localOnlyMedPlanItems = (s.medicationPlanItems || []).filter(l => !serverMedPlanItemIds.has(l.id) && !baseMedPlanItemIds?.has(l.id));
+          const localOnlyMedPillboxChecks = (s.medicationPillboxChecks || []).filter(l => !serverMedPillboxCheckIds.has(l.id) && !baseMedPillboxCheckIds?.has(l.id));
           // Locally-deleted-but-unsynced rows (in base, gone from local): filter
           // them out of fresh so the background refresh doesn't resurrect a log
           // the user just deleted before the delete reached the server (audit
@@ -524,6 +542,12 @@ function App() {
           const delTemp    = delDel(base?.bodyTempLogs, s.bodyTempLogs);
           const delWater   = delDel(base?.waterLogs, s.waterLogs);
           const delFood    = delDel(base?.foodLogs, s.foodLogs);
+          const delMedPlans = delDel(base?.medicationPlans, s.medicationPlans);
+          const delMeds = delDel(base?.medications, s.medications);
+          const delMedSlots = delDel(base?.medicationScheduleSlots, s.medicationScheduleSlots);
+          const delMedLogs = delDel(base?.medicationLogs, s.medicationLogs);
+          const delMedPlanItems = delDel(base?.medicationPlanItems, s.medicationPlanItems);
+          const delMedPillboxChecks = delDel(base?.medicationPillboxChecks, s.medicationPillboxChecks);
           const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
           const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
           const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
@@ -531,6 +555,12 @@ function App() {
           const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
           const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
           const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
+          const nextMedPlans = [...localOnlyMedPlans, ...LB.mergeCollectionById(fresh.medicationPlans || [], s.medicationPlans, base?.medicationPlans, delMedPlans)];
+          const nextMeds = [...localOnlyMeds, ...LB.mergeCollectionById(fresh.medications || [], s.medications, base?.medications, delMeds)];
+          const nextMedSlots = [...localOnlyMedSlots, ...LB.mergeCollectionById(fresh.medicationScheduleSlots || [], s.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlots)];
+          const nextMedLogs = [...localOnlyMedLogs, ...LB.mergeCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs)];
+          const nextMedPlanItems = [...localOnlyMedPlanItems, ...LB.mergeCollectionById(fresh.medicationPlanItems || [], s.medicationPlanItems, base?.medicationPlanItems, delMedPlanItems)];
+          const nextMedPillboxChecks = [...localOnlyMedPillboxChecks, ...LB.mergeCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks)];
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed,
           // which forced a full re-render of the active screen on EVERY
@@ -546,7 +576,14 @@ function App() {
           const tSame = sameLogs(nextTemp, s.bodyTempLogs);
           const wSame = sameLogs(nextWater, s.waterLogs);
           const fSame = sameLogs(nextFood, s.foodLogs);
-          if (dSame && cSame && gSame && bpSame && tSame && wSame && fSame) return s;
+          const medPlansSame = sameLogs(nextMedPlans, s.medicationPlans);
+          const medsSame = sameLogs(nextMeds, s.medications);
+          const medSlotsSame = sameLogs(nextMedSlots, s.medicationScheduleSlots);
+          const medLogsSame = sameLogs(nextMedLogs, s.medicationLogs);
+          const medPlanItemsSame = sameLogs(nextMedPlanItems, s.medicationPlanItems);
+          const medPillboxChecksSame = sameLogs(nextMedPillboxChecks, s.medicationPillboxChecks);
+          if (dSame && cSame && gSame && bpSame && tSame && wSame && fSame
+              && medPlansSame && medsSame && medSlotsSame && medLogsSame && medPlanItemsSame && medPillboxChecksSame) return s;
           return { ...s,
             dailyLogs:   dSame ? s.dailyLogs : nextDaily,
             cardioLogs:  cSame ? s.cardioLogs : nextCardio,
@@ -555,6 +592,12 @@ function App() {
             bodyTempLogs: tSame ? s.bodyTempLogs : nextTemp,
             waterLogs: wSame ? s.waterLogs : nextWater,
             foodLogs: fSame ? s.foodLogs : nextFood,
+            medicationPlans: medPlansSame ? s.medicationPlans : nextMedPlans,
+            medications: medsSame ? s.medications : nextMeds,
+            medicationScheduleSlots: medSlotsSame ? s.medicationScheduleSlots : nextMedSlots,
+            medicationLogs: medLogsSame ? s.medicationLogs : nextMedLogs,
+            medicationPlanItems: medPlanItemsSame ? s.medicationPlanItems : nextMedPlanItems,
+            medicationPillboxChecks: medPillboxChecksSame ? s.medicationPillboxChecks : nextMedPillboxChecks,
           };
         });
       }).catch(() => {});

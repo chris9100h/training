@@ -669,6 +669,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         fiber: l.fiber ?? null, sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
         recipe_items: l.recipeItems ?? null,
         recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+        logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
         logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
         planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
       }))
@@ -693,6 +694,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_food_recipes').upsert(
       backup.foodRecipes.map(r => ({
         id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+        cooked_weight_g: r.cookedWeightG ?? null,
         updated_at: r.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -712,7 +714,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading shopping list preferences…');
     await unwrap(_supabase.from('zane_food_shopping_prefs').upsert(
       backup.foodShoppingPrefs.map(p => ({
-        id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
+        id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
         excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
         stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
         food_name: p.foodName, brand: p.brand ?? null,
@@ -913,7 +915,7 @@ async function exportBackup(store, userId) {
     // windowed collection through would silently drop every food log older
     // than the window on the next restore, so refetch the full history here
     // (same reasoning as the session entries above).
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Same reasoning as zane_food_logs above: store.medicationLogs is
     // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
@@ -1080,6 +1082,25 @@ function mapEntryRows(entryRows) {
   }));
 }
 
+// Full training history for the "Export Training CSV" button (Settings →
+// Data): store.sessions is windowed to HISTORY_WINDOW_DAYS in memory (see
+// docs/internals.md), so entries/sets for anything older have to be fetched
+// fresh, same reasoning and same query shape as exportBackup uses for the
+// JSON backup.
+async function fetchFullTrainingHistory(store, userId) {
+  const { data, error } = await _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx');
+  if (error) throw error;
+  const bySession = {};
+  for (const e of (data || [])) {
+    if (!bySession[e.session_id]) bySession[e.session_id] = [];
+    bySession[e.session_id].push(e);
+  }
+  return store.sessions.map(s => ({
+    ...s,
+    entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
+  }));
+}
+
 // The Macros/Adherence/Targets Health cards merged into one composite
 // 'macroGroup' card; isCardVisible (screens-health.jsx, both the user's own
 // tab and the coach's read-only client view) only ever checks the array for
@@ -1166,7 +1187,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts. Favorites are owner-only RLS; recipes
@@ -1175,10 +1196,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // pushMealPlanToClient fetches the client's recipes directly when it needs
     // them for its dedup.
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, cooked_weight_g, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
-    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
     // Plan Mode auto-fill markers (migration 0198): which days the template was
     // already auto-materialized for, cross-device. Only recent days matter (the
     // fill effect only ever runs for today), so window like the food logs.
@@ -1187,11 +1208,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // active. Mirrors zane_schedules. Own store only, same reasoning as the
     // slots/favorites/recipes above.
     isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    // Shopping List per-food preferences (migration 0215/0216/0217): name
+    // Shopping List per-food preferences (migration 0215/0216/0217/0227): name
     // override, exclude flag, package size, stock baseline, identity
     // snapshot, own store only like the rest of the Food Tracker's personal
     // collections above.
-    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
     // Medications feature (migration 0218): own store only for the same
     // reason as the meal-plan collections above, isCoachLoad's own narrow
     // purpose (loadClientStore, only ever used to safely append a pushed
@@ -1458,11 +1479,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       source: f.source ?? null, quantityG: parseFloat(f.quantity_g), calories: f.calories,
       protein: parseFloat(f.protein), carbs: parseFloat(f.carbs), fat: parseFloat(f.fat),
       fiber: f.fiber != null ? parseFloat(f.fiber) : null,
+      sugar: f.sugar != null ? parseFloat(f.sugar) : null,
+      satFat: f.sat_fat != null ? parseFloat(f.sat_fat) : null,
+      sodiumMg: f.sodium_mg != null ? parseFloat(f.sodium_mg) : null,
       units: f.units || [],
       createdAt: f.created_at,
     })),
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
-      id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
+      id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1,
+      cookedWeightG: r.cooked_weight_g ?? null,
+      createdAt: r.created_at, updatedAt: r.updated_at,
     })),
     foodTemplateSlots: (foodTemplateSlotsRes?.data || []).map(mapTemplateSlotRow),
     foodTemplateDays: (foodTemplateDaysRes?.data || []).map(d => ({ id: d.id, date: d.date })),
@@ -1471,7 +1497,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
     })),
     foodShoppingPrefs: (foodShoppingPrefsRes?.data || []).map(p => ({
-      id: p.id, foodId: p.food_id, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
+      id: p.id, foodId: p.food_id, shoppingKey: p.shopping_key, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
       packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
       stockBaselineG: p.stock_baseline_g != null ? parseFloat(p.stock_baseline_g) : null,
       stockSetAt: p.stock_set_at ?? null, foodName: p.food_name, brand: p.brand ?? null,
@@ -2009,6 +2035,7 @@ async function syncStore(prev, next, userId) {
       sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
       recipe_items: l.recipeItems ?? null,
       recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+      logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
       logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
       planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
     }))));
@@ -2063,6 +2090,7 @@ async function syncStore(prev, next, userId) {
     // log of it in the same diff could hit the log upsert first and 23503.
     if (upsert.length) preOps.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
       id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+      cooked_weight_g: r.cookedWeightG ?? null,
       updated_at: r.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
@@ -2091,18 +2119,20 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodShoppingPrefs !== next.foodShoppingPrefs) {
     const { upsert, removed } = diffCollectionById(prev.foodShoppingPrefs, next.foodShoppingPrefs);
-    // onConflict on the real natural key (migration 0215's UNIQUE(user_id,
-    // food_id)), not the default primary-key id: each device mints its own
-    // local id (LB.uid()) for what can be the same logical row, so an
-    // id-conflict upsert 23505s on a second device's first write and
-    // flushSync retries it forever (same pattern as zane_checkins below).
+    // onConflict on the real natural key (migration 0227's UNIQUE(user_id,
+    // shopping_key), superseding migration 0215's UNIQUE(user_id, food_id):
+    // shopping_key covers a name-keyed row too, see fdSetShoppingPref), not
+    // the default primary-key id: each device mints its own local id
+    // (LB.uid()) for what can be the same logical row, so an id-conflict
+    // upsert 23505s on a second device's first write and flushSync retries
+    // it forever (same pattern as zane_checkins below).
     if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
-      id: p.id, user_id: userId, food_id: p.foodId, name_override: p.nameOverride ?? null,
+      id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
       excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
       stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
       food_name: p.foodName, brand: p.brand ?? null,
       updated_at: p.updatedAt ?? new Date().toISOString(),
-    })), { onConflict: 'user_id,food_id' }));
+    })), { onConflict: 'user_id,shopping_key' }));
     if (removed.length) ops.push(_supabase.from('zane_food_shopping_prefs').delete().in('id', removed.map(p => p.id)));
   }
 
@@ -3202,6 +3232,7 @@ function mapFoodLogRow(l) {
     sodiumMg: l.sodium_mg != null ? parseFloat(l.sodium_mg) : null,
     recipeItems: l.recipe_items ?? null,
     recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
+    loggedCookedGrams: l.logged_cooked_grams ?? null, loggedCookedWeightG: l.logged_cooked_weight_g ?? null,
     // Which unit (e.g. "Pc") the entry was actually logged in, {label, grams},
     // or null when logged in plain grams/kcal. Lets a "count" view (the
     // timeline's split-into-multiple-meals sheet) read back the exact unit
@@ -3235,6 +3266,7 @@ function mapTemplateSlotRow(r) {
     sodiumMg: r.sodium_mg != null ? parseFloat(r.sodium_mg) : null,
     recipeItems: r.recipe_items ?? null,
     recipeId: r.recipe_id ?? null, loggedTotalPortions: r.logged_total_portions ?? null,
+    loggedCookedGrams: r.logged_cooked_grams ?? null, loggedCookedWeightG: r.logged_cooked_weight_g ?? null,
     hour: r.hour, dayType: r.day_type ?? 'any', sortIdx: r.sort_idx ?? 0,
     mealPlanId: r.meal_plan_id ?? null,
     createdAt: r.created_at,
@@ -3249,7 +3281,9 @@ function templateSlotRow(userId) {
     calories: t.calories, protein: t.protein, carbs: t.carbs, fat: t.fat,
     fiber: t.fiber ?? null, sugar: t.sugar ?? null, sat_fat: t.satFat ?? null, sodium_mg: t.sodiumMg ?? null,
     recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
-    logged_total_portions: t.loggedTotalPortions ?? null, hour: t.hour,
+    logged_total_portions: t.loggedTotalPortions ?? null,
+    logged_cooked_grams: t.loggedCookedGrams ?? null, logged_cooked_weight_g: t.loggedCookedWeightG ?? null,
+    hour: t.hour,
     day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0, meal_plan_id: t.mealPlanId ?? null,
   });
 }
@@ -3274,7 +3308,7 @@ async function fetchFoodLogsForDates(userId, dates) {
   const rows = [];
   for (let i = 0; i < ds.length; i += CHUNK) {
     const { data, error } = await _supabase.from('zane_food_logs')
-      .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+      .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
       .eq('user_id', userId)
       .in('date', ds.slice(i, i + CHUNK));
     if (error) throw error;
@@ -3298,7 +3332,7 @@ async function fetchFoodLogsForDates(userId, dates) {
 // for on every load.
 async function fetchFoodLogsSince(userId, sinceDateISO) {
   const { data, error } = await _supabase.from('zane_food_logs')
-    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
   return (data || []).map(mapFoodLogRow);
@@ -5526,7 +5560,7 @@ function minRestRatio(trainingDays) {
 // restRatio (optional): rest-day calories as a fraction of training-day
 // calories. Clamped into [minRestRatio(trainingDays), 1]; omitted means the
 // automatic split, so it keeps following the day count instead of freezing.
-function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, fatPerKg, restRatio }) {
+function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDays, proteinPerKg, proteinG, fatPerKg, fatG, restRatio }) {
   const w = Number(weightKg);
   const t = Number(tdee);
   if (!(w > 0) || !(t > 0)) return null;
@@ -5553,14 +5587,23 @@ function macroTargetsFromGoal({ tdee, weightKg, goal, rateKgPerWeek, trainingDay
   const trainingCal = cycles ? Math.round((daily * 7) / (days + ratio * (7 - days))) : daily;
   const restCal = cycles ? Math.round(trainingCal * ratio) : daily;
 
-  const protein = Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
+  // proteinG/fatG (optional): a FIXED gram amount, same number every day
+  // regardless of bodyweight, for anyone whose protein/fat is a settled
+  // number they dial calories around via carbs alone rather than a ratio
+  // that quietly drifts with the scale. Takes priority over the per-kg
+  // inputs when given.
+  const protein = Number(proteinG) > 0
+    ? Math.round(Number(proteinG))
+    : Math.round(w * (Number(proteinPerKg) > 0 ? Number(proteinPerKg) : 2));
   // With the low-fat option, exactly what was asked for. Otherwise 25% of
   // calories, computed off the average day so the gram figure is the same on
   // both, and never under the floor: dropping fat that low to buy carbs is not
   // a trade to make on the user's behalf, only one they can make themselves.
-  const fat = Number(fatPerKg) > 0
-    ? Math.round(w * Number(fatPerKg))
-    : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
+  const fat = Number(fatG) > 0
+    ? Math.round(Number(fatG))
+    : Number(fatPerKg) > 0
+      ? Math.round(w * Number(fatPerKg))
+      : Math.max(Math.round(daily * 0.25 / 9), Math.round(w * FAT_FLOOR_PER_KG));
   const pf = protein * 4 + fat * 9;
   const carbsFor = (cal) => Math.max(0, Math.round((cal - pf) / 4));
 
@@ -5627,16 +5670,25 @@ function rebalanceMacros(current, key, value, opts = {}) {
   next[key] = Math.max(0, Number(value) || 0);
 
   const locked = new Set(Array.isArray(opts.locked) ? opts.locked : []);
-  const fatTarget = (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
-    ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
-    : null;
+  // fatG/proteinG (fixed grams, see macroTargetsFromGoal) hold that macro the
+  // same way the per-kg fat figure already did: pinned to its target whenever
+  // some OTHER field is the one being edited, free to take a direct edit of
+  // its own field for that one keystroke same as before.
+  const fatTarget = Number(opts.fatG) > 0
+    ? Math.round(Number(opts.fatG))
+    : (Number(opts.weightKg) > 0 && Number(opts.fatPerKg) > 0)
+      ? Math.round(Number(opts.weightKg) * Number(opts.fatPerKg))
+      : null;
+  const proteinTarget = Number(opts.proteinG) > 0 ? Math.round(Number(opts.proteinG)) : null;
   const fatPinned = fatTarget != null && key !== 'fat' && !locked.has('fat');
+  const proteinPinned = proteinTarget != null && key !== 'protein' && !locked.has('protein');
   if (fatPinned) next.fat = fatTarget;
+  if (proteinPinned) next.protein = proteinTarget;
 
   const target = Number(opts.targetCalories);
   if (!(target > 0)) return out(next);
 
-  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned));
+  const free = KEYS.filter(k => k !== key && !locked.has(k) && !(k === 'fat' && fatPinned) && !(k === 'protein' && proteinPinned));
   if (!free.length) return out(next);
 
   const heldCal = KEYS.filter(k => !free.includes(k)).reduce((a, k) => a + next[k] * KCAL[k], 0);
@@ -5721,6 +5773,106 @@ function statusModeForDate(state, dateStr) {
     return t >= from && t <= to;
   });
   return hit ? hit.mode : null;
+}
+
+// ── Adaptive TDEE recalibration (weekly check-in, migration-free) ──────────
+// estimateTdee above is a formula run once from static inputs (height/weight/
+// age/activity) and never revisited. This is the opposite approach and the
+// weekly companion to it: no body formula at all, just what actually
+// happened. Over a trailing window it weighs what was eaten against what
+// bodyweight did, and solves for the maintenance calories that explain the
+// difference (the MacroFactor-style "expenditure = intake ± energy stored"
+// method). Deliberately does NOT fold in any training/steps/RPE-derived burn
+// estimate: avgCalories below already IS the intake side of the equation, and
+// the weight trend already reflects however much was actually burned,
+// exercise included. Adding a separate exercise-based burn number on top
+// would double-count that and is exactly the inaccuracy this design avoids.
+//
+// Pure: reads store.dailyLogs/statusMode/statusPeriods/settings.unit, writes
+// nothing, decides nothing about targets. Callers turn a success result into
+// a new target set via macroTargetsFromGoal, same as the one-time estimator.
+//
+// Returns one of:
+//   { ok: true, tdee, avgCalories, weightChangeKg, daySpan }
+//   { ok: false, reason: 'insufficient_data' }
+// weightChangeKg is always true kilograms regardless of settings.unit (like
+// every other *Kg field in this file, e.g. macroCalc.weightKg), positive
+// means weight went UP over the window. Never extrapolates a number past the
+// thresholds below: callers must branch on `ok` and show the reason, not
+// treat a missing tdee as 0.
+const ADAPTIVE_TDEE_WINDOW_DAYS = 14;
+const ADAPTIVE_TDEE_MIN_CALORIE_DAYS = 5;
+const ADAPTIVE_TDEE_MIN_WEIGH_INS = 2;
+const ADAPTIVE_TDEE_MIN_WEIGH_SPAN_DAYS = 5;
+// Real physical conversion factor (kg per lb), distinct from screens-health.jsx's
+// own top-level LBS_TO_KG: that file and this one share one global scope as
+// classic scripts, so a second top-level const of the same name would throw
+// "already been declared" and take the whole file down with it (see CLAUDE.md).
+const KG_PER_LB = 0.45359237;
+
+function estimateAdaptiveTdee(store, todayStr) {
+  const today = todayStr || todayISO();
+  const winStart = (() => {
+    const d = new Date(today + 'T12:00:00');
+    d.setDate(d.getDate() - (ADAPTIVE_TDEE_WINDOW_DAYS - 1));
+    return fmtISO(d);
+  })();
+  const dayDiff = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
+
+  // Sick/vacation/deload days carry neither reliable intake nor a meaningful
+  // weight signal (routine and hydration both swing), so they drop out of
+  // both sides of the calculation entirely rather than diluting it.
+  const windowLogs = (store?.dailyLogs || [])
+    .filter(l => l.date >= winStart && l.date <= today)
+    .filter(l => !statusModeForDate(store, l.date));
+
+  const calorieDays = windowLogs.filter(l => Number(l.calories) > 0);
+  if (calorieDays.length < ADAPTIVE_TDEE_MIN_CALORIE_DAYS) return { ok: false, reason: 'insufficient_data' };
+  const avgCalories = calorieDays.reduce((s, l) => s + Number(l.calories), 0) / calorieDays.length;
+
+  // zane_daily_logs is UNIQUE on (user_id, date), so this is already one
+  // weigh-in per calendar day, chronological order below is all that's needed.
+  const weighIns = windowLogs
+    .filter(l => l.weight != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const n = weighIns.length;
+  const overallSpan = n >= 2 ? dayDiff(weighIns[0].date, weighIns[n - 1].date) : 0;
+  if (n < ADAPTIVE_TDEE_MIN_WEIGH_INS || overallSpan < ADAPTIVE_TDEE_MIN_WEIGH_SPAN_DAYS) {
+    return { ok: false, reason: 'insufficient_data' };
+  }
+
+  // Split chronologically into a first and second half. On an odd count the
+  // single middle entry is dropped from both rather than assigned to either,
+  // which is what keeps the split symmetric.
+  const half = Math.floor(n / 2);
+  const firstHalf = weighIns.slice(0, half);
+  const secondHalf = weighIns.slice(n - half);
+  const avgOf = list => list.reduce((s, l) => s + Number(l.weight), 0) / list.length;
+  // store.dailyLogs weight is in the DISPLAY unit (lbs users log lbs
+  // straight, no conversion, see CLAUDE.md's weight-unit note), but
+  // weightChangeKg has to be TRUE kg for the KCAL_PER_KG physical constant
+  // below to mean anything. weightAxisUnit collapses 'mixed' (kg weight +
+  // mi distance) onto the kg axis same as everywhere else that checks this.
+  const isLbs = weightAxisUnit(store?.settings?.unit) === 'lbs';
+  const weightChangeNative = avgOf(secondHalf) - avgOf(firstHalf);
+  const weightChangeKg = isLbs ? weightChangeNative * KG_PER_LB : weightChangeNative;
+  const daySpan = Math.max(1, dayDiff(firstHalf[0].date, secondHalf[secondHalf.length - 1].date));
+
+  // Sign check: eating avgCalories/day while LOSING weight (weightChangeKg <
+  // 0) means more was burned than eaten, so real maintenance sits ABOVE
+  // avgCalories. -(negative)/daySpan is positive, so it adds to avgCalories.
+  // Eating avgCalories/day while GAINING weight does the opposite. Both fall
+  // out of this one line without a branch.
+  const tdee = avgCalories - (weightChangeKg * KCAL_PER_KG) / daySpan;
+
+  return {
+    ok: true,
+    tdee: Math.round(tdee),
+    avgCalories: Math.round(avgCalories),
+    weightChangeKg: Math.round(weightChangeKg * 100) / 100,
+    daySpan,
+  };
 }
 
 // The budget a meal of choice inherits: the day's target minus everything else
@@ -6042,16 +6194,31 @@ async function endDeload(userId, store, setStore) {
 
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
+  // Medications (migration 0218/0221) mirrors the exact SELECT/mapping
+  // loadFromSupabase uses for these 6 tables, kept in sync by hand since
+  // this is a second, lighter fetch path rather than a shared helper: the
+  // boot merge already handles all 6 correctly (see app.jsx), this
+  // function was just never extended to include them when it was written,
+  // so a coach push or another device's dose log landing in the 30s-30min
+  // background window was invisible until a full reload.
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
+         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error
+      || medicationPlansRes.error || medicationsRes.error || medicationScheduleSlotsRes.error || medicationLogsRes.error || medicationPlanItemsRes.error || medicationPillboxChecksRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -6095,6 +6262,38 @@ async function refreshHealthLogs(userId) {
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
     foodLogs: (foodRes?.data || []).map(mapFoodLogRow),
+    medicationPlans: (medicationPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
+      coachId: p.coach_id ?? null, active: !!p.active, createdAt: p.created_at, updatedAt: p.updated_at,
+    })),
+    medications: (medicationsRes?.data || []).map(m => ({
+      id: m.id, name: m.name, brand: m.brand ?? null,
+      category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
+      packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
+      stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
+      excludeFromPillbox: !!m.exclude_from_pillbox,
+      createdAt: m.created_at, updatedAt: m.updated_at,
+    })),
+    medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
+      id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
+      weekdays: s.weekdays || [],
+      hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
+      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      createdAt: s.created_at, updatedAt: s.updated_at,
+    })),
+    medicationLogs: (medicationLogsRes?.data || []).map(l => ({
+      id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
+      date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    })),
+    medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
+      id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
+      createdAt: it.created_at,
+    })),
+    medicationPillboxChecks: (medicationPillboxChecksRes?.data || []).map(c => ({
+      id: c.id, date: c.date, scheduleSlotId: c.schedule_slot_id,
+    })),
   };
 }
 
@@ -6243,14 +6442,24 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 // Assembles everything the ai-daily-summary Edge Function needs for one day,
 // straight off the already-loaded store, no extra fetch. weightTrend is a
 // 14-day trailing window (this day inclusive), ascending, nulls excluded: a
-// single day's weight can't show a trend, only a short series can. training
-// is one entry per ended session logged that day (usually 0 or 1); cardio is
-// separate (zane_cardio_logs, its own tracker, not part of a lifting session).
+// single day's weight can't show a trend, only a short series can. Sick/
+// vacation/deload days drop out (routine and hydration both swing on those),
+// same exclusion estimateAdaptiveTdee already applies to this exact signal,
+// kept consistent rather than feeding the summary a noisier series than the
+// check-in feature would trust. training is one entry per ended session
+// logged that day (usually 0 or 1); cardio is separate (zane_cardio_logs,
+// its own tracker, not part of a lifting session). goal ('cut'/'maintain'/
+// 'gain', see macroTargetsFromGoal) is only ever set once the estimator has
+// run at least once (MacroSourceCard's estimatorConfigured gate), null for
+// everyone else (manual targets, coached without ever running it): the
+// Edge Function must never guess a direction to judge the weight trend
+// against when this is null, "down" is not universally "good".
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
   const weightTrend = (store.dailyLogs || [])
     .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
+    .filter(l => !statusModeForDate(store, l.date))
     .map(l => ({ date: l.date, weight: l.weight }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const foodItems = (store.foodLogs || [])
@@ -6265,6 +6474,7 @@ function buildDailySummaryPayload(store, dateISO) {
     date: dateISO,
     weight: log?.weight ?? null,
     weightTrend,
+    goal: store.settings?.macroCalc?.goal ?? null,
     steps: log?.steps ?? null,
     calories: log?.calories ?? null,
     protein: log?.protein ?? null,
@@ -8349,7 +8559,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
+  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
@@ -8368,6 +8578,7 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
+  estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,

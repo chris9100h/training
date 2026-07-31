@@ -22,6 +22,29 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.687',
+    date: '2026-07-31',
+    title: "Now we're cooking 🍳",
+    items: [
+      "🍳 Cooking Mode (Food → a recipe → Cook it): walks you through a batch recipe step by step, one ingredient at a time, training-session style. Ingredients in the recipe editor are numbered now and drag-to-reorder, so you can set them to match your actual cooking order first. Then Cooking Mode: adjust amounts on the fly, swap or add ingredients mid-cook, live macros for both that ingredient and the whole dish as you go. Gets interrupted? No problem, it picks up right where you left off.",
+      "⚖️ Log recipes by weight, not just portions: give a recipe a cooked weight (recipe editor, optional) and you can log or plan servings by grams instead of guessing at fractions. Weigh the whole batch once, portion it out however you actually eat it. Works for any recipe, with or without Cooking Mode.",
+      "📝 Permanent prep notes per ingredient ('dice small', 'add right at the end'): set them once, they show up right on the card every time you cook. Share a recipe (the share button on any recipe) and your notes travel with it, so whoever else cooks it gets your exact process too.",
+      "🎯 Weekly check-in for your targets (Health → Targets card, toggle it on): once a week, the app looks at your last 14 days of actual weight and calories and gives you its best guess at your real maintenance number, higher, lower, or about the same as before, right next to what you're eating now. Apply it to update your targets, or skip the week and keep what you have. Set your goal (bulk, cut, maintain) any time, no need to run the full calculator first, and the daily AI summary now actually knows which direction is good for you instead of assuming weight loss is always the win.",
+      "✨ Smaller stuff: duplicate a recipe from a header button now instead of hunting for the right row icon.",
+    ],
+  },
+  {
+    id: 'v2.685',
+    date: '2026-07-30',
+    title: 'Your numbers, your way 📊',
+    items: [
+      "📤 Export your training history: Settings → Data → Export Training. Pick CSV, a properly formatted spreadsheet, or a clean PDF, then the last 7 days, 30 days, a custom range, or everything. Every session, exercise, set, rep and weight, grouped and readable, not a wall of raw numbers.",
+      "📊 Food Stats (Food → the day menu → Stats): your macro adherence over time as a chart, your longest goal-hit streak, how many days you actually hit target, average calories and macros for the period next to what you were actually aiming for, and which food you reached for most. 7, 30, 90 days, or your own range.",
+      "🏋️ Pulley ratio converter: the Plate Calculator has a third tab now. Tell it the ratio you trained with and the one your machine actually has, and it works out the equivalent weight, one tap applies it straight to your set.",
+      "✨ Smaller fixes: the Shopping List now works for AI-described meals and recipe ingredients too (exclude, rename, track stock, whatever you need, and its Excluded section tucks itself away by default now), a food that showed up twice on the list shows once now, and a favorite keeps its full nutrition info (sugar, saturated fat, sodium) after you reload the app.",
+    ],
+  },
+  {
     id: 'v2.684',
     date: '2026-07-29',
     title: 'Just tell it what you ate 🍝',

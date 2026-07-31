@@ -26,8 +26,51 @@ function fdShiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return LB.fmtISO(d);
 }
+// Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
+// Used by the Stats sheet to build a chart series with a bar (or gap) for
+// every day in the period, not just days that happen to have a log.
+function fdDateRange(from, to) {
+  const out = [];
+  const cur = new Date(from + 'T12:00:00'), end = new Date(to + 'T12:00:00');
+  let guard = 0;
+  while (cur <= end && guard < 1000) {
+    out.push(LB.fmtISO(cur));
+    cur.setDate(cur.getDate() + 1); guard++;
+  }
+  return out;
+}
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// The grams figure to actually SHOW for a logged/planned entry or template
+// slot. quantityG on a grams-mode recipe entry is the scaled raw-ingredient
+// sum (needed elsewhere, e.g. Shopping List projections), not the cooked-
+// dish weight the user actually typed, showing that number next to a name
+// already suffixed "(500g)" read as two disagreeing amounts for the same
+// entry. loggedCookedGrams is null for every non-grams-mode entry, so this
+// is a no-op everywhere else.
+const fdDisplayG = e => e?.loggedCookedGrams ?? e?.quantityG;
+// Grams of the finished dish <-> the equivalent chosenPortions, so a recipe
+// with a cookedWeightG can be logged by weight while every downstream
+// consumer (confirmRecipeLog, draftBuilt, the live preview) keeps reading
+// the same chosenPortions/totalPortions pair it always has, grams is purely
+// an alternate input unit that resolves to that pair before anything else
+// runs, not a second scaling path.
+const fdGramsToPortions = (grams, cookedWeightG, totalPortions) => cookedWeightG > 0 ? (grams / cookedWeightG) * totalPortions : 0;
+// Inverse, used only to carry the current amount across when the Portions/
+// Grams toggle itself is flipped, so switching units mid-edit doesn't reset
+// the quantity back to some default.
+const fdPortionsToGrams = (portionsVal, cookedWeightG, totalPortions) => totalPortions > 0 ? (portionsVal / totalPortions) * cookedWeightG : 0;
+// The chosenPortions a recipe-log prompt is actually at right now, resolving
+// grams mode down to its portions equivalent. Shared by the live macro
+// preview and confirmRecipeLog so the number the user sees is exactly the
+// number that gets logged.
+function fdEffectiveChosenPortions(prompt) {
+  if (!prompt) return 0;
+  if (prompt.mode === 'grams' && prompt.recipe.cookedWeightG > 0) {
+    return fdGramsToPortions(fdNum(prompt.gramsStr) || 0, prompt.recipe.cookedWeightG, prompt.totalPortions);
+  }
+  return prompt.chosenPortions;
+}
 // Splits `total` into `n` whole-number parts as evenly as possible, remainder
 // (from integer rounding) landing on the first parts so they always sum back
 // to `total` exactly. Used by the timeline's "split into multiple meals".
@@ -47,6 +90,23 @@ function fdEvenSplitFloat(total, n) {
   const drift = Math.round((total - base * n) * 100) / 100;
   parts[n - 1] = Math.round((parts[n - 1] + drift) * 100) / 100;
   return parts;
+}
+// Next hour at or after `preferred` (wrapping to the start of the day if the
+// day runs out) with no existing entries (byHour) and not already claimed by
+// another meal in this same split (`taken`), so the default proposal for a
+// new split meal never silently lands on top of an unrelated existing entry
+// or on top of another new meal's own hour. Without this a preferred hour
+// past 19 clamps straight to 23 with no free-hour search at all, which for a
+// preferred hour of exactly 23 (a stack starting at 19+) proposes putting
+// the new meal on the SAME hour as the one being split. Falls back to
+// `preferred` itself only if every hour of the day is already taken, same
+// degraded "user has to fix it by hand" outcome the unconditional clamp
+// always had, just no longer the common case.
+function fdNextFreeHour(preferred, byHour, taken) {
+  const isFree = h => !(byHour[h] || []).length && !taken.includes(h);
+  for (let h = preferred; h <= 23; h++) if (isFree(h)) return h;
+  for (let h = 0; h < preferred; h++) if (isFree(h)) return h;
+  return preferred;
 }
 // Scales a food-log entry's amount/macros/ingredient-snapshot by `scale`, for
 // "split into multiple meals": a fixed-composition food or recipe batch
@@ -246,7 +306,9 @@ function fdMaterializeSlotEntry(slot, dateISO) {
     quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
     fiber: slot.fiber ?? null, sugar: slot.sugar ?? null, satFat: slot.satFat ?? null, sodiumMg: slot.sodiumMg ?? null,
     recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
-    loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
+    loggedTotalPortions: slot.loggedTotalPortions ?? null,
+    loggedCookedGrams: slot.loggedCookedGrams ?? null, loggedCookedWeightG: slot.loggedCookedWeightG ?? null,
+    planned: true, templateSlotId: slot.id,
     createdAt: new Date().toISOString(),
   };
 }
@@ -284,6 +346,11 @@ const FD_SHOPPING_RATE_FLOOR_DAYS = 7;
 // 100kg is far past any real package or stash a user would actually track,
 // so this only ever catches garbage input, never a genuine bulk-buyer.
 const FD_SHOPPING_QTY_MAX_G = 100000;
+// Same green threshold fdAdherenceColor/screens-health.jsx's adherenceColor
+// already use for "on target": the Stats sheet's streak/goal-hit KPIs and
+// chart target line reuse it rather than inventing a second definition of
+// "good" for the same metric.
+const FD_STATS_GOAL_ADHERENCE = 90;
 function fdClampQtyG(n) {
   return n == null ? null : Math.min(FD_SHOPPING_QTY_MAX_G, n);
 }
@@ -408,6 +475,54 @@ function fdShoppingProjectionTally(store, todayISO, days) {
   }
   return fdReconcileShoppingTally(tally);
 }
+// fdReconcileShoppingTally only folds a name-keyed row into an id-keyed one
+// WITHIN a single tally. A food logged standalone (real food_id, lands in
+// hist) that's ALSO only ever eaten via a projected recipe slot (no
+// food_id, lands in proj under a name key) survives reconciliation in both
+// tallies as two separate rows under two different keys, since neither
+// tally on its own has both variants to fold together. Re-keys any such
+// name-keyed row (in either tally) to the matching id-keyed key when the
+// SAME food (by normalized name) has a real food_id in EITHER tally,
+// backfilling foodId/brand onto the moved row so it still carries its real
+// product identity. Deliberately does NOT merge totalGrams/count/firstDate
+// across hist and proj, a projection's quantity must stay only the
+// projection's own total (see fdBuildShoppingList below). Mutates hist/proj
+// in place; called once per fdBuildShoppingList run, before the two tallies
+// are merged into a single key set.
+function fdUnifyShoppingKeys(hist, proj) {
+  const idRowByName = new Map();
+  // Two genuinely different products (different real foodId) can normalize
+  // to the same display name (e.g. the same "Chicken Breast" from two
+  // different sources). Silently keeping whichever one .set() saw last would
+  // let a name-keyed row (no foodId of its own) get backfilled onto the
+  // WRONG specific product. Track the collision instead and simply decline
+  // to guess for that name, same safe fallback as no id-row match at all.
+  const ambiguousNames = new Set();
+  [hist, proj].forEach(tally => tally.forEach(row => {
+    if (!row.foodId) return;
+    const name = fdNormFoodName(row.foodName);
+    const existing = idRowByName.get(name);
+    if (existing && existing.foodId !== row.foodId) { ambiguousNames.add(name); return; }
+    idRowByName.set(name, row);
+  }));
+  [hist, proj].forEach(tally => {
+    const renames = [];
+    tally.forEach((row, key) => {
+      if (row.foodId) return;
+      const name = fdNormFoodName(row.foodName);
+      if (ambiguousNames.has(name)) return;
+      const idRow = idRowByName.get(name);
+      if (!idRow) return;
+      const idKey = fdShoppingKey(idRow.foodId, idRow.foodName);
+      if (idKey === key) return;
+      renames.push([key, idKey, { ...row, foodId: idRow.foodId, brand: row.brand || idRow.brand }]);
+    });
+    // A tally already has its own row under idKey only if fdReconcileShoppingTally
+    // missed it, which it doesn't: within one tally there's at most one row
+    // per normalized name, so this rename never collides with an existing entry.
+    renames.forEach(([oldKey, newKey, newRow]) => { tally.delete(oldKey); tally.set(newKey, newRow); });
+  });
+}
 // Merges the two signals without ever double-counting a food: a projected
 // food's quantity is the projection's own total for the window, full stop,
 // never added to the historical estimate (a template slot is a definite
@@ -432,6 +547,7 @@ function fdBuildShoppingList(store, todayISO, shoppingDays) {
   const favKeys = fdFavoriteShoppingKeys(store.foodFavorites);
   const hist = fdShoppingHistoryTally(store.foodLogs, todayISO);
   const proj = fdShoppingProjectionTally(store, todayISO, shoppingDays);
+  fdUnifyShoppingKeys(hist, proj);
   const keys = new Set([...hist.keys(), ...proj.keys()]);
   const out = [];
   keys.forEach(key => {
@@ -516,12 +632,15 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
 // optional; a food with no matching pref row gets none of them. Adds
 // displayName/overridden (so the row can skip its own brand subtitle
 // instead of showing it twice) to every item, then re-sorts by whatever
-// ends up actually displayed. Recipe-exploded/custom items without a foodId
-// can never have a pref row, nothing stable to key one on.
+// ends up actually displayed. Matches on item.key, the same
+// fdShoppingKey(foodId, foodName) both fdBuildShoppingList's demand tally
+// and the pref row's own shopping_key (migration 0227) use, so a
+// recipe-exploded ingredient or Custom Item with no real foodId still finds
+// its pref row via a normalized-name fallback instead of never matching one.
 function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
-  const byFoodId = new Map((prefs || []).map(p => [p.foodId, p]));
+  const byKey = new Map((prefs || []).map(p => [p.shoppingKey, p]));
   const out = list.map(item => {
-    const pref = item.foodId ? byFoodId.get(item.foodId) : null;
+    const pref = byKey.get(item.key);
     return {
       ...item,
       displayName: pref?.nameOverride || item.foodName,
@@ -549,7 +668,7 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
   return (store.foodShoppingPrefs || [])
     .filter(p => p.stockBaselineG != null)
     .map(p => ({
-      key: `id:${p.foodId}`,
+      key: p.shoppingKey,
       foodId: p.foodId,
       foodName: p.foodName,
       brand: p.brand || null,
@@ -661,21 +780,29 @@ function fdWriteShoppingDays(v) {
 // toggleExclusion) always includes the item's current foodName/brand in
 // patch, this is the only place that writes this table, so the snapshot can
 // never silently go stale relative to what the list itself shows for the
-// same foodId. Needed so the Inventory tab (fdBuildInventoryList) can show a
+// same key. Needed so the Inventory tab (fdBuildInventoryList) can show a
 // name for a tracked item independent of fdBuildShoppingList's own
 // staple/projection filter. setStore drives it through the normal syncStore
 // diff/upsert like any other collection, so this doesn't touch Supabase
 // directly.
-function fdSetShoppingPref(setStore, foodId, patch) {
+// Keyed on fdShoppingKey(item.foodId, item.foodName) (migration 0227), not
+// item.foodId alone: a recipe-exploded ingredient or a Custom Item (Describe
+// a meal's AI estimates always log foodId: null, see commitMealItems above)
+// has no real product match, but still needs somewhere to persist an
+// exclude/rename/stock preference. The same key fdBuildShoppingList already
+// tallies demand under, so a name-keyed pref matches its item exactly the
+// way an id-keyed one always has.
+function fdSetShoppingPref(setStore, item, patch) {
+  const key = fdShoppingKey(item.foodId, item.foodName);
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
-    const existing = list.find(p => p.foodId === foodId);
-    const merged = { ...(existing || { id: LB.uid(), foodId, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    const existing = list.find(p => p.shoppingKey === key);
+    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
     const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
     const next = isDefault
-      ? list.filter(p => p.foodId !== foodId)
+      ? list.filter(p => p.shoppingKey !== key)
       : existing
-        ? list.map(p => p.foodId === foodId ? merged : p)
+        ? list.map(p => p.shoppingKey === key ? merged : p)
         : [...list, merged];
     return { ...s, foodShoppingPrefs: next };
   });
@@ -861,6 +988,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
+  const [statsOpen, setStatsOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Shared across Recent/Favorites/Recipes since only one shows at a time;
   // cleared on switching sub-tabs so a filter typed in one never silently
@@ -1013,13 +1141,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (below) are what RecipeEditorScreen's onSave/onClose actually call.
   const [recipeEditorOpen, setRecipeEditorOpen] = useStateFd(false);
   const [recipeEditorRecipe, setRecipeEditorRecipe] = useStateFd(null);
+  // "Which recipe do I want a copy of" picker, opened from the header's copy
+  // icon (see duplicateRecipe below).
+  const [duplicatePickerOpen, setDuplicatePickerOpen] = useStateFd(false);
   // Prompt shown before a recipe actually gets logged (see addRecipeToLog):
   // always a portions stepper (half-portion steps), even for a recipe with
   // just one portion, e.g. "1 cake" doesn't mean the only choice is the
   // whole cake. chosenPortions defaults to 1 regardless of how many the
   // recipe actually has, not "all of them": logging the whole batch by
-  // default would be the more surprising default of the two.
-  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, chosenPortions } | null
+  // default would be the more surprising default of the two. mode/gramsStr
+  // only matter when recipe.cookedWeightG is set (see fdEffectiveChosenPortions).
+  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, mode, chosenPortions, totalPortions, gramsStr, fromCookingMode? } | null
+  // Cooking Mode (CookingModeScreen, see startCookingMode below): { recipe,
+  // draft } while open, null while closed. recipeLogPrompt is deliberately
+  // left set (not cleared) while this is open, so Part D's handoff back into
+  // it has nothing to re-open, just new values to show, no flash.
+  const [cookingMode, setCookingMode] = useStateFd(null);
 
   // Copy/move entries from the viewed day onto another one, at their
   // original time-of-day. copyMoveIds are foodLogs ids picked from
@@ -1148,7 +1285,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (entries.length >= 2) {
       const qtys = {};
       entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
-      const nextHours = [Math.min(23, h + 4)];
+      const nextHours = [fdNextFreeHour(Math.min(23, h + 4), byHour, [h])];
       splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
       setSplitCount(2);
       setSplitHours(nextHours);
@@ -1182,7 +1319,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setSplitCount(n);
     setSplitHours(prev => {
       const next = prev.slice(0, n - 1);
-      while (next.length < n - 1) next.push(Math.min(23, (next[next.length - 1] ?? splitHour) + 4));
+      while (next.length < n - 1) {
+        const base = next[next.length - 1] ?? splitHour;
+        next.push(fdNextFreeHour(Math.min(23, base + 4), byHour, [splitHour, ...next]));
+      }
       return next;
     });
     setSplitQtys(prev => {
@@ -2768,6 +2908,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (n && !await confirm(`${n} item${n === 1 ? '' : 's'} from your description won't be added.`, { title: 'Discard items?', ok: 'Discard', cancel: 'Keep reviewing', danger: true })) return;
     setMealItems(null);
   }
+  // Blocks "Log it"/"Plan it"/"Add N items" while any row is still at a 0g
+  // (or otherwise missing) amount: editMealItem (via openCustomAsScalable)
+  // is the only way to fix a row's quantity, an untouched 0g AI estimate
+  // would otherwise commit a phantom entry with nothing to catch it, unlike
+  // every sibling add path (see customValid above) which already guards this.
+  const mealItemsValid = !!mealItems && mealItems.length > 0 && mealItems.every(i => i.quantityG > 0);
   // "Log it" / "Plan it" / "Add N items" on the review list: every row
   // becomes its own staged entry (same shape/destination as any other add
   // path), sharing one time/createdAt since they're all the one described
@@ -2804,6 +2950,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // ── Recipes ──
   function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
   function editRecipe(recipe) { setRecipeEditorRecipe(recipe); setRecipeEditorOpen(true); }
+  // Reached from the header's copy icon (duplicatePickerOpen), not a button
+  // per row: one row per recipe times three action icons got crowded fast
+  // once someone had more than a handful. Picking a recipe here confirms
+  // (a long list makes a mis-tap easy) then copies it, same naming/id-
+  // regeneration pattern as duplicatePlan below (meal plans). Item ids are
+  // regenerated too, not just the recipe's own: they're only ever scoped to
+  // their own recipe's items array, but a fresh id per copy avoids any doubt
+  // about whether editing one recipe's ingredient could ever reach the other.
+  async function duplicateRecipe(recipe) {
+    if (!await confirm(recipe.name, { title: 'Duplicate recipe?', ok: 'Duplicate' })) return;
+    const now = new Date().toISOString();
+    const copy = {
+      ...recipe, id: LB.uid(), name: recipe.name + ' (Copy)',
+      items: (recipe.items || []).map(i => ({ ...i, id: LB.uid() })),
+      createdAt: now, updatedAt: now,
+    };
+    setStore(s => ({ ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] }));
+    setDuplicatePickerOpen(false);
+  }
   // RecipeEditorScreen's onSave: it owns its own draft (name/items/portions)
   // entirely locally and only ever hands back the finished shape, so saving
   // is just the usual upsert-by-id-or-prepend every other store collection
@@ -2823,7 +2988,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Confirmed like every other destructive action in this module (deleteEntry,
   // deletePlan, deleteSlot, even removing a single ingredient): a recipe is the
   // most expensive artifact here, it's fired from a small trash icon in a
-  // scrolling list, and dropping it silently breaks "Edit portions" on every
+  // scrolling list, and dropping it silently breaks "Edit amount" on every
   // already-logged entry that resolves back to it (recipeEntryLiveRecipe).
   async function deleteRecipe(recipe) {
     const n = (recipe.items || []).length;
@@ -2878,7 +3043,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // stage, same reason a DB food needs its quantity sheet first.
   function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
-    setRecipeLogPrompt({ recipe, chosenPortions: 1, totalPortions: recipe.portions || 1 });
+    setRecipeLogPrompt({ recipe, mode: 'portions', chosenPortions: 1, totalPortions: recipe.portions || 1, gramsStr: '' });
   }
   // Reopens an already-logged recipe entry's own portions prompt, so bumping
   // the count up or down doesn't need a delete + re-add. A recipe entry's
@@ -2890,7 +3055,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function openEditRecipeEntry(entry) {
     const recipe = recipeEntryLiveRecipe(entry);
     if (!recipe || !(recipe.items || []).length) return;
-    const m = entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/);
+    // A grams-mode log carries both fields frozen at log time (see
+    // confirmRecipeLog's `built`); reconstruct the SAME chosen/total pair a
+    // portions-mode entry would via the entry's own logged_total_portions,
+    // just with the scale coming from grams/cookedWeight instead of a typed
+    // portions count. Every entry made before this feature shipped has
+    // neither field, so it always falls through to the portions branch below
+    // unchanged.
+    const gramsMode = entry.loggedCookedGrams != null && entry.loggedCookedWeightG > 0;
+    const m = !gramsMode ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
     // The total-portions-at-log-time must come from the entry itself, not the
     // live recipe (recipe.portions may have changed since logging, which
     // would silently rescale this entry's macros against the wrong base).
@@ -2900,7 +3073,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const totalPortions = entry.loggedTotalPortions != null ? entry.loggedTotalPortions
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
-    const origChosen = m ? parseFloat(m[1]) : totalPortions;
+    const origChosen = gramsMode ? (entry.loggedCookedGrams / entry.loggedCookedWeightG) * totalPortions
+      : m ? parseFloat(m[1])
+      : totalPortions;
     // Rescale from the entry's OWN frozen ingredient snapshot, not the live
     // recipe: changing the portion count of a past entry must not retroactively
     // bake in ingredient edits made to the recipe since it was logged (that
@@ -2910,7 +3085,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // confirmRecipeLog's normal chosen/total math but sourcing it from the
     // snapshot. Legacy entries without a snapshot fall back to the live recipe.
     const snap = (entry.recipeItems && entry.recipeItems.length) ? entry.recipeItems : null;
-    const promptRecipe = snap ? (() => {
+    let promptRecipe = snap ? (() => {
       const perTotal = origChosen ? totalPortions / origChosen : 1;
       return { ...recipe, portions: totalPortions, items: snap.map(i => ({
         foodId: i.foodId ?? null, brand: i.brand ?? null,
@@ -2925,16 +3100,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         sodiumMg: i.sodiumMg != null ? i.sodiumMg * perTotal : null,
       })) };
     })() : recipe;
+    // Frozen cooked weight, not the live recipe's current one (same reasoning
+    // as totalPortions above): the toggle and the grams math both need to
+    // read the weight this entry was actually logged against. Always a fresh
+    // object, promptRecipe may still be the live recipe reference (no
+    // snapshot branch above) and must never be mutated in place.
+    if (gramsMode) promptRecipe = { ...promptRecipe, cookedWeightG: entry.loggedCookedWeightG };
     setEditingEntry(entry);
     setQtyEditPlanned(!!entry.planned);
-    setRecipeLogPrompt({ recipe: promptRecipe, chosenPortions: origChosen, totalPortions });
+    setRecipeLogPrompt({
+      recipe: promptRecipe, mode: gramsMode ? 'grams' : 'portions',
+      chosenPortions: origChosen, totalPortions,
+      gramsStr: gramsMode ? String(entry.loggedCookedGrams) : '',
+    });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
   // tapped), so the Stepper's live number always matches what gets logged.
   const recipeLogPreview = useMemoFd(() => {
     if (!recipeLogPrompt) return null;
-    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
+    const { recipe, totalPortions } = recipeLogPrompt;
+    const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
@@ -2950,7 +3136,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
   async function confirmRecipeLog(planned = false) {
-    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
+    const { recipe, totalPortions, mode, gramsStr } = recipeLogPrompt;
+    const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
+    const gramsMode = mode === 'grams' && recipe.cookedWeightG > 0;
+    const gramsVal = gramsMode ? (fdNum(gramsStr) || 0) : null;
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
@@ -2974,7 +3163,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
     }));
     const built = {
-      foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+      foodId: null,
+      // Grams mode names itself by the typed weight, not a converted (and
+      // often unfriendly-looking) portions fraction, it's what the user
+      // actually thought in terms of.
+      foodName: gramsMode ? (gramsVal !== recipe.cookedWeightG ? `${recipe.name} (${gramsVal}g)` : recipe.name)
+        : chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name,
+      brand: null, source: 'recipe',
       // Stable id back to the source recipe, so recipeEntryLiveRecipe can
       // resolve this entry correctly even if another recipe later gets the
       // same name (a plain name match, the old fallback, can't tell them apart).
@@ -2983,6 +3178,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // rescales against the total at LOG time, not against whatever
       // recipe.portions has since become (see openEditRecipeEntry).
       loggedTotalPortions: totalPortions,
+      // Both null unless logged in grams mode, both frozen at log time same
+      // as loggedTotalPortions above, so a later edit to the recipe's own
+      // cooked weight can never retroactively rescale this entry when it's
+      // reopened (openEditRecipeEntry reads these back, not the live recipe).
+      loggedCookedGrams: gramsVal, loggedCookedWeightG: gramsMode ? recipe.cookedWeightG : null,
       quantityG: Math.round(sum('quantityG') * scale),
       // Same expression recipeLogPreview above already showed on the
       // portions sheet (fdRecipeItemsCalories sums every ingredient's exact
@@ -3026,8 +3226,148 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setEditingEntry(null);
     } else {
       setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned, ...built }]);
+      // Cooking Mode's own draft (see startCookingMode) is done once its log
+      // actually commits, whichever of Plan it/Log it got tapped: this is one
+      // of the wizard's two terminal outcomes, see fdClearCookingDraft's
+      // other call site (CookingModeScreen's requestExit) for the other.
+      if (recipeLogPrompt?.fromCookingMode) fdClearCookingDraft();
     }
     setRecipeLogPrompt(null);
+  }
+
+  // "Cook it" on the recipe log prompt (see the Sheet's own button row
+  // below): hands off to CookingModeScreen for the recipe currently sitting
+  // in recipeLogPrompt, instead of calling confirmRecipeLog. The amount
+  // chosen on the prompt so far is simply discarded, irrelevant, the wizard
+  // determines the real amount itself (per ingredient, then optionally a
+  // cooked weight). recipeLogPrompt itself is left untouched (not cleared)
+  // so CookingModeScreen, opened on top of it, can cleanly hand back into it
+  // afterward with no flash or remount.
+  async function startCookingMode() {
+    if (!recipeLogPrompt) return;
+    const recipe = recipeLogPrompt.recipe;
+    let draft = null;
+    const saved = fdReadCookingDraft();
+    if (saved) {
+      const fresh = saved.startedAt && (Date.now() - Date.parse(saved.startedAt)) < 24 * 60 * 60 * 1000;
+      const matches = saved.recipeId === recipe.id;
+      if (matches && fresh) {
+        const total = (saved.items || []).length;
+        const atIdx = Math.min((saved.currentIdx || 0) + 1, Math.max(total, 1));
+        // saved.step matters here, not just currentIdx: once the wizard has
+        // moved past the last ingredient into the cooked-weight step,
+        // currentIdx stays parked at items.length - 1 (see handleNext), so
+        // without this branch the confirm would misleadingly read
+        // "ingredient N of N" for a draft that actually resumes straight
+        // into the cooked-weight screen, past every ingredient.
+        const resumeMsg = saved.step === 'cookedWeight'
+          ? 'Resume cooking? You already went through every ingredient, just the cooked weight is left.'
+          : `Resume cooking from ingredient ${atIdx} of ${total}?`;
+        const resume = await confirm(resumeMsg, { title: 'Resume cooking?', ok: 'Continue', cancel: 'Start over' });
+        if (resume) draft = saved;
+      } else if (!matches && fresh) {
+        // A still-fresh draft for a DIFFERENT recipe (e.g. cooking got
+        // interrupted earlier and the user backed out without finishing,
+        // which deliberately leaves it in place, see requestExit) would
+        // otherwise get silently wiped the moment a second recipe's Cook it
+        // is tapped, with no warning at all, the opposite of the "survives
+        // app-kill, resumable within 24h" guarantee this draft exists for.
+        const otherName = (store.foodRecipes || []).find(r => r.id === saved.recipeId)?.name || 'another recipe';
+        const ok = await confirm(`You have an unfinished cook for "${otherName}". Starting this one discards it.`,
+          { title: 'Discard other cook?', ok: 'Discard, start this', cancel: 'Cancel', danger: true });
+        if (!ok) return;
+      }
+      if (!draft) fdClearCookingDraft();
+    }
+    setCookingMode({ recipe, draft });
+  }
+  // CookingModeScreen's own onFinish: Part B/C are done (either no diff to
+  // confirm, or the user picked Leave/Update recipe), hand off into the
+  // normal recipeLogPrompt/confirmRecipeLog machinery as the actual final
+  // commit step, exactly as if a plain portions/grams amount had been typed
+  // on the prompt directly. resolvedCookedWeightG falls back to the recipe's
+  // own existing cookedWeightG when nothing was typed this session (never
+  // erased by leaving the field blank), typedThisSession alone decides the
+  // sheet's starting unit.
+  function finishCookingMode(finalItems, resolvedCookedWeightG, typedThisSession) {
+    const recipe = cookingMode?.recipe;
+    setCookingMode(null);
+    if (!recipe) return;
+    setRecipeLogPrompt({
+      recipe: { ...recipe, items: finalItems, cookedWeightG: resolvedCookedWeightG },
+      mode: typedThisSession ? 'grams' : 'portions',
+      chosenPortions: 1,
+      totalPortions: recipe.portions || 1,
+      gramsStr: typedThisSession ? String(resolvedCookedWeightG) : '',
+      fromCookingMode: true,
+    });
+  }
+  // "Update recipe" in CookingModeScreen's own diff confirm: same store-write
+  // shape handleRecipeSave already uses, name/portions untouched.
+  function updateRecipeFromCooking(recipeId, items, cookedWeightG) {
+    const now = new Date().toISOString();
+    setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === recipeId ? { ...r, items, cookedWeightG, updatedAt: now } : r) }));
+  }
+  // A note is evergreen prep guidance, not tied to this cook's own outcome
+  // the way amounts/add/swap/remove are (those stay provisional until
+  // Update recipe, or vanish on Leave recipe/Cancel). CookingModeScreen only
+  // calls this for an ingredient that already exists in the persisted
+  // recipe unchanged (see its own saveNoteEditor), so unlike
+  // updateRecipeFromCooking above this patches ONE item's note in place,
+  // nothing else about the recipe (other items, amounts, cookedWeightG)
+  // moves, and it fires immediately rather than waiting for the diff sheet.
+  function patchRecipeItemNote(recipeId, itemId, note) {
+    const now = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      foodRecipes: (s.foodRecipes || []).map(r => r.id !== recipeId ? r : {
+        ...r, updatedAt: now,
+        items: (r.items || []).map(i => i.id !== itemId ? i : { ...i, note }),
+      }),
+    }));
+  }
+  // "Back" on the Cooking Mode hand-off sheet (e.g. to fix the dish weight
+  // after all): reopens the wizard from the SAME draft finishCookingMode
+  // left behind (that draft only ever gets cleared on an actual commit or
+  // an explicit discard, see requestCloseRecipeLogPrompt/CookingModeScreen's
+  // own requestCancel), no confirm needed, going back loses nothing. Reads
+  // the LIVE recipe, not recipeLogPrompt.recipe (that one is a synthetic
+  // snapshot merged with the wizard's own final edits), so originalItemsRef
+  // inside CookingModeScreen still diffs against what is actually persisted.
+  // recipeLogPrompt itself is left in place, same reasoning as
+  // startCookingMode: CookingModeScreen just re-layers on top of it, and
+  // backing out of the wizard again lands cleanly back on this same sheet.
+  function backToCookingMode() {
+    if (!recipeLogPrompt?.fromCookingMode) return;
+    const recipeId = recipeLogPrompt.recipe.id;
+    const recipe = (store.foodRecipes || []).find(r => r.id === recipeId);
+    if (!recipe) return;
+    const saved = fdReadCookingDraft();
+    const draft = (saved && saved.recipeId === recipeId) ? saved : null;
+    setCookingMode({ recipe, draft });
+  }
+  // Every other use of this Sheet (plain log, plan, edit an existing entry)
+  // stays a free backdrop-tap-to-close, low stakes, a couple seconds of typing
+  // to redo. Reached via Cooking Mode it is not: a whole ingredient-by-
+  // ingredient walkthrough sits behind it, so a stray tap outside the sheet
+  // gets a confirm instead of silently dropping back to the recipe list, and
+  // confirming actually discards the draft too (see below), "Discard" that
+  // quietly left something resumable behind was its own bug. Backing out via
+  // the new Back button instead (not this close path) reopens the wizard
+  // from that same draft, nothing here stops that.
+  async function requestCloseRecipeLogPrompt() {
+    if (recipeLogPrompt?.fromCookingMode) {
+      const ok = await confirm('This discards the cook, nothing gets logged.',
+        { title: 'Discard cooking?', ok: 'Discard', cancel: 'Keep editing', danger: true });
+      if (!ok) return;
+      // "Discard" has to actually mean discard: leaving the draft behind
+      // here (like a plain backdrop tap on every other sheet does) meant
+      // the next "Cook it" for this recipe offered to resume a session the
+      // user had just explicitly thrown away.
+      fdClearCookingDraft();
+    }
+    setRecipeLogPrompt(null);
+    setEditingEntry(null);
   }
 
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
@@ -3080,7 +3420,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
                 <span style={fdEntryMeta}>
-                  {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                  {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                   <span style={fdMetaDivider} />
                   <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                 </span>
@@ -3135,28 +3475,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={dayMenu} onClose={() => setDayMenu(false)} title={dayLabel}>
         <button onClick={() => { setDayMenu(false); setMocSheet({ name: mocName || '', hour: mocHour }); }}
           disabled={!dayTarget}
-          style={{ ...fdTemplateBtn, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
-          <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
-          <span style={{ flex: 1, textAlign: 'left' }}>
-            {isMealOfChoice ? 'Meal of choice, set' : 'Make this a meal of choice day'}
-          </span>
+          style={{ ...fdTemplateBtn, flexDirection: 'column', alignItems: 'stretch', gap: 8, opacity: dayTarget ? 1 : 0.45, cursor: dayTarget ? 'pointer' : 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <i className="fa-solid fa-utensils" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            <span style={{ flex: 1, textAlign: 'left' }}>
+              {isMealOfChoice ? 'Meal of choice, set' : 'Make this a meal of choice day'}
+            </span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+          </div>
+          {/* Always shown, including the first one and including zero: the point
+              of a counter you dose by is that it is there before you decide, not
+              only once you are already over. */}
+          <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'left' }}>
+            {isMealOfChoice
+              ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
+              : mocWeek.count === 0
+                ? 'None yet this week.'
+                : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 400, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'left' }}>
+            {dayTarget
+              ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
+              : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
+          </div>
+        </button>
+        <button onClick={() => { setDayMenu(false); setStatsOpen(true); }} style={{ ...fdTemplateBtn, marginTop: 8 }}>
+          <i className="fa-solid fa-chart-column" style={{ fontSize: 13, color: 'var(--accent)' }} />
+          <span style={{ flex: 1, textAlign: 'left' }}>Stats</span>
           <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
         </button>
-        {/* Always shown, including the first one and including zero: the point
-            of a counter you dose by is that it is there before you decide, not
-            only once you are already over. */}
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
-          {isMealOfChoice
-            ? `Your ${fdOrdinal(mocWeek.ordinal)} this week.`
-            : mocWeek.count === 0
-              ? 'None yet this week.'
-              : `${mocWeek.count} so far this week, this would be your ${fdOrdinal(mocWeek.count + 1)}.`}
-        </div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 8 }}>
-          {dayTarget
-            ? 'One meal takes whatever macros are left over, and the day stops being scored. Meant for the odd meal you plan around, not for a day that got away from you.'
-            : 'Needs a macro target first: without one there is no budget for the meal to inherit.'}
-        </div>
+      </Sheet>
+
+      <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="Stats" titleColor="var(--accent)">
+        <FdStatsBody store={store} />
       </Sheet>
 
       {/* Naming is optional but it is the ONLY thing the coach sees: the name
@@ -3231,9 +3582,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
         right={
           tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
-            <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
-              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setDuplicatePickerOpen(true)} aria-label="Duplicate a recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-copy" style={{ fontSize: 13 }} />
+              </button>
+              <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+              </button>
+            </div>
           ) : tab === 'log' ? (
             // Day-level actions. Screenshot and multi-select need something to
             // act on, but the overflow and shopping list must not: a
@@ -3330,7 +3686,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
-                                {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                 <span style={fdMetaDivider} />
                                 <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                 {e.moc ? ' left for it' : ''}
@@ -3559,7 +3915,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
-                                            {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                            {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                             <span style={fdMetaDivider} />
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
@@ -4133,13 +4489,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => commitMealItems(false)} style={{ flex: 2 }}>
+            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 2 }}>
               Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
             </Btn>
           </div>
@@ -4168,7 +4524,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                   <div style={fdEntryName}>{e.foodName}</div>
                   <span style={fdEntryMeta}>
-                    {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                     <span style={fdMetaDivider} />
                     <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                   </span>
@@ -4344,7 +4700,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
-                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
+                    <span style={fdEntryMeta}>{fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
                   </div>
                 </div>
               ))}
@@ -4425,8 +4781,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           stepper, even for a 1-portion recipe (e.g. "1 cake" doesn't mean
           logging the whole cake is the only option, half of it or a second
           one are just as valid). Half-portion steps, no upper cap: chosen
-          can go above the recipe's own portion count too. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
+          can go above the recipe's own portion count too.
+          STACKING WARNING: stays z-index 100 on purpose, tied with
+          CookingModeScreen below, which must render as a LATER sibling than
+          this Sheet in the JSX to win that tie (see CookingModeScreen's own
+          comment for why a literal higher zIndex is unsafe here). Do not
+          move this Sheet below CookingModeScreen's render call, or reorder
+          either one, without re-reading that comment first. ── */}
+      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
           // Always share the LIVE recipe. When this sheet is opened from an
           // already-logged entry (openEditRecipeEntry) the prompt holds a
@@ -4439,16 +4801,55 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
         )}
       >
-        {recipeLogPrompt && (
+        {recipeLogPrompt && (() => {
+          const gramsCapable = recipeLogPrompt.recipe.cookedWeightG > 0;
+          const gramsModeOn = gramsCapable && recipeLogPrompt.mode === 'grams';
+          const qtyLabel = gramsModeOn
+            ? `${fdNum(recipeLogPrompt.gramsStr) || 0}g`
+            : `${recipeLogPrompt.chosenPortions} portion${recipeLogPrompt.chosenPortions === 1 ? '' : 's'}`;
+          // Portions mode is already safe (the Stepper below floors at 0.5),
+          // but grams mode is a free-typed field with no min at all, so a
+          // cleared or "0" input would otherwise stage a real, 0-calorie
+          // "Chicken Bowl (0g)" entry, the exact phantom-entry class every
+          // other add flow in this file already guards against.
+          const qtyValid = gramsModeOn ? fdNum(recipeLogPrompt.gramsStr) > 0 : recipeLogPrompt.chosenPortions > 0;
+          return (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
               How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
             </div>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-              <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
-                suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
-                onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
-            </div>
+            {gramsCapable && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+                {[['portions', 'Portions'], ['grams', 'Grams']].map(([id, label]) => (
+                  <button key={id} onClick={() => setRecipeLogPrompt(p => {
+                    // Carries the current amount across in whichever direction,
+                    // switching units mid-edit shouldn't reset the quantity.
+                    if (!p || p.mode === id) return p;
+                    if (id === 'grams') {
+                      return { ...p, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(p.chosenPortions, p.recipe.cookedWeightG, p.totalPortions)))) };
+                    }
+                    return { ...p, mode: id, chosenPortions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(p.gramsStr) || 0, p.recipe.cookedWeightG, p.totalPortions) * 2) / 2) };
+                  })} style={fdSegBtn(recipeLogPrompt.mode === id)}>{label}</button>
+                ))}
+              </div>
+            )}
+            {gramsModeOn ? (
+              // Free-typed, not a Stepper: grams spans too wide a range for
+              // a fixed step to ever be the right size (10g taps to shave 460g
+              // off a 960g default is exactly the "tap fifty times" complaint
+              // this replaced), unlike portions below where a half-step really
+              // is normally the whole adjustment.
+              <Field label="Amount (g)" style={{ marginBottom: 20 }}>
+                <input value={recipeLogPrompt.gramsStr} onChange={e => setRecipeLogPrompt(p => p ? { ...p, gramsStr: fdDecimalFilter(e.target.value) } : p)}
+                  type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
+                  suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
+                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
+              </div>
+            )}
             {recipeLogPreview && (
               <FdMacroPreview calories={recipeLogPreview.calories} protein={recipeLogPreview.protein} carbs={recipeLogPreview.carbs} fat={recipeLogPreview.fat} />
             )}
@@ -4460,21 +4861,70 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {editingEntry ? (
-              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+              <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ width: '100%' }}>
+                Save · {qtyLabel}
               </Btn>
-            ) : planMode ? (
+            ) : recipeLogPrompt.fromCookingMode ? (
+              // Reached via Cooking Mode's own hand-off (Part D): behaves like
+              // a normal, non-Cook-it prompt (see the plain planMode/single-Add
+              // branches this mirrors), no "Cook it" a second time, that
+              // doesn't make sense once the dish is already cooked. The back
+              // chevron (matching the wizard's own footer button) reopens
+              // Cooking Mode, e.g. to fix the dish weight after all.
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+                <button onClick={backToCookingMode} aria-label="Back to Cooking Mode" style={{
+                  width: 44, minHeight: 44, borderRadius: 6, background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  color: UI.inkSoft, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                {planMode ? (
+                  <div style={{ display: 'flex', gap: 8, flex: 1 }}>
+                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                    {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                  </div>
+                ) : (
+                  <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>
+                    Add {recipeLogPrompt.recipe.name} · {qtyLabel}
+                  </Btn>
+                )}
               </div>
-            ) : (
-              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
-              </Btn>
-            )}
+            ) : (<>
+              {/* Three real actions instead of the old plan-mode-only split:
+                  Cook it walks through Cooking Mode below (real-time only,
+                  same reasoning as Log it, a future date can't be cooked
+                  today); Plan it/Log it are unchanged. The chosen quantity no
+                  longer fits inside a now-narrower button label, so it's
+                  called out here instead. */}
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+              </div>
+            </>)}
           </>
-        )}
+          );
+        })()}
+      </Sheet>
+
+      {/* ── Duplicate-recipe picker (header copy icon, see duplicateRecipe) ── */}
+      <Sheet open={duplicatePickerOpen} onClose={() => setDuplicatePickerOpen(false)} title="Duplicate recipe" titleColor="var(--accent)">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '60vh', overflowY: 'auto' }}>
+          {(store.foodRecipes || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+            const n = (r.items || []).length;
+            return (
+              <button key={r.id} onClick={() => duplicateRecipe(r)} style={fdResultRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{r.name}</div>
+                  <div style={fdEntryMeta}>{n} ingredient{n === 1 ? '' : 's'}</div>
+                </div>
+                <i className="fa-solid fa-copy" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            );
+          })}
+        </div>
       </Sheet>
 
       {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
@@ -4512,6 +4962,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
 
+      {/* Rendered AFTER recipeLogPrompt's own Sheet above (both z-index 100,
+          see CookingModeScreen's own comment on why not a literal 200): later
+          in document order wins an equal-z-index tie, so this correctly
+          paints above the recipe log prompt it was opened from and returns
+          into. */}
+      <CookingModeScreen open={!!cookingMode} recipe={cookingMode?.recipe} draft={cookingMode?.draft} store={store}
+        onClose={() => setCookingMode(null)} onFinish={finishCookingMode} onUpdateRecipe={updateRecipeFromCooking} onNoteChange={patchRecipeItemNote} />
+
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
       <ShoppingListScreen open={shoppingOpen} onClose={() => setShoppingOpen(false)} store={store} setStore={setStore} today={today} userId={userId} />
@@ -4535,7 +4993,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               )}
               {meCanPortions ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
-                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit portions
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit amount
                 </Btn>
               ) : !meIsRecipe ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditEntry(me))} style={{ width: '100%' }}>
@@ -4665,6 +5123,10 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           // snapshot is another user's jsonb, so nothing is spread blindly.
           // Absent on anything shared before 0204, which stays null.
           sugar: numOrNull(i.sugar), satFat: numOrNull(i.satFat), sodiumMg: numOrNull(i.sodiumMg),
+          // Prep notes are exactly why someone shares a recipe with notes in
+          // the first place (e.g. so a partner cooks it the same way), keep
+          // them through the adopt whitelist same as every other field here.
+          note: i.note != null ? String(i.note) : null,
         })),
         createdAt: now, updatedAt: now,
       };
@@ -4695,12 +5157,23 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
             {fdSortIngredientsByQty(items).map((i, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
-                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
+              <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
+                  </div>
+                  <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
                 </div>
-                <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                {/* Exactly why someone shares a recipe with notes at all: so
+                    whoever cooks it (a partner, a roommate) gets the same
+                    prep guidance, not just the ingredient list. */}
+                {i.note && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 4, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                    <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -5000,7 +5473,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   }
   function openAddRecipe(recipe) {
     setPickerOpen(false);
-    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' };
+    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, mode: 'portions', portions: 1, gramsStr: '', hour: 8, dayType: 'any' };
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
   }
@@ -5184,7 +5657,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const recipe = draft.recipe;
       const items = recipe.items || [];
       const totalPortions = recipe.portions || 1;
-      const scale = draft.portions / totalPortions;
+      // Same grams-mode resolution as the direct-log prompt's
+      // fdEffectiveChosenPortions, just against draft's own field names
+      // (portions here, not chosenPortions).
+      const gramsMode = draft.mode === 'grams' && recipe.cookedWeightG > 0;
+      const gramsVal = gramsMode ? (fdNum(draft.gramsStr) || 0) : null;
+      const chosenPortions = gramsMode ? fdGramsToPortions(gramsVal, recipe.cookedWeightG, totalPortions) : draft.portions;
+      // Same guard the food branch above already has (g == null || !(g > 0)):
+      // a cleared/zero grams field here would otherwise build and let
+      // saveDraft persist a permanent, recurring 0-calorie template slot.
+      if (!(chosenPortions > 0)) return null;
+      const scale = chosenPortions / totalPortions;
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const recipeItems = items.map(i => ({
         foodId: i.foodId ?? null, brand: i.brand ?? null,
@@ -5197,7 +5680,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
       }));
       return {
-        foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
+        foodId: null,
+        foodName: gramsMode ? (gramsVal !== recipe.cookedWeightG ? `${recipe.name} (${gramsVal}g)` : recipe.name)
+          : draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
         brand: null, source: 'recipe', quantityG: Math.round(sum('quantityG') * scale),
         calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
         carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
@@ -5206,6 +5691,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
         sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
         recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
+        loggedCookedGrams: gramsVal, loggedCookedWeightG: gramsMode ? recipe.cookedWeightG : null,
       };
     }
     // recipe edit: no macro recompute, reuse the existing slot's food fields.
@@ -5363,7 +5849,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                           {slot.foodName}
                         </span>
                         <span style={fdEntryMeta}>
-                          {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                          {fdDisplayG(slot) ? `${fdDisplayG(slot)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
                           <span style={fdMetaDivider} />
                           <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
                         </span>
@@ -5520,11 +6006,39 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               </Field>
             ) : draft.recipe ? (
               <div style={{ marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Portions</div>
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
-                    onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
-                </div>
+                {draft.recipe.cookedWeightG > 0 && (
+                  <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 12 }}>
+                    {[['portions', 'Portions'], ['grams', 'Grams']].map(([id, label]) => (
+                      <button key={id} onClick={() => setDraft(d => {
+                        // Carries the current amount across in whichever
+                        // direction, same reasoning as the direct-log
+                        // prompt's own toggle.
+                        if (!d || d.mode === id) return d;
+                        if (id === 'grams') {
+                          return { ...d, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(d.portions, d.recipe.cookedWeightG, d.recipe.portions || 1)))) };
+                        }
+                        return { ...d, mode: id, portions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(d.gramsStr) || 0, d.recipe.cookedWeightG, d.recipe.portions || 1) * 2) / 2) };
+                      })} style={fdSegBtn(draft.mode === id)}>{label}</button>
+                    ))}
+                  </div>
+                )}
+                {draft.mode === 'grams' ? (
+                  // Free-typed, not a Stepper: grams spans too wide a range
+                  // for a fixed step to ever be the right size, unlike
+                  // portions below where a half-step really is normally the
+                  // whole adjustment.
+                  <Field label="Amount (g)">
+                    <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                ) : (
+                  <>
+                    <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
+                        onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                    </div>
+                  </>
+                )}
               </div>
             ) : null}
             {draftBuilt && (
@@ -5757,6 +6271,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   }, [displayList, inventoryList]);
   const includedForDisplay = useMemoFd(() => includedList.filter(i => !fdIsLowStock(i)), [includedList]);
   const excludedForDisplay = useMemoFd(() => excludedList.filter(i => !fdIsLowStock(i)), [excludedList]);
+  // Collapsed by default: the Excluded section is set-aside stuff the user
+  // already decided not to buy, not something that needs to compete for
+  // attention with the actual shopping list every time this screen opens.
+  const [excludedOpen, setExcludedOpen] = useStateFd(false);
 
   // One-time "Running Low" banner: shows only for a dip the user hasn't
   // already seen (see fdReadLowStockAcks), dismissing marks every currently-
@@ -5791,7 +6309,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
   function openEdit(item) {
-    if (!item.foodId) return; // recipe-exploded/custom items have nothing stable to key a pref row on
     setEditItem(item);
     setEditDraft(item.displayName);
     setPkgDraft(item.packageSizeG != null ? String(item.packageSizeG) : '');
@@ -5851,20 +6368,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
       stockTyped = fdNum(stockDraft);
     }
     if (stockTyped != null) { patch.stockBaselineG = fdClampQtyG(stockTyped); patch.stockSetAt = new Date().toISOString(); }
-    fdSetShoppingPref(setStore, editItem.foodId, patch);
+    fdSetShoppingPref(setStore, editItem, patch);
     closeEdit();
   }
   async function resetEdit() {
     if (!editItem) return;
     if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
-    fdSetShoppingPref(setStore, editItem.foodId, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
+    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
   // The checkbox's own handler, independent of the edit sheet: toggles
   // straight from either list section, no sheet involved.
   function toggleExclusion(item) {
-    if (!item.foodId) return;
-    fdSetShoppingPref(setStore, item.foodId, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
+    fdSetShoppingPref(setStore, item, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
   }
   // Shared row for both includedList and excludedList below: same layout,
   // just dimmed with the checkbox unchecked once excluded. The checkbox is a
@@ -5899,12 +6415,11 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         {!inventoryMode && (
           <FdCheckbox
             checked={!item.excluded}
-            disabled={!item.foodId}
             label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
             onToggle={() => toggleExclusion(item)}
           />
         )}
-        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: item.foodId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}>
+        <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
@@ -6183,11 +6698,16 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 {excludedForDisplay.length > 0 && (
                   <>
                     <div className="knurl" style={{ margin: '16px 0 10px' }} />
-                    <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi, textAlign: 'center' }}>Excluded</div>
+                    <button onClick={() => setExcludedOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--accent)', fontFamily: UI.fontUi }}>Excluded ({excludedForDisplay.length})</span>
+                      <i className={`fa-solid fa-chevron-${excludedOpen ? 'down' : 'right'}`} style={{ fontSize: 11, color: 'var(--accent)' }} />
+                    </button>
                     <div className="knurl" style={{ margin: '10px 0' }} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {excludedForDisplay.map(item => renderShoppingRow(item))}
-                    </div>
+                    {excludedOpen && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {excludedForDisplay.map(item => renderShoppingRow(item))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -6309,14 +6829,36 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   );
 }
 
+// Circular position badge (1, 2, 3, ...) reflecting an ingredient's place in
+// the recipe's prep order (array order). Shared by the ingredient list above
+// and Cooking Mode's one-at-a-time hero card below, so the same number means
+// the same thing in both places.
+function FdIngredientBadge({ n, size = 20 }) {
+  return (
+    <span className="num" style={{
+      flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: size, height: size, borderRadius: 999,
+      background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
+      fontSize: Math.round(size * 0.5), fontWeight: 700,
+    }}>{n}</span>
+  );
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
   const [items, setItems] = useStateFd([]);
   const [portions, setPortions] = useStateFd(1);
+  const [cookedWeightG, setCookedWeightG] = useStateFd('');
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
+  // Per-ingredient note (items[i].note, optional): the item being edited, or
+  // null while closed. Carried through to Cooking Mode below, where it's the
+  // whole point of being permanent (shown prominently on that ingredient's
+  // own card while actually cooking).
+  const [noteItem, setNoteItem] = useStateFd(null);
+  const [noteText, setNoteText] = useStateFd('');
   // Snapshot of the draft as it was opened, to detect unsaved edits on close.
   const initialSnap = useRefFd(null);
 
@@ -6330,8 +6872,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     // item and wiped the whole recipe instead of the one being removed.
     const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
     const p = recipe?.portions || 1;
-    setName(n); setItems(it); setPortions(p);
-    initialSnap.current = JSON.stringify({ name: n, items: it, portions: p });
+    const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+    setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
+    initialSnap.current = JSON.stringify({ name: n, items: it, portions: p, cookedWeightG: cw });
   }, [open, recipe]);
 
   // Batch totals, the whole recipe as cooked, independent of portions:
@@ -6345,8 +6888,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
   }), [items, netCarbs]);
+  // Raw ingredient weight, shown only as a reference next to cookedWeightG
+  // below, never auto-filled into it: water lost or gained during cooking
+  // means the finished dish rarely weighs what its raw ingredients did,
+  // that gap is the entire reason this field asks for a real typed number.
+  const rawGramsTotal = useMemoFd(() => items.reduce((a, i) => a + (i.quantityG || 0), 0), [items]);
 
-  const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
+  const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions, cookedWeightG }) !== initialSnap.current;
   const requestClose = async () => {
     if (isDirty() && !await confirm("Your changes to this recipe won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -6367,8 +6915,47 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     if (!await confirm(`${item.foodName} · ${item.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     removeItem(item.id);
   }
+  // Array order IS the deliberate prep order now (see the ingredient list
+  // below and Cooking Mode further down): a plain splice-to-new-position,
+  // no macro recalculation, only position changes.
+  function reorderItems(from, to) {
+    if (from === to) return;
+    setItems(list => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
+  function closeNoteItem() { setNoteItem(null); setNoteText(''); }
+  function saveNote() {
+    if (!noteItem) return;
+    const trimmed = noteText.trim();
+    setItems(list => list.map(i => i.id !== noteItem.id ? i : { ...i, note: trimmed || null }));
+    closeNoteItem();
+  }
+  // Live preview of the rescaled macros as the amount is typed, same factor
+  // math saveEditItem itself commits below, so what's shown here is exactly
+  // what Save will write. Without this the sheet was just a bare grams
+  // input, no way to tell how much of an ingredient to dial in for a target
+  // without saving blind and checking the row after.
+  const editItemPreview = useMemoFd(() => {
+    const g = fdNum(editGrams);
+    if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return null;
+    const factor = g / editItem.quantityG;
+    return {
+      calories: Math.round((editItem.calories || 0) * factor),
+      protein: fdRound1((editItem.protein || 0) * factor),
+      carbs: fdRound1((editItem.carbs || 0) * factor),
+      fat: fdRound1((editItem.fat || 0) * factor),
+      sugar: editItem.sugar != null ? fdRound1(editItem.sugar * factor) : null,
+      satFat: editItem.satFat != null ? fdRound1(editItem.satFat * factor) : null,
+      sodiumMg: editItem.sodiumMg != null ? Math.round(editItem.sodiumMg * factor) : null,
+    };
+  }, [editItem, editGrams]);
   // Rescales every field on the item by the same factor (newGrams/oldGrams)
   // rather than re-deriving per-100g rates: mathematically identical, one
   // fewer intermediate step.
@@ -6403,7 +6990,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     const ok = await confirm(<RecipeSaveRecap name={trimmed} portions={portions} totals={totals} />,
       { title: recipe ? 'Save recipe?' : 'Add recipe?', ok: recipe ? 'Save' : 'Add' });
     if (!ok) return;
-    onSave({ name: trimmed, items, portions });
+    onSave({ name: trimmed, items, portions, cookedWeightG: fdNum(cookedWeightG) });
   }
   const canSave = !!(name.trim() && items.length);
 
@@ -6429,14 +7016,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
           <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
         </Field>
 
-        <BracketFrame gold style={{ padding: 20 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Whole batch</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{totals.calories}</span>
-            <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
-          </div>
-          <FdMacroGhosts protein={totals.protein} carbs={totals.carbs} fat={totals.fat} style={{ marginTop: 12 }} />
-        </BracketFrame>
+        <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
         <div>
           <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
@@ -6445,16 +7025,36 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
           </div>
         </div>
 
+        {/* Optional: unlocks logging this recipe by grams of the finished
+            dish instead of only by portions, useful for batch cooking where
+            weighing out a serving is more natural than a portion fraction
+            (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
+            Never auto-filled from the ingredient total below: cooking loses
+            or gains water weight, so the two numbers are rarely the same. */}
+        <Field label="Cooked weight (g), optional">
+          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+          </div>
+        </Field>
+
         <div>
-          <Bezel style={{ marginBottom: 10 }}>Ingredients</Bezel>
+          <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
             <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
               <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
             </Btn>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {fdSortIngredientsByQty(items).map(i => (
-                <div key={i.id} style={fdEntryRow}>
+            // Array order is the deliberate prep order (the order to add
+            // ingredients while cooking, see Cooking Mode below), so this list
+            // renders items as-is, drag the grip to reorder, same engine as
+            // the plan editor's own item list (screens-schedule.jsx).
+            <ReorderList onReorder={reorderItems} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((i, idx) => (
+                <div key={i.id} data-reorder-item="true" style={fdEntryRow}>
+                  <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
+                  <FdIngredientBadge n={idx + 1} />
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                       {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -6466,12 +7066,15 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                       <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
                     </span>
                   </button>
-                  <button onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
+                  </button>
+                  <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                   </button>
                 </div>
               ))}
-            </div>
+            </ReorderList>
           )}
         </div>
       </div>
@@ -6482,12 +7085,30 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
           <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
+        {editItemPreview && (
+          <FdMacroPreview calories={editItemPreview.calories} protein={editItemPreview.protein} carbs={editItemPreview.carbs} fat={editItemPreview.fat}
+            sugar={editItemPreview.sugar} satFat={editItemPreview.satFat} sodiumMg={editItemPreview.sodiumMg} />
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={removeEditItem} aria-label="Remove ingredient" style={{ ...fdSideBtn, width: 44, flexShrink: 0 }}>
             <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
           </button>
           <Btn kind="ghost" onClick={closeEditItem} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      {/* ── Per-ingredient note: a short, permanent reminder that follows the
+          ingredient into Cooking Mode (CookingModeScreen below), where it's
+          shown prominently on that ingredient's own card while cooking ── */}
+      <Sheet open={!!noteItem} onClose={closeNoteItem} title={noteItem?.foodName || 'Note'} titleColor="var(--accent)">
+        <Field label="Note" style={{ marginBottom: 16 }}>
+          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="e.g. dice small, or add right at the end"
+            rows={2} style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }} />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeNoteItem} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveNote} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
@@ -6511,11 +7132,771 @@ function RecipeSaveRecap({ name, portions, totals }) {
   );
 }
 
+// ── Cooking Mode: localStorage draft (this device only, never synced) ──────
+// Mirrors LB.saveToLocal's own defensive pattern (store.js): a full/blocked
+// localStorage must never crash the wizard, it should just silently fail to
+// persist that one write. Only one draft at a time, same as cooking itself.
+function fdReadCookingDraft() {
+  try {
+    const raw = localStorage.getItem('logbook-cooking-draft');
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+function fdWriteCookingDraft(draft) {
+  try { localStorage.setItem('logbook-cooking-draft', JSON.stringify(draft)); } catch (_) {}
+}
+function fdClearCookingDraft() {
+  try { localStorage.removeItem('logbook-cooking-draft'); } catch (_) {}
+}
+
+// Diff between the wizard's final working items and the recipe's own
+// currently persisted items, for the "Recipe changes" confirm below. Swaps
+// are NOT re-derived from a generic added+removed pair (that would have to
+// guess which removal pairs with which addition); they come in as an
+// explicit event log recorded the moment each swap actually happened in the
+// wizard (swapEvents), same reasoning training tracks its own swap
+// operations directly instead of inferring them after the fact.
+function fdComputeCookingDiff(originalItems, finalItems, swapEvents) {
+  const origById = new Map((originalItems || []).map(i => [i.id, i]));
+  const finalById = new Map((finalItems || []).map(i => [i.id, i]));
+  const swappedIds = new Set((swapEvents || []).map(e => e.itemId));
+  const diffs = [];
+  (finalItems || []).forEach(i => { if (!origById.has(i.id)) diffs.push({ type: 'added', name: i.foodName }); });
+  (originalItems || []).forEach(i => { if (!finalById.has(i.id)) diffs.push({ type: 'removed', name: i.foodName }); });
+  // finalById guard: a slot that was swapped and later removed entirely
+  // reports only as "removed" (the true end state), not also as "swapped"
+  // into a food that no longer exists either. requestRemove already prunes
+  // swapEvents for a removed slot, this is a second line of defense.
+  // origById guard: a slot that was added this session and THEN swapped
+  // (never existed in the persisted recipe at all) reports only as "added"
+  // (using its final, post-swap food), not also as a "swapped" row naming an
+  // old food that was never part of the recipe to begin with.
+  (swapEvents || []).forEach(e => { if (finalById.has(e.itemId) && origById.has(e.itemId)) diffs.push({ type: 'swapped', fromName: e.fromFoodName, toName: e.toFoodName }); });
+  // Amount changed: the same item survived (and wasn't swapped), but its
+  // quantity moved by more than max(5% relative, 3g floor). At or under that
+  // threshold is deliberately never reported, normal imprecise kitchen
+  // weighing must never trigger this dialog, only a genuinely deliberate
+  // change should.
+  (originalItems || []).forEach(orig => {
+    if (swappedIds.has(orig.id)) return;
+    const fin = finalById.get(orig.id);
+    if (!fin) return;
+    const origG = orig.quantityG || 0;
+    const finG = fin.quantityG || 0;
+    const threshold = Math.max(origG * 0.05, 3);
+    if (Math.abs(finG - origG) > threshold) {
+      diffs.push({ type: 'amount', name: fin.foodName, oldG: origG, newG: finG });
+    }
+  });
+  return diffs;
+}
+
+// Cooking Mode: a guided, one-ingredient-at-a-time wizard for actually
+// cooking a recipe, opened from the recipe log prompt's "Cook it" button
+// (FoodScreen's startCookingMode). Modeled on TrainingScreen's own
+// one-exercise-at-a-time flow (chip row + position counter, swap/add/remove
+// toolbar, Back/Next footer) but built entirely out of this file's own
+// components, never training's literal CSS constants or its KgInput/
+// CustomKeyboard machinery. Next is always enabled here, unlike training's
+// gated Next: reviewing an ingredient has no "done" state to gate on.
+//
+// zIndex 100, tied with an ordinary Sheet, not the seemingly obvious 200
+// ("must sit above the already-open recipeLogPrompt Sheet"): FdIngredientPicker
+// is reused unmodified below, and its OWN internal "discard picks?" confirm
+// (useConfirm's default zIndex, portaled straight to document.body) would
+// render BEHIND a z-200 wizard, an invisible, unreachable confirm. Tied at
+// z-100, that portal still always wins ties against same-tier content (see
+// useConfirm's own comment in ui.jsx), and this component is rendered as a
+// LATER sibling than recipeLogPrompt's own Sheet in FoodScreen's return, so
+// the tie against THAT is won by DOM order instead, the exact same mechanism
+// RecipeEditorScreen already relies on for nesting this same picker.
+function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe, onNoteChange }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [items, setItems] = useStateFd([]);
+  const originalItemsRef = useRefFd([]);
+  const [currentIdx, setCurrentIdx] = useStateFd(0);
+  const [step, setStep] = useStateFd('ingredients'); // 'ingredients' | 'cookedWeight'
+  const [cookedWeightG, setCookedWeightG] = useStateFd('');
+  const [swapEvents, setSwapEvents] = useStateFd([]); // [{ itemId, fromFoodName, toFoodName }]
+  const [amountStr, setAmountStr] = useStateFd('');
+  // Frozen basis for the live amount-scale preview (same two-state idea as
+  // RecipeEditorScreen's editItem/editGrams): reset explicitly whenever the
+  // ingredient AT the current position changes (goToIndex, a swap), never
+  // recomputed from the drifting `items` state itself, or repeated typing
+  // would compound rounding against an already-scaled value instead of the
+  // ingredient's own fixed starting point for this visit.
+  const baseItemRef = useRefFd(null);
+  const startedAtRef = useRefFd(null);
+  const [pickerOpen, setPickerOpen] = useStateFd(false);
+  const pickerModeRef = useRefFd('add'); // 'add' | 'swap': which toolbar button opened FdIngredientPicker
+  // Note editor always targets curItem (the wizard only ever shows one
+  // ingredient at a time), so unlike RecipeEditorScreen's noteItem there is
+  // no need to track WHICH item is being edited, only the draft text.
+  const [noteEditorOpen, setNoteEditorOpen] = useStateFd(false);
+  const [noteDraft, setNoteDraft] = useStateFd('');
+  // Keeps the active chip centered in the strip as currentIdx moves, same
+  // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
+  // without it the strip only scrolls by hand and the active chip silently
+  // runs off-screen on a longer ingredient list.
+  const chipRowRef = useRefFd(null);
+  useEffectFd(() => {
+    const row = chipRowRef.current;
+    if (!row || step !== 'ingredients') return;
+    const chip = row.querySelector(`[data-chip-idx="${currentIdx}"]`);
+    if (!chip) return;
+    row.scrollLeft = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
+  }, [currentIdx, step]);
+  const [diffOpen, setDiffOpen] = useStateFd(false);
+  const [diffList, setDiffList] = useStateFd([]);
+  // Whether this open resumed a saved draft (vs. a from-scratch cook):
+  // requestExit below must never wipe a resumed draft just because THIS
+  // visit made no further changes, that would silently discard real
+  // progress saved in an earlier session.
+  const resumedRef = useRefFd(false);
+  // Set on any state-changing action taken this session (amount typed,
+  // add/swap/remove, cooked weight typed). requestExit only ever clears
+  // the draft for a truly untouched session, see its own comment below.
+  const dirtyRef = useRefFd(false);
+  // Whether cookedWeightG actually reflects a real typed value, as opposed
+  // to merely being pre-filled from the recipe's own already-saved
+  // cookedWeightG. Deliberately separate from dirtyRef above (which also
+  // flips true for unrelated actions like an ingredient amount edit): this
+  // one specifically decides the Part D hand-off's starting unit ('grams'
+  // vs 'portions'), an untouched pre-filled value must resolve to
+  // 'portions' same as today, even if other fields were touched this
+  // session. Initialized in the open-effect below (also handles resuming a
+  // draft where the value was genuinely typed in an earlier, killed
+  // session), then flipped true directly by the field's own onChange.
+  const cookedWeightTypedRef = useRefFd(false);
+
+  useEffectFd(() => {
+    if (!open) return;
+    const idsFilled = (recipe?.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+    originalItemsRef.current = idsFilled.map(i => ({ ...i }));
+    let initItems, initIdx, initStep, initCookedWeightG, initSwapEvents;
+    if (draft) {
+      initItems = (draft.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+      initIdx = Math.max(0, Math.min(draft.currentIdx || 0, initItems.length - 1));
+      initStep = draft.step === 'cookedWeight' ? 'cookedWeight' : 'ingredients';
+      initCookedWeightG = draft.cookedWeightG || '';
+      initSwapEvents = draft.swapEvents || [];
+      startedAtRef.current = draft.startedAt || new Date().toISOString();
+    } else {
+      initItems = idsFilled.map(i => ({ ...i }));
+      initIdx = 0;
+      initStep = 'ingredients';
+      initCookedWeightG = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+      initSwapEvents = [];
+      startedAtRef.current = new Date().toISOString();
+    }
+    resumedRef.current = !!draft;
+    dirtyRef.current = false;
+    // A draft's cookedWeightG diverging from the recipe's own currently
+    // saved value can only mean it was genuinely typed at some point (this
+    // device only ever writes what the field itself held); matching it (or
+    // a from-scratch open, where it's the same prefill by construction)
+    // means untouched.
+    const recipeCookedWeight = recipe?.cookedWeightG ?? null;
+    cookedWeightTypedRef.current = fdNum(initCookedWeightG) > 0 && fdNum(initCookedWeightG) !== recipeCookedWeight;
+    setItems(initItems);
+    setCurrentIdx(initIdx);
+    setStep(initStep);
+    setCookedWeightG(initCookedWeightG);
+    setSwapEvents(initSwapEvents);
+    setDiffOpen(false);
+    setDiffList([]);
+    baseItemRef.current = initItems[initIdx] || null;
+    setAmountStr(initItems[initIdx] ? String(initItems[initIdx].quantityG ?? '') : '');
+  }, [open, recipe, draft]);
+
+  // Persists on every change so an app-kill mid-cook survives (this device
+  // only, see CLAUDE.md's localStorage-key list). Guarded on items.length:
+  // the render right after `open` flips true, before the effect above's
+  // setItems has actually landed, must never overwrite a real draft with an
+  // empty one (a real recipe always has at least one ingredient). Carries
+  // swapEvents along too, otherwise a resumed draft would forget which
+  // ingredients were swapped and fdComputeCookingDiff below would misreport
+  // them as a plain amount change (or drop them) instead of "swapped".
+  useEffectFd(() => {
+    if (!open || !recipe || !items.length) return;
+    fdWriteCookingDraft({ recipeId: recipe.id, startedAt: startedAtRef.current, step, currentIdx, items, cookedWeightG, swapEvents });
+  }, [open, recipe, step, currentIdx, items, cookedWeightG, swapEvents]);
+
+  function syncAmountField(idx, list) {
+    const it = list[idx];
+    baseItemRef.current = it || null;
+    setAmountStr(it ? String(it.quantityG ?? '') : '');
+  }
+  function goToIndex(idx, list) {
+    const arr = list || items;
+    const clamped = Math.max(0, Math.min(idx, arr.length - 1));
+    setCurrentIdx(clamped);
+    syncAmountField(clamped, arr);
+  }
+
+  const rawGramsTotal = useMemoFd(() => items.reduce((a, i) => a + (i.quantityG || 0), 0), [items]);
+  // Whole-batch running total, same math as RecipeEditorScreen's own
+  // `totals`: recomputed straight off the live `items` state, so it starts
+  // equal to the saved recipe (items is cloned from recipe.items on open)
+  // and updates itself for free on every amount/add/swap/remove action,
+  // no separate "recompute on change" wiring needed.
+  const netCarbs = !!store.settings?.netCarbs;
+  const batchTotals = useMemoFd(() => ({
+    calories: fdRecipeItemsCalories(items, netCarbs),
+    protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
+    carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
+    fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
+  }), [items, netCarbs]);
+  const curItem = items[currentIdx] || null;
+  // Continuous shrink instead of training's fixed length breakpoints: a
+  // straight-line falloff past a comfortable short-name length, clamped to
+  // this card's own min/max, so a very long ingredient name never wraps or
+  // overflows past the amount field below it.
+  const curNameFontSize = curItem
+    ? Math.max(15, Math.min(32, 32 - Math.max(0, curItem.foodName.length - 11) * 0.8))
+    : 32;
+
+  function onAmountChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setAmountStr(filtered);
+    const base = baseItemRef.current;
+    const g = fdNum(filtered);
+    if (!base || !(g > 0) || !(base.quantityG > 0)) return;
+    dirtyRef.current = true;
+    const factor = g / base.quantityG;
+    setItems(list => list.map((it, i) => i !== currentIdx ? it : {
+      ...it, quantityG: Math.round(g),
+      calories: Math.round((base.calories || 0) * factor),
+      protein: fdRound1((base.protein || 0) * factor),
+      carbs: fdRound1((base.carbs || 0) * factor),
+      fat: fdRound1((base.fat || 0) * factor),
+      fiber: base.fiber != null ? fdRound1(base.fiber * factor) : null,
+      sugar: base.sugar != null ? fdRound1(base.sugar * factor) : null,
+      satFat: base.satFat != null ? fdRound1(base.satFat * factor) : null,
+      sodiumMg: base.sodiumMg != null ? Math.round(base.sodiumMg * factor) : null,
+    }));
+  }
+
+  function handleNext() {
+    if (currentIdx < items.length - 1) goToIndex(currentIdx + 1);
+    else setStep('cookedWeight');
+  }
+  function handleBack() {
+    if (step === 'cookedWeight') { setStep('ingredients'); goToIndex(items.length - 1); return; }
+    if (currentIdx === 0) return;
+    goToIndex(currentIdx - 1);
+  }
+  // No confirm-to-exit here (deliberate, see Cooking Mode's persistence
+  // notes): the localStorage draft is what survives navigating away. Only
+  // a session that is BOTH back at the very first ingredient AND has made
+  // no changes at all clears it, "before doing anything" per the spec.
+  // resumedRef matters here too: re-opening a saved draft and immediately
+  // backing out again with no further edits must not discard the progress
+  // that draft already represents, only a from-scratch session with
+  // nothing in it is safe to wipe.
+  function requestExit() {
+    if (step === 'ingredients' && currentIdx === 0 && !dirtyRef.current && !resumedRef.current) fdClearCookingDraft();
+    onClose();
+  }
+
+  function openAddPicker() { pickerModeRef.current = 'add'; setPickerOpen(true); }
+  // The only way to give a note to an ingredient added mid-cook: it never
+  // passed through RecipeEditorScreen, so it has no chance to pick one up
+  // there. Same permanent-note idea either way, saves straight into curItem.
+  function openNoteEditor() { setNoteDraft(curItem?.note || ''); setNoteEditorOpen(true); }
+  function closeNoteEditor() { setNoteEditorOpen(false); setNoteDraft(''); }
+  function saveNoteEditor() {
+    if (!curItem) return;
+    dirtyRef.current = true;
+    const trimmed = noteDraft.trim();
+    const note = trimmed || null;
+    const id = curItem.id;
+    setItems(list => list.map(i => i.id !== id ? i : { ...i, note }));
+    // Unlike an amount/add/swap/remove edit, a note is evergreen prep
+    // guidance, not this session's outcome, so it should survive even if
+    // the whole cook gets left or canceled. Only patch the persisted recipe
+    // immediately for a slot that's actually still the SAME ingredient the
+    // recipe already has: not swapped this session (a swapped-in food isn't
+    // in the recipe yet, its note travels along with it only if Update
+    // recipe later promotes it, same as a brand new added ingredient).
+    const wasSwapped = swapEvents.some(e => e.itemId === id);
+    if (!wasSwapped && originalItemsRef.current.some(o => o.id === id)) {
+      onNoteChange(recipe.id, id, note);
+    }
+    closeNoteEditor();
+  }
+  // The X in the header: unlike requestExit (the back-chevron, silent, the
+  // localStorage draft is the safety net for "just navigating away"), this
+  // is a deliberate abort. Always confirms, and always clears the draft
+  // even if requestExit's own narrower conditions would have kept it,
+  // canceling here means the user does not want to pick this back up.
+  async function requestCancel() {
+    // Not "no changes are saved to the recipe": a note on an unswapped,
+    // originally-existing ingredient already patched straight into
+    // store.foodRecipes the moment it was saved (see saveNoteEditor), by
+    // design, and canceling does not revert that. Promising otherwise here
+    // was simply false.
+    const ok = await confirm('This cancels the whole cook, nothing gets logged. Any notes you saved along the way stay on the recipe.',
+      { title: 'Cancel cooking?', ok: 'Cancel cooking', cancel: 'Keep cooking', danger: true });
+    if (!ok) return;
+    fdClearCookingDraft();
+    onClose();
+  }
+  async function requestSwap() {
+    if (!curItem) return;
+    if (!await confirm(`Swap "${curItem.foodName}"?`, { ok: 'Swap' })) return;
+    pickerModeRef.current = 'swap';
+    setPickerOpen(true);
+  }
+  async function requestRemove() {
+    if (items.length <= 1 || !curItem) return;
+    if (!await confirm(`${curItem.foodName} · ${curItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    dirtyRef.current = true;
+    const removedId = curItem.id;
+    const next = items.filter((_, i) => i !== currentIdx);
+    setItems(next);
+    // Drop any swap event recorded for the removed slot: it no longer
+    // exists in the final list, so fdComputeCookingDiff below should just
+    // report it as removed, not ALSO as swapped into a food that then
+    // vanished too.
+    setSwapEvents(list => list.filter(e => e.itemId !== removedId));
+    goToIndex(Math.min(currentIdx, next.length - 1), next);
+  }
+
+  // FdIngredientPicker always hands back an array (its own "Add N
+  // ingredients" button supports staging several at once); Add inserts all
+  // of them, Swap uses only the first (multi-add makes no sense for a
+  // one-for-one swap) and ignores the rest. Reused completely unmodified
+  // either way, per this file's own established contract for that component.
+  function handlePickerAdd(newItems) {
+    if (!newItems || !newItems.length) { setPickerOpen(false); return; }
+    if (pickerModeRef.current === 'swap') {
+      applySwap({ id: LB.uid(), ...newItems[0] });
+      setPickerOpen(false);
+      return;
+    }
+    dirtyRef.current = true;
+    const withIds = newItems.map(it => ({ id: LB.uid(), ...it }));
+    const insertAt = currentIdx + 1;
+    const next = [...items.slice(0, insertAt), ...withIds, ...items.slice(insertAt)];
+    setItems(next);
+    goToIndex(insertAt, next);
+    setPickerOpen(false);
+  }
+  // Keeps the currently typed gram amount (not the new food's own default
+  // quantity) and recomputes every macro from the new food's own rate at
+  // that same gram amount; note is dropped, a note written for the old
+  // ingredient has no reason to carry over to a different food.
+  function applySwap(picked) {
+    if (!curItem) return;
+    dirtyRef.current = true;
+    const keptGrams = fdNum(amountStr) || curItem.quantityG || 0;
+    const factor = picked.quantityG > 0 ? keptGrams / picked.quantityG : 0;
+    const swapped = {
+      ...curItem,
+      foodId: picked.foodId ?? null, foodName: picked.foodName, brand: picked.brand ?? null, source: picked.source ?? null,
+      quantityG: Math.round(keptGrams),
+      calories: Math.round((picked.calories || 0) * factor),
+      protein: fdRound1((picked.protein || 0) * factor),
+      carbs: fdRound1((picked.carbs || 0) * factor),
+      fat: fdRound1((picked.fat || 0) * factor),
+      fiber: picked.fiber != null ? fdRound1(picked.fiber * factor) : null,
+      sugar: picked.sugar != null ? fdRound1(picked.sugar * factor) : null,
+      satFat: picked.satFat != null ? fdRound1(picked.satFat * factor) : null,
+      sodiumMg: picked.sodiumMg != null ? Math.round(picked.sodiumMg * factor) : null,
+      note: null,
+    };
+    const swappedItemId = curItem.id;
+    const next = items.map((it, i) => i === currentIdx ? swapped : it);
+    setItems(next);
+    baseItemRef.current = swapped;
+    setAmountStr(String(swapped.quantityG));
+    // Net-tracks per slot rather than appending a new row per swap: two
+    // swaps of the same ingredient (rice to quinoa, then quinoa to
+    // couscous) collapse into one "rice to couscous" event, matching what
+    // actually changed versus the original recipe, not a stale
+    // intermediate step. Swapping back to the very original food for that
+    // slot cancels the event entirely, since nothing really changed.
+    setSwapEvents(list => {
+      const origItem = originalItemsRef.current.find(o => o.id === swappedItemId);
+      const originalName = origItem ? origItem.foodName : curItem.foodName;
+      const existing = list.find(e => e.itemId === swappedItemId);
+      if (swapped.foodName === originalName) return list.filter(e => e.itemId !== swappedItemId);
+      const fromFoodName = existing ? existing.fromFoodName : curItem.foodName;
+      const event = { itemId: swappedItemId, fromFoodName, toFoodName: swapped.foodName };
+      return existing ? list.map(e => e.itemId === swappedItemId ? event : e) : [...list, event];
+    });
+  }
+
+  // Blank stays blank downstream (no update to cooked weight), it never
+  // erases an already-set one: only a positive typed value overrides it.
+  // typedThisSession reads cookedWeightTypedRef (was the field genuinely
+  // edited, not just pre-filled from the recipe's own already-saved value),
+  // not merely "does it currently parse to a positive number": a recipe
+  // that already has a cookedWeightG would otherwise always look "typed"
+  // even when the user never touched the field, wrongly forcing Part D's
+  // hand-off into 'grams' instead of the spec's 'portions' default.
+  function resolveCookedWeight() {
+    const typed = fdNum(cookedWeightG);
+    return { resolved: typed > 0 ? typed : (recipe?.cookedWeightG ?? null), typedThisSession: cookedWeightTypedRef.current && typed > 0 };
+  }
+  function proceedToLog() {
+    const { resolved, typedThisSession } = resolveCookedWeight();
+    onFinish(items, resolved, typedThisSession);
+  }
+  function handleFinishIngredients() {
+    const diffs = fdComputeCookingDiff(originalItemsRef.current, items, swapEvents);
+    if (!diffs.length) { proceedToLog(); return; }
+    setDiffList(diffs);
+    setDiffOpen(true);
+  }
+  function handleLeaveRecipe() { setDiffOpen(false); proceedToLog(); }
+  function handleUpdateRecipe() {
+    setDiffOpen(false);
+    const { resolved } = resolveCookedWeight();
+    onUpdateRecipe(recipe.id, items, resolved);
+    proceedToLog();
+  }
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      {confirmEl}
+      <TopBar title={recipe?.name || 'Cooking'} sub="Cooking mode" onBack={requestExit} right={
+        <button onClick={requestCancel} aria-label="Cancel cooking" style={fdTopAddBtn}>
+          <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+        </button>
+      } />
+
+      {step === 'ingredients' && curItem && (<>
+        <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span className="micro-gold">Ingredients</span>
+          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
+            {String(currentIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(items.length).padStart(2, '0')}
+          </span>
+        </div>
+
+        {/* Chip row, tap a chip to jump straight to that ingredient. */}
+        <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {items.map((it, i) => (
+            <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
+              flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
+              border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
+              background: i === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+              fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
+              color: i === currentIdx ? 'var(--accent)' : UI.inkFaint,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>{it.foodName}</button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <FdIngredientBadge n={currentIdx + 1} size={34} />
+            <span className="display" style={{
+              flex: 1, minWidth: 0,
+              fontSize: curNameFontSize,
+              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>{curItem.foodName}</span>
+          </div>
+
+          {/* Whole batch: the more consequential number while stepping
+              through ingredients (does this dish still hit target?), starts
+              equal to the saved recipe (items is cloned from recipe.items on
+              open) and live-updates with every amount edit or add/swap/
+              remove action. */}
+          <FdMacroHero label="Whole batch" calories={batchTotals.calories} protein={batchTotals.protein} carbs={batchTotals.carbs} fat={batchTotals.fat} />
+
+          {curItem.note && (
+            <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
+              <div className="micro-gold" style={{ marginBottom: 4 }}>Note</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{curItem.note}</div>
+            </div>
+          )}
+
+          <Field label="Amount (g)">
+            <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+          </Field>
+
+          <FdMacroPreview calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat}
+            sugar={curItem.sugar} satFat={curItem.satFat} sodiumMg={curItem.sodiumMg} marginBottom={0} />
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={requestSwap} aria-label="Swap ingredient" style={fdIconBtn(38)}>
+              <i className="fa-solid fa-right-left" style={{ fontSize: 14 }} />
+            </button>
+            {items.length > 1 && (
+              <button onClick={requestRemove} aria-label="Remove ingredient" style={fdIconBtn(38)}>
+                <i className="fa-solid fa-trash" style={{ fontSize: 14 }} />
+              </button>
+            )}
+            <div style={{ flex: 1 }} />
+            {/* Pinned to the far right, same "+ Note" / "Note" pill training's
+                own toolbar row uses (screens-train.jsx), deliberately not a
+                square fdIconBtn like its left-side siblings: those three
+                mutate/replace the ingredient, this one is its own separate
+                category of action. */}
+            <button onClick={openNoteEditor} aria-label={curItem.note ? 'Edit note' : 'Add note'} style={{
+              background: curItem.note ? UI.goldFaint : 'transparent',
+              border: `var(--hair-width) solid ${curItem.note ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+              color: curItem.note ? UI.gold : UI.inkFaint, fontSize: 10,
+              fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {curItem.note ? 'Note' : '+ Note'}
+            </button>
+          </div>
+        </div>
+      </>)}
+
+      {step === 'cookedWeight' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div className="display" style={{ fontSize: 28, color: UI.ink, lineHeight: 1.1 }}>Weigh the dish</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Optional. Weigh the finished dish to log it by weight later instead of by portion, it usually differs from the raw ingredient total below.
+            </div>
+          </div>
+          <Field label="Cooked weight (g), optional">
+            <input value={cookedWeightG} onChange={e => { dirtyRef.current = true; cookedWeightTypedRef.current = true; setCookedWeightG(fdDecimalFilter(e.target.value)); }} type="text" inputMode="decimal"
+              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          </Field>
+        </div>
+      )}
+
+      <div className="knurl" />
+      <div style={{ flexShrink: 0, padding: '10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)', display: 'flex', gap: 10 }}>
+        <button onClick={handleBack} disabled={step === 'ingredients' && currentIdx === 0} style={{
+          width: 44, minHeight: 44, borderRadius: 6, background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+          color: UI.inkSoft, cursor: (step === 'ingredients' && currentIdx === 0) ? 'default' : 'pointer',
+          opacity: (step === 'ingredients' && currentIdx === 0) ? 0.3 : 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        {step === 'ingredients' ? (
+          <Btn onClick={handleNext} style={{ flex: 1, minHeight: 44 }}>
+            {currentIdx === items.length - 1 ? 'Weigh it →' : 'Next ingredient →'}
+          </Btn>
+        ) : (
+          <Btn onClick={handleFinishIngredients} style={{ flex: 1, minHeight: 44 }}>Finish →</Btn>
+        )}
+      </div>
+
+      {/* "Recipe changes" vs. the recipe's own persisted items, modeled
+          directly on training's "Session changes" Sheet. */}
+      <Sheet open={diffOpen} onClose={() => setDiffOpen(false)} title="Recipe changes">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. recipe:</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+          {diffList.map((d, i) => (
+            <div key={i} style={{ background: UI.bgInset, borderRadius: 4, padding: '10px 14px', border: `var(--hair-width) solid ${UI.hair}`, fontSize: 13, color: UI.ink, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {d.type === 'swapped' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⇄</span>
+                  <span><span style={{ color: UI.inkSoft }}>{d.fromName}</span>{' → '}<strong>{d.toName}</strong></span>
+                </>
+              ) : d.type === 'amount' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
+                  <span><strong>{d.name}</strong>{': '}<span style={{ color: UI.inkSoft }}>{Math.round(d.oldG)}g</span>{' → '}<strong>{Math.round(d.newG)}g</strong></span>
+                </>
+              ) : d.type === 'added' ? (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>＋</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' removed'}</span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={handleLeaveRecipe} style={{ flex: 1 }}>Leave recipe</Btn>
+          <Btn onClick={handleUpdateRecipe} style={{ flex: 2 }}>Update recipe</Btn>
+        </div>
+      </Sheet>
+
+      {/* Same permanent per-ingredient note as RecipeEditorScreen's own note
+          Sheet, just always targeting curItem, so an ingredient added mid-
+          cook (which never passed through the editor) can get one too. */}
+      <Sheet open={noteEditorOpen} onClose={closeNoteEditor} title={curItem?.foodName || 'Note'} titleColor="var(--accent)">
+        <Field label="Note" style={{ marginBottom: 16 }}>
+          <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)} placeholder="e.g. dice small, or add right at the end"
+            rows={2} style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }} />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeNoteEditor} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveNoteEditor} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={handlePickerAdd} store={store} />
+    </Screen>
+  );
+}
+
 const FD_PICKER_TABS = [
   { id: 'search', label: 'Search' },
   { id: 'favorites', label: 'Favorites' },
   { id: 'recent', label: 'Recent' },
 ];
+
+// Stats sheet body: 7/30/90/custom history of macro adherence with
+// drag-to-inspect bars (reuses HealthBarChart, same as Water's own stats
+// sheet), KPIs, and an average-macros breakdown. Charts adherence (0-100,
+// store.dailyLogs, see dailyLogAdherence in store.js) rather than raw
+// calories: HealthBarChart's target line is a single scalar for the whole
+// period, but the actual calorie target can differ by training/rest day or
+// change over time (targetsSnap freezes a day's target as of when it was
+// scored), so only the already-normalized adherence score stays meaningful
+// across an arbitrary date range. A day with no macro target (or nothing
+// logged) has adherence: null, treated as 0 for both the chart and the KPIs
+// below, same as Water treats an unlogged day as 0ml: an untracked day is
+// not a hit, not a gap in the data.
+function FdStatsBody({ store }) {
+  const [period, setPeriod] = useStateFd(30);
+  const [from, setFrom] = useStateFd(fdShiftDate(LB.todayISO(), -29));
+  const [to, setTo] = useStateFd(LB.todayISO());
+  const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
+
+  const range = useMemoFd(() => {
+    if (period === 'custom') return (from > to) ? { from: to, to: from } : { from, to };
+    return { from: fdShiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
+  }, [period, from, to]);
+
+  const s = useMemoFd(() => {
+    const adhByDate = {}, calByDate = {}, macroByDate = {}, mocDates = new Set();
+    (store.dailyLogs || []).forEach(l => {
+      if (l.date < range.from || l.date > range.to) return;
+      if (l.adherence != null) adhByDate[l.date] = l.adherence;
+      if (l.calories) { calByDate[l.date] = l.calories; macroByDate[l.date] = l; }
+      // A meal-of-choice day is deliberately unscored (dailyLogAdherence
+      // always nulls its adherence, see store.js), so it must not read as a
+      // missed day here either: excluded from the goal-hit rate's own
+      // denominator and skipped (neither breaking nor extending) by the
+      // streak below, rather than counting as 0% the way a genuinely
+      // untracked day correctly does.
+      if (l.mealOfChoice) mocDates.add(l.date);
+    });
+    const dates = fdDateRange(range.from, range.to);
+    const days = dates.map(d => ({ date: d, value: adhByDate[d] || 0, moc: mocDates.has(d) }));
+    const scorable = days.filter(d => !d.moc);
+    const loggedDates = dates.filter(d => calByDate[d] > 0);
+    const goalDays = scorable.filter(d => d.value >= FD_STATS_GOAL_ADHERENCE);
+    const avgCal = loggedDates.length ? Math.round(loggedDates.reduce((a, d) => a + calByDate[d], 0) / loggedDates.length) : 0;
+    const rate = scorable.length ? Math.round((goalDays.length / scorable.length) * 100) : 0;
+    let best = 0, cur = 0;
+    days.forEach(d => {
+      if (d.moc) return;
+      if (d.value >= FD_STATS_GOAL_ADHERENCE) { cur++; best = Math.max(best, cur); } else cur = 0;
+    });
+    const avgMacros = loggedDates.length ? {
+      protein: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].protein || 0), 0) / loggedDates.length),
+      carbs: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].carbs || 0), 0) / loggedDates.length),
+      fat: Math.round(loggedDates.reduce((a, d) => a + (macroByDate[d].fat || 0), 0) / loggedDates.length),
+    } : null;
+    // Average GOAL macros over the same logged days, from each day's own
+    // frozen targetsSnap (the target it was actually scored against at save
+    // time, see dailyLogAdherence): a raw achieved average means little on
+    // its own without something to compare it to, and a single "today's
+    // target" reference would be wrong for a period spanning both training
+    // and rest days, or a target the user changed partway through.
+    const goalSum = { protein: 0, carbs: 0, fat: 0, n: 0 };
+    loggedDates.forEach(d => {
+      const snap = macroByDate[d].targetsSnap;
+      if (!snap || (snap.protein == null && snap.carbs == null && snap.fat == null)) return;
+      goalSum.protein += snap.protein || 0; goalSum.carbs += snap.carbs || 0; goalSum.fat += snap.fat || 0; goalSum.n++;
+    });
+    const avgGoalMacros = goalSum.n ? {
+      protein: Math.round(goalSum.protein / goalSum.n),
+      carbs: Math.round(goalSum.carbs / goalSum.n),
+      fat: Math.round(goalSum.fat / goalSum.n),
+    } : null;
+    // Top logged food: counts actually-eaten log rows as-is (not recipe-
+    // exploded like the Shopping List's own tally), one count per entry,
+    // normalized name groups casing/whitespace variants of the same food
+    // the way fdShoppingKey does, display uses whichever raw name the group
+    // was first seen under.
+    const counts = new Map();
+    (store.foodLogs || []).forEach(e => {
+      if (e.planned || !e.foodName || e.date < range.from || e.date > range.to) return;
+      const key = fdNormFoodName(e.foodName);
+      const row = counts.get(key) || { name: e.foodName, count: 0 };
+      row.count++;
+      counts.set(key, row);
+    });
+    let top = null;
+    counts.forEach(row => { if (!top || row.count > top.count) top = row; });
+    return { days, loggedDays: loggedDates.length, goalDays: goalDays.length, avgCal, rate, best, avgMacros, avgGoalMacros, top };
+  }, [store.dailyLogs, store.foodLogs, range]);
+
+  const segBtn = (id, label) => (
+    <button onClick={() => setPeriod(id)} style={{
+      flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
+      background: period === id ? 'var(--accent)' : 'transparent',
+      color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
+      textShadow: period === id ? 'none' : 'var(--text-lift)',
+      fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
+    }}>{label}</button>
+  );
+  const statCard = (label, value, sub) => (
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '11px 12px', minWidth: 0 }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 5 }}>{label}</div>
+      <div className="num" style={{ fontSize: 19, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {value}{sub && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 4, fontFamily: UI.fontUi }}>{sub}</span>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 14 }}>
+        {segBtn(7, '7D')}{segBtn(30, '30D')}{segBtn(90, '90D')}{segBtn('custom', 'Custom')}
+      </div>
+      {period === 'custom' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ ...fdInputStyle, colorScheme: timeColorScheme }} /></Field>
+          <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...fdInputStyle, colorScheme: timeColorScheme }} /></Field>
+        </div>
+      )}
+      <div style={{ marginBottom: 20 }}>
+        <HealthBarChart series={s.days} from={range.from} to={range.to}
+          format={v => `${Math.round(v)}%`} target={FD_STATS_GOAL_ADHERENCE}
+          color={UI.ok} colorSoft="rgba(var(--ok-rgb),0.35)" />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {statCard('Best streak', `🔥 ${s.best}`, 'days')}
+        {statCard('Goal hit', `${s.rate}`, '%')}
+        {statCard('Goal days', `${s.goalDays}`, 'days')}
+        {statCard('Days logged', `${s.loggedDays}`, 'days')}
+        {statCard('Avg / day', `${s.avgCal}`, 'kcal')}
+        {statCard('Top food', s.top ? s.top.name : 'None', s.top ? `${s.top.count}x` : null)}
+      </div>
+      {s.avgMacros && (
+        <Card style={{ padding: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Average macros this period</div>
+          <FdMacroBits protein={s.avgMacros.protein} carbs={s.avgMacros.carbs} fat={s.avgMacros.fat} strong />
+          {s.avgGoalMacros && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6 }}>Average goal</div>
+              <FdMacroBits protein={s.avgGoalMacros.protein} carbs={s.avgGoalMacros.carbs} fat={s.avgGoalMacros.fat} />
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
 
 // Multi-select ingredient picker for the recipe editor. Tapping a search
 // result / favorite / recent item opens a quantity step (same idiom as
@@ -7684,6 +9065,29 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
       {cell('C', carbs)}
       {cell('F', fat)}
     </div>
+  );
+}
+// Centered "hero" macro readout for Cooking Mode's whole-batch running
+// total: a large label, calories big and gold, P/C/F below in
+// FD_MACRO_COLORS, the same protein/carbs/fat colors the rest of the Log
+// tab already uses (FdMacroBits), not FdMacroGhosts' neutral UI.inkSoft. A
+// dedicated component rather than reusing FdMacroGhosts here: that one is
+// also RecipeEditorScreen's own "Whole batch" card, and giving IT these
+// colors too was not asked for, out of scope.
+function FdMacroHero({ label, calories, protein, carbs, fat }) {
+  return (
+    <BracketFrame gold style={{ padding: 22, textAlign: 'center' }}>
+      <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: 6 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
+        <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+        <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 12 }}>
+        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
+        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
+        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
+      </div>
+    </BracketFrame>
   );
 }
 // The "what you're about to log" readout: kcal on the left, macros on the

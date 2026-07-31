@@ -2416,6 +2416,8 @@ CREATE TABLE zane_food_logs (
   -- run of this file would need zane_food_recipes created first.
   recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
   logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
+  logged_cooked_grams numeric,                            -- 0228, grams-mode: the typed cooked-dish weight, source:'recipe' entries only
+  logged_cooked_weight_g numeric,                          -- 0228, grams-mode: recipe.cookedWeightG at log time, source:'recipe' entries only
   logged_unit  jsonb,                                     -- {label, grams} the entry was actually logged in, null if logged in grams/kcal (0202)
   split_batch  jsonb,                                     -- {id, removedEntries} for a split-into-meals result entry, redundant per sibling, null otherwise (0203)
   planned      boolean     NOT NULL DEFAULT false,        -- Plan Mode (0196): true = in the timeline but not eaten yet, excluded from daily totals until checked off
@@ -2475,7 +2477,8 @@ CREATE TABLE zane_food_recipes (
   items       jsonb       NOT NULL DEFAULT '[]',
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
-  portions    integer     NOT NULL DEFAULT 1  -- how many servings the batch in `items` splits into
+  portions    integer     NOT NULL DEFAULT 1,  -- how many servings the batch in `items` splits into
+  cooked_weight_g numeric                      -- 0228, optional: weight of the finished (cooked) dish, freely typed, never derived from items' raw grams
 );
 
 CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
@@ -2514,6 +2517,8 @@ CREATE TABLE zane_food_template_slots (
   recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
   recipe_id    text,                                  -- soft ref to the source recipe (no FK)
   logged_total_portions integer,                      -- recipe batch total, recipe slots only
+  logged_cooked_grams numeric,                        -- 0228, grams-mode: the typed cooked-dish weight, recipe slots only
+  logged_cooked_weight_g numeric,                     -- 0228, grams-mode: recipe.cookedWeightG at slot-creation time, recipe slots only
   hour         integer     NOT NULL DEFAULT 12,       -- 0-23
   day_type     text        NOT NULL DEFAULT 'any',    -- 'any' | 'training' | 'rest'
   sort_idx     integer     NOT NULL DEFAULT 0,
@@ -2579,14 +2584,14 @@ CREATE POLICY "zane_food_template_days_own"
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- Per-food Shopping List preferences (migration 0215): display-name override,
--- exclude flag, and package size in grams, one row per (user, food). Simple
--- owned collection like favorites/recipes, no coach access. A row with all
--- three unset has no reason to exist, the client deletes it instead of
+-- exclude flag, and package size in grams, one row per (user, shopping_key).
+-- Simple owned collection like favorites/recipes, no coach access. A row with
+-- all fields unset has no reason to exist, the client deletes it instead of
 -- leaving a no-op row behind.
 CREATE TABLE zane_food_shopping_prefs (
   id              text        PRIMARY KEY,
   user_id         uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  food_id         text        NOT NULL REFERENCES public.zane_foods(id) ON DELETE CASCADE,
+  food_id         text        REFERENCES public.zane_foods(id) ON DELETE CASCADE, -- nullable since 0227
   name_override   text,
   excluded        boolean     NOT NULL DEFAULT false,
   package_size_g  numeric,
@@ -2596,7 +2601,8 @@ CREATE TABLE zane_food_shopping_prefs (
   stock_set_at    timestamptz,                          -- 0216
   food_name       text        NOT NULL,                 -- 0217, snapshot at write time
   brand           text,                                 -- 0217
-  UNIQUE (user_id, food_id)
+  shopping_key    text        NOT NULL,                 -- 0227, identity/unique column, replaces food_id in that role
+  UNIQUE (user_id, shopping_key)
 );
 
 CREATE INDEX zane_food_shopping_prefs_user_idx ON public.zane_food_shopping_prefs USING btree (user_id);

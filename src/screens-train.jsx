@@ -387,6 +387,8 @@ const PLATE_SIZE_KG    = { 25: 70,       20: 64,       15: 60,       10: 56,    
 const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
 const PLATE_SIZE_LBS   = { 55: 70,       45: 64,       35: 56,       25: 48,       10: 42,       5: 36,        2.5: 30,       1.25: 28      };
 
+const PULLEY_RATIOS = [1, 2, 3, 4];
+
 function calcPlates(weight, plateSet) {
   const result = [];
   let rem = Math.round(weight * 1000) / 1000;
@@ -397,10 +399,12 @@ function calcPlates(weight, plateSet) {
   return { plates: result, remainder: rem };
 }
 
-function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
+function PlateCalcSheet({ open, onClose, initialWeight, availablePlates, onApply }) {
   const [tab, setTab] = useStateT(0);
   const [raw, setRaw] = useStateT('');
   const [fresh, setFresh] = useStateT(false);
+  const [fromRatio, setFromRatio] = useStateT(1);
+  const [toRatio, setToRatio] = useStateT(2);
   const prevOpen = useRefT(false);
   useEffectT(() => {
     if (open && !prevOpen.current) {
@@ -418,6 +422,9 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
   const target = parseFloat(raw.replace(',', '.')) || 0;
   const perSide = tab === 0 ? target / 2 : target;
   const { plates, remainder } = calcPlates(perSide, plateSet);
+  const pulleyResult = target > 0 && fromRatio > 0
+    ? Math.round((target * toRatio / fromRatio) * 100) / 100
+    : null;
 
   // round up per-side to next achievable multiple of smallest plate
   const sides = tab === 0 ? 2 : 1;
@@ -435,7 +442,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
     <Sheet open={open} onClose={onClose} title="Plate Calculator">
       {/* Segmented control */}
       <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
-        {['Dual side', 'Single'].map((l, i) => (
+        {['Dual side', 'Single', 'Pulley'].map((l, i) => (
           <button key={i} onClick={() => setTab(i)} style={{
             flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
             background: tab === i ? 'var(--accent)' : 'transparent',
@@ -479,8 +486,65 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
         )}
       </div>
 
+      {/* Pulley ratio converter */}
+      {tab === 2 && (
+        <div style={{ marginBottom: 20 }}>
+          {[
+            { label: 'YOUR NUMBER IS ON', value: fromRatio, onPick: setFromRatio },
+            { label: "TODAY'S STACK IS", value: toRatio, onPick: setToRatio },
+          ].map((row, i) => (
+            <div key={i} style={{ marginBottom: i === 0 ? 12 : 0 }}>
+              <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em', marginBottom: 6 }}>
+                {row.label}
+              </div>
+              <div style={{ display: 'flex', gap: 3, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
+                {PULLEY_RATIOS.map(r => (
+                  <button key={r} onClick={() => row.onPick(r)} style={{
+                    flex: 1, padding: '7px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
+                    background: row.value === r ? 'var(--accent)' : 'transparent',
+                    color: row.value === r ? 'var(--accent-ink)' : UI.inkFaint,
+                    fontFamily: UI.fontNum, fontSize: 12, letterSpacing: '0.02em',
+                    fontWeight: row.value === r ? 600 : 400,
+                    boxShadow: 'none',
+                    textShadow: 'none',
+                    transition: 'all 0.15s',
+                  }}>{r}:1</button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pulley result */}
+      {tab === 2 && (
+        target > 0 ? (
+          <div style={{ textAlign: 'center', paddingBottom: 8 }}>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 40, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em' }}>
+              {pulleyResult}
+            </div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em', marginTop: 6, marginBottom: 14 }}>
+              SET TODAY'S STACK TO THIS
+            </div>
+            <button onClick={() => onApply?.(pulleyResult)} style={{
+              padding: '8px 20px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+              color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em',
+              fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
+              textShadow: 'none',
+            }}>
+              USE THIS WEIGHT
+            </button>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.12em', paddingBottom: 8 }}>
+            ENTER YOUR NUMBER ABOVE
+          </div>
+        )
+      )}
+
       {/* Plate circles */}
-      {target > 0 && (
+      {tab !== 2 && target > 0 && (
         plates.length > 0 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center', alignItems: 'flex-end', paddingBottom: 4 }}>
             {plates.map(({ p, n }) => {
@@ -513,7 +577,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           </div>
         )
       )}
-      {correctionDelta !== null && (
+      {tab !== 2 && correctionDelta !== null && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
             CAN'T REACH EXACTLY, {correctionDelta} {UI.unit().toUpperCase()} MISSING
@@ -4773,6 +4837,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // Plate Calculator's Pulley tab hands back a converted number; write it
+  // through the same kbApply path typing/kbAdjust use so it lands in
+  // whichever kg field (plain set, drop, myo, av, stretch) is actually
+  // active, then close the sheet, same as picking a value on the keypad.
+  const applyPlateCalcResult = (value) => {
+    if (!kbFieldRef.current) return;
+    const { field, setIdx } = kbFieldRef.current;
+    const newRaw = String(value).replace('.', ',');
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
+    setKbRaw(newRaw);
+    kbApply(newRaw, field, setIdx);
+    setPlateCalcOpen(false);
+  };
+
   const saveExNote = () => {
     const trimmed = exNoteVal.trim();
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: trimmed, note_pinned: trimmed ? exNotePinned : false } : e) }));
@@ -8639,6 +8718,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         availablePlates={UI.unit() === 'lbs'
           ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
+        onApply={applyPlateCalcResult}
       />
 
       {/* Pinned exercise note, must acknowledge on exercise start (note_pinned) */}
