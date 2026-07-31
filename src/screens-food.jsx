@@ -4702,7 +4702,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       {/* ── Duplicate-recipe picker (header copy icon, see duplicateRecipe) ── */}
       <Sheet open={duplicatePickerOpen} onClose={() => setDuplicatePickerOpen(false)} title="Duplicate recipe" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '60vh', overflowY: 'auto' }}>
-          {(store.foodRecipes || []).map(r => {
+          {(store.foodRecipes || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
             const n = (r.items || []).length;
             return (
               <button key={r.id} onClick={() => duplicateRecipe(r)} style={fdResultRow}>
