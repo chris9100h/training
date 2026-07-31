@@ -7131,6 +7131,11 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   const startedAtRef = useRefFd(null);
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const pickerModeRef = useRefFd('add'); // 'add' | 'swap': which toolbar button opened FdIngredientPicker
+  // Note editor always targets curItem (the wizard only ever shows one
+  // ingredient at a time), so unlike RecipeEditorScreen's noteItem there is
+  // no need to track WHICH item is being edited, only the draft text.
+  const [noteEditorOpen, setNoteEditorOpen] = useStateFd(false);
+  const [noteDraft, setNoteDraft] = useStateFd('');
   // Keeps the active chip centered in the strip as currentIdx moves, same
   // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
   // without it the strip only scrolls by hand and the active chip silently
@@ -7297,6 +7302,31 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   }
 
   function openAddPicker() { pickerModeRef.current = 'add'; setPickerOpen(true); }
+  // The only way to give a note to an ingredient added mid-cook: it never
+  // passed through RecipeEditorScreen, so it has no chance to pick one up
+  // there. Same permanent-note idea either way, saves straight into curItem.
+  function openNoteEditor() { setNoteDraft(curItem?.note || ''); setNoteEditorOpen(true); }
+  function closeNoteEditor() { setNoteEditorOpen(false); setNoteDraft(''); }
+  function saveNoteEditor() {
+    if (!curItem) return;
+    dirtyRef.current = true;
+    const trimmed = noteDraft.trim();
+    const id = curItem.id;
+    setItems(list => list.map(i => i.id !== id ? i : { ...i, note: trimmed || null }));
+    closeNoteEditor();
+  }
+  // The X in the header: unlike requestExit (the back-chevron, silent, the
+  // localStorage draft is the safety net for "just navigating away"), this
+  // is a deliberate abort. Always confirms, and always clears the draft
+  // even if requestExit's own narrower conditions would have kept it,
+  // canceling here means the user does not want to pick this back up.
+  async function requestCancel() {
+    const ok = await confirm('This cancels the whole cook, nothing gets logged and no changes are saved to the recipe.',
+      { title: 'Cancel cooking?', ok: 'Cancel cooking', cancel: 'Keep cooking', danger: true });
+    if (!ok) return;
+    fdClearCookingDraft();
+    onClose();
+  }
   async function requestSwap() {
     if (!curItem) return;
     if (!await confirm(`Swap "${curItem.foodName}"?`, { ok: 'Swap' })) return;
@@ -7417,7 +7447,11 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       {confirmEl}
-      <TopBar title={recipe?.name || 'Cooking'} sub="Cooking mode" onBack={requestExit} />
+      <TopBar title={recipe?.name || 'Cooking'} sub="Cooking mode" onBack={requestExit} right={
+        <button onClick={requestCancel} aria-label="Cancel cooking" style={fdTopAddBtn}>
+          <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+        </button>
+      } />
 
       {step === 'ingredients' && curItem && (<>
         <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -7477,6 +7511,9 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={openNoteEditor} aria-label={curItem.note ? 'Edit note' : 'Add note'} style={fdIconBtn(38)}>
+              <i className={`fa-solid ${curItem.note ? 'fa-note-sticky' : 'fa-pen'}`} style={{ fontSize: 14, ...(curItem.note ? { color: 'var(--accent)' } : null) }} />
             </button>
             <button onClick={requestSwap} aria-label="Swap ingredient" style={fdIconBtn(38)}>
               <i className="fa-solid fa-right-left" style={{ fontSize: 14 }} />
@@ -7558,6 +7595,20 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={handleLeaveRecipe} style={{ flex: 1 }}>Leave recipe</Btn>
           <Btn onClick={handleUpdateRecipe} style={{ flex: 2 }}>Update recipe</Btn>
+        </div>
+      </Sheet>
+
+      {/* Same permanent per-ingredient note as RecipeEditorScreen's own note
+          Sheet, just always targeting curItem, so an ingredient added mid-
+          cook (which never passed through the editor) can get one too. */}
+      <Sheet open={noteEditorOpen} onClose={closeNoteEditor} title={curItem?.foodName || 'Note'} titleColor="var(--accent)">
+        <Field label="Note" style={{ marginBottom: 16 }}>
+          <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)} placeholder="e.g. dice small, or add right at the end"
+            rows={2} style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }} />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeNoteEditor} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveNoteEditor} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
