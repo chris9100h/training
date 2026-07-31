@@ -2707,8 +2707,14 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
   }, [adaptive, store.dailyLogs, calc.weightKg, calc.goal, calc.rateKgPerWeek, calc.trainingDays, calc.proteinG, calc.fatPerKg, calc.fatG, calc.restRatioPct, isLbs]);
 
   const tdeeDelta = (adaptive?.ok && originalTdee != null) ? adaptive.tdee - originalTdee : null;
-  const weightDeltaDisplay = adaptive?.ok ? Math.round(Math.abs(fromKg(adaptive.weightChangeKg)) * 10) / 10 : null;
-  const weightDir = !adaptive?.ok ? null : adaptive.weightChangeKg > 0.05 ? 'up' : adaptive.weightChangeKg < -0.05 ? 'down' : 'steady';
+  // adaptive.weightChangeKg spans adaptive.daySpan days (close to the full
+  // ~14-day window, not 7, see estimateAdaptiveTdee), rescaled here to an
+  // actual per-week rate: showing the raw span invited reading it as a
+  // weekly figure it wasn't, and the check-in itself already runs on a
+  // 7-day cadence, so a mismatched timeframe here was exactly backwards.
+  const weeklyRateKg = adaptive?.ok ? adaptive.weightChangeKg * 7 / adaptive.daySpan : null;
+  const weightDeltaDisplay = weeklyRateKg != null ? Math.round(Math.abs(fromKg(weeklyRateKg)) * 10) / 10 : null;
+  const weightDir = weeklyRateKg == null ? null : weeklyRateKg > 0.05 ? 'up' : weeklyRateKg < -0.05 ? 'down' : 'steady';
   // The week-average figure for each target set, the only thing directly
   // comparable to "New maintenance estimate" above: Training/Rest alone
   // don't say anything on their own without knowing how many of each a week
@@ -2794,10 +2800,10 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
               </div>
             </div>
             <div style={{ flex: 1 }}>
-              <div className="micro" style={{ marginBottom: 6 }}>Weight trend</div>
+              <div className="micro" style={{ marginBottom: 6 }}>Weekly trend</div>
               <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
                 {weightDir === 'steady' ? 'Steady' : `${weightDir === 'up' ? 'Up' : 'Down'} ${weightDeltaDisplay}`}
-                {weightDir !== 'steady' && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>{UI.unit()}</span>}
+                {weightDir !== 'steady' && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>{UI.unit()}/wk</span>}
               </div>
             </div>
           </div>
