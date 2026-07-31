@@ -3250,6 +3250,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           : `Resume cooking from ingredient ${atIdx} of ${total}?`;
         const resume = await confirm(resumeMsg, { title: 'Resume cooking?', ok: 'Continue', cancel: 'Start over' });
         if (resume) draft = saved;
+      } else if (!matches && fresh) {
+        // A still-fresh draft for a DIFFERENT recipe (e.g. cooking got
+        // interrupted earlier and the user backed out without finishing,
+        // which deliberately leaves it in place, see requestExit) would
+        // otherwise get silently wiped the moment a second recipe's Cook it
+        // is tapped, with no warning at all, the opposite of the "survives
+        // app-kill, resumable within 24h" guarantee this draft exists for.
+        const otherName = (store.foodRecipes || []).find(r => r.id === saved.recipeId)?.name || 'another recipe';
+        const ok = await confirm(`You have an unfinished cook for "${otherName}". Starting this one discards it.`,
+          { title: 'Discard other cook?', ok: 'Discard, start this', cancel: 'Cancel', danger: true });
+        if (!ok) return;
       }
       if (!draft) fdClearCookingDraft();
     }
