@@ -2486,12 +2486,14 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   // dormant personal target, this is purely a second opinion to weigh
   // against the coach's own numbers, not a way to override them.
   const showAutomation = true;
-  // apply() in MacroEstimatorSheet always writes a goal (defaulting to
-  // 'maintain'), so its presence is what tells apart "the estimator has run
-  // at least once" from macros the user typed by hand, which is what
-  // macroTargetsFromGoal needs to produce a real training/rest split instead
-  // of silently defaulting to a flat maintain-style number.
-  const estimatorConfigured = calc.goal != null;
+  // trainingDays is asked in every branch of the full estimator and nowhere
+  // else, unlike goal (now also directly settable below, on its own,
+  // without ever running the estimator): its presence is what actually
+  // tells apart "the estimator has run at least once" from a goal picked
+  // standalone, which is what macroTargetsFromGoal needs to produce a real
+  // training/rest split instead of silently defaulting to a flat
+  // maintain-style number.
+  const estimatorConfigured = calc.trainingDays != null;
   const checkinEnabled = showAutomation && estimatorConfigured && !!calc.checkinEnabled;
 
   // Recomputed from scratch on every relevant store change rather than cached
@@ -2504,6 +2506,15 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
 
   const enableCheckins = () => {
     setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, checkinEnabled: true } } }));
+  };
+  // Standalone, independent of the estimator: a user on manual or coached
+  // targets who has never run (and may never run) the full estimator can
+  // still tell the app cut/maintain/gain directly. Consumed by the AI daily
+  // summary (LB.buildDailySummaryPayload) to judge a weight trend's
+  // direction correctly instead of defaulting to "down is good", and
+  // prefills MacroEstimatorSheet's own goal step if it's ever opened later.
+  const setGoal = goal => {
+    setStore(s => ({ ...s, settings: { ...s.settings, macroCalc: { ...s.settings.macroCalc, goal } } }));
   };
 
   // 'insufficient' | 'waiting' | 'due' | null (automation off or not offered).
@@ -2535,6 +2546,21 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
         }}>{hasTargets ? 'EDIT' : 'SET'}</button>
       }>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, marginBottom: 10 }}>{sourceLabel}</div>
+      <div style={{ marginBottom: 10 }}>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Goal</div>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+          {MACRO_GOAL_OPTIONS.map(o => (
+            <button key={o.id} data-reorder-ignore="true" onClick={() => setGoal(o.id)} style={{
+              flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+              background: calc.goal === o.id ? 'var(--accent)' : 'transparent',
+              color: calc.goal === o.id ? 'var(--accent-ink)' : UI.inkFaint,
+              textShadow: calc.goal === o.id ? 'none' : 'var(--text-lift)',
+              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.03em',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{o.label}</button>
+          ))}
+        </div>
+      </div>
       {children}
       {/* Plain-framed on purpose, unlike the accent-framed box above: this is
           a reference to compare against, not the numbers actually in effect.
