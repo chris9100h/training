@@ -2723,7 +2723,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
 // today either way, that is what stops the nag, not whether the numbers
 // actually changed. Never applies anything on its own; see MacroEstimatorSheet
 // for the same "estimate is a prefill, not a save" philosophy this mirrors.
-function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, coachingMacros }) {
+function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, coachingMacros, onOpenSettings }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
   const toKg = w => (isLbs ? Number(w) * LBS_TO_KG : Number(w));
@@ -2836,6 +2836,14 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
       </span>
     </div>
   );
+  // What this whole report is being judged against: without it, "Weekly
+  // trend: Up 0.4" reads as good or bad only if you already remember which
+  // way you're trying to move, which defeats the point of putting the trend
+  // next to a maintenance estimate in the first place.
+  const goalLabel = MACRO_GOAL_OPTIONS.find(o => o.id === calc.goal)?.label;
+  const goalRateDisplay = (calc.goal !== 'maintain' && calc.rateKgPerWeek > 0)
+    ? Math.round(fromKg(calc.rateKgPerWeek) * 100) / 100
+    : null;
 
   return (
     <Sheet open={open} onClose={onClose} title={coachHasMacros ? 'Second opinion' : 'Weekly check-in'}>
@@ -2843,6 +2851,14 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Not enough data yet.</div>
       ) : (
         <>
+          {goalLabel && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>Goal</span>
+              <span style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                {goalLabel}{goalRateDisplay != null && ` · ${goalRateDisplay} ${UI.unit()}/week`}
+              </span>
+            </div>
+          )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 18 }}>
             Based on your last 14 days of logging (sick, vacation and deload days excluded).
           </div>
@@ -2895,6 +2911,19 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
                   Applying only updates your personal targets. Your coach's numbers stay active either way.
                 </div>
               )}
+              {/* The algorithm's own knobs (rate, protein/fat mode, rest-day
+                  ratio) live in the estimator, not in this read-only report:
+                  without a way out from here, disagreeing with these numbers
+                  left no clue where to actually go change the inputs behind
+                  them. */}
+              <button onClick={onOpenSettings} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 6, width: '100%', background: 'transparent', border: 'none', padding: 0,
+                marginTop: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: '16px', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent', textShadow: 'none', textAlign: 'left',
+              }}>
+                <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+                <span>You can adjust how the algorithm splits these macros anytime in settings.</span>
+              </button>
               <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
                 <Btn kind="ghost" onClick={() => finish(false)} style={{ flex: 1 }}>Skip for now</Btn>
                 <Btn onClick={() => finish(true)} style={{ flex: 1 }}>Apply</Btn>
@@ -4490,7 +4519,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros} />
+      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
+        onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
       <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
         onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
