@@ -7508,12 +7508,9 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
           <FdMacroPreview calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat}
             sugar={curItem.sugar} satFat={curItem.satFat} sodiumMg={curItem.sodiumMg} marginBottom={0} />
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
-            </button>
-            <button onClick={openNoteEditor} aria-label={curItem.note ? 'Edit note' : 'Add note'} style={fdIconBtn(38)}>
-              <i className={`fa-solid ${curItem.note ? 'fa-note-sticky' : 'fa-pen'}`} style={{ fontSize: 14, ...(curItem.note ? { color: 'var(--accent)' } : null) }} />
             </button>
             <button onClick={requestSwap} aria-label="Swap ingredient" style={fdIconBtn(38)}>
               <i className="fa-solid fa-right-left" style={{ fontSize: 14 }} />
@@ -7523,6 +7520,22 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
                 <i className="fa-solid fa-trash" style={{ fontSize: 14 }} />
               </button>
             )}
+            <div style={{ flex: 1 }} />
+            {/* Pinned to the far right, same "+ Note" / "Note" pill training's
+                own toolbar row uses (screens-train.jsx), deliberately not a
+                square fdIconBtn like its left-side siblings: those three
+                mutate/replace the ingredient, this one is its own separate
+                category of action. */}
+            <button onClick={openNoteEditor} aria-label={curItem.note ? 'Edit note' : 'Add note'} style={{
+              background: curItem.note ? UI.goldFaint : 'transparent',
+              border: `var(--hair-width) solid ${curItem.note ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+              color: curItem.note ? UI.gold : UI.inkFaint, fontSize: 10,
+              fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {curItem.note ? 'Note' : '+ Note'}
+            </button>
           </div>
         </div>
       </>)}
