@@ -4653,16 +4653,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 ))}
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-              {gramsModeOn ? (
-                <Stepper value={fdNum(recipeLogPrompt.gramsStr) || 0} step={10} min={0} suffix="g"
-                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, gramsStr: String(Math.max(0, Math.round(v))) } : p)} big />
-              ) : (
+            {gramsModeOn ? (
+              // Free-typed, not a Stepper: grams spans too wide a range for
+              // a fixed step to ever be the right size (10g taps to shave 460g
+              // off a 960g default is exactly the "tap fifty times" complaint
+              // this replaced), unlike portions below where a half-step really
+              // is normally the whole adjustment.
+              <Field label="Amount (g)" style={{ marginBottom: 20 }}>
+                <input value={recipeLogPrompt.gramsStr} onChange={e => setRecipeLogPrompt(p => p ? { ...p, gramsStr: fdDecimalFilter(e.target.value) } : p)}
+                  type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
                 <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
                   suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
                   onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
-              )}
-            </div>
+              </div>
+            )}
             {recipeLogPreview && (
               <FdMacroPreview calories={recipeLogPreview.calories} protein={recipeLogPreview.protein} carbs={recipeLogPreview.carbs} fat={recipeLogPreview.fat} />
             )}
@@ -5778,16 +5785,23 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                     ))}
                   </div>
                 )}
-                <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>{draft.mode === 'grams' ? 'Grams' : 'Portions'}</div>
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  {draft.mode === 'grams' ? (
-                    <Stepper value={fdNum(draft.gramsStr) || 0} step={10} min={0} suffix="g"
-                      onChange={v => setDraft(d => ({ ...d, gramsStr: String(Math.max(0, Math.round(v))) }))} big />
-                  ) : (
-                    <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
-                      onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
-                  )}
-                </div>
+                {draft.mode === 'grams' ? (
+                  // Free-typed, not a Stepper: grams spans too wide a range
+                  // for a fixed step to ever be the right size, unlike
+                  // portions below where a half-step really is normally the
+                  // whole adjustment.
+                  <Field label="Amount (g)">
+                    <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                ) : (
+                  <>
+                    <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
+                        onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                    </div>
+                  </>
+                )}
               </div>
             ) : null}
             {draftBuilt && (
