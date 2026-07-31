@@ -861,10 +861,21 @@ function App() {
           LB.saveBase(diffBase, uid);
           let merged = fresh;
           if (cur) {
-            // Use `in` (not `??`) so an explicit local null, "session just
-            // ended on this device", wins over the stale server value instead
-            // of being treated as missing and resurrecting the old session.
-            const inProgressId = ('inProgress' in cur) ? cur.inProgress : fresh.inProgress;
+            // Same unsynced-edit test as PLAN_POS_FIELDS below: an explicit
+            // local null, "session just ended on this device", must still win
+            // over the stale server value instead of being treated as missing
+            // and resurrecting the old session, but ONLY if this device
+            // actually changed it since the last confirmed-synced base.
+            // Blindly trusting cur (the old `in`-operator check, true for
+            // every cached store since inProgress is always a key) let a
+            // SECOND device that never started a session, or whose cache
+            // still held a stale local null, overwrite the server's pointer
+            // to a session actively running on a FIRST device just by
+            // opening the app. The next load then treated that still-open
+            // session as an orphan and deleted it, cascading away real
+            // logged sets. No base (legacy cache) → keep cur, matching every
+            // other no-base fallback in this merge.
+            const inProgressId = LB.resolveInProgressId(cur, fresh, base);
             // Session merge lives in store.js (LB.mergeSessions) so the
             // windowing rules are unit-tested: the "missing on the server →
             // drop" logic works on the (complete) metadata list, while cached
