@@ -3282,6 +3282,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const now = new Date().toISOString();
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === recipeId ? { ...r, items, cookedWeightG, updatedAt: now } : r) }));
   }
+  // A note is evergreen prep guidance, not tied to this cook's own outcome
+  // the way amounts/add/swap/remove are (those stay provisional until
+  // Update recipe, or vanish on Leave recipe/Cancel). CookingModeScreen only
+  // calls this for an ingredient that already exists in the persisted
+  // recipe unchanged (see its own saveNoteEditor), so unlike
+  // updateRecipeFromCooking above this patches ONE item's note in place,
+  // nothing else about the recipe (other items, amounts, cookedWeightG)
+  // moves, and it fires immediately rather than waiting for the diff sheet.
+  function patchRecipeItemNote(recipeId, itemId, note) {
+    const now = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      foodRecipes: (s.foodRecipes || []).map(r => r.id !== recipeId ? r : {
+        ...r, updatedAt: now,
+        items: (r.items || []).map(i => i.id !== itemId ? i : { ...i, note }),
+      }),
+    }));
+  }
   // Every other use of this Sheet (plain log, plan, edit an existing entry)
   // stays a free backdrop-tap-to-close, low stakes, a couple seconds of typing
   // to redo. Reached via Cooking Mode it is not: a whole ingredient-by-
@@ -4882,7 +4900,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           paints above the recipe log prompt it was opened from and returns
           into. */}
       <CookingModeScreen open={!!cookingMode} recipe={cookingMode?.recipe} draft={cookingMode?.draft} store={store}
-        onClose={() => setCookingMode(null)} onFinish={finishCookingMode} onUpdateRecipe={updateRecipeFromCooking} />
+        onClose={() => setCookingMode(null)} onFinish={finishCookingMode} onUpdateRecipe={updateRecipeFromCooking} onNoteChange={patchRecipeItemNote} />
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
@@ -6911,14 +6929,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
           <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
         </Field>
 
-        <BracketFrame gold style={{ padding: 20 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Whole batch</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{totals.calories}</span>
-            <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
-          </div>
-          <FdMacroGhosts protein={totals.protein} carbs={totals.carbs} fat={totals.fat} style={{ marginTop: 12 }} />
-        </BracketFrame>
+        <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
         <div>
           <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
@@ -7112,7 +7123,7 @@ function fdComputeCookingDiff(originalItems, finalItems, swapEvents) {
 // LATER sibling than recipeLogPrompt's own Sheet in FoodScreen's return, so
 // the tie against THAT is won by DOM order instead, the exact same mechanism
 // RecipeEditorScreen already relies on for nesting this same picker.
-function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe }) {
+function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe, onNoteChange }) {
   const [confirmEl, confirm] = useConfirm();
   const [items, setItems] = useStateFd([]);
   const originalItemsRef = useRefFd([]);
@@ -7311,8 +7322,20 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     if (!curItem) return;
     dirtyRef.current = true;
     const trimmed = noteDraft.trim();
+    const note = trimmed || null;
     const id = curItem.id;
-    setItems(list => list.map(i => i.id !== id ? i : { ...i, note: trimmed || null }));
+    setItems(list => list.map(i => i.id !== id ? i : { ...i, note }));
+    // Unlike an amount/add/swap/remove edit, a note is evergreen prep
+    // guidance, not this session's outcome, so it should survive even if
+    // the whole cook gets left or canceled. Only patch the persisted recipe
+    // immediately for a slot that's actually still the SAME ingredient the
+    // recipe already has: not swapped this session (a swapped-in food isn't
+    // in the recipe yet, its note travels along with it only if Update
+    // recipe later promotes it, same as a brand new added ingredient).
+    const wasSwapped = swapEvents.some(e => e.itemId === id);
+    if (!wasSwapped && originalItemsRef.current.some(o => o.id === id)) {
+      onNoteChange(recipe.id, id, note);
+    }
     closeNoteEditor();
   }
   // The X in the header: unlike requestExit (the back-chevron, silent, the
