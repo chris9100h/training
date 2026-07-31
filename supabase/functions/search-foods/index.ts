@@ -447,14 +447,14 @@ function needsNutrientRefresh(row: any): boolean {
   return !Number.isFinite(cachedAt) || (Date.now() - cachedAt) > NUTRIENT_REFRESH_MS;
 }
 
-async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void> {
+async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<boolean> {
   const existing = await fetchCachedFoodRow(`${source}:${sourceId}`);
-  if (existing && !needsNutrientRefresh(existing)) return;
-  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return;
+  if (existing && !needsNutrientRefresh(existing)) return true;
+  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return false;
   const food = source === 'off'
     ? await lookupOffBarcode(sourceId)
     : await lookupUsdaById(sourceId, Deno.env.get('USDA_API_KEY') ?? '');
-  if (!food) return;
+  if (!food) return false;
   const row = {
     id: `${food.source}:${food.sourceId}`,
     source: food.source,
@@ -477,11 +477,19 @@ async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void
     raw: food,
     cached_at: new Date().toISOString(),
   };
-  await dbFetch('zane_foods', {
+  const r = await dbFetch('zane_foods', {
     method: 'POST',
     headers: { 'Prefer': 'resolution=merge-duplicates' },
     body: JSON.stringify(row),
-  }).catch((e) => console.error('[search-foods] cache upsert error:', e));
+  }).catch((e) => {
+    console.error('[search-foods] cache upsert error:', e);
+    return null;
+  });
+  if (!r?.ok) {
+    console.error('[search-foods] cache upsert error:', r ? `status ${r.status}` : 'no response');
+    return false;
+  }
+  return true;
 }
 
 Deno.serve(async (req) => {
@@ -552,7 +560,12 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    await cacheFood(source, sourceId);
+    const cached = await cacheFood(source, sourceId);
+    if (!cached) {
+      return new Response(JSON.stringify({ ok: false, error: 'failed to cache food' }), {
+        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     return new Response(JSON.stringify({ ok: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

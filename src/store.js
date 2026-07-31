@@ -89,6 +89,18 @@ async function foodLogUpsertWithFkFallback(rows) {
   return await _supabase.from('zane_food_logs').upsert(noFood.map(r => ({ ...r, recipe_id: null })));
 }
 
+// Same self-heal as foodLogUpsertWithFkFallback above, but for
+// zane_food_favorites: a favorite whose food_id points at a zane_foods row
+// that was never actually cached server-side hits 23503 on every sync retry
+// forever, with nothing to ever null it out. Only one fallback tier is needed
+// here since favorites have no recipe_id column, only food_id.
+async function foodFavoriteUpsertWithFkFallback(rows) {
+  const res = await _supabase.from('zane_food_favorites').upsert(rows);
+  if (!res?.error || res.error.code !== '23503') return res;
+  const noFood = rows.map(r => ({ ...r, food_id: null }));
+  return await _supabase.from('zane_food_favorites').upsert(noFood);
+}
+
 async function unwrap(builder) {
   const res = await builder;
   if (res && res.error) {
@@ -2073,7 +2085,7 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodFavorites !== next.foodFavorites) {
     const { upsert, removed } = diffCollectionById(prev.foodFavorites, next.foodFavorites);
-    if (upsert.length) ops.push(_supabase.from('zane_food_favorites').upsert(upsert.map(f => ({
+    if (upsert.length) ops.push(foodFavoriteUpsertWithFkFallback(upsert.map(f => ({
       id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
       brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
       calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
