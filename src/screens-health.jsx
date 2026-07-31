@@ -2577,6 +2577,21 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             }}>{o.label}</button>
           ))}
         </div>
+        {/* setGoal only ever prompts for a rate the FIRST time (see its own
+            comment above), so once one is on file there was no way back in
+            to change it short of the full estimator sheet. Reuses the exact
+            same rateModalGoal/confirmGoalRate plumbing, just triggered
+            on demand instead of only on a bare goal. */}
+        {calc.goal !== 'maintain' && calc.rateKgPerWeek > 0 && (
+          <button data-reorder-ignore="true" onClick={() => setRateModalGoal(calc.goal)} style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
+            marginTop: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-gauge" style={{ fontSize: 10, color: 'var(--accent)' }} />
+            {Math.round((isLbs ? calc.rateKgPerWeek / LBS_TO_KG : calc.rateKgPerWeek) * 100) / 100} {UI.unit()}/week · tap to change
+          </button>
+        )}
       </div>
       {children}
       {/* Plain-framed on purpose, unlike the accent-framed box above: this is
