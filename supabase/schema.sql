@@ -2416,6 +2416,8 @@ CREATE TABLE zane_food_logs (
   -- run of this file would need zane_food_recipes created first.
   recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
   logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
+  logged_cooked_grams numeric,                            -- 0228, grams-mode: the typed cooked-dish weight, source:'recipe' entries only
+  logged_cooked_weight_g numeric,                          -- 0228, grams-mode: recipe.cookedWeightG at log time, source:'recipe' entries only
   logged_unit  jsonb,                                     -- {label, grams} the entry was actually logged in, null if logged in grams/kcal (0202)
   split_batch  jsonb,                                     -- {id, removedEntries} for a split-into-meals result entry, redundant per sibling, null otherwise (0203)
   planned      boolean     NOT NULL DEFAULT false,        -- Plan Mode (0196): true = in the timeline but not eaten yet, excluded from daily totals until checked off
@@ -2475,7 +2477,8 @@ CREATE TABLE zane_food_recipes (
   items       jsonb       NOT NULL DEFAULT '[]',
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
-  portions    integer     NOT NULL DEFAULT 1  -- how many servings the batch in `items` splits into
+  portions    integer     NOT NULL DEFAULT 1,  -- how many servings the batch in `items` splits into
+  cooked_weight_g numeric                      -- 0228, optional: weight of the finished (cooked) dish, freely typed, never derived from items' raw grams
 );
 
 CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
@@ -2514,6 +2517,8 @@ CREATE TABLE zane_food_template_slots (
   recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
   recipe_id    text,                                  -- soft ref to the source recipe (no FK)
   logged_total_portions integer,                      -- recipe batch total, recipe slots only
+  logged_cooked_grams numeric,                        -- 0228, grams-mode: the typed cooked-dish weight, recipe slots only
+  logged_cooked_weight_g numeric,                     -- 0228, grams-mode: recipe.cookedWeightG at slot-creation time, recipe slots only
   hour         integer     NOT NULL DEFAULT 12,       -- 0-23
   day_type     text        NOT NULL DEFAULT 'any',    -- 'any' | 'training' | 'rest'
   sort_idx     integer     NOT NULL DEFAULT 0,

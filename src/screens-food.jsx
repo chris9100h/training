@@ -41,6 +41,28 @@ function fdDateRange(from, to) {
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// Grams of the finished dish <-> the equivalent chosenPortions, so a recipe
+// with a cookedWeightG can be logged by weight while every downstream
+// consumer (confirmRecipeLog, draftBuilt, the live preview) keeps reading
+// the same chosenPortions/totalPortions pair it always has, grams is purely
+// an alternate input unit that resolves to that pair before anything else
+// runs, not a second scaling path.
+const fdGramsToPortions = (grams, cookedWeightG, totalPortions) => cookedWeightG > 0 ? (grams / cookedWeightG) * totalPortions : 0;
+// Inverse, used only to carry the current amount across when the Portions/
+// Grams toggle itself is flipped, so switching units mid-edit doesn't reset
+// the quantity back to some default.
+const fdPortionsToGrams = (portionsVal, cookedWeightG, totalPortions) => totalPortions > 0 ? (portionsVal / totalPortions) * cookedWeightG : 0;
+// The chosenPortions a recipe-log prompt is actually at right now, resolving
+// grams mode down to its portions equivalent. Shared by the live macro
+// preview and confirmRecipeLog so the number the user sees is exactly the
+// number that gets logged.
+function fdEffectiveChosenPortions(prompt) {
+  if (!prompt) return 0;
+  if (prompt.mode === 'grams' && prompt.recipe.cookedWeightG > 0) {
+    return fdGramsToPortions(fdNum(prompt.gramsStr) || 0, prompt.recipe.cookedWeightG, prompt.totalPortions);
+  }
+  return prompt.chosenPortions;
+}
 // Splits `total` into `n` whole-number parts as evenly as possible, remainder
 // (from integer rounding) landing on the first parts so they always sum back
 // to `total` exactly. Used by the timeline's "split into multiple meals".
@@ -276,7 +298,9 @@ function fdMaterializeSlotEntry(slot, dateISO) {
     quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
     fiber: slot.fiber ?? null, sugar: slot.sugar ?? null, satFat: slot.satFat ?? null, sodiumMg: slot.sodiumMg ?? null,
     recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
-    loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
+    loggedTotalPortions: slot.loggedTotalPortions ?? null,
+    loggedCookedGrams: slot.loggedCookedGrams ?? null, loggedCookedWeightG: slot.loggedCookedWeightG ?? null,
+    planned: true, templateSlotId: slot.id,
     createdAt: new Date().toISOString(),
   };
 }
@@ -1099,8 +1123,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // just one portion, e.g. "1 cake" doesn't mean the only choice is the
   // whole cake. chosenPortions defaults to 1 regardless of how many the
   // recipe actually has, not "all of them": logging the whole batch by
-  // default would be the more surprising default of the two.
-  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, chosenPortions } | null
+  // default would be the more surprising default of the two. mode/gramsStr
+  // only matter when recipe.cookedWeightG is set (see fdEffectiveChosenPortions).
+  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, mode, chosenPortions, totalPortions, gramsStr } | null
 
   // Copy/move entries from the viewed day onto another one, at their
   // original time-of-day. copyMoveIds are foodLogs ids picked from
@@ -2968,7 +2993,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // stage, same reason a DB food needs its quantity sheet first.
   function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
-    setRecipeLogPrompt({ recipe, chosenPortions: 1, totalPortions: recipe.portions || 1 });
+    setRecipeLogPrompt({ recipe, mode: 'portions', chosenPortions: 1, totalPortions: recipe.portions || 1, gramsStr: '' });
   }
   // Reopens an already-logged recipe entry's own portions prompt, so bumping
   // the count up or down doesn't need a delete + re-add. A recipe entry's
@@ -2980,7 +3005,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function openEditRecipeEntry(entry) {
     const recipe = recipeEntryLiveRecipe(entry);
     if (!recipe || !(recipe.items || []).length) return;
-    const m = entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/);
+    // A grams-mode log carries both fields frozen at log time (see
+    // confirmRecipeLog's `built`); reconstruct the SAME chosen/total pair a
+    // portions-mode entry would via the entry's own logged_total_portions,
+    // just with the scale coming from grams/cookedWeight instead of a typed
+    // portions count. Every entry made before this feature shipped has
+    // neither field, so it always falls through to the portions branch below
+    // unchanged.
+    const gramsMode = entry.loggedCookedGrams != null && entry.loggedCookedWeightG > 0;
+    const m = !gramsMode ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
     // The total-portions-at-log-time must come from the entry itself, not the
     // live recipe (recipe.portions may have changed since logging, which
     // would silently rescale this entry's macros against the wrong base).
@@ -2990,7 +3023,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const totalPortions = entry.loggedTotalPortions != null ? entry.loggedTotalPortions
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
-    const origChosen = m ? parseFloat(m[1]) : totalPortions;
+    const origChosen = gramsMode ? (entry.loggedCookedGrams / entry.loggedCookedWeightG) * totalPortions
+      : m ? parseFloat(m[1])
+      : totalPortions;
     // Rescale from the entry's OWN frozen ingredient snapshot, not the live
     // recipe: changing the portion count of a past entry must not retroactively
     // bake in ingredient edits made to the recipe since it was logged (that
@@ -3000,7 +3035,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // confirmRecipeLog's normal chosen/total math but sourcing it from the
     // snapshot. Legacy entries without a snapshot fall back to the live recipe.
     const snap = (entry.recipeItems && entry.recipeItems.length) ? entry.recipeItems : null;
-    const promptRecipe = snap ? (() => {
+    let promptRecipe = snap ? (() => {
       const perTotal = origChosen ? totalPortions / origChosen : 1;
       return { ...recipe, portions: totalPortions, items: snap.map(i => ({
         foodId: i.foodId ?? null, brand: i.brand ?? null,
@@ -3015,16 +3050,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         sodiumMg: i.sodiumMg != null ? i.sodiumMg * perTotal : null,
       })) };
     })() : recipe;
+    // Frozen cooked weight, not the live recipe's current one (same reasoning
+    // as totalPortions above): the toggle and the grams math both need to
+    // read the weight this entry was actually logged against. Always a fresh
+    // object, promptRecipe may still be the live recipe reference (no
+    // snapshot branch above) and must never be mutated in place.
+    if (gramsMode) promptRecipe = { ...promptRecipe, cookedWeightG: entry.loggedCookedWeightG };
     setEditingEntry(entry);
     setQtyEditPlanned(!!entry.planned);
-    setRecipeLogPrompt({ recipe: promptRecipe, chosenPortions: origChosen, totalPortions });
+    setRecipeLogPrompt({
+      recipe: promptRecipe, mode: gramsMode ? 'grams' : 'portions',
+      chosenPortions: origChosen, totalPortions,
+      gramsStr: gramsMode ? String(entry.loggedCookedGrams) : '',
+    });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
   // tapped), so the Stepper's live number always matches what gets logged.
   const recipeLogPreview = useMemoFd(() => {
     if (!recipeLogPrompt) return null;
-    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
+    const { recipe, totalPortions } = recipeLogPrompt;
+    const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
@@ -3040,7 +3086,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
   async function confirmRecipeLog(planned = false) {
-    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
+    const { recipe, totalPortions, mode, gramsStr } = recipeLogPrompt;
+    const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
+    const gramsMode = mode === 'grams' && recipe.cookedWeightG > 0;
+    const gramsVal = gramsMode ? (fdNum(gramsStr) || 0) : null;
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
@@ -3064,7 +3113,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
     }));
     const built = {
-      foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+      foodId: null,
+      // Grams mode names itself by the typed weight, not a converted (and
+      // often unfriendly-looking) portions fraction, it's what the user
+      // actually thought in terms of.
+      foodName: gramsMode ? (gramsVal !== recipe.cookedWeightG ? `${recipe.name} (${gramsVal}g)` : recipe.name)
+        : chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name,
+      brand: null, source: 'recipe',
       // Stable id back to the source recipe, so recipeEntryLiveRecipe can
       // resolve this entry correctly even if another recipe later gets the
       // same name (a plain name match, the old fallback, can't tell them apart).
@@ -3073,6 +3128,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // rescales against the total at LOG time, not against whatever
       // recipe.portions has since become (see openEditRecipeEntry).
       loggedTotalPortions: totalPortions,
+      // Both null unless logged in grams mode, both frozen at log time same
+      // as loggedTotalPortions above, so a later edit to the recipe's own
+      // cooked weight can never retroactively rescale this entry when it's
+      // reopened (openEditRecipeEntry reads these back, not the live recipe).
+      loggedCookedGrams: gramsVal, loggedCookedWeightG: gramsMode ? recipe.cookedWeightG : null,
       quantityG: Math.round(sum('quantityG') * scale),
       // Same expression recipeLogPreview above already showed on the
       // portions sheet (fdRecipeItemsCalories sums every ingredient's exact
@@ -4540,15 +4600,41 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
         )}
       >
-        {recipeLogPrompt && (
+        {recipeLogPrompt && (() => {
+          const gramsCapable = recipeLogPrompt.recipe.cookedWeightG > 0;
+          const gramsModeOn = gramsCapable && recipeLogPrompt.mode === 'grams';
+          const qtyLabel = gramsModeOn
+            ? `${fdNum(recipeLogPrompt.gramsStr) || 0}g`
+            : `${recipeLogPrompt.chosenPortions} portion${recipeLogPrompt.chosenPortions === 1 ? '' : 's'}`;
+          return (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
               How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
             </div>
+            {gramsCapable && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+                {[['portions', 'Portions'], ['grams', 'Grams']].map(([id, label]) => (
+                  <button key={id} onClick={() => setRecipeLogPrompt(p => {
+                    // Carries the current amount across in whichever direction,
+                    // switching units mid-edit shouldn't reset the quantity.
+                    if (!p || p.mode === id) return p;
+                    if (id === 'grams') {
+                      return { ...p, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(p.chosenPortions, p.recipe.cookedWeightG, p.totalPortions)))) };
+                    }
+                    return { ...p, mode: id, chosenPortions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(p.gramsStr) || 0, p.recipe.cookedWeightG, p.totalPortions) * 2) / 2) };
+                  })} style={fdSegBtn(recipeLogPrompt.mode === id)}>{label}</button>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-              <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
-                suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
-                onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
+              {gramsModeOn ? (
+                <Stepper value={fdNum(recipeLogPrompt.gramsStr) || 0} step={10} min={0} suffix="g"
+                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, gramsStr: String(Math.max(0, Math.round(v))) } : p)} big />
+              ) : (
+                <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
+                  suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
+                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
+              )}
             </div>
             {recipeLogPreview && (
               <FdMacroPreview calories={recipeLogPreview.calories} protein={recipeLogPreview.protein} carbs={recipeLogPreview.carbs} fat={recipeLogPreview.fat} />
@@ -4562,7 +4648,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             )}
             {editingEntry ? (
               <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+                Save · {qtyLabel}
               </Btn>
             ) : planMode ? (
               <div style={{ display: 'flex', gap: 8 }}>
@@ -4571,11 +4657,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             ) : (
               <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+                Add {recipeLogPrompt.recipe.name} · {qtyLabel}
               </Btn>
             )}
           </>
-        )}
+          );
+        })()}
       </Sheet>
 
       {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
@@ -4636,7 +4723,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               )}
               {meCanPortions ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
-                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit portions
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit amount
                 </Btn>
               ) : !meIsRecipe ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditEntry(me))} style={{ width: '100%' }}>
@@ -5101,7 +5188,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   }
   function openAddRecipe(recipe) {
     setPickerOpen(false);
-    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' };
+    const d = { id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, mode: 'portions', portions: 1, gramsStr: '', hour: 8, dayType: 'any' };
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
   }
@@ -5285,7 +5372,13 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const recipe = draft.recipe;
       const items = recipe.items || [];
       const totalPortions = recipe.portions || 1;
-      const scale = draft.portions / totalPortions;
+      // Same grams-mode resolution as the direct-log prompt's
+      // fdEffectiveChosenPortions, just against draft's own field names
+      // (portions here, not chosenPortions).
+      const gramsMode = draft.mode === 'grams' && recipe.cookedWeightG > 0;
+      const gramsVal = gramsMode ? (fdNum(draft.gramsStr) || 0) : null;
+      const chosenPortions = gramsMode ? fdGramsToPortions(gramsVal, recipe.cookedWeightG, totalPortions) : draft.portions;
+      const scale = chosenPortions / totalPortions;
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const recipeItems = items.map(i => ({
         foodId: i.foodId ?? null, brand: i.brand ?? null,
@@ -5298,7 +5391,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
       }));
       return {
-        foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
+        foodId: null,
+        foodName: gramsMode ? (gramsVal !== recipe.cookedWeightG ? `${recipe.name} (${gramsVal}g)` : recipe.name)
+          : draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
         brand: null, source: 'recipe', quantityG: Math.round(sum('quantityG') * scale),
         calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
         carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
@@ -5307,6 +5402,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         satFat: items.some(i => i.satFat != null) ? fdRound1(sum('satFat') * scale) : null,
         sodiumMg: items.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg') * scale) : null,
         recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
+        loggedCookedGrams: gramsVal, loggedCookedWeightG: gramsMode ? recipe.cookedWeightG : null,
       };
     }
     // recipe edit: no macro recompute, reuse the existing slot's food fields.
@@ -5621,10 +5717,31 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               </Field>
             ) : draft.recipe ? (
               <div style={{ marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                {draft.recipe.cookedWeightG > 0 && (
+                  <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 12 }}>
+                    {[['portions', 'Portions'], ['grams', 'Grams']].map(([id, label]) => (
+                      <button key={id} onClick={() => setDraft(d => {
+                        // Carries the current amount across in whichever
+                        // direction, same reasoning as the direct-log
+                        // prompt's own toggle.
+                        if (!d || d.mode === id) return d;
+                        if (id === 'grams') {
+                          return { ...d, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(d.portions, d.recipe.cookedWeightG, d.recipe.portions || 1)))) };
+                        }
+                        return { ...d, mode: id, portions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(d.gramsStr) || 0, d.recipe.cookedWeightG, d.recipe.portions || 1) * 2) / 2) };
+                      })} style={fdSegBtn(draft.mode === id)}>{label}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="micro" style={{ marginBottom: 8, textAlign: 'center' }}>{draft.mode === 'grams' ? 'Grams' : 'Portions'}</div>
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
-                    onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                  {draft.mode === 'grams' ? (
+                    <Stepper value={fdNum(draft.gramsStr) || 0} step={10} min={0} suffix="g"
+                      onChange={v => setDraft(d => ({ ...d, gramsStr: String(Math.max(0, Math.round(v))) }))} big />
+                  ) : (
+                    <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
+                      onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                  )}
                 </div>
               </div>
             ) : null}
@@ -6421,6 +6538,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [name, setName] = useStateFd('');
   const [items, setItems] = useStateFd([]);
   const [portions, setPortions] = useStateFd(1);
+  const [cookedWeightG, setCookedWeightG] = useStateFd('');
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
@@ -6437,8 +6555,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     // item and wiped the whole recipe instead of the one being removed.
     const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
     const p = recipe?.portions || 1;
-    setName(n); setItems(it); setPortions(p);
-    initialSnap.current = JSON.stringify({ name: n, items: it, portions: p });
+    const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+    setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
+    initialSnap.current = JSON.stringify({ name: n, items: it, portions: p, cookedWeightG: cw });
   }, [open, recipe]);
 
   // Batch totals, the whole recipe as cooked, independent of portions:
@@ -6452,8 +6571,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
   }), [items, netCarbs]);
+  // Raw ingredient weight, shown only as a reference next to cookedWeightG
+  // below, never auto-filled into it: water lost or gained during cooking
+  // means the finished dish rarely weighs what its raw ingredients did,
+  // that gap is the entire reason this field asks for a real typed number.
+  const rawGramsTotal = useMemoFd(() => items.reduce((a, i) => a + (i.quantityG || 0), 0), [items]);
 
-  const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
+  const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions, cookedWeightG }) !== initialSnap.current;
   const requestClose = async () => {
     if (isDirty() && !await confirm("Your changes to this recipe won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -6510,7 +6634,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     const ok = await confirm(<RecipeSaveRecap name={trimmed} portions={portions} totals={totals} />,
       { title: recipe ? 'Save recipe?' : 'Add recipe?', ok: recipe ? 'Save' : 'Add' });
     if (!ok) return;
-    onSave({ name: trimmed, items, portions });
+    onSave({ name: trimmed, items, portions, cookedWeightG: fdNum(cookedWeightG) });
   }
   const canSave = !!(name.trim() && items.length);
 
@@ -6551,6 +6675,20 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
           </div>
         </div>
+
+        {/* Optional: unlocks logging this recipe by grams of the finished
+            dish instead of only by portions, useful for batch cooking where
+            weighing out a serving is more natural than a portion fraction
+            (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
+            Never auto-filled from the ingredient total below: cooking loses
+            or gains water weight, so the two numbers are rarely the same. */}
+        <Field label="Cooked weight (g), optional">
+          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+          </div>
+        </Field>
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients</Bezel>
