@@ -1036,7 +1036,8 @@ begin
       where client_id = auth.uid()
         and status = 'active'
         and coach_id <> client_id
-        and id <> p_coaching_id;
+        and id <> p_coaching_id
+        and id not like 'support_%';
     update zane_coaching
       set status = 'active'
       where id = p_coaching_id and client_id = auth.uid() and status = 'pending';
