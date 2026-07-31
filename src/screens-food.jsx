@@ -2919,6 +2919,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // ── Recipes ──
   function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
   function editRecipe(recipe) { setRecipeEditorRecipe(recipe); setRecipeEditorOpen(true); }
+  // Independent copy, appended to the top of the list, same naming/id-
+  // regeneration pattern as duplicatePlan below (meal plans). Item ids are
+  // regenerated too, not just the recipe's own: they're only ever scoped to
+  // their own recipe's items array, but a fresh id per copy avoids any doubt
+  // about whether editing one recipe's ingredient could ever reach the other.
+  function duplicateRecipe(recipe) {
+    const now = new Date().toISOString();
+    const copy = {
+      ...recipe, id: LB.uid(), name: recipe.name + ' (Copy)',
+      items: (recipe.items || []).map(i => ({ ...i, id: LB.uid() })),
+      createdAt: now, updatedAt: now,
+    };
+    setStore(s => ({ ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] }));
+  }
   // RecipeEditorScreen's onSave: it owns its own draft (name/items/portions)
   // entirely locally and only ever hands back the finished shape, so saving
   // is just the usual upsert-by-id-or-prepend every other store collection
@@ -2938,7 +2952,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Confirmed like every other destructive action in this module (deleteEntry,
   // deletePlan, deleteSlot, even removing a single ingredient): a recipe is the
   // most expensive artifact here, it's fired from a small trash icon in a
-  // scrolling list, and dropping it silently breaks "Edit portions" on every
+  // scrolling list, and dropping it silently breaks "Edit amount" on every
   // already-logged entry that resolves back to it (recipeEntryLiveRecipe).
   async function deleteRecipe(recipe) {
     const n = (recipe.items || []).length;
@@ -4050,6 +4064,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
+                          </button>
+                          <button onClick={() => duplicateRecipe(r)} aria-label="Duplicate recipe" style={fdSideBtn}>
+                            <i className="fa-solid fa-copy" style={{ fontSize: 12 }} />
                           </button>
                           <button onClick={() => deleteRecipe(r)} aria-label="Delete recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
