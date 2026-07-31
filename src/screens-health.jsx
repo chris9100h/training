@@ -4168,7 +4168,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // right above already says whose targets these are, no need to repeat it
   // in the label here too).
   const targetRow = (
-    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+    <div style={{ background: UI.bgInset, border: `2px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
       </div>
