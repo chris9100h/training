@@ -6969,7 +6969,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                     </span>
                   </button>
                   <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
-                    <i className={`fa-solid ${i.note ? 'fa-note-sticky' : 'fa-pen'}`} style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
+                    <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
                   </button>
                   <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
