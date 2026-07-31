@@ -1136,7 +1136,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // recipe actually has, not "all of them": logging the whole batch by
   // default would be the more surprising default of the two. mode/gramsStr
   // only matter when recipe.cookedWeightG is set (see fdEffectiveChosenPortions).
-  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, mode, chosenPortions, totalPortions, gramsStr } | null
+  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, mode, chosenPortions, totalPortions, gramsStr, fromCookingMode? } | null
+  // Cooking Mode (CookingModeScreen, see startCookingMode below): { recipe,
+  // draft } while open, null while closed. recipeLogPrompt is deliberately
+  // left set (not cleared) while this is open, so Part D's handoff back into
+  // it has nothing to re-open, just new values to show, no flash.
+  const [cookingMode, setCookingMode] = useStateFd(null);
 
   // Copy/move entries from the viewed day onto another one, at their
   // original time-of-day. copyMoveIds are foodLogs ids picked from
@@ -3206,8 +3211,76 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setEditingEntry(null);
     } else {
       setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned, ...built }]);
+      // Cooking Mode's own draft (see startCookingMode) is done once its log
+      // actually commits, whichever of Plan it/Log it got tapped: this is one
+      // of the wizard's two terminal outcomes, see fdClearCookingDraft's
+      // other call site (CookingModeScreen's requestExit) for the other.
+      if (recipeLogPrompt?.fromCookingMode) fdClearCookingDraft();
     }
     setRecipeLogPrompt(null);
+  }
+
+  // "Cook it" on the recipe log prompt (see the Sheet's own button row
+  // below): hands off to CookingModeScreen for the recipe currently sitting
+  // in recipeLogPrompt, instead of calling confirmRecipeLog. The amount
+  // chosen on the prompt so far is simply discarded, irrelevant, the wizard
+  // determines the real amount itself (per ingredient, then optionally a
+  // cooked weight). recipeLogPrompt itself is left untouched (not cleared)
+  // so CookingModeScreen, opened on top of it, can cleanly hand back into it
+  // afterward with no flash or remount.
+  async function startCookingMode() {
+    if (!recipeLogPrompt) return;
+    const recipe = recipeLogPrompt.recipe;
+    let draft = null;
+    const saved = fdReadCookingDraft();
+    if (saved) {
+      const fresh = saved.startedAt && (Date.now() - Date.parse(saved.startedAt)) < 24 * 60 * 60 * 1000;
+      const matches = saved.recipeId === recipe.id;
+      if (matches && fresh) {
+        const total = (saved.items || []).length;
+        const atIdx = Math.min((saved.currentIdx || 0) + 1, Math.max(total, 1));
+        // saved.step matters here, not just currentIdx: once the wizard has
+        // moved past the last ingredient into the cooked-weight step,
+        // currentIdx stays parked at items.length - 1 (see handleNext), so
+        // without this branch the confirm would misleadingly read
+        // "ingredient N of N" for a draft that actually resumes straight
+        // into the cooked-weight screen, past every ingredient.
+        const resumeMsg = saved.step === 'cookedWeight'
+          ? 'Resume cooking? You already went through every ingredient, just the cooked weight is left.'
+          : `Resume cooking from ingredient ${atIdx} of ${total}?`;
+        const resume = await confirm(resumeMsg, { title: 'Resume cooking?', ok: 'Continue', cancel: 'Start over' });
+        if (resume) draft = saved;
+      }
+      if (!draft) fdClearCookingDraft();
+    }
+    setCookingMode({ recipe, draft });
+  }
+  // CookingModeScreen's own onFinish: Part B/C are done (either no diff to
+  // confirm, or the user picked Leave/Update recipe), hand off into the
+  // normal recipeLogPrompt/confirmRecipeLog machinery as the actual final
+  // commit step, exactly as if a plain portions/grams amount had been typed
+  // on the prompt directly. resolvedCookedWeightG falls back to the recipe's
+  // own existing cookedWeightG when nothing was typed this session (never
+  // erased by leaving the field blank), typedThisSession alone decides the
+  // sheet's starting unit.
+  function finishCookingMode(finalItems, resolvedCookedWeightG, typedThisSession) {
+    const recipe = cookingMode?.recipe;
+    setCookingMode(null);
+    if (!recipe) return;
+    setRecipeLogPrompt({
+      recipe: { ...recipe, items: finalItems, cookedWeightG: resolvedCookedWeightG },
+      mode: typedThisSession ? 'grams' : 'portions',
+      chosenPortions: 1,
+      totalPortions: recipe.portions || 1,
+      gramsStr: typedThisSession ? String(resolvedCookedWeightG) : '',
+      fromCookingMode: true,
+    });
+  }
+  // "Update recipe" in CookingModeScreen's own diff confirm: same store-write
+  // shape handleRecipeSave already uses, name/portions untouched.
+  function updateRecipeFromCooking(recipeId, items, cookedWeightG) {
+    const now = new Date().toISOString();
+    setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === recipeId ? { ...r, items, cookedWeightG, updatedAt: now } : r) }));
   }
 
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
@@ -4621,7 +4694,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           stepper, even for a 1-portion recipe (e.g. "1 cake" doesn't mean
           logging the whole cake is the only option, half of it or a second
           one are just as valid). Half-portion steps, no upper cap: chosen
-          can go above the recipe's own portion count too. ── */}
+          can go above the recipe's own portion count too.
+          STACKING WARNING: stays z-index 100 on purpose, tied with
+          CookingModeScreen below, which must render as a LATER sibling than
+          this Sheet in the JSX to win that tie (see CookingModeScreen's own
+          comment for why a literal higher zIndex is unsafe here). Do not
+          move this Sheet below CookingModeScreen's render call, or reorder
+          either one, without re-reading that comment first. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
         titleRight={recipeLogPrompt && (
           // Always share the LIVE recipe. When this sheet is opened from an
@@ -4692,16 +4771,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
                 Save · {qtyLabel}
               </Btn>
-            ) : planMode ? (
+            ) : recipeLogPrompt.fromCookingMode ? (
+              // Reached via Cooking Mode's own hand-off (Part D): behaves like
+              // a normal, non-Cook-it prompt (see the plain planMode/single-Add
+              // branches this mirrors), no "Cook it" a second time, that
+              // doesn't make sense once the dish is already cooked.
+              planMode ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
+                  {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+                </div>
+              ) : (
+                <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
+                  Add {recipeLogPrompt.recipe.name} · {qtyLabel}
+                </Btn>
+              )
+            ) : (<>
+              {/* Three real actions instead of the old plan-mode-only split:
+                  Cook it walks through Cooking Mode below (real-time only,
+                  same reasoning as Log it, a future date can't be cooked
+                  today); Plan it/Log it are unchanged. The chosen quantity no
+                  longer fits inside a now-narrower button label, so it's
+                  called out here instead. */}
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
               <div style={{ display: 'flex', gap: 8 }}>
+                {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
                 <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
                 {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
               </div>
-            ) : (
-              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                Add {recipeLogPrompt.recipe.name} · {qtyLabel}
-              </Btn>
-            )}
+            </>)}
           </>
           );
         })()}
@@ -4759,6 +4857,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
+
+      {/* Rendered AFTER recipeLogPrompt's own Sheet above (both z-index 100,
+          see CookingModeScreen's own comment on why not a literal 200): later
+          in document order wins an equal-z-index tie, so this correctly
+          paints above the recipe log prompt it was opened from and returns
+          into. */}
+      <CookingModeScreen open={!!cookingMode} recipe={cookingMode?.recipe} draft={cookingMode?.draft} store={store}
+        onClose={() => setCookingMode(null)} onFinish={finishCookingMode} onUpdateRecipe={updateRecipeFromCooking} />
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
@@ -6600,6 +6706,21 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   );
 }
 
+// Circular position badge (1, 2, 3, ...) reflecting an ingredient's place in
+// the recipe's prep order (array order). Shared by the ingredient list above
+// and Cooking Mode's one-at-a-time hero card below, so the same number means
+// the same thing in both places.
+function FdIngredientBadge({ n, size = 20 }) {
+  return (
+    <span className="num" style={{
+      flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: size, height: size, borderRadius: 999,
+      background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
+      fontSize: Math.round(size * 0.5), fontWeight: 700,
+    }}>{n}</span>
+  );
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
@@ -6609,6 +6730,12 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
+  // Per-ingredient note (items[i].note, optional): the item being edited, or
+  // null while closed. Carried through to Cooking Mode below, where it's the
+  // whole point of being permanent (shown prominently on that ingredient's
+  // own card while actually cooking).
+  const [noteItem, setNoteItem] = useStateFd(null);
+  const [noteText, setNoteText] = useStateFd('');
   // Snapshot of the draft as it was opened, to detect unsaved edits on close.
   const initialSnap = useRefFd(null);
 
@@ -6665,8 +6792,28 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     if (!await confirm(`${item.foodName} · ${item.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     removeItem(item.id);
   }
+  // Array order IS the deliberate prep order now (see the ingredient list
+  // below and Cooking Mode further down): a plain splice-to-new-position,
+  // no macro recalculation, only position changes.
+  function reorderItems(from, to) {
+    if (from === to) return;
+    setItems(list => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
+  function closeNoteItem() { setNoteItem(null); setNoteText(''); }
+  function saveNote() {
+    if (!noteItem) return;
+    const trimmed = noteText.trim();
+    setItems(list => list.map(i => i.id !== noteItem.id ? i : { ...i, note: trimmed || null }));
+    closeNoteItem();
+  }
   // Live preview of the rescaled macros as the amount is typed, same factor
   // math saveEditItem itself commits below, so what's shown here is exactly
   // what Save will write. Without this the sheet was just a bare grams
@@ -6777,15 +6924,21 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         </Field>
 
         <div>
-          <Bezel style={{ marginBottom: 10 }}>Ingredients</Bezel>
+          <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
             <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
               <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
             </Btn>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {fdSortIngredientsByQty(items).map(i => (
-                <div key={i.id} style={fdEntryRow}>
+            // Array order is the deliberate prep order (the order to add
+            // ingredients while cooking, see Cooking Mode below), so this list
+            // renders items as-is, drag the grip to reorder, same engine as
+            // the plan editor's own item list (screens-schedule.jsx).
+            <ReorderList onReorder={reorderItems} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((i, idx) => (
+                <div key={i.id} data-reorder-item="true" style={fdEntryRow}>
+                  <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
+                  <FdIngredientBadge n={idx + 1} />
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                       {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -6797,12 +6950,15 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                       <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
                     </span>
                   </button>
-                  <button onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
+                    <i className={`fa-solid ${i.note ? 'fa-note-sticky' : 'fa-pen'}`} style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
+                  </button>
+                  <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                   </button>
                 </div>
               ))}
-            </div>
+            </ReorderList>
           )}
         </div>
       </div>
@@ -6826,6 +6982,20 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         </div>
       </Sheet>
 
+      {/* ── Per-ingredient note: a short, permanent reminder that follows the
+          ingredient into Cooking Mode (CookingModeScreen below), where it's
+          shown prominently on that ingredient's own card while cooking ── */}
+      <Sheet open={!!noteItem} onClose={closeNoteItem} title={noteItem?.foodName || 'Note'} titleColor="var(--accent)">
+        <Field label="Note" style={{ marginBottom: 16 }}>
+          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="e.g. dice small, or add right at the end"
+            rows={2} style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }} />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeNoteItem} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveNote} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
       <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItems} store={store} />
     </Screen>
   );
@@ -6843,6 +7013,507 @@ function RecipeSaveRecap({ name, portions, totals }) {
         <FdMacroGhosts protein={totals.protein} carbs={totals.carbs} fat={totals.fat} size={13} />
       </div>
     </div>
+  );
+}
+
+// ── Cooking Mode: localStorage draft (this device only, never synced) ──────
+// Mirrors LB.saveToLocal's own defensive pattern (store.js): a full/blocked
+// localStorage must never crash the wizard, it should just silently fail to
+// persist that one write. Only one draft at a time, same as cooking itself.
+function fdReadCookingDraft() {
+  try {
+    const raw = localStorage.getItem('logbook-cooking-draft');
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+function fdWriteCookingDraft(draft) {
+  try { localStorage.setItem('logbook-cooking-draft', JSON.stringify(draft)); } catch (_) {}
+}
+function fdClearCookingDraft() {
+  try { localStorage.removeItem('logbook-cooking-draft'); } catch (_) {}
+}
+
+// Diff between the wizard's final working items and the recipe's own
+// currently persisted items, for the "Recipe changes" confirm below. Swaps
+// are NOT re-derived from a generic added+removed pair (that would have to
+// guess which removal pairs with which addition); they come in as an
+// explicit event log recorded the moment each swap actually happened in the
+// wizard (swapEvents), same reasoning training tracks its own swap
+// operations directly instead of inferring them after the fact.
+function fdComputeCookingDiff(originalItems, finalItems, swapEvents) {
+  const origById = new Map((originalItems || []).map(i => [i.id, i]));
+  const finalById = new Map((finalItems || []).map(i => [i.id, i]));
+  const swappedIds = new Set((swapEvents || []).map(e => e.itemId));
+  const diffs = [];
+  (finalItems || []).forEach(i => { if (!origById.has(i.id)) diffs.push({ type: 'added', name: i.foodName }); });
+  (originalItems || []).forEach(i => { if (!finalById.has(i.id)) diffs.push({ type: 'removed', name: i.foodName }); });
+  // finalById guard: a slot that was swapped and later removed entirely
+  // reports only as "removed" (the true end state), not also as "swapped"
+  // into a food that no longer exists either. requestRemove already prunes
+  // swapEvents for a removed slot, this is a second line of defense.
+  // origById guard: a slot that was added this session and THEN swapped
+  // (never existed in the persisted recipe at all) reports only as "added"
+  // (using its final, post-swap food), not also as a "swapped" row naming an
+  // old food that was never part of the recipe to begin with.
+  (swapEvents || []).forEach(e => { if (finalById.has(e.itemId) && origById.has(e.itemId)) diffs.push({ type: 'swapped', fromName: e.fromFoodName, toName: e.toFoodName }); });
+  // Amount changed: the same item survived (and wasn't swapped), but its
+  // quantity moved by more than max(5% relative, 3g floor). At or under that
+  // threshold is deliberately never reported, normal imprecise kitchen
+  // weighing must never trigger this dialog, only a genuinely deliberate
+  // change should.
+  (originalItems || []).forEach(orig => {
+    if (swappedIds.has(orig.id)) return;
+    const fin = finalById.get(orig.id);
+    if (!fin) return;
+    const origG = orig.quantityG || 0;
+    const finG = fin.quantityG || 0;
+    const threshold = Math.max(origG * 0.05, 3);
+    if (Math.abs(finG - origG) > threshold) {
+      diffs.push({ type: 'amount', name: fin.foodName, oldG: origG, newG: finG });
+    }
+  });
+  return diffs;
+}
+
+// Cooking Mode: a guided, one-ingredient-at-a-time wizard for actually
+// cooking a recipe, opened from the recipe log prompt's "Cook it" button
+// (FoodScreen's startCookingMode). Modeled on TrainingScreen's own
+// one-exercise-at-a-time flow (chip row + position counter, swap/add/remove
+// toolbar, Back/Next footer) but built entirely out of this file's own
+// components, never training's literal CSS constants or its KgInput/
+// CustomKeyboard machinery. Next is always enabled here, unlike training's
+// gated Next: reviewing an ingredient has no "done" state to gate on.
+//
+// zIndex 100, tied with an ordinary Sheet, not the seemingly obvious 200
+// ("must sit above the already-open recipeLogPrompt Sheet"): FdIngredientPicker
+// is reused unmodified below, and its OWN internal "discard picks?" confirm
+// (useConfirm's default zIndex, portaled straight to document.body) would
+// render BEHIND a z-200 wizard, an invisible, unreachable confirm. Tied at
+// z-100, that portal still always wins ties against same-tier content (see
+// useConfirm's own comment in ui.jsx), and this component is rendered as a
+// LATER sibling than recipeLogPrompt's own Sheet in FoodScreen's return, so
+// the tie against THAT is won by DOM order instead, the exact same mechanism
+// RecipeEditorScreen already relies on for nesting this same picker.
+function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [items, setItems] = useStateFd([]);
+  const originalItemsRef = useRefFd([]);
+  const [currentIdx, setCurrentIdx] = useStateFd(0);
+  const [step, setStep] = useStateFd('ingredients'); // 'ingredients' | 'cookedWeight'
+  const [cookedWeightG, setCookedWeightG] = useStateFd('');
+  const [swapEvents, setSwapEvents] = useStateFd([]); // [{ itemId, fromFoodName, toFoodName }]
+  const [amountStr, setAmountStr] = useStateFd('');
+  // Frozen basis for the live amount-scale preview (same two-state idea as
+  // RecipeEditorScreen's editItem/editGrams): reset explicitly whenever the
+  // ingredient AT the current position changes (goToIndex, a swap), never
+  // recomputed from the drifting `items` state itself, or repeated typing
+  // would compound rounding against an already-scaled value instead of the
+  // ingredient's own fixed starting point for this visit.
+  const baseItemRef = useRefFd(null);
+  const startedAtRef = useRefFd(null);
+  const [pickerOpen, setPickerOpen] = useStateFd(false);
+  const pickerModeRef = useRefFd('add'); // 'add' | 'swap': which toolbar button opened FdIngredientPicker
+  const [diffOpen, setDiffOpen] = useStateFd(false);
+  const [diffList, setDiffList] = useStateFd([]);
+  // Whether this open resumed a saved draft (vs. a from-scratch cook):
+  // requestExit below must never wipe a resumed draft just because THIS
+  // visit made no further changes, that would silently discard real
+  // progress saved in an earlier session.
+  const resumedRef = useRefFd(false);
+  // Set on any state-changing action taken this session (amount typed,
+  // add/swap/remove, cooked weight typed). requestExit only ever clears
+  // the draft for a truly untouched session, see its own comment below.
+  const dirtyRef = useRefFd(false);
+  // Whether cookedWeightG actually reflects a real typed value, as opposed
+  // to merely being pre-filled from the recipe's own already-saved
+  // cookedWeightG. Deliberately separate from dirtyRef above (which also
+  // flips true for unrelated actions like an ingredient amount edit): this
+  // one specifically decides the Part D hand-off's starting unit ('grams'
+  // vs 'portions'), an untouched pre-filled value must resolve to
+  // 'portions' same as today, even if other fields were touched this
+  // session. Initialized in the open-effect below (also handles resuming a
+  // draft where the value was genuinely typed in an earlier, killed
+  // session), then flipped true directly by the field's own onChange.
+  const cookedWeightTypedRef = useRefFd(false);
+
+  useEffectFd(() => {
+    if (!open) return;
+    const idsFilled = (recipe?.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+    originalItemsRef.current = idsFilled.map(i => ({ ...i }));
+    let initItems, initIdx, initStep, initCookedWeightG, initSwapEvents;
+    if (draft) {
+      initItems = (draft.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+      initIdx = Math.max(0, Math.min(draft.currentIdx || 0, initItems.length - 1));
+      initStep = draft.step === 'cookedWeight' ? 'cookedWeight' : 'ingredients';
+      initCookedWeightG = draft.cookedWeightG || '';
+      initSwapEvents = draft.swapEvents || [];
+      startedAtRef.current = draft.startedAt || new Date().toISOString();
+    } else {
+      initItems = idsFilled.map(i => ({ ...i }));
+      initIdx = 0;
+      initStep = 'ingredients';
+      initCookedWeightG = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+      initSwapEvents = [];
+      startedAtRef.current = new Date().toISOString();
+    }
+    resumedRef.current = !!draft;
+    dirtyRef.current = false;
+    // A draft's cookedWeightG diverging from the recipe's own currently
+    // saved value can only mean it was genuinely typed at some point (this
+    // device only ever writes what the field itself held); matching it (or
+    // a from-scratch open, where it's the same prefill by construction)
+    // means untouched.
+    const recipeCookedWeight = recipe?.cookedWeightG ?? null;
+    cookedWeightTypedRef.current = fdNum(initCookedWeightG) > 0 && fdNum(initCookedWeightG) !== recipeCookedWeight;
+    setItems(initItems);
+    setCurrentIdx(initIdx);
+    setStep(initStep);
+    setCookedWeightG(initCookedWeightG);
+    setSwapEvents(initSwapEvents);
+    setDiffOpen(false);
+    setDiffList([]);
+    baseItemRef.current = initItems[initIdx] || null;
+    setAmountStr(initItems[initIdx] ? String(initItems[initIdx].quantityG ?? '') : '');
+  }, [open, recipe, draft]);
+
+  // Persists on every change so an app-kill mid-cook survives (this device
+  // only, see CLAUDE.md's localStorage-key list). Guarded on items.length:
+  // the render right after `open` flips true, before the effect above's
+  // setItems has actually landed, must never overwrite a real draft with an
+  // empty one (a real recipe always has at least one ingredient). Carries
+  // swapEvents along too, otherwise a resumed draft would forget which
+  // ingredients were swapped and fdComputeCookingDiff below would misreport
+  // them as a plain amount change (or drop them) instead of "swapped".
+  useEffectFd(() => {
+    if (!open || !recipe || !items.length) return;
+    fdWriteCookingDraft({ recipeId: recipe.id, startedAt: startedAtRef.current, step, currentIdx, items, cookedWeightG, swapEvents });
+  }, [open, recipe, step, currentIdx, items, cookedWeightG, swapEvents]);
+
+  function syncAmountField(idx, list) {
+    const it = list[idx];
+    baseItemRef.current = it || null;
+    setAmountStr(it ? String(it.quantityG ?? '') : '');
+  }
+  function goToIndex(idx, list) {
+    const arr = list || items;
+    const clamped = Math.max(0, Math.min(idx, arr.length - 1));
+    setCurrentIdx(clamped);
+    syncAmountField(clamped, arr);
+  }
+
+  const rawGramsTotal = useMemoFd(() => items.reduce((a, i) => a + (i.quantityG || 0), 0), [items]);
+  const curItem = items[currentIdx] || null;
+  // Continuous shrink instead of training's fixed length breakpoints: a
+  // straight-line falloff past a comfortable short-name length, clamped to
+  // this card's own min/max, so a very long ingredient name never wraps or
+  // overflows past the amount field below it.
+  const curNameFontSize = curItem
+    ? Math.max(15, Math.min(32, 32 - Math.max(0, curItem.foodName.length - 11) * 0.8))
+    : 32;
+
+  function onAmountChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setAmountStr(filtered);
+    const base = baseItemRef.current;
+    const g = fdNum(filtered);
+    if (!base || !(g > 0) || !(base.quantityG > 0)) return;
+    dirtyRef.current = true;
+    const factor = g / base.quantityG;
+    setItems(list => list.map((it, i) => i !== currentIdx ? it : {
+      ...it, quantityG: Math.round(g),
+      calories: Math.round((base.calories || 0) * factor),
+      protein: fdRound1((base.protein || 0) * factor),
+      carbs: fdRound1((base.carbs || 0) * factor),
+      fat: fdRound1((base.fat || 0) * factor),
+      fiber: base.fiber != null ? fdRound1(base.fiber * factor) : null,
+      sugar: base.sugar != null ? fdRound1(base.sugar * factor) : null,
+      satFat: base.satFat != null ? fdRound1(base.satFat * factor) : null,
+      sodiumMg: base.sodiumMg != null ? Math.round(base.sodiumMg * factor) : null,
+    }));
+  }
+
+  function handleNext() {
+    if (currentIdx < items.length - 1) goToIndex(currentIdx + 1);
+    else setStep('cookedWeight');
+  }
+  function handleBack() {
+    if (step === 'cookedWeight') { setStep('ingredients'); goToIndex(items.length - 1); return; }
+    if (currentIdx === 0) return;
+    goToIndex(currentIdx - 1);
+  }
+  // No confirm-to-exit here (deliberate, see Cooking Mode's persistence
+  // notes): the localStorage draft is what survives navigating away. Only
+  // a session that is BOTH back at the very first ingredient AND has made
+  // no changes at all clears it, "before doing anything" per the spec.
+  // resumedRef matters here too: re-opening a saved draft and immediately
+  // backing out again with no further edits must not discard the progress
+  // that draft already represents, only a from-scratch session with
+  // nothing in it is safe to wipe.
+  function requestExit() {
+    if (step === 'ingredients' && currentIdx === 0 && !dirtyRef.current && !resumedRef.current) fdClearCookingDraft();
+    onClose();
+  }
+
+  function openAddPicker() { pickerModeRef.current = 'add'; setPickerOpen(true); }
+  async function requestSwap() {
+    if (!curItem) return;
+    if (!await confirm(`Swap "${curItem.foodName}"?`, { ok: 'Swap' })) return;
+    pickerModeRef.current = 'swap';
+    setPickerOpen(true);
+  }
+  async function requestRemove() {
+    if (items.length <= 1 || !curItem) return;
+    if (!await confirm(`${curItem.foodName} · ${curItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    dirtyRef.current = true;
+    const removedId = curItem.id;
+    const next = items.filter((_, i) => i !== currentIdx);
+    setItems(next);
+    // Drop any swap event recorded for the removed slot: it no longer
+    // exists in the final list, so fdComputeCookingDiff below should just
+    // report it as removed, not ALSO as swapped into a food that then
+    // vanished too.
+    setSwapEvents(list => list.filter(e => e.itemId !== removedId));
+    goToIndex(Math.min(currentIdx, next.length - 1), next);
+  }
+
+  // FdIngredientPicker always hands back an array (its own "Add N
+  // ingredients" button supports staging several at once); Add inserts all
+  // of them, Swap uses only the first (multi-add makes no sense for a
+  // one-for-one swap) and ignores the rest. Reused completely unmodified
+  // either way, per this file's own established contract for that component.
+  function handlePickerAdd(newItems) {
+    if (!newItems || !newItems.length) { setPickerOpen(false); return; }
+    if (pickerModeRef.current === 'swap') {
+      applySwap({ id: LB.uid(), ...newItems[0] });
+      setPickerOpen(false);
+      return;
+    }
+    dirtyRef.current = true;
+    const withIds = newItems.map(it => ({ id: LB.uid(), ...it }));
+    const insertAt = currentIdx + 1;
+    const next = [...items.slice(0, insertAt), ...withIds, ...items.slice(insertAt)];
+    setItems(next);
+    goToIndex(insertAt, next);
+    setPickerOpen(false);
+  }
+  // Keeps the currently typed gram amount (not the new food's own default
+  // quantity) and recomputes every macro from the new food's own rate at
+  // that same gram amount; note is dropped, a note written for the old
+  // ingredient has no reason to carry over to a different food.
+  function applySwap(picked) {
+    if (!curItem) return;
+    dirtyRef.current = true;
+    const keptGrams = fdNum(amountStr) || curItem.quantityG || 0;
+    const factor = picked.quantityG > 0 ? keptGrams / picked.quantityG : 0;
+    const swapped = {
+      ...curItem,
+      foodId: picked.foodId ?? null, foodName: picked.foodName, brand: picked.brand ?? null, source: picked.source ?? null,
+      quantityG: Math.round(keptGrams),
+      calories: Math.round((picked.calories || 0) * factor),
+      protein: fdRound1((picked.protein || 0) * factor),
+      carbs: fdRound1((picked.carbs || 0) * factor),
+      fat: fdRound1((picked.fat || 0) * factor),
+      fiber: picked.fiber != null ? fdRound1(picked.fiber * factor) : null,
+      sugar: picked.sugar != null ? fdRound1(picked.sugar * factor) : null,
+      satFat: picked.satFat != null ? fdRound1(picked.satFat * factor) : null,
+      sodiumMg: picked.sodiumMg != null ? Math.round(picked.sodiumMg * factor) : null,
+      note: null,
+    };
+    const swappedItemId = curItem.id;
+    const next = items.map((it, i) => i === currentIdx ? swapped : it);
+    setItems(next);
+    baseItemRef.current = swapped;
+    setAmountStr(String(swapped.quantityG));
+    // Net-tracks per slot rather than appending a new row per swap: two
+    // swaps of the same ingredient (rice to quinoa, then quinoa to
+    // couscous) collapse into one "rice to couscous" event, matching what
+    // actually changed versus the original recipe, not a stale
+    // intermediate step. Swapping back to the very original food for that
+    // slot cancels the event entirely, since nothing really changed.
+    setSwapEvents(list => {
+      const origItem = originalItemsRef.current.find(o => o.id === swappedItemId);
+      const originalName = origItem ? origItem.foodName : curItem.foodName;
+      const existing = list.find(e => e.itemId === swappedItemId);
+      if (swapped.foodName === originalName) return list.filter(e => e.itemId !== swappedItemId);
+      const fromFoodName = existing ? existing.fromFoodName : curItem.foodName;
+      const event = { itemId: swappedItemId, fromFoodName, toFoodName: swapped.foodName };
+      return existing ? list.map(e => e.itemId === swappedItemId ? event : e) : [...list, event];
+    });
+  }
+
+  // Blank stays blank downstream (no update to cooked weight), it never
+  // erases an already-set one: only a positive typed value overrides it.
+  // typedThisSession reads cookedWeightTypedRef (was the field genuinely
+  // edited, not just pre-filled from the recipe's own already-saved value),
+  // not merely "does it currently parse to a positive number": a recipe
+  // that already has a cookedWeightG would otherwise always look "typed"
+  // even when the user never touched the field, wrongly forcing Part D's
+  // hand-off into 'grams' instead of the spec's 'portions' default.
+  function resolveCookedWeight() {
+    const typed = fdNum(cookedWeightG);
+    return { resolved: typed > 0 ? typed : (recipe?.cookedWeightG ?? null), typedThisSession: cookedWeightTypedRef.current && typed > 0 };
+  }
+  function proceedToLog() {
+    const { resolved, typedThisSession } = resolveCookedWeight();
+    onFinish(items, resolved, typedThisSession);
+  }
+  function handleFinishIngredients() {
+    const diffs = fdComputeCookingDiff(originalItemsRef.current, items, swapEvents);
+    if (!diffs.length) { proceedToLog(); return; }
+    setDiffList(diffs);
+    setDiffOpen(true);
+  }
+  function handleLeaveRecipe() { setDiffOpen(false); proceedToLog(); }
+  function handleUpdateRecipe() {
+    setDiffOpen(false);
+    const { resolved } = resolveCookedWeight();
+    onUpdateRecipe(recipe.id, items, resolved);
+    proceedToLog();
+  }
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      {confirmEl}
+      <TopBar title={recipe?.name || 'Cooking'} sub="Cooking mode" onBack={requestExit} />
+
+      {step === 'ingredients' && curItem && (<>
+        <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span className="micro-gold">Ingredients</span>
+          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
+            {String(currentIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(items.length).padStart(2, '0')}
+          </span>
+        </div>
+
+        {/* Chip row, tap a chip to jump straight to that ingredient. */}
+        <div style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {items.map((it, i) => (
+            <button key={it.id} onClick={() => goToIndex(i)} style={{
+              flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
+              border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
+              background: i === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+              fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
+              color: i === currentIdx ? 'var(--accent)' : UI.inkFaint,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>{it.foodName}</button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <FdIngredientBadge n={currentIdx + 1} size={34} />
+            <span className="display" style={{
+              flex: 1, minWidth: 0,
+              fontSize: curNameFontSize,
+              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>{curItem.foodName}</span>
+          </div>
+
+          {curItem.note && (
+            <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
+              <div className="micro-gold" style={{ marginBottom: 4 }}>Note</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{curItem.note}</div>
+            </div>
+          )}
+
+          <Field label="Amount (g)">
+            <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+          </Field>
+
+          <FdMacroPreview calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat}
+            sugar={curItem.sugar} satFat={curItem.satFat} sodiumMg={curItem.sodiumMg} marginBottom={0} />
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={openAddPicker} aria-label="Add ingredient" style={fdIconBtn(38)}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+            <button onClick={requestSwap} aria-label="Swap ingredient" style={fdIconBtn(38)}>
+              <i className="fa-solid fa-right-left" style={{ fontSize: 14 }} />
+            </button>
+            {items.length > 1 && (
+              <button onClick={requestRemove} aria-label="Remove ingredient" style={fdIconBtn(38)}>
+                <i className="fa-solid fa-trash" style={{ fontSize: 14 }} />
+              </button>
+            )}
+          </div>
+        </div>
+      </>)}
+
+      {step === 'cookedWeight' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div className="display" style={{ fontSize: 28, color: UI.ink, lineHeight: 1.1 }}>Weigh the dish</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Optional. Weigh the finished dish to log it by weight later instead of by portion, it usually differs from the raw ingredient total below.
+            </div>
+          </div>
+          <Field label="Cooked weight (g), optional">
+            <input value={cookedWeightG} onChange={e => { dirtyRef.current = true; cookedWeightTypedRef.current = true; setCookedWeightG(fdDecimalFilter(e.target.value)); }} type="text" inputMode="decimal"
+              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          </Field>
+        </div>
+      )}
+
+      <div className="knurl" />
+      <div style={{ flexShrink: 0, padding: '10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)', display: 'flex', gap: 10 }}>
+        <button onClick={handleBack} disabled={step === 'ingredients' && currentIdx === 0} style={{
+          width: 44, minHeight: 44, borderRadius: 6, background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+          color: UI.inkSoft, cursor: (step === 'ingredients' && currentIdx === 0) ? 'default' : 'pointer',
+          opacity: (step === 'ingredients' && currentIdx === 0) ? 0.3 : 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        {step === 'ingredients' ? (
+          <Btn onClick={handleNext} style={{ flex: 1, minHeight: 44 }}>
+            {currentIdx === items.length - 1 ? 'Weigh it →' : 'Next ingredient →'}
+          </Btn>
+        ) : (
+          <Btn onClick={handleFinishIngredients} style={{ flex: 1, minHeight: 44 }}>Finish →</Btn>
+        )}
+      </div>
+
+      {/* "Recipe changes" vs. the recipe's own persisted items, modeled
+          directly on training's "Session changes" Sheet. */}
+      <Sheet open={diffOpen} onClose={() => setDiffOpen(false)} title="Recipe changes">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. recipe:</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+          {diffList.map((d, i) => (
+            <div key={i} style={{ background: UI.bgInset, borderRadius: 4, padding: '10px 14px', border: `var(--hair-width) solid ${UI.hair}`, fontSize: 13, color: UI.ink, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {d.type === 'swapped' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⇄</span>
+                  <span><span style={{ color: UI.inkSoft }}>{d.fromName}</span>{' → '}<strong>{d.toName}</strong></span>
+                </>
+              ) : d.type === 'amount' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
+                  <span><strong>{d.name}</strong>{': '}<span style={{ color: UI.inkSoft }}>{Math.round(d.oldG)}g</span>{' → '}<strong>{Math.round(d.newG)}g</strong></span>
+                </>
+              ) : d.type === 'added' ? (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>＋</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' removed'}</span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={handleLeaveRecipe} style={{ flex: 1 }}>Leave recipe</Btn>
+          <Btn onClick={handleUpdateRecipe} style={{ flex: 2 }}>Update recipe</Btn>
+        </div>
+      </Sheet>
+
+      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={handlePickerAdd} store={store} />
+    </Screen>
   );
 }
 
