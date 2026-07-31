@@ -1118,6 +1118,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (below) are what RecipeEditorScreen's onSave/onClose actually call.
   const [recipeEditorOpen, setRecipeEditorOpen] = useStateFd(false);
   const [recipeEditorRecipe, setRecipeEditorRecipe] = useStateFd(null);
+  // "Which recipe do I want a copy of" picker, opened from the header's copy
+  // icon (see duplicateRecipe below).
+  const [duplicatePickerOpen, setDuplicatePickerOpen] = useStateFd(false);
   // Prompt shown before a recipe actually gets logged (see addRecipeToLog):
   // always a portions stepper (half-portion steps), even for a recipe with
   // just one portion, e.g. "1 cake" doesn't mean the only choice is the
@@ -2919,12 +2922,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // ── Recipes ──
   function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
   function editRecipe(recipe) { setRecipeEditorRecipe(recipe); setRecipeEditorOpen(true); }
-  // Independent copy, appended to the top of the list, same naming/id-
+  // Reached from the header's copy icon (duplicatePickerOpen), not a button
+  // per row: one row per recipe times three action icons got crowded fast
+  // once someone had more than a handful. Picking a recipe here confirms
+  // (a long list makes a mis-tap easy) then copies it, same naming/id-
   // regeneration pattern as duplicatePlan below (meal plans). Item ids are
   // regenerated too, not just the recipe's own: they're only ever scoped to
   // their own recipe's items array, but a fresh id per copy avoids any doubt
   // about whether editing one recipe's ingredient could ever reach the other.
-  function duplicateRecipe(recipe) {
+  async function duplicateRecipe(recipe) {
+    if (!await confirm(recipe.name, { title: 'Duplicate recipe?', ok: 'Duplicate' })) return;
     const now = new Date().toISOString();
     const copy = {
       ...recipe, id: LB.uid(), name: recipe.name + ' (Copy)',
@@ -2932,6 +2939,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       createdAt: now, updatedAt: now,
     };
     setStore(s => ({ ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] }));
+    setDuplicatePickerOpen(false);
   }
   // RecipeEditorScreen's onSave: it owns its own draft (name/items/portions)
   // entirely locally and only ever hands back the finished shape, so saving
@@ -3406,9 +3414,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
         right={
           tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
-            <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
-              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setDuplicatePickerOpen(true)} aria-label="Duplicate a recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-copy" style={{ fontSize: 13 }} />
+              </button>
+              <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+              </button>
+            </div>
           ) : tab === 'log' ? (
             // Day-level actions. Screenshot and multi-select need something to
             // act on, but the overflow and shopping list must not: a
@@ -4065,9 +4078,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
                           </button>
-                          <button onClick={() => duplicateRecipe(r)} aria-label="Duplicate recipe" style={fdSideBtn}>
-                            <i className="fa-solid fa-copy" style={{ fontSize: 12 }} />
-                          </button>
                           <button onClick={() => deleteRecipe(r)} aria-label="Delete recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
                           </button>
@@ -4680,6 +4690,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </>
           );
         })()}
+      </Sheet>
+
+      {/* ── Duplicate-recipe picker (header copy icon, see duplicateRecipe) ── */}
+      <Sheet open={duplicatePickerOpen} onClose={() => setDuplicatePickerOpen(false)} title="Duplicate recipe" titleColor="var(--accent)">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '60vh', overflowY: 'auto' }}>
+          {(store.foodRecipes || []).map(r => {
+            const n = (r.items || []).length;
+            return (
+              <button key={r.id} onClick={() => duplicateRecipe(r)} style={fdResultRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{r.name}</div>
+                  <div style={fdEntryMeta}>{n} ingredient{n === 1 ? '' : 's'}</div>
+                </div>
+                <i className="fa-solid fa-copy" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            );
+          })}
+        </div>
       </Sheet>
 
       {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
