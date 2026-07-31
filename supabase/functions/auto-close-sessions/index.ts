@@ -39,6 +39,24 @@ async function sendWebPush(userId: string, title: string, message: string) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  // Cron-only shared secret. This function is a cron trigger target with no
+  // caller identity to resolve (unlike pushover/index.ts), so it just checks
+  // the bearer token against CRON_SECRET. Fails CLOSED: an unset/empty
+  // CRON_SECRET rejects every request rather than accidentally allowing it
+  // through. See migration 0230_cron_shared_secret_auth.sql for the
+  // Vault-backed secret this compares against. auto-close-sessions is
+  // scheduled via the Supabase Dashboard (not an in-repo migration), so its
+  // schedule's Authorization header must be updated there by hand, see the
+  // migration's top comment.
+  const cronSecret = Deno.env.get('CRON_SECRET') ?? '';
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const run = async () => {
     const now = new Date();
 

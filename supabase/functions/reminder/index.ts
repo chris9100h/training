@@ -85,6 +85,22 @@ async function sendReminders() {
 // Scheduled via pg_cron in the database (see migration 0028_reminder_cron.sql).
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // Cron-only shared secret. This function is a cron trigger target with no
+  // caller identity to resolve (unlike pushover/index.ts), so it just checks
+  // the bearer token against CRON_SECRET. Fails CLOSED: an unset/empty
+  // CRON_SECRET rejects every request rather than accidentally allowing it
+  // through. See migration 0230_cron_shared_secret_auth.sql for the
+  // Vault-backed secret this compares against.
+  const cronSecret = Deno.env.get('CRON_SECRET') ?? '';
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   // Allow manual trigger via POST for testing
   if (req.method === 'POST') {
     await sendReminders();
