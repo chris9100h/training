@@ -5091,6 +5091,10 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           // snapshot is another user's jsonb, so nothing is spread blindly.
           // Absent on anything shared before 0204, which stays null.
           sugar: numOrNull(i.sugar), satFat: numOrNull(i.satFat), sodiumMg: numOrNull(i.sodiumMg),
+          // Prep notes are exactly why someone shares a recipe with notes in
+          // the first place (e.g. so a partner cooks it the same way), keep
+          // them through the adopt whitelist same as every other field here.
+          note: i.note != null ? String(i.note) : null,
         })),
         createdAt: now, updatedAt: now,
       };
@@ -5121,12 +5125,23 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
             {fdSortIngredientsByQty(items).map((i, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
-                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
+              <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
+                  </div>
+                  <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
                 </div>
-                <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                {/* Exactly why someone shares a recipe with notes at all: so
+                    whoever cooks it (a partner, a roommate) gets the same
+                    prep guidance, not just the ingredient list. */}
+                {i.note && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 4, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                    <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
