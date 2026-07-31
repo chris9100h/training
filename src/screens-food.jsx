@@ -41,6 +41,14 @@ function fdDateRange(from, to) {
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// The grams figure to actually SHOW for a logged/planned entry or template
+// slot. quantityG on a grams-mode recipe entry is the scaled raw-ingredient
+// sum (needed elsewhere, e.g. Shopping List projections), not the cooked-
+// dish weight the user actually typed, showing that number next to a name
+// already suffixed "(500g)" read as two disagreeing amounts for the same
+// entry. loggedCookedGrams is null for every non-grams-mode entry, so this
+// is a no-op everywhere else.
+const fdDisplayG = e => e?.loggedCookedGrams ?? e?.quantityG;
 // Grams of the finished dish <-> the equivalent chosenPortions, so a recipe
 // with a cookedWeightG can be logged by weight while every downstream
 // consumer (confirmRecipeLog, draftBuilt, the live preview) keeps reading
@@ -3252,7 +3260,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
                 <span style={fdEntryMeta}>
-                  {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                  {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                   <span style={fdMetaDivider} />
                   <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                 </span>
@@ -3518,7 +3526,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
-                                {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                 <span style={fdMetaDivider} />
                                 <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                 {e.moc ? ' left for it' : ''}
@@ -3747,7 +3755,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
-                                            {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                            {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                             <span style={fdMetaDivider} />
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
@@ -4356,7 +4364,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                   <div style={fdEntryName}>{e.foodName}</div>
                   <span style={fdEntryMeta}>
-                    {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                     <span style={fdMetaDivider} />
                     <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                   </span>
@@ -4532,7 +4540,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
-                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
+                    <span style={fdEntryMeta}>{fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
                   </div>
                 </div>
               ))}
@@ -5612,7 +5620,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                           {slot.foodName}
                         </span>
                         <span style={fdEntryMeta}>
-                          {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                          {fdDisplayG(slot) ? `${fdDisplayG(slot)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
                           <span style={fdMetaDivider} />
                           <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
                         </span>
