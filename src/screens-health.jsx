@@ -2564,7 +2564,26 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
       }>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, marginBottom: 10 }}>{sourceLabel}</div>
       <div style={{ marginBottom: 10 }}>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Goal</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+          <div className="micro" style={{ color: UI.inkFaint }}>Goal</div>
+          {/* setGoal only ever prompts for a rate the FIRST time (see its own
+              comment above), so once one is on file there was no way back in
+              to change it short of the full estimator sheet. Reuses the exact
+              same rateModalGoal/confirmGoalRate plumbing, just triggered
+              on demand instead of only on a bare goal. */}
+          {calc.goal !== 'maintain' && calc.rateKgPerWeek > 0 && (
+            <button data-reorder-ignore="true" onClick={() => setRateModalGoal(calc.goal)} style={{
+              display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', padding: 0,
+              color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent', textShadow: 'none', minWidth: 0,
+            }}>
+              <i className="fa-solid fa-gauge" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {Math.round((isLbs ? calc.rateKgPerWeek / LBS_TO_KG : calc.rateKgPerWeek) * 100) / 100} {UI.unit()}/week · tap to change
+              </span>
+            </button>
+          )}
+        </div>
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
           {MACRO_GOAL_OPTIONS.map(o => (
             <button key={o.id} data-reorder-ignore="true" onClick={() => setGoal(o.id)} style={{
@@ -2577,21 +2596,6 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             }}>{o.label}</button>
           ))}
         </div>
-        {/* setGoal only ever prompts for a rate the FIRST time (see its own
-            comment above), so once one is on file there was no way back in
-            to change it short of the full estimator sheet. Reuses the exact
-            same rateModalGoal/confirmGoalRate plumbing, just triggered
-            on demand instead of only on a bare goal. */}
-        {calc.goal !== 'maintain' && calc.rateKgPerWeek > 0 && (
-          <button data-reorder-ignore="true" onClick={() => setRateModalGoal(calc.goal)} style={{
-            display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', padding: 0,
-            marginTop: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
-          }}>
-            <i className="fa-solid fa-gauge" style={{ fontSize: 10, color: 'var(--accent)' }} />
-            {Math.round((isLbs ? calc.rateKgPerWeek / LBS_TO_KG : calc.rateKgPerWeek) * 100) / 100} {UI.unit()}/week · tap to change
-          </button>
-        )}
       </div>
       {children}
       {/* Plain-framed on purpose, unlike the accent-framed box above: this is
