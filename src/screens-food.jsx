@@ -6617,6 +6617,25 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  // Live preview of the rescaled macros as the amount is typed, same factor
+  // math saveEditItem itself commits below, so what's shown here is exactly
+  // what Save will write. Without this the sheet was just a bare grams
+  // input, no way to tell how much of an ingredient to dial in for a target
+  // without saving blind and checking the row after.
+  const editItemPreview = useMemoFd(() => {
+    const g = fdNum(editGrams);
+    if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return null;
+    const factor = g / editItem.quantityG;
+    return {
+      calories: Math.round((editItem.calories || 0) * factor),
+      protein: fdRound1((editItem.protein || 0) * factor),
+      carbs: fdRound1((editItem.carbs || 0) * factor),
+      fat: fdRound1((editItem.fat || 0) * factor),
+      sugar: editItem.sugar != null ? fdRound1(editItem.sugar * factor) : null,
+      satFat: editItem.satFat != null ? fdRound1(editItem.satFat * factor) : null,
+      sodiumMg: editItem.sodiumMg != null ? Math.round(editItem.sodiumMg * factor) : null,
+    };
+  }, [editItem, editGrams]);
   // Rescales every field on the item by the same factor (newGrams/oldGrams)
   // rather than re-deriving per-100g rates: mathematically identical, one
   // fewer intermediate step.
@@ -6744,6 +6763,10 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
           <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
+        {editItemPreview && (
+          <FdMacroPreview calories={editItemPreview.calories} protein={editItemPreview.protein} carbs={editItemPreview.carbs} fat={editItemPreview.fat}
+            sugar={editItemPreview.sugar} satFat={editItemPreview.satFat} sodiumMg={editItemPreview.sodiumMg} />
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={removeEditItem} aria-label="Remove ingredient" style={{ ...fdSideBtn, width: 44, flexShrink: 0 }}>
             <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
