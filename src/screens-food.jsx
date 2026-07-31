@@ -8897,7 +8897,7 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
 // colors too was not asked for, out of scope.
 function FdMacroHero({ label, calories, protein, carbs, fat }) {
   return (
-    <BracketFrame gold style={{ padding: 22, textAlign: 'center', borderRadius: 8, background: 'rgba(var(--accent-rgb),0.06)' }}>
+    <BracketFrame gold style={{ padding: 22, textAlign: 'center' }}>
       <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: 6 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
         <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
