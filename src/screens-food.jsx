@@ -3300,20 +3300,45 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       }),
     }));
   }
+  // "Back" on the Cooking Mode hand-off sheet (e.g. to fix the dish weight
+  // after all): reopens the wizard from the SAME draft finishCookingMode
+  // left behind (that draft only ever gets cleared on an actual commit or
+  // an explicit discard, see requestCloseRecipeLogPrompt/CookingModeScreen's
+  // own requestCancel), no confirm needed, going back loses nothing. Reads
+  // the LIVE recipe, not recipeLogPrompt.recipe (that one is a synthetic
+  // snapshot merged with the wizard's own final edits), so originalItemsRef
+  // inside CookingModeScreen still diffs against what is actually persisted.
+  // recipeLogPrompt itself is left in place, same reasoning as
+  // startCookingMode: CookingModeScreen just re-layers on top of it, and
+  // backing out of the wizard again lands cleanly back on this same sheet.
+  function backToCookingMode() {
+    if (!recipeLogPrompt?.fromCookingMode) return;
+    const recipeId = recipeLogPrompt.recipe.id;
+    const recipe = (store.foodRecipes || []).find(r => r.id === recipeId);
+    if (!recipe) return;
+    const saved = fdReadCookingDraft();
+    const draft = (saved && saved.recipeId === recipeId) ? saved : null;
+    setCookingMode({ recipe, draft });
+  }
   // Every other use of this Sheet (plain log, plan, edit an existing entry)
   // stays a free backdrop-tap-to-close, low stakes, a couple seconds of typing
   // to redo. Reached via Cooking Mode it is not: a whole ingredient-by-
   // ingredient walkthrough sits behind it, so a stray tap outside the sheet
-  // gets a confirm instead of silently dropping back to the recipe list. The
-  // cook itself is never actually lost either way, fdClearCookingDraft only
-  // ever fires on an explicit commit or an untouched first-step exit (see
-  // CookingModeScreen), a discard here just leaves that draft in place for
-  // "Cook it" to resume later.
+  // gets a confirm instead of silently dropping back to the recipe list, and
+  // confirming actually discards the draft too (see below), "Discard" that
+  // quietly left something resumable behind was its own bug. Backing out via
+  // the new Back button instead (not this close path) reopens the wizard
+  // from that same draft, nothing here stops that.
   async function requestCloseRecipeLogPrompt() {
     if (recipeLogPrompt?.fromCookingMode) {
-      const ok = await confirm("Your cooked batch isn't logged yet. It's saved, Cook it will offer to resume right where you left off.",
-        { title: 'Discard for now?', ok: 'Discard', cancel: 'Keep editing', danger: true });
+      const ok = await confirm('This discards the cook, nothing gets logged.',
+        { title: 'Discard cooking?', ok: 'Discard', cancel: 'Keep editing', danger: true });
       if (!ok) return;
+      // "Discard" has to actually mean discard: leaving the draft behind
+      // here (like a plain backdrop tap on every other sheet does) meant
+      // the next "Cook it" for this recipe offered to resume a session the
+      // user had just explicitly thrown away.
+      fdClearCookingDraft();
     }
     setRecipeLogPrompt(null);
     setEditingEntry(null);
@@ -4811,17 +4836,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               // Reached via Cooking Mode's own hand-off (Part D): behaves like
               // a normal, non-Cook-it prompt (see the plain planMode/single-Add
               // branches this mirrors), no "Cook it" a second time, that
-              // doesn't make sense once the dish is already cooked.
-              planMode ? (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
-                  {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
-                </div>
-              ) : (
-                <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
-                  Add {recipeLogPrompt.recipe.name} · {qtyLabel}
-                </Btn>
-              )
+              // doesn't make sense once the dish is already cooked. The back
+              // chevron (matching the wizard's own footer button) reopens
+              // Cooking Mode, e.g. to fix the dish weight after all.
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={backToCookingMode} aria-label="Back to Cooking Mode" style={{
+                  width: 44, minHeight: 44, borderRadius: 6, background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  color: UI.inkSoft, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                {planMode ? (
+                  <div style={{ display: 'flex', gap: 8, flex: 1 }}>
+                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
+                    {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+                  </div>
+                ) : (
+                  <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>
+                    Add {recipeLogPrompt.recipe.name} · {qtyLabel}
+                  </Btn>
+                )}
+              </div>
             ) : (<>
               {/* Three real actions instead of the old plan-mode-only split:
                   Cook it walks through Cooking Mode below (real-time only,
