@@ -491,12 +491,27 @@ function fdShoppingProjectionTally(store, todayISO, days) {
 // are merged into a single key set.
 function fdUnifyShoppingKeys(hist, proj) {
   const idRowByName = new Map();
-  [hist, proj].forEach(tally => tally.forEach(row => { if (row.foodId) idRowByName.set(fdNormFoodName(row.foodName), row); }));
+  // Two genuinely different products (different real foodId) can normalize
+  // to the same display name (e.g. the same "Chicken Breast" from two
+  // different sources). Silently keeping whichever one .set() saw last would
+  // let a name-keyed row (no foodId of its own) get backfilled onto the
+  // WRONG specific product. Track the collision instead and simply decline
+  // to guess for that name, same safe fallback as no id-row match at all.
+  const ambiguousNames = new Set();
+  [hist, proj].forEach(tally => tally.forEach(row => {
+    if (!row.foodId) return;
+    const name = fdNormFoodName(row.foodName);
+    const existing = idRowByName.get(name);
+    if (existing && existing.foodId !== row.foodId) { ambiguousNames.add(name); return; }
+    idRowByName.set(name, row);
+  }));
   [hist, proj].forEach(tally => {
     const renames = [];
     tally.forEach((row, key) => {
       if (row.foodId) return;
-      const idRow = idRowByName.get(fdNormFoodName(row.foodName));
+      const name = fdNormFoodName(row.foodName);
+      if (ambiguousNames.has(name)) return;
+      const idRow = idRowByName.get(name);
       if (!idRow) return;
       const idKey = fdShoppingKey(idRow.foodId, idRow.foodName);
       if (idKey === key) return;
@@ -4792,6 +4807,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           const qtyLabel = gramsModeOn
             ? `${fdNum(recipeLogPrompt.gramsStr) || 0}g`
             : `${recipeLogPrompt.chosenPortions} portion${recipeLogPrompt.chosenPortions === 1 ? '' : 's'}`;
+          // Portions mode is already safe (the Stepper below floors at 0.5),
+          // but grams mode is a free-typed field with no min at all, so a
+          // cleared or "0" input would otherwise stage a real, 0-calorie
+          // "Chicken Bowl (0g)" entry, the exact phantom-entry class every
+          // other add flow in this file already guards against.
+          const qtyValid = gramsModeOn ? fdNum(recipeLogPrompt.gramsStr) > 0 : recipeLogPrompt.chosenPortions > 0;
           return (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
@@ -4840,7 +4861,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {editingEntry ? (
-              <Btn onClick={() => confirmRecipeLog(false)} style={{ width: '100%' }}>
+              <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ width: '100%' }}>
                 Save · {qtyLabel}
               </Btn>
             ) : recipeLogPrompt.fromCookingMode ? (
@@ -4860,11 +4881,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </button>
                 {planMode ? (
                   <div style={{ display: 'flex', gap: 8, flex: 1 }}>
-                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
-                    {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                    {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
                   </div>
                 ) : (
-                  <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>
+                  <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>
                     Add {recipeLogPrompt.recipe.name} · {qtyLabel}
                   </Btn>
                 )}
@@ -4879,8 +4900,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} style={{ flex: 1 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} style={{ flex: 1 }}>Log it</Btn>}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
               </div>
             </>)}
           </>
@@ -5642,6 +5663,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       const gramsMode = draft.mode === 'grams' && recipe.cookedWeightG > 0;
       const gramsVal = gramsMode ? (fdNum(draft.gramsStr) || 0) : null;
       const chosenPortions = gramsMode ? fdGramsToPortions(gramsVal, recipe.cookedWeightG, totalPortions) : draft.portions;
+      // Same guard the food branch above already has (g == null || !(g > 0)):
+      // a cleared/zero grams field here would otherwise build and let
+      // saveDraft persist a permanent, recurring 0-calorie template slot.
+      if (!(chosenPortions > 0)) return null;
       const scale = chosenPortions / totalPortions;
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const recipeItems = items.map(i => ({
@@ -7406,7 +7431,12 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // even if requestExit's own narrower conditions would have kept it,
   // canceling here means the user does not want to pick this back up.
   async function requestCancel() {
-    const ok = await confirm('This cancels the whole cook, nothing gets logged and no changes are saved to the recipe.',
+    // Not "no changes are saved to the recipe": a note on an unswapped,
+    // originally-existing ingredient already patched straight into
+    // store.foodRecipes the moment it was saved (see saveNoteEditor), by
+    // design, and canceling does not revert that. Promising otherwise here
+    // was simply false.
+    const ok = await confirm('This cancels the whole cook, nothing gets logged. Any notes you saved along the way stay on the recipe.',
       { title: 'Cancel cooking?', ok: 'Cancel cooking', cancel: 'Keep cooking', danger: true });
     if (!ok) return;
     fdClearCookingDraft();
