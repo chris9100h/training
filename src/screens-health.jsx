@@ -2854,7 +2854,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
           {goalLabel && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>Goal</span>
-              <span style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+              <span style={{ fontSize: 12, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600 }}>
                 {goalLabel}{goalRateDisplay != null && ` · ${goalRateDisplay} ${UI.unit()}/week`}
               </span>
             </div>
