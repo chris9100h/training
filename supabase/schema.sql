@@ -2663,6 +2663,7 @@ CREATE TABLE zane_medications (
   stock_set_at       timestamptz,
   archived           boolean     NOT NULL DEFAULT false,
   exclude_from_pillbox boolean   NOT NULL DEFAULT false,
+  low_stock_threshold numeric,                          -- 0233, overrides package_size as the Running Low comparison
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );

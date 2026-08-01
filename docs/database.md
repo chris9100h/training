@@ -407,10 +407,11 @@ Das getrackte Medikament selbst (reine Identität + hergeleitetes Inventory), si
 - `category` (text, nullable): freier Text, keine DB-CHECK-Konstraint, das UI bietet Presets wie Vitamin/Compound/Peptide/Other an, eine neue Kategorie braucht also nie eine Migration
 - `unit_label` (text, NOT NULL, Default `'pills'`): die Zähleinheit, z.B. "pills"/"ml"/"drops", frei editierbar da Medikamente sehr unterschiedlich dosiert werden
 - `package_size`/`stock_baseline`/`stock_set_at` (numeric/numeric/timestamptz, alle nullable): gleiches hergeleitetes Inventory-Prinzip wie `zane_food_shopping_prefs` (aktueller Bestand = `stock_baseline` minus allem seit `stock_set_at` Geloggten, client-seitig zur Laufzeit berechnet, kein Live-Countdown-Feld)
+- `low_stock_threshold` (numeric, nullable, Migration 0233): überschreibt `package_size` als Vergleichswert für `mdIsLowStock` (`threshold = med.lowStockThreshold ?? med.packageSize; threshold > 0 && effectiveStock < threshold`), 1:1 dasselbe Prinzip wie `zane_food_shopping_prefs.low_stock_threshold_g` (Migration 0232): manche Medikamente sind schneller aufgebraucht als eine Packung reicht, "unter einer Packung" allein warnt dann zu spät. Leer heißt reines Default-Verhalten (Vergleich gegen `package_size`), ein gesetzter Wert ersetzt das komplett. Anders als beim Food Tracker kein Packs/Grams-Dual-Draft nötig: Medikamenten-Mengen sind ohnehin schon eine flache Zahl im freien `unit_label` (z.B. "pills"), kein Gramm-vs-Packungs-Umrechnungsschritt. Eingabefeld direkt unter Package size in `medSheet` (`lowStockThresholdStr`, `screens-medications.jsx`)
 - `archived` (boolean, Default false), `created_at`/`updated_at`
 - `exclude_from_pillbox` (boolean, NOT NULL, Default false, Migration 0223): blendet dieses Medikament komplett aus `WeeklyPrepScreen` aus, z.B. für ein Injectable, das ohnehin nie in eine physische Pillendose kommt. Toggle in `medSheet`.
 - Store field: `store.medications`
-- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` entfernt in Migration 0221, `exclude_from_pillbox` Migration 0223.
+- RLS: siehe Medications-Übersicht. Migration 0218, `medication_plan_id` entfernt in Migration 0221, `exclude_from_pillbox` Migration 0223, `low_stock_threshold` Migration 0233.
 
 ### `zane_medication_plan_items`
 

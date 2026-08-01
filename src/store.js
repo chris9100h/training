@@ -757,7 +757,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.medications.map(m => ({
         id: m.id, user_id: userId, name: m.name,
         brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
-        package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+        package_size: m.packageSize ?? null, low_stock_threshold: m.lowStockThreshold ?? null,
+        stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
         exclude_from_pillbox: !!m.excludeFromPillbox,
         updated_at: m.updatedAt ?? new Date().toISOString(),
@@ -1234,7 +1235,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
     isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, created_at, updated_at').eq('user_id', userId),
     isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
@@ -1541,6 +1542,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: m.id, name: m.name, brand: m.brand ?? null,
       category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      lowStockThreshold: m.low_stock_threshold != null ? parseFloat(m.low_stock_threshold) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
       excludeFromPillbox: !!m.exclude_from_pillbox,
@@ -2187,7 +2189,8 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) preOps.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
       id: m.id, user_id: userId, name: m.name,
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
-      package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+      package_size: m.packageSize ?? null, low_stock_threshold: m.lowStockThreshold ?? null,
+      stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
       exclude_from_pillbox: !!m.excludeFromPillbox,
       updated_at: m.updatedAt ?? new Date().toISOString(),
@@ -6266,7 +6269,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
@@ -6325,6 +6328,7 @@ async function refreshHealthLogs(userId) {
       id: m.id, name: m.name, brand: m.brand ?? null,
       category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      lowStockThreshold: m.low_stock_threshold != null ? parseFloat(m.low_stock_threshold) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
       excludeFromPillbox: !!m.exclude_from_pillbox,

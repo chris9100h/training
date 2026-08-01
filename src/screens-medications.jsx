@@ -283,11 +283,15 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
   if (med?.stockBaseline == null || !med.stockSetAt) return null;
   return Math.max(0, med.stockBaseline - mdConsumedSince(medicationLogs, med.id, med.stockSetAt, todayISO));
 }
-// Below one package's worth: only meaningful with both a package size and
-// stock tracking on, a medication with either missing has nothing to compare
-// its stock against.
+// Below the effective threshold: lowStockThreshold (migration 0233) when
+// set, package size otherwise, only meaningful with stock tracking on, a
+// medication with neither has nothing to compare its stock against. The
+// override exists because "below one package" alone fires too late for
+// something that gets used up faster than one package lasts, exact mirror
+// of fdIsLowStock in screens-food.jsx.
 function mdIsLowStock(med, effectiveStock) {
-  return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
+  const threshold = med.lowStockThreshold ?? med.packageSize;
+  return threshold > 0 && effectiveStock != null && effectiveStock < threshold;
 }
 // Whether a medication currently belongs to at least one plan (migration
 // 0221: membership is many-to-many via zane_medication_plan_items, no single
@@ -824,7 +828,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function snapMedSheet(d) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
-      excludeFromPillbox: d.excludeFromPillbox,
+      lowStockThresholdStr: d.lowStockThresholdStr, excludeFromPillbox: d.excludeFromPillbox,
     });
   }
   // Every plan this medication currently belongs to, for medSheet's own
@@ -843,10 +847,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
+      lowStockThresholdStr: med.lowStockThreshold != null ? String(med.lowStockThreshold) : '',
       excludeFromPillbox: !!med.excludeFromPillbox,
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
-      excludeFromPillbox: false,
+      lowStockThresholdStr: '', excludeFromPillbox: false,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -863,6 +868,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function saveMedSheet() {
     if (!medSheet || !medSheet.name.trim()) return;
     const packageSize = mdNum(medSheet.packageSizeStr);
+    const lowStockThreshold = mdNum(medSheet.lowStockThresholdStr);
     const nowISO = new Date().toISOString();
     if (medSheet.id) {
       setStore(s => ({
@@ -870,13 +876,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         medications: (s.medications || []).map(m => m.id !== medSheet.id ? m : {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
-          packageSize, excludeFromPillbox: !!medSheet.excludeFromPillbox, updatedAt: nowISO,
+          packageSize, lowStockThreshold, excludeFromPillbox: !!medSheet.excludeFromPillbox, updatedAt: nowISO,
         }),
       }));
     } else {
       const newMed = {
         id: LB.uid(), name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
+        lowStockThreshold,
         stockBaseline: null, stockSetAt: null, archived: false, excludeFromPillbox: !!medSheet.excludeFromPillbox,
         createdAt: nowISO, updatedAt: nowISO,
       };
@@ -1657,7 +1664,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
             </Field>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
-              Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+              Tracks what's actually taken since, warns here once it drops below the Running Low threshold. Leave blank to keep the current count unchanged.
             </div>
             <Btn onClick={saveStockSheet} style={{ width: '100%' }}>Save</Btn>
           </>
@@ -1791,6 +1798,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </div>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
+            </div>
+            <Field label="Warn when below" style={{ marginBottom: 6 }}>
+              <input value={medSheet.lowStockThresholdStr} onChange={e => setMedSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
+                type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
+            </Field>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
+              Running Low fires under this amount of {medSheet.unitLabel || 'units'}. Defaults to one package, raise it for anything that runs out faster than a package lasts.
             </div>
             <div style={{ marginBottom: 14 }}>
               <Row label="Exclude from pillbox" first>
