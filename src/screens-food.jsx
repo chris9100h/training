@@ -637,15 +637,27 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
 // and the pref row's own shopping_key (migration 0227) use, so a
 // recipe-exploded ingredient or Custom Item with no real foodId still finds
 // its pref row via a normalized-name fallback instead of never matching one.
+// A fixed-duration "snooze": excluded_until N days from right now. Presets
+// only (1 week/2 weeks/1 month in the edit sheet below), no date picker, so
+// plain day counts are enough, no calendar-month edge cases to worry about.
+function fdSnoozeUntil(days) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
 function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
   const byKey = new Map((prefs || []).map(p => [p.shoppingKey, p]));
+  const now = new Date();
   const out = list.map(item => {
     const pref = byKey.get(item.key);
+    // Only surfaced while still in the future: an expired snooze is exactly
+    // as inert as no snooze at all, both for bucketing (excluded below) and
+    // for what the edit sheet shows as "currently active".
+    const tempExcludedUntil = (pref?.excludedUntil && new Date(pref.excludedUntil) > now) ? pref.excludedUntil : null;
     return {
       ...item,
       displayName: pref?.nameOverride || item.foodName,
       overridden: !!pref?.nameOverride,
-      excluded: !!pref?.excluded,
+      excluded: !!pref?.excluded || !!tempExcludedUntil,
+      tempExcludedUntil,
       packageSizeG: pref?.packageSizeG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
       effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
@@ -797,8 +809,13 @@ function fdSetShoppingPref(setStore, item, patch) {
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
     const existing = list.find(p => p.shoppingKey === key);
-    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
-    const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
+    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, excludedUntil: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    // An expired excludedUntil is as meaningless as a null one here: without
+    // this check, a snoozed item whose date has already passed would keep
+    // this row alive forever (never eligible for the delete-when-default
+    // cleanup below) even after it has no actual effect on the list anymore.
+    const tempStillActive = merged.excludedUntil && new Date(merged.excludedUntil) > new Date();
+    const isDefault = !merged.nameOverride && !merged.excluded && !tempStillActive && merged.packageSizeG == null && merged.stockBaselineG == null;
     const next = isDefault
       ? list.filter(p => p.shoppingKey !== key)
       : existing
@@ -6308,6 +6325,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockDraft, setStockDraft] = useStateFd('');
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
+  // Temporary-exclude draft: null (no snooze) or an excludedUntil ISO
+  // string. Unlike the stock drafts, this pre-fills from the item like
+  // editDraft/pkgDraft do (it's editing an existing value, not always
+  // starting from blank), using tempExcludedUntil specifically so a stale,
+  // already-expired excludedUntil doesn't come back as if still active.
+  const [snoozeDraft, setSnoozeDraft] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6315,19 +6338,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
+    setSnoozeDraft(item.tempExcludedUntil || null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+    setSnoozeDraft(null);
   }
   // True if any field actually differs from what the sheet opened with.
-  // editDraft/pkgDraft are pre-filled on open (dirty means "changed from
-  // that"), the three stock drafts always start blank (dirty means "typed
-  // into at all"). Backs requestCloseEdit's confirm below.
+  // editDraft/pkgDraft/snoozeDraft are pre-filled on open (dirty means
+  // "changed from that"), the three stock drafts always start blank (dirty
+  // means "typed into at all"). Backs requestCloseEdit's confirm below.
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
     if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
+    if (snoozeDraft !== (editItem.tempExcludedUntil || null)) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
   // Sheet's backdrop tap calls onClose directly with no dirty-check of its
@@ -6350,7 +6376,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
     const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
-    const patch = { nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null };
+    const patch = { nameOverride, packageSizeG, excludedUntil: snoozeDraft, foodName: editItem.foodName, brand: editItem.brand ?? null };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
     // makes "I just restocked" mean "start counting from zero again".
@@ -6378,9 +6404,15 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     closeEdit();
   }
   // The checkbox's own handler, independent of the edit sheet: toggles
-  // straight from either list section, no sheet involved.
+  // straight from either list section, no sheet involved. item.excluded is
+  // the effective flag (permanent OR an active snooze, see
+  // fdApplyShoppingPrefs), so un-checking clears excludedUntil too: bringing
+  // a snoozed item back early is exactly what unchecking this box means,
+  // it shouldn't silently re-exclude itself once the snooze would've ended.
   function toggleExclusion(item) {
-    fdSetShoppingPref(setStore, item, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
+    fdSetShoppingPref(setStore, item, item.excluded
+      ? { excluded: false, excludedUntil: null, foodName: item.foodName, brand: item.brand ?? null }
+      : { excluded: true, foodName: item.foodName, brand: item.brand ?? null });
   }
   // Shared row for both includedList and excludedList below: same layout,
   // just dimmed with the checkbox unchecked once excluded. The checkbox is a
@@ -6424,6 +6456,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
               {(item.overridden || item.packageSizeG || item.effectiveStockG != null) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
+              {item.tempExcludedUntil && <i className="fa-solid fa-clock" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title={`Back ${new Date(item.tempExcludedUntil).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`} />}
             </div>
             {hasEstimate
               ? (item.effectiveStockG != null
@@ -6780,6 +6813,27 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         </Field>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
           Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
+        </div>
+        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          <Field label="Temporarily exclude" style={{ marginBottom: 6 }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(7))} style={fdSegBtn(false)}>1 week</button>
+              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(14))} style={fdSegBtn(false)}>2 weeks</button>
+              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(30))} style={fdSegBtn(false)}>1 month</button>
+            </div>
+          </Field>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>
+              {snoozeDraft
+                ? `Off the list until ${new Date(snoozeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
+                : 'Skips this ingredient for a while, no need to remember to add it back.'}
+            </span>
+            {snoozeDraft && (
+              <button onClick={() => setSnoozeDraft(null)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+                Clear
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
           {editItem?.effectiveStockG != null && (

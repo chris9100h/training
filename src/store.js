@@ -727,7 +727,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_food_shopping_prefs').upsert(
       backup.foodShoppingPrefs.map(p => ({
         id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
-        excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+        excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null, package_size_g: p.packageSizeG ?? null,
         stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
         food_name: p.foodName, brand: p.brand ?? null,
         updated_at: p.updatedAt ?? new Date().toISOString(),
@@ -1224,7 +1224,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // override, exclude flag, package size, stock baseline, identity
     // snapshot, own store only like the rest of the Food Tracker's personal
     // collections above.
-    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, excluded_until, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
     // Medications feature (migration 0218): own store only for the same
     // reason as the meal-plan collections above, isCoachLoad's own narrow
     // purpose (loadClientStore, only ever used to safely append a pushed
@@ -1525,6 +1525,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     foodShoppingPrefs: (foodShoppingPrefsRes?.data || []).map(p => ({
       id: p.id, foodId: p.food_id, shoppingKey: p.shopping_key, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
+      excludedUntil: p.excluded_until ?? null,
       packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
       stockBaselineG: p.stock_baseline_g != null ? parseFloat(p.stock_baseline_g) : null,
       stockSetAt: p.stock_set_at ?? null, foodName: p.food_name, brand: p.brand ?? null,
@@ -2155,7 +2156,7 @@ async function syncStore(prev, next, userId) {
     // it forever (same pattern as zane_checkins below).
     if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
       id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
-      excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+      excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null, package_size_g: p.packageSizeG ?? null,
       stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
       food_name: p.foodName, brand: p.brand ?? null,
       updated_at: p.updatedAt ?? new Date().toISOString(),

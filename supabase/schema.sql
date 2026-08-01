@@ -2603,6 +2603,7 @@ CREATE TABLE zane_food_shopping_prefs (
   food_name       text        NOT NULL,                 -- 0217, snapshot at write time
   brand           text,                                 -- 0217
   shopping_key    text        NOT NULL,                 -- 0227, identity/unique column, replaces food_id in that role
+  excluded_until  timestamptz,                          -- 0231, temporary snooze exclude, distinct from `excluded`
   UNIQUE (user_id, shopping_key)
 );
 
