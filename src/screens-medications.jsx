@@ -1143,8 +1143,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }, [screenTab, activeMedications, userId]);
   const logsForStock = stockBackfill || medicationLogs;
   // Computed once per medication per render and reused everywhere below
-  // (lowStockList, mainInventoryList, filteredMedicationsList, renderMedRow,
-  // the stock sheet), instead of every one of those independently re-running
+  // (lowStockList, mainInventoryList, renderMedRow, the stock sheet),
+  // instead of every one of those independently re-running
   // mdEffectiveStock's own full scan over medicationLogs, mirrors the Food
   // Shopping List's own compute-once-per-item pattern (fdApplyShoppingPrefs).
   const effectiveStockById = useMemoMd(() => {
@@ -1159,33 +1159,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // (screens-lib.jsx: a Field/TextInput at flex:1 next to a Filter button
   // with a GoldSectionLabel sheet, gold active-count badge). Category is
   // multi-select (an array, like that screen's own MUSCLE GROUP filter);
-  // Plan and Tracked are each a nullable single choice (like that screen's
-  // own PLAN filter: tapping the same pill again clears it back to "no
-  // filter"). Search is free text, matched against name/brand, and
-  // deliberately left out of the active-count badge, same as Exercises'
-  // own q not counting toward its activeCount either.
+  // Plan is a nullable single choice (like that screen's own PLAN filter:
+  // tapping the same pill again clears it back to "no filter"). Search is
+  // free text, matched against name/brand, and deliberately left out of
+  // the active-count badge, same as Exercises' own q not counting toward
+  // its activeCount either.
   const [invSearch, setInvSearch] = useStateMd('');
   const [stockFilterCategories, setStockFilterCategories] = useStateMd([]); // MED_CATEGORIES ids
   const [stockFilterInPlan, setStockFilterInPlan] = useStateMd(null); // 'in' | 'out' | null
-  const [stockFilterTracked, setStockFilterTracked] = useStateMd(null); // 'tracked' | 'untracked' | null
   const [stockFiltersOpen, setStockFiltersOpen] = useStateMd(false);
   const toggleStockFilterCategory = (c) => setStockFilterCategories(cats => cats.includes(c) ? cats.filter(x => x !== c) : [...cats, c]);
   const toggleStockFilterInPlan = (v) => setStockFilterInPlan(cur => cur === v ? null : v);
-  const toggleStockFilterTracked = (v) => setStockFilterTracked(cur => cur === v ? null : v);
-  const stockFilterActiveCount = stockFilterCategories.length + (stockFilterInPlan !== null ? 1 : 0) + (stockFilterTracked !== null ? 1 : 0);
+  const stockFilterActiveCount = stockFilterCategories.length + (stockFilterInPlan !== null ? 1 : 0);
   function clearStockFilters() {
     setStockFilterCategories([]);
     setStockFilterInPlan(null);
-    setStockFilterTracked(null);
   }
   // Search, Category and Plan apply everywhere this feeds into: Running Low,
   // the Stock tab's own list, and the Medications tab's own list, all three
   // are genuine "which medications" questions no matter which tab is asking.
-  // Tracked/Not-tracked is applied separately per list further down
-  // (mainInventoryList, filteredMedicationsList): Running Low is
-  // definitionally always tracked (it requires a real stock count to compare
-  // against package size), so that axis would be a no-op or always-empty
-  // there depending on which side you pick.
   const filteredInventoryBase = useMemoMd(() => inventoryList.filter(m => {
     const ql = invSearch.trim().toUpperCase();
     const matchSearch = !ql || m.name.toUpperCase().includes(ql) || (m.brand || '').toUpperCase().includes(ql);
@@ -1235,28 +1227,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
   // trackStock off (migration 0235) drops a medication from this list
   // entirely, not even as "Not tracked": the Medications sub-tab
-  // (filteredMedicationsList below) stays unaffected on purpose, a
-  // medication opted out of Stock display should still be findable/
-  // editable there.
-  const mainInventoryList = useMemoMd(() => {
-    const rest = filteredInventoryBase.filter(m => m.trackStock && !mdIsLowStock(m, effectiveStockById.get(m.id)));
-    if (stockFilterTracked === null) return rest;
-    return rest.filter(m => {
-      const tracked = effectiveStockById.get(m.id) != null;
-      return stockFilterTracked === 'tracked' ? tracked : !tracked;
-    });
-  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
-
-  // Same three filters, applied to the Medications sub-tab's own list. No
-  // Running Low split exists there (that's Stock-specific), so this is just
-  // filteredInventoryBase plus the Tracked axis, nothing carved out.
-  const filteredMedicationsList = useMemoMd(() => {
-    if (stockFilterTracked === null) return filteredInventoryBase;
-    return filteredInventoryBase.filter(m => {
-      const tracked = effectiveStockById.get(m.id) != null;
-      return stockFilterTracked === 'tracked' ? tracked : !tracked;
-    });
-  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
+  // (filteredInventoryBase directly, no separate list of its own needed
+  // now that the old Tracked/Not-tracked filter is gone) stays unaffected
+  // on purpose, a medication opted out of Stock display should still be
+  // findable/editable there.
+  const mainInventoryList = useMemoMd(
+    () => filteredInventoryBase.filter(m => m.trackStock && !mdIsLowStock(m, effectiveStockById.get(m.id))),
+    [filteredInventoryBase, effectiveStockById],
+  );
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
@@ -1715,11 +1693,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 ) : (
                   <>
                     {renderSearchAndFilterRow()}
-                    {!filteredMedicationsList.length ? (
+                    {!filteredInventoryBase.length ? (
                       <div style={mdEmptyHint}>Nothing matches this filter.</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {filteredMedicationsList.map(m => renderMedListRow(m, { showPlanTag: true }))}
+                        {filteredInventoryBase.map(m => renderMedListRow(m, { showPlanTag: true }))}
                       </div>
                     )}
                   </>
@@ -1829,13 +1807,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', gap: 6 }}>
               <Pill gold={stockFilterInPlan === 'in'} onClick={() => toggleStockFilterInPlan('in')} style={{ cursor: 'pointer' }}>In a plan</Pill>
               <Pill gold={stockFilterInPlan === 'out'} onClick={() => toggleStockFilterInPlan('out')} style={{ cursor: 'pointer' }}>Not in a plan</Pill>
-            </div>
-          </div>
-          <div>
-            <MdGoldLabel>STOCK</MdGoldLabel>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Pill gold={stockFilterTracked === 'tracked'} onClick={() => toggleStockFilterTracked('tracked')} style={{ cursor: 'pointer' }}>Tracked</Pill>
-              <Pill gold={stockFilterTracked === 'untracked'} onClick={() => toggleStockFilterTracked('untracked')} style={{ cursor: 'pointer' }}>Not tracked</Pill>
             </div>
           </div>
           {stockFilterActiveCount > 0 && <Btn kind="ghost" onClick={clearStockFilters}>Clear all filters</Btn>}
