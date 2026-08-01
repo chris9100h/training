@@ -6953,6 +6953,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           </div>
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          <span className="label">Inventory</span>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', margin: '6px 0 10px' }}>
+            Optional: track what you actually have on hand, so Running Low can warn you before it's gone instead of guessing off what you usually buy.
+          </div>
           {editItem?.effectiveStockG != null && (
             <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
               Current stock: <span className="num">{fdExactShoppingQty(editItem.effectiveStockG)}</span>
