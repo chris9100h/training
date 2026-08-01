@@ -657,6 +657,12 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
       displayName: pref?.nameOverride || item.foodName,
       overridden: !!pref?.nameOverride,
       excluded: !!pref?.excluded || !!tempExcludedUntil,
+      // The raw permanent flag, kept distinct from the effective `excluded`
+      // above: the edit sheet's exclude picker needs to know specifically
+      // whether THIS item is permanently excluded (to pre-select that
+      // segment), not just "is it excluded at all" (which a temp snooze
+      // alone would also satisfy).
+      permanentExcluded: !!pref?.excluded,
       tempExcludedUntil,
       packageSizeG: pref?.packageSizeG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
@@ -721,14 +727,21 @@ function fdWriteLowStockAcks(v) {
 // exactly "nearest 100g" once expressed in kg, reused rather than writing a
 // second decimal-rounding rule). Never rounds a genuinely non-zero amount
 // down to a misleading 0.
+// The numeric half of fdRoundShoppingQty below, split out so a caller that
+// needs an actual gram amount (not a formatted display string) shares the
+// exact same rounding, e.g. markBought's inventory write further below.
+function fdRoundShoppingQtyG(grams) {
+  if (!(grams > 0)) return 0;
+  const unit = grams < 50 ? 5 : 25;
+  return Math.round(grams / unit) * unit || unit;
+}
 function fdRoundShoppingQty(grams) {
-  if (!(grams > 0)) return '0g';
   // Rounds to the nearest 5/25 FIRST, then checks the rounded value against
   // the 1000g cutoff, not the raw one: deciding off the raw value let
   // something like 990g round up to 1000g but still print as "1000g"
   // instead of switching to "1kg".
-  const unit = grams < 50 ? 5 : 25;
-  const rounded = Math.round(grams / unit) * unit || unit;
+  const rounded = fdRoundShoppingQtyG(grams);
+  if (!rounded) return '0g';
   if (rounded >= 1000) return `${fdRound1(rounded / 1000)}kg`;
   return `${rounded}g`;
 }
@@ -766,6 +779,15 @@ function fdFormatShoppingQty(grams, packageSizeG) {
   const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
   return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
 }
+// The actual purchasable quantity in grams behind fdFormatShoppingQty's
+// headline above: whole packages only with a package size (you can't buy
+// half a pack), the same rounded estimate as fdRoundShoppingQty without
+// one. Shared with markBought below so the number written to inventory on
+// "bought it" is always exactly what the row's headline just showed, never
+// a silently different raw estimate.
+function fdShoppingBuyQtyG(grams, packageSizeG) {
+  return packageSizeG > 0 ? Math.max(1, Math.ceil((grams || 0) / packageSizeG)) * packageSizeG : fdRoundShoppingQtyG(grams);
+}
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
 // default on a fresh device. Unlike logbook-label-scanner-provider this has
@@ -789,7 +811,7 @@ function fdWriteShoppingDays(v) {
 // identity snapshot, like zane_food_logs/zane_food_favorites already do;
 // they don't count towards isDefault, a food's own name never keeps an
 // otherwise-empty row alive by itself. Every live call site (saveEdit,
-// toggleExclusion) always includes the item's current foodName/brand in
+// markBought) always includes the item's current foodName/brand in
 // patch, this is the only place that writes this table, so the snapshot can
 // never silently go stale relative to what the list itself shows for the
 // same key. Needed so the Inventory tab (fdBuildInventoryList) can show a
@@ -6325,18 +6347,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockDraft, setStockDraft] = useStateFd('');
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
-  // Temporary-exclude draft: null (no snooze) or an excludedUntil ISO
-  // string. Unlike the stock drafts, this pre-fills from the item like
-  // editDraft/pkgDraft do (it's editing an existing value, not always
-  // starting from blank), using tempExcludedUntil specifically so a stale,
-  // already-expired excludedUntil doesn't come back as if still active.
-  const [snoozeDraft, setSnoozeDraft] = useStateFd(null);
-  // Which preset (7/14/30) lights up, purely a this-visit interaction
-  // marker, separate from snoozeDraft itself: an already-active snooze from
-  // a previous save has no reliable matching preset once time has passed
-  // (its remaining days no longer line up with 7/14/30), so reopening the
-  // sheet never pre-highlights one, only actually tapping a preset does.
-  const [snoozeDraftDays, setSnoozeDraftDays] = useStateFd(null);
+  // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
+  // ISO string (temporary, until that timestamp). One control now covers
+  // both the old permanent excluded flag and the temporary snooze, they're
+  // mutually exclusive states of the same underlying choice. Pre-fills from
+  // the item like editDraft/pkgDraft do, using permanentExcluded/
+  // tempExcludedUntil (not the raw pref) so a stale, already-expired
+  // excludedUntil doesn't come back as if still active.
+  const [excludeDraft, setExcludeDraft] = useStateFd(null);
+  // Which temporary preset (7/14/30) lights up, purely a this-visit
+  // interaction marker, separate from excludeDraft itself: an already-
+  // active snooze from a previous save has no reliable matching preset
+  // once time has passed (its remaining days no longer line up with
+  // 7/14/30), so reopening the sheet never pre-highlights one, only
+  // actually tapping a preset does. The Permanent segment needs no
+  // equivalent marker, excludeDraft === 'permanent' is unambiguous on its own.
+  const [excludeDraftDays, setExcludeDraftDays] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6344,23 +6370,23 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
-    setSnoozeDraft(item.tempExcludedUntil || null);
-    setSnoozeDraftDays(null);
+    setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
+    setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
-    setSnoozeDraft(null); setSnoozeDraftDays(null);
+    setExcludeDraft(null); setExcludeDraftDays(null);
   }
   // True if any field actually differs from what the sheet opened with.
-  // editDraft/pkgDraft/snoozeDraft are pre-filled on open (dirty means
+  // editDraft/pkgDraft/excludeDraft are pre-filled on open (dirty means
   // "changed from that"), the three stock drafts always start blank (dirty
   // means "typed into at all"). Backs requestCloseEdit's confirm below.
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
     if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
-    if (snoozeDraft !== (editItem.tempExcludedUntil || null)) return true;
+    if (excludeDraft !== (editItem.permanentExcluded ? 'permanent' : (editItem.tempExcludedUntil || null))) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
   // Sheet's backdrop tap calls onClose directly with no dirty-check of its
@@ -6383,7 +6409,11 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
     const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
-    const patch = { nameOverride, packageSizeG, excludedUntil: snoozeDraft, foodName: editItem.foodName, brand: editItem.brand ?? null };
+    const patch = {
+      nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null,
+      excluded: excludeDraft === 'permanent',
+      excludedUntil: excludeDraft === 'permanent' ? null : excludeDraft,
+    };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
     // makes "I just restocked" mean "start counting from zero again".
@@ -6410,25 +6440,45 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
-  // The checkbox's own handler, independent of the edit sheet: toggles
-  // straight from either list section, no sheet involved. item.excluded is
-  // the effective flag (permanent OR an active snooze, see
-  // fdApplyShoppingPrefs), so un-checking clears excludedUntil too: bringing
-  // a snoozed item back early is exactly what unchecking this box means,
-  // it shouldn't silently re-exclude itself once the snooze would've ended.
-  function toggleExclusion(item) {
-    fdSetShoppingPref(setStore, item, item.excluded
-      ? { excluded: false, excludedUntil: null, foodName: item.foodName, brand: item.brand ?? null }
-      : { excluded: true, foodName: item.foodName, brand: item.brand ?? null });
+  // "Did I physically buy this on THIS shopping trip", not a persisted
+  // preference: local and this-visit-only, always starts empty (see the
+  // effect below), separate from the exclude/include concept entirely now
+  // (that moved into the edit sheet, see excludeDraft above). Checking an
+  // item writes fdShoppingBuyQtyG's quantity, exactly what the row's
+  // headline shows, into inventory tracking straight away, on top of
+  // whatever was already on hand (not a replacement: a partial pack left
+  // over from before this trip is still real stock), stamping a fresh
+  // stockSetAt like every other stock write in this screen. One-way: there's
+  // no recorded "amount just added" to subtract back out, so unchecking only
+  // clears the local mark, it does not undo the inventory write.
+  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
+  useEffectFd(() => { if (!open) setBoughtSet(new Set()); }, [open]);
+  function markBought(item, bought) {
+    setBoughtSet(prev => {
+      const next = new Set(prev);
+      if (bought) next.add(item.key); else next.delete(item.key);
+      return next;
+    });
+    if (!bought) return;
+    const qty = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
+    fdSetShoppingPref(setStore, item, {
+      stockBaselineG: (item.effectiveStockG || 0) + qty,
+      stockSetAt: new Date().toISOString(),
+      foodName: item.foodName, brand: item.brand ?? null,
+    });
   }
   // Shared row for both includedList and excludedList below: same layout,
-  // just dimmed with the checkbox unchecked once excluded. The checkbox is a
-  // sibling button next to the name/amount button, not nested inside it,
-  // real <button> elements can't nest without the browser silently breaking
-  // the layout back out of the outer one.
-  // inventoryMode (Inventory tab, see below) drops the include/exclude
-  // checkbox (a shopping-only concept) and swaps the buy-quantity column for
-  // a quiet package-size reference instead, there's nothing to purchase here.
+  // just dimmed once excluded. The checkbox is a sibling button next to the
+  // name/amount button, not nested inside it, real <button> elements can't
+  // nest without the browser silently breaking the layout back out of the
+  // outer one.
+  // inventoryMode (Inventory tab, see below) drops the "bought it" checkbox
+  // (a shopping-only concept) and swaps the buy-quantity column for a quiet
+  // package-size reference instead, there's nothing to purchase here. Same
+  // reason an excluded item never shows it either (see renderShoppingRow's
+  // own check below): nothing on this trip's list to mark as bought, and
+  // hasEstimate gates out low-stock fallback rows with no real buy quantity
+  // for markBought to work with in the first place.
   function renderShoppingRow(item, inventoryMode) {
     // grams is only ever > 0 for a real fdBuildShoppingList estimate (both its
     // history and projection paths filter out non-positive grams themselves);
@@ -6445,17 +6495,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     const hasEstimate = item.grams > 0 || item.fromProjection;
     const low = fdIsLowStock(item);
     const { headline, sub } = hasEstimate ? fdFormatShoppingQty(item.grams, item.packageSizeG) : { headline: null, sub: null };
-    // Dimming for `excluded` is a Shopping List concept (it's what the
-    // checkbox below toggles): skipped in inventoryMode, same reasoning as
-    // hiding the checkbox itself, a food excluded from the buy list is
-    // still just a normal tracked item here, nothing to visually mute.
+    // Dimming for `excluded` is a Shopping List concept (set from the edit
+    // sheet's exclude picker, see excludeDraft above): skipped in
+    // inventoryMode, same reasoning as hiding the checkbox itself, a food
+    // excluded from the buy list is still just a normal tracked item here,
+    // nothing to visually mute.
+    const bought = boughtSet.has(item.key);
     return (
       <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: (item.excluded && !inventoryMode) ? 0.55 : 1 }}>
-        {!inventoryMode && (
+        {!inventoryMode && !item.excluded && hasEstimate && (
           <FdCheckbox
-            checked={!item.excluded}
-            label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
-            onToggle={() => toggleExclusion(item)}
+            checked={bought}
+            label={bought ? 'Bought, added to inventory' : 'Mark as bought, add the suggested amount to inventory'}
+            onToggle={() => markBought(item, !bought)}
           />
         )}
         <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -6822,21 +6874,24 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-          <Field label="Temporarily exclude" style={{ marginBottom: 6 }}>
+          <Field label="Exclude" style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(7)); setSnoozeDraftDays(7); }} style={fdSegBtn(snoozeDraftDays === 7)}>1 week</button>
-              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(14)); setSnoozeDraftDays(14); }} style={fdSegBtn(snoozeDraftDays === 14)}>2 weeks</button>
-              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(30)); setSnoozeDraftDays(30); }} style={fdSegBtn(snoozeDraftDays === 30)}>1 month</button>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(7)); setExcludeDraftDays(7); }} style={fdSegBtn(excludeDraftDays === 7)}>1 week</button>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(14)); setExcludeDraftDays(14); }} style={fdSegBtn(excludeDraftDays === 14)}>2 weeks</button>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(30)); setExcludeDraftDays(30); }} style={fdSegBtn(excludeDraftDays === 30)}>1 month</button>
+              <button onClick={() => { setExcludeDraft('permanent'); setExcludeDraftDays(null); }} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
             </div>
           </Field>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span>
-              {snoozeDraft
-                ? `Off the list until ${new Date(snoozeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
-                : 'Skips this ingredient for a while, no need to remember to add it back.'}
+              {excludeDraft === 'permanent'
+                ? 'Off the shopping list until you pick something else here.'
+                : excludeDraft
+                  ? `Off the list until ${new Date(excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
+                  : 'On the shopping list. Pick a duration above to skip it for a while.'}
             </span>
-            {snoozeDraft && (
-              <button onClick={() => { setSnoozeDraft(null); setSnoozeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+            {excludeDraft && (
+              <button onClick={() => { setExcludeDraft(null); setExcludeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
                 Clear
               </button>
             )}
