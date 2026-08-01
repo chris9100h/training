@@ -1775,23 +1775,23 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <Sheet open={!!medSheet} onClose={requestCloseMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
         {medSheet && (
           <>
-            <Field label="Name" style={{ marginBottom: 14 }}>
+            <Field label="Name" accent style={{ marginBottom: 14 }}>
               <TextInput value={medSheet.name} onChange={v => setMedSheet(d => ({ ...d, name: v }))} placeholder="e.g. Vitamin D3" autoFocus />
             </Field>
-            <Field label="Brand (optional)" style={{ marginBottom: 14 }}>
+            <Field label="Brand (optional)" accent style={{ marginBottom: 14 }}>
               <TextInput value={medSheet.brand} onChange={v => setMedSheet(d => ({ ...d, brand: v }))} placeholder="e.g. Nature's Own" />
             </Field>
-            <div className="micro" style={{ marginBottom: 6 }}>Category</div>
+            <div className="micro-gold" style={{ marginBottom: 6 }}>Category</div>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 14 }}>
               {MED_CATEGORIES.map(c => (
                 <button key={c.id} onClick={() => setMedSheet(d => ({ ...d, category: d.category === c.id ? '' : c.id }))} style={mdSegBtn(medSheet.category === c.id)}>{c.label}</button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <Field label="Unit" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Unit" accent style={{ flex: 1, marginBottom: 0 }}>
                 <TextInput value={medSheet.unitLabel} onChange={v => setMedSheet(d => ({ ...d, unitLabel: v }))} placeholder="pills" />
               </Field>
-              <Field label="Package size" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Package size" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={medSheet.packageSizeStr} onChange={e => setMedSheet(d => ({ ...d, packageSizeStr: mdDecimalFilter(e.target.value) }))}
                   type="text" inputMode="decimal" placeholder="e.g. 60" style={mdInputStyle} />
               </Field>
@@ -1799,7 +1799,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            <Field label="Warn when below" style={{ marginBottom: 6 }}>
+            <Field label="Warn when below" accent style={{ marginBottom: 6 }}>
               <input value={medSheet.lowStockThresholdStr} onChange={e => setMedSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
             </Field>
@@ -1816,7 +1816,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </div>
             {medSheet.id && medSheetMemberships.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8 }}>In these plans</div>
+                <div className="micro-gold" style={{ marginBottom: 8 }}>In these plans</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {medSheetMemberships.map(it => (
                     <div key={it.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
