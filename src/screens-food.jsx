@@ -6331,6 +6331,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // starting from blank), using tempExcludedUntil specifically so a stale,
   // already-expired excludedUntil doesn't come back as if still active.
   const [snoozeDraft, setSnoozeDraft] = useStateFd(null);
+  // Which preset (7/14/30) lights up, purely a this-visit interaction
+  // marker, separate from snoozeDraft itself: an already-active snooze from
+  // a previous save has no reliable matching preset once time has passed
+  // (its remaining days no longer line up with 7/14/30), so reopening the
+  // sheet never pre-highlights one, only actually tapping a preset does.
+  const [snoozeDraftDays, setSnoozeDraftDays] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6339,11 +6345,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockPacksDraft('');
     setStockExtraDraft('');
     setSnoozeDraft(item.tempExcludedUntil || null);
+    setSnoozeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
-    setSnoozeDraft(null);
+    setSnoozeDraft(null); setSnoozeDraftDays(null);
   }
   // True if any field actually differs from what the sheet opened with.
   // editDraft/pkgDraft/snoozeDraft are pre-filled on open (dirty means
@@ -6817,9 +6824,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
           <Field label="Temporarily exclude" style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(7))} style={fdSegBtn(false)}>1 week</button>
-              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(14))} style={fdSegBtn(false)}>2 weeks</button>
-              <button onClick={() => setSnoozeDraft(fdSnoozeUntil(30))} style={fdSegBtn(false)}>1 month</button>
+              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(7)); setSnoozeDraftDays(7); }} style={fdSegBtn(snoozeDraftDays === 7)}>1 week</button>
+              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(14)); setSnoozeDraftDays(14); }} style={fdSegBtn(snoozeDraftDays === 14)}>2 weeks</button>
+              <button onClick={() => { setSnoozeDraft(fdSnoozeUntil(30)); setSnoozeDraftDays(30); }} style={fdSegBtn(snoozeDraftDays === 30)}>1 month</button>
             </div>
           </Field>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -6829,7 +6836,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 : 'Skips this ingredient for a while, no need to remember to add it back.'}
             </span>
             {snoozeDraft && (
-              <button onClick={() => setSnoozeDraft(null)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+              <button onClick={() => { setSnoozeDraft(null); setSnoozeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
                 Clear
               </button>
             )}
