@@ -665,6 +665,7 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
       permanentExcluded: !!pref?.excluded,
       tempExcludedUntil,
       packageSizeG: pref?.packageSizeG ?? null,
+      lowStockThresholdG: pref?.lowStockThresholdG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
       effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
     };
@@ -694,6 +695,7 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
       overridden: !!p.nameOverride,
       excluded: !!p.excluded,
       packageSizeG: p.packageSizeG ?? null,
+      lowStockThresholdG: p.lowStockThresholdG ?? null,
       stockSetAt: p.stockSetAt,
       effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
       grams: 0,
@@ -701,11 +703,16 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
-// Below one package's worth: only meaningful with both a package size and
-// stock tracking enabled (see fdApplyShoppingPrefs), a food with either
-// missing has nothing to compare its stock against.
+// Below the effective threshold: lowStockThresholdG (migration 0232) when
+// set, package size otherwise, only meaningful with stock tracking enabled
+// (see fdApplyShoppingPrefs), a food with neither a threshold nor a package
+// size has nothing to compare its stock against. The override exists
+// because "below one package" alone fires too late for a food that gets
+// eaten through faster than one package lasts, by the time it dips under
+// package_size_g there might be nothing left at all.
 function fdIsLowStock(item) {
-  return item.packageSizeG > 0 && item.effectiveStockG != null && item.effectiveStockG < item.packageSizeG;
+  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG < threshold;
 }
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
 // user has already seen the Running Low banner for, keyed by foodId ->
@@ -831,13 +838,13 @@ function fdSetShoppingPref(setStore, item, patch) {
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
     const existing = list.find(p => p.shoppingKey === key);
-    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, excludedUntil: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, excludedUntil: null, packageSizeG: null, lowStockThresholdG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
     // An expired excludedUntil is as meaningless as a null one here: without
     // this check, a snoozed item whose date has already passed would keep
     // this row alive forever (never eligible for the delete-when-default
     // cleanup below) even after it has no actual effect on the list anymore.
     const tempStillActive = merged.excludedUntil && new Date(merged.excludedUntil) > new Date();
-    const isDefault = !merged.nameOverride && !merged.excluded && !tempStillActive && merged.packageSizeG == null && merged.stockBaselineG == null;
+    const isDefault = !merged.nameOverride && !merged.excluded && !tempStillActive && merged.packageSizeG == null && merged.stockBaselineG == null && merged.lowStockThresholdG == null;
     const next = isDefault
       ? list.filter(p => p.shoppingKey !== key)
       : existing
@@ -6347,6 +6354,11 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockDraft, setStockDraft] = useStateFd('');
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
+  // Running Low threshold override (migration 0232): pre-fills like
+  // pkgDraft (an existing value being edited, not a blank "type to add"
+  // field like the stock drafts above). Blank means "no override", falls
+  // back to package size, same as the item never had this pref set at all.
+  const [thresholdDraft, setThresholdDraft] = useStateFd('');
   // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
   // ISO string (temporary, until that timestamp). One control now covers
   // both the old permanent excluded flag and the temporary snooze, they're
@@ -6370,22 +6382,25 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
+    setThresholdDraft(item.lowStockThresholdG != null ? String(item.lowStockThresholdG) : '');
     setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
     setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
-    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft(''); setThresholdDraft('');
     setExcludeDraft(null); setExcludeDraftDays(null);
   }
   // True if any field actually differs from what the sheet opened with.
-  // editDraft/pkgDraft/excludeDraft are pre-filled on open (dirty means
-  // "changed from that"), the three stock drafts always start blank (dirty
-  // means "typed into at all"). Backs requestCloseEdit's confirm below.
+  // editDraft/pkgDraft/thresholdDraft/excludeDraft are pre-filled on open
+  // (dirty means "changed from that"), the three stock drafts always start
+  // blank (dirty means "typed into at all"). Backs requestCloseEdit's
+  // confirm below.
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
     if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
+    if (thresholdDraft !== (editItem.lowStockThresholdG != null ? String(editItem.lowStockThresholdG) : '')) return true;
     if (excludeDraft !== (editItem.permanentExcluded ? 'permanent' : (editItem.tempExcludedUntil || null))) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
@@ -6409,8 +6424,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
     const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
+    const lowStockThresholdG = fdClampQtyG(fdNum(thresholdDraft));
     const patch = {
-      nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null,
+      nameOverride, packageSizeG, lowStockThresholdG, foodName: editItem.foodName, brand: editItem.brand ?? null,
       excluded: excludeDraft === 'permanent',
       excludedUntil: excludeDraft === 'permanent' ? null : excludeDraft,
     };
@@ -6436,8 +6452,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   }
   async function resetEdit() {
     if (!editItem) return;
-    if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
-    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
+    if (!await confirm("This clears the rename, package size, low-stock threshold, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
+    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, lowStockThresholdG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
   // "Did I physically buy this on THIS shopping trip", not a persisted
@@ -6932,13 +6948,20 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
             </Field>
           )}
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
+            Tracks what's actually eaten since. Leave blank to keep the current count unchanged.
+          </div>
+          <Field label="Warn when below (g)" style={{ marginBottom: 6 }}>
+            <input value={thresholdDraft} onChange={e => setThresholdDraft(fdDecimalFilter(e.target.value))}
+              type="text" inputMode="decimal" placeholder={editItem?.packageSizeG > 0 ? `defaults to ${fdExactShoppingQty(editItem.packageSizeG)}` : 'e.g. 1000'} style={fdInputStyle} />
+          </Field>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
-            Tracks what's actually eaten since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+            Running Low fires under this amount. Defaults to one package, raise it for anything that gets eaten through faster than a package lasts.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {(editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
-          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
+          {(editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
         </div>
       </Sheet>
     </Screen>

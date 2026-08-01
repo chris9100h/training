@@ -2604,6 +2604,7 @@ CREATE TABLE zane_food_shopping_prefs (
   brand           text,                                 -- 0217
   shopping_key    text        NOT NULL,                 -- 0227, identity/unique column, replaces food_id in that role
   excluded_until  timestamptz,                          -- 0231, temporary snooze exclude, distinct from `excluded`
+  low_stock_threshold_g numeric,                        -- 0232, overrides package_size_g as the Running Low comparison
   UNIQUE (user_id, shopping_key)
 );
 
