@@ -1217,13 +1217,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
   // purpose, so Inventory stays a single-purpose "how much is left" screen.
-  const [stockSheet, setStockSheet] = useStateMd(null); // { id, name, unitLabel, stockStr } | null
+  // packageSize rides along read-only (this sheet never edits it, medSheet
+  // does) purely to decide which input mode the JSX below shows.
+  const [stockSheet, setStockSheet] = useStateMd(null); // { id, name, unitLabel, packageSize, stockStr, stockPacksStr, stockExtraStr } | null
   function openStockSheet(med) {
-    setStockSheet({ id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', stockStr: '' });
+    setStockSheet({ id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', packageSize: med.packageSize ?? null, stockStr: '', stockPacksStr: '', stockExtraStr: '' });
   }
   function saveStockSheet() {
     if (!stockSheet) return;
-    const stockTyped = mdNum(stockSheet.stockStr);
+    // Same pack-aware resolution as screens-food.jsx's saveEdit: with a
+    // package size known, packs+extra wins if either was touched (e.g. "10
+    // packs + 18 IU" for a 36 IU/pack HGH kit = 378 IU), otherwise falls
+    // back to the plain single-quantity field.
+    let stockTyped = null;
+    if (stockSheet.packageSize > 0 && (stockSheet.stockPacksStr.trim() || stockSheet.stockExtraStr.trim())) {
+      stockTyped = (mdNum(stockSheet.stockPacksStr) || 0) * stockSheet.packageSize + (mdNum(stockSheet.stockExtraStr) || 0);
+    } else if (stockSheet.stockStr.trim()) {
+      stockTyped = mdNum(stockSheet.stockStr);
+    }
     if (stockTyped != null) {
       const nowISO = new Date().toISOString();
       setStore(s => ({
@@ -1659,10 +1670,29 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 Current stock: <span className="num">{mdFmtQty(effectiveStockById.get(stockSheet.id), stockSheet.unitLabel)}</span>
               </div>
             )}
-            <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>
-              <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
-                type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
-            </Field>
+            {stockSheet.packageSize > 0 ? (
+              // Package size known, so stock is worth entering in packs
+              // instead of doing the pack-to-unit math yourself: "10 packs"
+              // beats "360 IU", and "10 packs + 18 IU" (a partially used
+              // one on top of sealed ones) beats guessing a single number.
+              // Either field alone still works. Same combo as the Food
+              // Tracker's own stock update (screens-food.jsx).
+              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
+                  <input value={stockSheet.stockPacksStr} onChange={e => setStockSheet(d => ({ ...d, stockPacksStr: mdDecimalFilter(e.target.value) }))}
+                    type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} autoFocus />
+                </Field>
+                <Field label={`+ ${stockSheet.unitLabel || 'pills'}`} accent style={{ flex: 1, marginBottom: 0 }}>
+                  <input value={stockSheet.stockExtraStr} onChange={e => setStockSheet(d => ({ ...d, stockExtraStr: mdDecimalFilter(e.target.value) }))}
+                    type="text" inputMode="decimal" placeholder="e.g. 18" style={mdInputStyle} />
+                </Field>
+              </div>
+            ) : (
+              <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} accent style={{ marginBottom: 6 }}>
+                <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
+                  type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
+              </Field>
+            )}
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
               Tracks what's actually taken since, warns here once it drops below the Running Low threshold. Leave blank to keep the current count unchanged.
             </div>
