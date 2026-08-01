@@ -1272,6 +1272,23 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     }
     setStockSheet(null);
   }
+  // Resets stockBaseline/stockSetAt to null, i.e. genuinely untracked again
+  // (mdEffectiveStock returns null, mdIsLowStock can never fire), not just a
+  // muted warning: for a compound being wound down on purpose with no
+  // intent to reorder, there's nothing left worth tracking, the exact
+  // remaining count stops mattering the moment reordering is off the table.
+  // No new column needed, this only ever touches the two fields normal
+  // restocking already writes. Re-tracking later is just typing a new count.
+  async function clearStockSheet() {
+    if (!stockSheet) return;
+    if (!await confirm("Stops tracking stock for this medication, including the Running Low warning. You can start again anytime by entering a new count.", { title: 'Clear inventory?', ok: 'Clear', cancel: 'Cancel', danger: true })) return;
+    const nowISO = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      medications: (s.medications || []).map(m => m.id !== stockSheet.id ? m : { ...m, stockBaseline: null, stockSetAt: null, updatedAt: nowISO }),
+    }));
+    setStockSheet(null);
+  }
 
   // Stock is the headline here, package size the quiet caption, same
   // prominence swap as the Food Shopping List's own Inventory row
@@ -1758,7 +1775,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
               Tracks what's actually taken since, warns here once it drops below the Running Low threshold. Leave blank to keep the current count unchanged.
             </div>
-            <Btn onClick={saveStockSheet} style={{ width: '100%' }}>Save</Btn>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {effectiveStockById.get(stockSheet.id) != null && (
+                <Btn kind="ghost" onClick={clearStockSheet} style={{ flex: 1, color: UI.danger }}>Stop tracking</Btn>
+              )}
+              <Btn onClick={saveStockSheet} style={{ flex: effectiveStockById.get(stockSheet.id) != null ? 2 : 1 }}>Save</Btn>
+            </div>
           </>
         )}
       </Sheet>
