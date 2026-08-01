@@ -4090,7 +4090,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // this, editing the macro targets today re-scored the whole logged
         // history against the new numbers, so past adherence (and every coach
         // view and check-in built on it) changed retroactively.
-        const snap = log.targetsSnap;
+        // Today is excluded from that override on purpose: it isn't history
+        // yet, and must keep tracking effectiveTargets live for as long as
+        // the day is still in progress (e.g. self-coached macros configured
+        // after already logging food earlier today). Without this exclusion,
+        // whichever write scored today FIRST froze it for the rest of the
+        // day, effectiveTargets changing again later just no-ops here since
+        // dayTargetOverride always wins once a snap exists, screens-food.jsx's
+        // own dayTarget memo makes the exact same assumption for today.
+        const snap = log.date !== today ? log.targetsSnap : null;
         const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
         let { adherence, targetsSnap } = dayMode
           ? { adherence: null, targetsSnap: null }

@@ -1634,14 +1634,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // scrolling back to an old day after a later macro change would show it
     // measured against TODAY's numbers here, while the Health tab's card for
     // that same day (which reads the frozen dailyLogs.adherence first)
-    // correctly kept showing the historical one. Today and future days have
-    // no snap yet, so they fall through to the live target as before.
-    const snap = dayLog?.targetsSnap;
+    // correctly kept showing the historical one. Today is explicitly
+    // excluded even when a snap already exists (the food reconciler effect
+    // or a flex day-type pick can freeze one for today too): today isn't
+    // history yet and must keep tracking the live target for as long as the
+    // day is still in progress, e.g. self-coached macros configured after
+    // already logging food earlier today. Future days have no snap either,
+    // so they fall through to the live target the same way.
+    const snap = curDate !== today ? dayLog?.targetsSnap : null;
     const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
     if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
     return LB.dayTargetFromMacros(macroTargets, isTraining);
-  }, [store, macroTargets, curDate, dayLog]);
+  }, [store, macroTargets, curDate, dayLog, today]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
   // Same weighted-macro-distance formula HealthScreen's today card uses
   // (LB.macroAdherence), computed live off dayTotals rather than reading
