@@ -2665,6 +2665,7 @@ CREATE TABLE zane_medications (
   exclude_from_pillbox boolean   NOT NULL DEFAULT false,
   low_stock_threshold numeric,                          -- 0233, overrides package_size as the Running Low comparison
   exclude_from_low_stock boolean NOT NULL DEFAULT false, -- 0234, opts out of Running Low, stock tracking itself stays on ("Cycle only" in the UI)
+  track_stock        boolean     NOT NULL DEFAULT true,  -- 0235, master toggle: off hides low_stock_threshold/exclude_from_low_stock's UI and drops this medication from the Inventory tab's Stock sub-view entirely
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );

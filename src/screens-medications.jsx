@@ -292,9 +292,12 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
 // "Cycle only" in medSheet) short-circuits before any of that: stock
 // tracking and the effectiveStock number itself stay fully on, only the
 // warning is suppressed, for something being run for one cycle with no
-// intent to reorder.
+// intent to reorder. trackStock (migration 0235, the "Track Medication
+// Stock" master toggle) is checked first and is more fundamental still:
+// off means this medication opted out of the whole tracking surface, not
+// just the warning.
 function mdIsLowStock(med, effectiveStock) {
-  if (med.excludeFromLowStock) return false;
+  if (!med.trackStock || med.excludeFromLowStock) return false;
   const threshold = med.lowStockThreshold ?? med.packageSize;
   return threshold > 0 && effectiveStock != null && effectiveStock < threshold;
 }
@@ -834,7 +837,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
       lowStockThresholdStr: d.lowStockThresholdStr, excludeFromPillbox: d.excludeFromPillbox,
-      excludeFromLowStock: d.excludeFromLowStock,
+      excludeFromLowStock: d.excludeFromLowStock, trackStock: d.trackStock,
     });
   }
   // Every plan this medication currently belongs to, for medSheet's own
@@ -855,9 +858,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
       lowStockThresholdStr: med.lowStockThreshold != null ? String(med.lowStockThreshold) : '',
       excludeFromPillbox: !!med.excludeFromPillbox, excludeFromLowStock: !!med.excludeFromLowStock,
+      // !== false, not !!: track_stock defaults to true at the DB layer, a
+      // record that somehow reached here without the field explicitly set
+      // should still read as on, not silently flip to off.
+      trackStock: med.trackStock !== false,
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
-      lowStockThresholdStr: '', excludeFromPillbox: false, excludeFromLowStock: false,
+      lowStockThresholdStr: '', excludeFromPillbox: false, excludeFromLowStock: false, trackStock: true,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -883,7 +890,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
           packageSize, lowStockThreshold, excludeFromPillbox: !!medSheet.excludeFromPillbox,
-          excludeFromLowStock: !!medSheet.excludeFromLowStock, updatedAt: nowISO,
+          excludeFromLowStock: !!medSheet.excludeFromLowStock, trackStock: !!medSheet.trackStock, updatedAt: nowISO,
         }),
       }));
     } else {
@@ -892,7 +899,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
         lowStockThreshold,
         stockBaseline: null, stockSetAt: null, archived: false, excludeFromPillbox: !!medSheet.excludeFromPillbox,
-        excludeFromLowStock: !!medSheet.excludeFromLowStock,
+        excludeFromLowStock: !!medSheet.excludeFromLowStock, trackStock: !!medSheet.trackStock,
         createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
@@ -1225,8 +1232,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     mdWriteLowStockAcks(next);
   }
 
+  // trackStock off (migration 0235) drops a medication from this list
+  // entirely, not even as "Not tracked": the Medications sub-tab
+  // (filteredMedicationsList below) stays unaffected on purpose, a
+  // medication opted out of Stock display should still be findable/
+  // editable there.
   const mainInventoryList = useMemoMd(() => {
-    const rest = filteredInventoryBase.filter(m => !mdIsLowStock(m, effectiveStockById.get(m.id)));
+    const rest = filteredInventoryBase.filter(m => m.trackStock && !mdIsLowStock(m, effectiveStockById.get(m.id)));
     if (stockFilterTracked === null) return rest;
     return rest.filter(m => {
       const tracked = effectiveStockById.get(m.id) != null;
@@ -1921,21 +1933,33 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            <Field label={`Warn when below (${medSheet.unitLabel || 'units'})`} accent style={{ marginBottom: 6 }}>
-              <input value={medSheet.lowStockThresholdStr} onChange={e => setMedSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
-                type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
-            </Field>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
-              Running Low fires under this. Defaults to one package, raise it for anything that runs out faster than a package lasts.
-            </div>
             <div style={{ marginBottom: 14 }}>
-              <Row label="Cycle only" first>
-                <Toggle on={!!medSheet.excludeFromLowStock} onToggle={() => setMedSheet(d => ({ ...d, excludeFromLowStock: !d.excludeFromLowStock }))} />
+              <Row label="Track Medication Stock" first>
+                <Toggle on={!!medSheet.trackStock} onToggle={() => setMedSheet(d => ({ ...d, trackStock: !d.trackStock }))} />
               </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
-                Keeps tracking stock, but skips the Running Low warning. For something you're using up for one cycle and won't be reordering.
+                Off hides the settings below and drops this medication from Inventory's Stock view entirely, for one you'll never bother counting.
               </div>
             </div>
+            {medSheet.trackStock && (
+              <>
+                <Field label={`Warn when below (${medSheet.unitLabel || 'units'})`} accent style={{ marginBottom: 6 }}>
+                  <input value={medSheet.lowStockThresholdStr} onChange={e => setMedSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
+                    type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
+                </Field>
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
+                  Running Low fires under this. Defaults to one package, raise it for anything that runs out faster than a package lasts.
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <Row label="Cycle only" first>
+                    <Toggle on={!!medSheet.excludeFromLowStock} onToggle={() => setMedSheet(d => ({ ...d, excludeFromLowStock: !d.excludeFromLowStock }))} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                    Keeps tracking stock, but skips the Running Low warning. For something you're using up for one cycle and won't be reordering.
+                  </div>
+                </div>
+              </>
+            )}
             <div style={{ marginBottom: 14 }}>
               <Row label="Exclude from pillbox" first>
                 <Toggle on={!!medSheet.excludeFromPillbox} onToggle={() => setMedSheet(d => ({ ...d, excludeFromPillbox: !d.excludeFromPillbox }))} />
