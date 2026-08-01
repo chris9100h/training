@@ -1306,8 +1306,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             {/* mdIsLowStock always returns false for a Cycle-only medication
                 (excludeFromLowStock), so it never lands in the Running Low
                 section no matter how low it actually gets, this is the only
-                place that still says so. */}
-            {med.excludeFromLowStock && <i className="fa-solid fa-rotate" title="Cycle only, no Running Low warning" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} />}
+                place that still says so. Bell-slash, not a rotate/cycle
+                icon: a circular arrow reads as "recurring", the opposite
+                of what "Cycle only" actually means (a one-off supply,
+                explicitly not being reordered). Bell-slash says "muted
+                warning" directly, independent of the (misleading) name. */}
+            {med.excludeFromLowStock && <i className="fa-solid fa-bell-slash" title="Cycle only, no Running Low warning" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} />}
           </div>
           {med.packageSize > 0
             ? <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{mdFmtQty(med.packageSize, med.unitLabel)}/pack</div>
