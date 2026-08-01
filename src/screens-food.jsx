@@ -6918,10 +6918,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
           Original: {editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
         </div>
-        <Field label="Show as" style={{ marginBottom: 14 }}>
+        <Field label="Show as" accent style={{ marginBottom: 14 }}>
           <TextInput value={editDraft} onChange={setEditDraft} placeholder={editItem?.foodName} autoFocus />
         </Field>
-        <Field label="Package size (g)" style={{ marginBottom: 6 }}>
+        <Field label="Package size (g)" accent style={{ marginBottom: 6 }}>
           <input value={pkgDraft} onChange={e => setPkgDraft(fdDecimalFilter(e.target.value))}
             type="text" inputMode="decimal" placeholder="e.g. 400" style={fdInputStyle} />
         </Field>
@@ -6929,7 +6929,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-          <Field label="Exclude" style={{ marginBottom: 6 }}>
+          <Field label="Exclude" accent style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
               <button onClick={() => { setExcludeDraft(fdSnoozeUntil(7)); setExcludeDraftDays(7); }} style={fdSegBtn(excludeDraftDays === 7)}>1 week</button>
               <button onClick={() => { setExcludeDraft(fdSnoozeUntil(14)); setExcludeDraftDays(14); }} style={fdSegBtn(excludeDraftDays === 14)}>2 weeks</button>
@@ -6953,7 +6953,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           </div>
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
-          <span className="label">Inventory</span>
+          <span className="label-gold">Inventory</span>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', margin: '6px 0 10px' }}>
             Optional: track what you actually have on hand, so Running Low can warn you before it's gone instead of guessing off what you usually buy.
           </div>
@@ -6976,17 +6976,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             // figure. Either field alone still works (0 + grams = pure
             // grams, packs + 0 = pure packs), this is one input, not a mode switch.
             <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-              <Field label="Full packs" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={stockPacksDraft} onChange={e => setStockPacksDraft(fdDecimalFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
               </Field>
-              <Field label="+ grams" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="+ grams" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdDecimalFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
               </Field>
             </div>
           ) : (
-            <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
+            <Field label="Update stock (g)" accent style={{ marginBottom: 6 }}>
               <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
             </Field>
@@ -6995,12 +6995,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             Tracks what's actually eaten since. Leave blank to keep the current count unchanged.
           </div>
           {fdNum(pkgDraft) > 0 ? (
-            <Field label="Warn when below (packs)" style={{ marginBottom: 6 }}>
+            <Field label="Warn when below (packs)" accent style={{ marginBottom: 6 }}>
               <input value={thresholdPacksDraft} onChange={e => setThresholdPacksDraft(fdDecimalFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
             </Field>
           ) : (
-            <Field label="Warn when below (g)" style={{ marginBottom: 6 }}>
+            <Field label="Warn when below (g)" accent style={{ marginBottom: 6 }}>
               <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdDecimalFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 1000" style={fdInputStyle} />
             </Field>
