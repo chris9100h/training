@@ -4068,6 +4068,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     return set;
   }, [store.foodLogs]);
   useEffectH(() => {
+    // Root cause of a real bug: coachingId is known the moment store.coaching
+    // loads at boot, but coachingMacros itself is a separate fetch this
+    // screen fires afterward (coachingId's own useEffectH above) and takes a
+    // moment to resolve. Running this reconciler in that window computed
+    // effectiveTargets with coachingMacros still null, i.e. exactly like no
+    // coach/self-coaching macros existed, so the personal target (e.g. a
+    // just-applied weekly check-in estimate) won by default and got scored
+    // and frozen into targetsSnap, permanently for a day already in the
+    // past, even though the real coaching macros arrived correct and
+    // unchanged moments later. Waiting for the fetch to settle first means
+    // this only ever scores against a target that's actually final.
+    if (coachingId && !coachingMacrosLoaded) return;
     if (!foodTouchedDates.size || !effectiveTargets) return;
     const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
     setStore(s => {
@@ -4119,7 +4131,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
       return { ...s, dailyLogs: nextLogs };
     });
-  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId]);
+  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, coachingId, coachingMacrosLoaded]);
 
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
@@ -4137,6 +4149,10 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     [store.schedules, store.activeScheduleId]
   );
   useEffectH(() => {
+    // Same coachingMacros-still-loading race as the food reconciler above:
+    // this heal also freezes targetsSnap for past days off effectiveTargets,
+    // so it must wait for the same settle before trusting it.
+    if (coachingId && !coachingMacrosLoaded) return;
     const today = LB.todayISO();
     const dayOf = s => s.date ? s.date.slice(0, 10) : null;
     const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
@@ -4172,7 +4188,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       });
       return changed ? { ...s, dailyLogs: nextLogs } : s;
     });
-  }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive]);
+  }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive, coachingId, coachingMacrosLoaded]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
