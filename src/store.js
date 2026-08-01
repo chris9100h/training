@@ -788,7 +788,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.medicationScheduleSlots.map(s => ({
         id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
         weekdays: s.weekdays || [],
-        hour: s.hour, dose_qty: s.doseQty,
+        hour: s.hour, dose_qty: s.doseQty, interval_days: s.intervalDays ?? null,
         start_date: s.startDate ?? null, end_date: s.endDate ?? null,
         updated_at: s.updatedAt ?? new Date().toISOString(),
       }))
@@ -1243,7 +1243,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // screens-coaching-detail.jsx), not through this boot load.
     isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
-    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
@@ -1560,7 +1560,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
       weekdays: s.weekdays || [],
       hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
-      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      intervalDays: s.interval_days ?? null, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
       createdAt: s.created_at, updatedAt: s.updated_at,
     })),
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
@@ -2216,7 +2216,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) preOps.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
       id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
       weekdays: s.weekdays || [],
-      hour: s.hour, dose_qty: s.doseQty,
+      hour: s.hour, dose_qty: s.doseQty, interval_days: s.intervalDays ?? null,
       start_date: s.startDate ?? null, end_date: s.endDate ?? null,
       updated_at: s.updatedAt ?? new Date().toISOString(),
     }))));
@@ -6279,7 +6279,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
@@ -6348,7 +6348,7 @@ async function refreshHealthLogs(userId) {
       id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
       weekdays: s.weekdays || [],
       hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
-      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      intervalDays: s.interval_days ?? null, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
       createdAt: s.created_at, updatedAt: s.updated_at,
     })),
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
@@ -6369,12 +6369,18 @@ async function refreshHealthLogs(userId) {
 // ── AI Daily Summary (ai-daily-summary Edge Function) ───────────────────────
 // Self-contained copy of screens-medications.jsx's mdSlotAppliesOn: that file
 // isn't loaded by store.test.cjs's sandbox, and this needs to run there too.
+// Keep both in sync on every change to this logic (migration 0237's
+// interval_days mode included).
 function dsSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
   if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (!(slot.weekdays || []).includes(wd)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
   if (slot.endDate && dateISO > slot.endDate) return false;
-  return true;
+  if (slot.intervalDays > 0) {
+    if (!slot.startDate) return false;
+    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
+    return daysSince % slot.intervalDays === 0;
+  }
+  return (slot.weekdays || []).includes(wd);
 }
 function dsShiftDate(dateStr, deltaDays) {
   const d = new Date(dateStr + 'T12:00:00');

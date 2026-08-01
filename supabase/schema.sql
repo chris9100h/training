@@ -2711,10 +2711,11 @@ CREATE TABLE zane_medication_schedule_slots (
   user_id            uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   medication_id      text        NOT NULL REFERENCES public.zane_medications(id) ON DELETE CASCADE,
   medication_plan_id text,                                            -- soft reference, migration 0221: scopes this slot to one (medication, plan) pair
-  weekdays           integer[]   NOT NULL DEFAULT '{0,1,2,3,4,5,6}',   -- 0=Mon..6=Sun, see isoWd in store.js
+  weekdays           integer[]   NOT NULL DEFAULT '{0,1,2,3,4,5,6}',   -- 0=Mon..6=Sun, see isoWd in store.js. Ignored when interval_days is set.
   hour               integer     NOT NULL DEFAULT 8,                  -- 0-23
   dose_qty           numeric     NOT NULL,
-  start_date         date,                                            -- null = unbounded (default/simple case)
+  interval_days      integer,                                         -- migration 0237: set = "every N days from start_date" instead of weekdays; NULL = weekday mode (default)
+  start_date         date,                                            -- null = unbounded (default/simple case). Mandatory anchor when interval_days is set.
   end_date           date,                                            -- null = unbounded
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()

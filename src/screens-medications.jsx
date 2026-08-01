@@ -308,19 +308,39 @@ function mdHasPlan(med, medicationPlanItems) {
   return medicationPlanItems.some(it => it.medicationId === med.id);
 }
 
-// A schedule slot applies to `dateISO` if its plan is active, today's
-// weekday is in its list, and (when set) dateISO falls inside its optional
-// start/end date phase. Both bounds null (the default) means unbounded,
-// identical to a plain always-on schedule. There is no per-slot pause flag
-// (removed, see the header comment): a slot with no plan, or whose plan
-// isn't in activePlanIds, is simply never due, exactly as if it didn't
-// exist, no separate "orphaned" handling needed.
+// A schedule slot applies to `dateISO` if its plan is active, (when set)
+// dateISO falls inside its optional start/end date phase, and then either
+// today's weekday is in its list, or, in interval mode (migration 0237,
+// intervalDays set), dateISO lands exactly on a multiple of intervalDays
+// since startDate. Both bounds null (the default, weekday mode) means
+// unbounded, identical to a plain always-on schedule. There is no per-slot
+// pause flag (removed, see the header comment): a slot with no plan, or
+// whose plan isn't in activePlanIds, is simply never due, exactly as if it
+// didn't exist, no separate "orphaned" handling needed.
+// Interval mode has no unbounded case: startDate is its anchor, so a slot
+// with intervalDays set but no startDate (shouldn't happen, saveSlotDraft
+// requires one, but a synced row from elsewhere could still lack it) is
+// simply never due rather than guessing an anchor.
+// Kept in sync with store.js's own self-contained copy, dsSlotAppliesOn
+// (used by the AI daily summary, which runs where this file isn't loaded).
 function mdSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
   if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (!(slot.weekdays || []).includes(wd)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
   if (slot.endDate && dateISO > slot.endDate) return false;
-  return true;
+  if (slot.intervalDays > 0) {
+    if (!slot.startDate) return false;
+    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
+    return daysSince % slot.intervalDays === 0;
+  }
+  return (slot.weekdays || []).includes(wd);
+}
+// Human-readable recurrence label for a schedule slot: "Every Nd" in
+// interval mode, "Every day"/"Mon/Wed/Fri" in weekday mode. Shared by
+// renderMedListRow's aggregate summary and schedMed's own per-slot list, so
+// the two never drift on how this reads.
+function mdSlotDaysLabel(slot) {
+  if (slot.intervalDays > 0) return `Every ${slot.intervalDays}d`;
+  return slot.weekdays.length === 7 ? 'Every day' : slot.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/');
 }
 function mdMaterializeSlotEntry(med, slot, dateISO) {
   return {
@@ -743,7 +763,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       ? scheduleSlots.filter(sl => sl.medicationId === m.id && sl.medicationPlanId === planId)
       : scheduleSlots.filter(sl => sl.medicationId === m.id);
     const scheduleSummary = relevantSlots.length
-      ? relevantSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
+      ? relevantSlots.map(sl => `${mdSlotDaysLabel(sl)} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
       : 'No schedule yet';
     const memberPlanNames = showPlanTag
       ? medicationPlanItems.filter(it => it.medicationId === m.id).map(it => medicationPlans.find(p => p.id === it.medicationPlanId)?.name).filter(Boolean)
@@ -989,21 +1009,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // No longer part of the plan being viewed, nothing left to show here.
     closeSchedMed();
   }
-  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, phaseOpen, startDate, endDate }
+  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, mode: 'weekdays'|'interval', weekdays, intervalDaysNum, hour, doseQtyStr, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
   function snapSlotDraft(d) {
-    return JSON.stringify({ weekdays: d.weekdays, hour: d.hour, doseQtyStr: d.doseQtyStr, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
+    return JSON.stringify({ mode: d.mode, weekdays: d.weekdays, intervalDaysNum: d.intervalDaysNum, hour: d.hour, doseQtyStr: d.doseQtyStr, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
   }
   function openSlotDraft(slot) {
     const next = slot ? {
-      id: slot.id, weekdays: [...(slot.weekdays || [])], hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
+      id: slot.id, mode: slot.intervalDays > 0 ? 'interval' : 'weekdays',
+      weekdays: [...(slot.weekdays || [])], intervalDaysNum: slot.intervalDays > 0 ? slot.intervalDays : 2,
+      hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
       phaseOpen: !!(slot.startDate || slot.endDate), startDate: slot.startDate || '', endDate: slot.endDate || '',
     } : {
       // Starts with NO days selected (was all 7): a blank slate reads more
       // honestly as "pick what you actually mean" than a default that
       // happens to already be right only for an every-day dose.
       // selectAllWeekdays below is the one-tap shortcut for that common case.
-      id: null, weekdays: [], hour: 8, doseQtyStr: '',
+      // 2 is intervalDaysNum's own default once interval mode gets picked,
+      // matching the most common real case (a compound dosed every other day).
+      id: null, mode: 'weekdays', weekdays: [], intervalDaysNum: 2, hour: 8, doseQtyStr: '',
       phaseOpen: false, startDate: '', endDate: '',
     };
     slotDraftInitialSnap.current = snapSlotDraft(next);
@@ -1018,7 +1042,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function saveSlotDraft() {
-    if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft) return;
+    const isInterval = slotDraft.mode === 'interval';
+    // Interval mode has nothing equivalent to "no weekdays picked" to guard
+    // on, startDate is its own required field instead (it's the count-from
+    // anchor, not an optional phase bound here, see mdSlotAppliesOn).
+    if (isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     // A reversed range (From after To) would otherwise save silently and
@@ -1029,23 +1058,31 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     if (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate) return;
     const nowISO = new Date().toISOString();
     // Gated on the fields' own values, NOT on phaseOpen: phaseOpen only
-    // controls whether the date-range section is visually expanded.
-    // Collapsing it to declutter the sheet must not silently wipe a
+    // controls whether the date-range section is visually expanded in
+    // weekday mode (interval mode always shows it, startDate isn't optional
+    // there). Collapsing it to declutter the sheet must not silently wipe a
     // staged cycle's dates, only actually clearing the inputs should.
     const startDate = slotDraft.startDate || null;
     const endDate = slotDraft.endDate || null;
+    // The two modes are mutually exclusive per slot: switching a slot from
+    // one to the other on edit must clear the other mode's field rather than
+    // leave a stale value sitting there unused, mdSlotAppliesOn only ever
+    // reads intervalDays first, but a stale weekdays/intervalDays value would
+    // still be misleading to anyone inspecting the row directly.
+    const weekdays = isInterval ? [] : slotDraft.weekdays;
+    const intervalDays = isInterval ? slotDraft.intervalDaysNum : null;
     if (slotDraft.id) {
       setStore(s => ({
         ...s,
         medicationScheduleSlots: (s.medicationScheduleSlots || []).map(sl => sl.id !== slotDraft.id ? sl : {
-          ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty,
+          ...sl, weekdays, hour: slotDraft.hour, doseQty, intervalDays,
           startDate, endDate, updatedAt: nowISO,
         }),
       }));
     } else {
       const newSlot = {
         id: LB.uid(), medicationId: schedMed.id, medicationPlanId: schedMed.medicationPlanId,
-        weekdays: slotDraft.weekdays, hour: slotDraft.hour,
+        weekdays, hour: slotDraft.hour, intervalDays,
         doseQty, startDate, endDate, createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medicationScheduleSlots: [...(s.medicationScheduleSlots || []), newSlot] }));
@@ -2029,7 +2066,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 {schedMedSlots.map(sl => (
                   <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
-                      {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
+                      {mdSlotDaysLabel(sl)} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
                       {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
                     </div>
                     <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
@@ -2067,24 +2104,47 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
       {/* Add/edit one schedule slot, nested within the schedMed sheet above */}
       <Sheet open={!!slotDraft} onClose={requestCloseSlotDraft} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
-        {slotDraft && (
+        {slotDraft && (() => {
+          const isInterval = slotDraft.mode === 'interval';
+          const reversedRange = slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate;
+          return (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div className="micro">Days</div>
-              <button onClick={selectAllWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+            {/* Weekdays vs every-N-days are mutually exclusive per slot (see
+                saveSlotDraft): most compounds run on fixed weekdays, but many
+                (peptides especially) are dosed every 2/3/x days instead, with
+                no weekday pattern to pick at all. */}
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+              <button onClick={() => setSlotDraft(d => ({ ...d, mode: 'weekdays' }))} style={mdSegBtn(!isInterval)}>Weekdays</button>
+              <button onClick={() => setSlotDraft(d => ({ ...d, mode: 'interval' }))} style={mdSegBtn(isInterval)}>Every X days</button>
             </div>
-            <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-              {MD_WEEKDAY_SHORT.map((label, wd) => (
-                <button key={wd} onClick={() => toggleWeekday(wd)} style={{
-                  flex: 1, padding: '8px 2px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: UI.fontUi,
-                  border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
-                  background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
-                  color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
-                  textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
-                  WebkitTapHighlightColor: 'transparent',
-                }}>{label}</button>
-              ))}
-            </div>
+            {isInterval ? (
+              <>
+                <div className="micro" style={{ marginBottom: 6 }}>Every</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                  <Stepper value={slotDraft.intervalDaysNum} step={1} min={2} max={90} suffix={slotDraft.intervalDaysNum === 1 ? ' day' : ' days'}
+                    onChange={v => setSlotDraft(d => ({ ...d, intervalDaysNum: Math.max(2, Math.min(90, Math.round(v))) }))} big />
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div className="micro">Days</div>
+                  <button onClick={selectAllWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+                </div>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  {MD_WEEKDAY_SHORT.map((label, wd) => (
+                    <button key={wd} onClick={() => toggleWeekday(wd)} style={{
+                      flex: 1, padding: '8px 2px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: UI.fontUi,
+                      border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
+                      background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
+                      color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
+                      textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="micro" style={{ marginBottom: 6 }}>Time</div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
               <Stepper value={slotDraft.hour} step={1} min={0} max={23} suffix=":00" onChange={v => setSlotDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
@@ -2093,33 +2153,57 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               <input value={slotDraft.doseQtyStr} onChange={e => setSlotDraft(d => ({ ...d, doseQtyStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 1" style={mdInputStyle} autoFocus />
             </Field>
-            <button onClick={() => setSlotDraft(d => ({ ...d, phaseOpen: !d.phaseOpen }))} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer', marginBottom: slotDraft.phaseOpen ? 10 : 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className={`fa-solid fa-chevron-${slotDraft.phaseOpen ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
-              Limit to a date range (for a staged cycle)
-            </button>
-            {slotDraft.phaseOpen && (
+            {isInterval ? (
+              // Not collapsible like the weekday-mode range below: startDate
+              // is the count-from anchor here, not an optional phase bound,
+              // so it's always shown and always required (see saveSlotDraft).
               <div style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
+                  <Field label="Starting" accent style={{ flex: 1, marginBottom: 0 }}>
                     <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
                   </Field>
-                  <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
+                  <Field label="Until (optional)" style={{ flex: 1, marginBottom: 0 }}>
                     <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
                   </Field>
                 </div>
-                {/* Same reversed-range check as saveSlotDraft's own guard,
-                    surfaced here so the user sees why Save is stuck instead
-                    of just finding out the button won't respond. */}
-                {slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate && (
+                {reversedRange && (
                   <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
-                    "To" must be on or after "From".
+                    "Until" must be on or after "Starting".
                   </div>
                 )}
               </div>
+            ) : (
+              <>
+                <button onClick={() => setSlotDraft(d => ({ ...d, phaseOpen: !d.phaseOpen }))} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer', marginBottom: slotDraft.phaseOpen ? 10 : 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <i className={`fa-solid fa-chevron-${slotDraft.phaseOpen ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
+                  Limit to a date range (for a staged cycle)
+                </button>
+                {slotDraft.phaseOpen && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
+                        <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
+                      </Field>
+                      <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
+                        <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
+                      </Field>
+                    </div>
+                    {/* Same reversed-range check as saveSlotDraft's own guard,
+                        surfaced here so the user sees why Save is stuck instead
+                        of just finding out the button won't respond. */}
+                    {reversedRange && (
+                      <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                        "To" must be on or after "From".
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
-            <Btn onClick={saveSlotDraft} disabled={!slotDraft.weekdays.length || !mdNum(slotDraft.doseQtyStr) || (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate)} style={{ width: '100%' }}>Save</Btn>
+            <Btn onClick={saveSlotDraft} disabled={(isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) || !mdNum(slotDraft.doseQtyStr) || reversedRange} style={{ width: '100%' }}>Save</Btn>
           </>
-        )}
+          );
+        })()}
       </Sheet>
 
       {/* Coach: push to client / template bucket */}
