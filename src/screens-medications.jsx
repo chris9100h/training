@@ -288,8 +288,13 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
 // medication with neither has nothing to compare its stock against. The
 // override exists because "below one package" alone fires too late for
 // something that gets used up faster than one package lasts, exact mirror
-// of fdIsLowStock in screens-food.jsx.
+// of fdIsLowStock in screens-food.jsx. excludeFromLowStock (migration 0234,
+// "Cycle only" in medSheet) short-circuits before any of that: stock
+// tracking and the effectiveStock number itself stay fully on, only the
+// warning is suppressed, for something being run for one cycle with no
+// intent to reorder.
 function mdIsLowStock(med, effectiveStock) {
+  if (med.excludeFromLowStock) return false;
   const threshold = med.lowStockThreshold ?? med.packageSize;
   return threshold > 0 && effectiveStock != null && effectiveStock < threshold;
 }
@@ -829,6 +834,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
       lowStockThresholdStr: d.lowStockThresholdStr, excludeFromPillbox: d.excludeFromPillbox,
+      excludeFromLowStock: d.excludeFromLowStock,
     });
   }
   // Every plan this medication currently belongs to, for medSheet's own
@@ -848,10 +854,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
       lowStockThresholdStr: med.lowStockThreshold != null ? String(med.lowStockThreshold) : '',
-      excludeFromPillbox: !!med.excludeFromPillbox,
+      excludeFromPillbox: !!med.excludeFromPillbox, excludeFromLowStock: !!med.excludeFromLowStock,
     } : {
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
-      lowStockThresholdStr: '', excludeFromPillbox: false,
+      lowStockThresholdStr: '', excludeFromPillbox: false, excludeFromLowStock: false,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -876,7 +882,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         medications: (s.medications || []).map(m => m.id !== medSheet.id ? m : {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
-          packageSize, lowStockThreshold, excludeFromPillbox: !!medSheet.excludeFromPillbox, updatedAt: nowISO,
+          packageSize, lowStockThreshold, excludeFromPillbox: !!medSheet.excludeFromPillbox,
+          excludeFromLowStock: !!medSheet.excludeFromLowStock, updatedAt: nowISO,
         }),
       }));
     } else {
@@ -885,6 +892,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
         lowStockThreshold,
         stockBaseline: null, stockSetAt: null, archived: false, excludeFromPillbox: !!medSheet.excludeFromPillbox,
+        excludeFromLowStock: !!medSheet.excludeFromLowStock,
         createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
@@ -1919,6 +1927,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </Field>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
               Running Low fires under this. Defaults to one package, raise it for anything that runs out faster than a package lasts.
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <Row label="Cycle only" first>
+                <Toggle on={!!medSheet.excludeFromLowStock} onToggle={() => setMedSheet(d => ({ ...d, excludeFromLowStock: !d.excludeFromLowStock }))} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                Keeps tracking stock, but skips the Running Low warning. For something you're using up for one cycle and won't be reordering.
+              </div>
             </div>
             <div style={{ marginBottom: 14 }}>
               <Row label="Exclude from pillbox" first>
