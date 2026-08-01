@@ -1182,14 +1182,37 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     () => filteredInventoryBase.filter(m => mdIsLowStock(m, effectiveStockById.get(m.id))),
     [filteredInventoryBase, effectiveStockById],
   );
+  // Same computation, off inventoryList directly instead of
+  // filteredInventoryBase: the Inventory tab's own search/category/plan
+  // filters have nothing to do with whether the Timeline's own banner
+  // should show, a medication doesn't stop running low just because
+  // someone's search box (on a completely different tab) doesn't match it
+  // right now. lowStockList above stays as the Inventory tab's own
+  // filtered view, this is the "is anything genuinely low, full stop" one.
+  const allLowStockList = useMemoMd(
+    () => inventoryList.filter(m => mdIsLowStock(m, effectiveStockById.get(m.id))),
+    [inventoryList, effectiveStockById],
+  );
   const [lowStockAcks, setLowStockAcks] = useStateMd(mdReadLowStockAcks);
   const freshLowStock = useMemoMd(
     () => lowStockList.filter(m => lowStockAcks[m.id] !== m.stockSetAt),
     [lowStockList, lowStockAcks],
   );
-  function dismissLowStockBanner() {
+  // Timeline gets its own "fresh" derivation off the unfiltered list, but
+  // shares lowStockAcks with the Inventory tab's banner: dismissing either
+  // one is the same underlying "I've seen this" fact, not a per-tab one.
+  const freshAllLowStock = useMemoMd(
+    () => allLowStockList.filter(m => lowStockAcks[m.id] !== m.stockSetAt),
+    [allLowStockList, lowStockAcks],
+  );
+  // Takes the list to ack explicitly (freshLowStock from the Inventory
+  // banner, freshAllLowStock from the Timeline one) rather than always
+  // reading freshLowStock itself, so each banner only marks the items it's
+  // actually showing right now, not the other one's (usually-larger,
+  // unfiltered) set.
+  function dismissLowStockBanner(list) {
     const next = { ...lowStockAcks };
-    freshLowStock.forEach(m => { next[m.id] = m.stockSetAt; });
+    list.forEach(m => { next[m.id] = m.stockSetAt; });
     setLowStockAcks(next);
     mdWriteLowStockAcks(next);
   }
@@ -1329,6 +1352,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {screenTab === 'timeline' && (
           <>
+            {/* Same dismissible warning as the Inventory tab's own (see
+                freshAllLowStock's comment above), surfaced here too since
+                Timeline is the tab people actually open day to day, not
+                everyone remembers to go check Inventory on its own. The
+                text itself is a separate sibling button that jumps straight
+                to Inventory > Stock, not the whole row: nesting the Dismiss
+                button inside a row-wide button breaks the layout, same trap
+                renderShoppingRow's own checkbox comment warns about in
+                screens-food.jsx. */}
+            {freshAllLowStock.length > 0 && (
+              <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button onClick={() => { setScreenTab('inventory'); setInvSubTab('inventory'); }} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+                    {freshAllLowStock.length === 1 ? `${freshAllLowStock[0].name} is running low.` : `${freshAllLowStock.length} medications are running low.`}
+                  </div>
+                </button>
+                <button onClick={() => dismissLowStockBanner(freshAllLowStock)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                </button>
+              </div>
+            )}
             {/* Day nav: same idiom as the Food Tracker's own Log-tab date
                 switcher (screens-food.jsx), unbounded both ways. */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1578,7 +1623,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
                       {freshLowStock.length === 1 ? `${freshLowStock[0].name} is running low.` : `${freshLowStock.length} medications are running low.`}
                     </div>
-                    <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    <button onClick={() => dismissLowStockBanner(freshLowStock)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                       <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
                     </button>
                   </div>
