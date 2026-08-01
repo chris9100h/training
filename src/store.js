@@ -761,7 +761,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
         exclude_from_pillbox: !!m.excludeFromPillbox,
-        exclude_from_low_stock: !!m.excludeFromLowStock, track_stock: m.trackStock !== false,
+        exclude_from_low_stock: !!m.excludeFromLowStock,
+        // A backup from before migration 0235 has no trackStock at all
+        // (undefined, not false): infer it from stock_baseline instead of
+        // defaulting to the now-opt-in false, a restored medication that
+        // was clearly already being tracked (it has a baseline) shouldn't
+        // silently vanish from Inventory just for predating this field.
+        track_stock: m.trackStock != null ? !!m.trackStock : m.stockBaseline != null,
         updated_at: m.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -2195,11 +2201,7 @@ async function syncStore(prev, next, userId) {
       stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
       exclude_from_pillbox: !!m.excludeFromPillbox,
-      // !== false, not !!: track_stock defaults to true (unlike every other
-      // boolean on this table, which default false), so a local object that
-      // predates this field (trackStock === undefined) must still write
-      // true, not silently flip to false and vanish from Inventory.
-      exclude_from_low_stock: !!m.excludeFromLowStock, track_stock: m.trackStock !== false,
+      exclude_from_low_stock: !!m.excludeFromLowStock, track_stock: !!m.trackStock,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medications').delete().in('id', removed.map(m => m.id)));

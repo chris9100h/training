@@ -858,13 +858,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
       lowStockThresholdStr: med.lowStockThreshold != null ? String(med.lowStockThreshold) : '',
       excludeFromPillbox: !!med.excludeFromPillbox, excludeFromLowStock: !!med.excludeFromLowStock,
-      // !== false, not !!: track_stock defaults to true at the DB layer, a
-      // record that somehow reached here without the field explicitly set
-      // should still read as on, not silently flip to off.
-      trackStock: med.trackStock !== false,
+      trackStock: !!med.trackStock,
     } : {
+      // trackStock off by default for a new medication too (migration
+      // 0236): most medications (vitamins, anything nobody physically
+      // counts) are never meant to show up in the Stock sub-view at all,
+      // tracking is opt-in per medication, not opt-out.
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
-      lowStockThresholdStr: '', excludeFromPillbox: false, excludeFromLowStock: false, trackStock: true,
+      lowStockThresholdStr: '', excludeFromPillbox: false, excludeFromLowStock: false, trackStock: false,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
