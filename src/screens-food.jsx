@@ -714,6 +714,17 @@ function fdIsLowStock(item) {
   const threshold = item.lowStockThresholdG ?? item.packageSizeG;
   return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG < threshold;
 }
+// The logical complement of fdIsLowStock above, same threshold precondition:
+// tracked stock, a real threshold to compare against, and currently above
+// it. Without either (no stock tracked at all, or tracked but no threshold
+// ever set) this is false, not true, on purpose, a food with nothing to
+// compare its stock against has no basis for "you have enough" either, and
+// silently hiding it from the buy list while it might genuinely be at zero
+// would be worse than just estimating demand for it like an untracked food.
+function fdIsWellStocked(item) {
+  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  return threshold > 0 && item.effectiveStockG != null && !fdIsLowStock(item);
+}
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
 // user has already seen the Running Low banner for, keyed by foodId ->
 // the stockSetAt it was shown under. Keying on stockSetAt rather than a
@@ -6282,12 +6293,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     [list, store.foodShoppingPrefs, logsForStock, today],
   );
   // What actually feeds the export/screenshot (included only) vs. what's
-  // still shown, just set aside, in the list screen's own "Excluded" section.
-  // Both stay keyed on `excluded` alone, unaffected by low stock on purpose:
-  // an excluded bulk item running low still doesn't belong in the grocery
-  // run, it needs reordering from wherever it's normally bought, and a
-  // normal included item running low is still a normal item to buy either way.
-  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
+  // still shown, just set aside, in the list screen's own "Excluded"
+  // section. excludedList stays keyed on `excluded` alone, unaffected by
+  // low stock on purpose: an excluded bulk item running low still doesn't
+  // belong in the grocery run, it needs reordering from wherever it's
+  // normally bought. includedList additionally drops anything fdIsWellStocked
+  // (tracked, real threshold, currently above it): there's nothing to buy
+  // for a food you already have plenty of, whether it's a staple/projection
+  // estimate is beside the point once inventory tracking says otherwise. A
+  // well-stocked item that later dips low reappears here on its own the
+  // moment fdIsWellStocked flips, same as everything else in this screen
+  // that self-corrects off a derived value instead of a stored flag; it's
+  // still visible the whole time via the Inventory tab regardless.
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && !fdIsWellStocked(i)), [displayList]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
   // The Inventory tab's own list, independent of `list`/`displayList` above:
   // every tracked food, not just this window's staples/projections (see
@@ -6734,8 +6752,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 // one), same reason the Food Log poster's entry cards use it:
                 // an opaque row blocks the watermark entirely wherever it
                 // sits, leaving it visible only in the gaps between rows.
-                // Excluded items never make it into includedList, they don't
-                // belong in a "what to buy" poster at all.
+                // Excluded and well-stocked items never make it into
+                // includedList, neither belongs in a "what to buy" poster.
                 <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{item.displayName}</div>
