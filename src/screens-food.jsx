@@ -6354,11 +6354,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockDraft, setStockDraft] = useStateFd('');
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
-  // Running Low threshold override (migration 0232): pre-fills like
-  // pkgDraft (an existing value being edited, not a blank "type to add"
-  // field like the stock drafts above). Blank means "no override", falls
-  // back to package size, same as the item never had this pref set at all.
-  const [thresholdDraft, setThresholdDraft] = useStateFd('');
+  // Running Low threshold override (migration 0232): package-aware like the
+  // stock fields above, two separate drafts rather than one field that
+  // silently changes units. Whichever one is live (toggles off pkgDraft,
+  // same condition the stock fields below use) is what saveEdit reads;
+  // switching modes mid-edit never reinterprets an already-typed number
+  // under a different unit, it just shows the other (still blank, or still
+  // holding whatever was typed into IT specifically) field instead. Both
+  // pre-fill like pkgDraft (an existing value being edited, not a blank
+  // "type to add" field like stockDraft/stockPacksDraft/stockExtraDraft).
+  // Blank on save means "no override", falls back to package size, same as
+  // the item never had this pref set at all.
+  const [thresholdPacksDraft, setThresholdPacksDraft] = useStateFd('');
+  const [thresholdGramsDraft, setThresholdGramsDraft] = useStateFd('');
   // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
   // ISO string (temporary, until that timestamp). One control now covers
   // both the old permanent excluded flag and the temporary snooze, they're
@@ -6382,25 +6390,28 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
-    setThresholdDraft(item.lowStockThresholdG != null ? String(item.lowStockThresholdG) : '');
+    setThresholdPacksDraft(item.lowStockThresholdG != null && item.packageSizeG > 0 ? String(fdRound1(item.lowStockThresholdG / item.packageSizeG)) : '');
+    setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? String(item.lowStockThresholdG) : '');
     setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
     setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
-    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft(''); setThresholdDraft('');
+    setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+    setThresholdPacksDraft(''); setThresholdGramsDraft('');
     setExcludeDraft(null); setExcludeDraftDays(null);
   }
   // True if any field actually differs from what the sheet opened with.
-  // editDraft/pkgDraft/thresholdDraft/excludeDraft are pre-filled on open
-  // (dirty means "changed from that"), the three stock drafts always start
-  // blank (dirty means "typed into at all"). Backs requestCloseEdit's
-  // confirm below.
+  // editDraft/pkgDraft/thresholdPacksDraft/thresholdGramsDraft/excludeDraft
+  // are pre-filled on open (dirty means "changed from that"), the three
+  // stock drafts always start blank (dirty means "typed into at all").
+  // Backs requestCloseEdit's confirm below.
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
     if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
-    if (thresholdDraft !== (editItem.lowStockThresholdG != null ? String(editItem.lowStockThresholdG) : '')) return true;
+    if (thresholdPacksDraft !== (editItem.lowStockThresholdG != null && editItem.packageSizeG > 0 ? String(fdRound1(editItem.lowStockThresholdG / editItem.packageSizeG)) : '')) return true;
+    if (thresholdGramsDraft !== (editItem.lowStockThresholdG != null && !(editItem.packageSizeG > 0) ? String(editItem.lowStockThresholdG) : '')) return true;
     if (excludeDraft !== (editItem.permanentExcluded ? 'permanent' : (editItem.tempExcludedUntil || null))) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
@@ -6424,7 +6435,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
     const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
-    const lowStockThresholdG = fdClampQtyG(fdNum(thresholdDraft));
+    // Reads whichever unit is currently live off the just-computed
+    // packageSizeG (not editItem's old one): a package size typed in this
+    // same visit should convert its packs threshold against the NEW size,
+    // not a stale one. The other field is simply never consulted, its
+    // contents (if any, from before a mode switch) are left as-is on
+    // screen but don't affect what gets saved.
+    const thresholdPacksTyped = fdNum(thresholdPacksDraft);
+    const thresholdGramsTyped = fdNum(thresholdGramsDraft);
+    const lowStockThresholdG = packageSizeG > 0
+      ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
+      : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null);
     const patch = {
       nameOverride, packageSizeG, lowStockThresholdG, foodName: editItem.foodName, brand: editItem.brand ?? null,
       excluded: excludeDraft === 'permanent',
@@ -6951,12 +6972,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
             Tracks what's actually eaten since. Leave blank to keep the current count unchanged.
           </div>
-          <Field label="Warn when below (g)" style={{ marginBottom: 6 }}>
-            <input value={thresholdDraft} onChange={e => setThresholdDraft(fdDecimalFilter(e.target.value))}
-              type="text" inputMode="decimal" placeholder={editItem?.packageSizeG > 0 ? `defaults to ${fdExactShoppingQty(editItem.packageSizeG)}` : 'e.g. 1000'} style={fdInputStyle} />
-          </Field>
+          {fdNum(pkgDraft) > 0 ? (
+            <Field label="Warn when below (packs)" style={{ marginBottom: 6 }}>
+              <input value={thresholdPacksDraft} onChange={e => setThresholdPacksDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
+            </Field>
+          ) : (
+            <Field label="Warn when below (g)" style={{ marginBottom: 6 }}>
+              <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 1000" style={fdInputStyle} />
+            </Field>
+          )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
-            Running Low fires under this amount. Defaults to one package, raise it for anything that gets eaten through faster than a package lasts.
+            Running Low fires under this. Defaults to one package, raise it for anything that gets eaten through faster than a package lasts.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
