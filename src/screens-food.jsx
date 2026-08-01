@@ -7594,12 +7594,20 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <FdIngredientBadge n={currentIdx + 1} size={34} />
-            <span className="display" style={{
-              flex: 1, minWidth: 0,
-              fontSize: curNameFontSize,
-              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>{curItem.foodName}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="display" style={{
+                display: 'block',
+                fontSize: curNameFontSize,
+                color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{curItem.foodName}</span>
+              {curItem.brand && (
+                <span style={{
+                  display: 'block', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{curItem.brand}</span>
+              )}
+            </div>
           </div>
 
           {/* Whole batch: the more consequential number while stepping

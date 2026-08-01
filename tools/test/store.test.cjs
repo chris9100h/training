@@ -349,6 +349,31 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new', 'new session from another device must appear');
   });
 
+  // ── resolveInProgressId: boot-merge in-progress-session pointer ──────────
+  // This is the exact bug scenario: base matches cur (this device made no
+  // unsynced change), fresh has moved on (another device started a real
+  // session server-side). Trusting cur here is the multi-device session
+  // kill: a second device that never started a session overwrites the
+  // server's pointer with its own stale/null value.
+  test('resolveInProgressId trusts fresh when cur matches base (no local change)', () => {
+    const cur = { inProgress: null };
+    const fresh = { inProgress: 'real-session' };
+    const base = { inProgress: null };
+    assert.strictEqual(LB.resolveInProgressId(cur, fresh, base), 'real-session');
+  });
+  test('resolveInProgressId trusts cur when it differs from base (unsynced local change)', () => {
+    const cur = { inProgress: null }; // device just ended its own session
+    const fresh = { inProgress: 'stale-session' };
+    const base = { inProgress: 'stale-session' };
+    assert.strictEqual(LB.resolveInProgressId(cur, fresh, base), null);
+  });
+  test('resolveInProgressId trusts cur when there is no base (legacy cache)', () => {
+    const cur = { inProgress: 'local-only' };
+    const fresh = { inProgress: null };
+    assert.strictEqual(LB.resolveInProgressId(cur, fresh, null), 'local-only');
+    assert.strictEqual(LB.resolveInProgressId(cur, fresh, undefined), 'local-only');
+  });
+
   // ── sessionToRow keeps client-only fields out of the DB row ──────────────
   // agg* / entries are attached at load time; writing them would 400 on
   // PostgREST (no such columns) and break the sync retry loop.

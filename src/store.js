@@ -89,6 +89,18 @@ async function foodLogUpsertWithFkFallback(rows) {
   return await _supabase.from('zane_food_logs').upsert(noFood.map(r => ({ ...r, recipe_id: null })));
 }
 
+// Same self-heal as foodLogUpsertWithFkFallback above, but for
+// zane_food_favorites: a favorite whose food_id points at a zane_foods row
+// that was never actually cached server-side hits 23503 on every sync retry
+// forever, with nothing to ever null it out. Only one fallback tier is needed
+// here since favorites have no recipe_id column, only food_id.
+async function foodFavoriteUpsertWithFkFallback(rows) {
+  const res = await _supabase.from('zane_food_favorites').upsert(rows);
+  if (!res?.error || res.error.code !== '23503') return res;
+  const noFood = rows.map(r => ({ ...r, food_id: null }));
+  return await _supabase.from('zane_food_favorites').upsert(noFood);
+}
+
 async function unwrap(builder) {
   const res = await builder;
   if (res && res.error) {
@@ -1337,16 +1349,6 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
 
   const sett = settRes.data || {};
 
-  // Sessions with no ended timestamp that aren't the current in-progress
-  // session are orphans (app crashed / closed mid-session). Delete them now.
-  // Skip for coach loads, we must not clean up a client's in-progress session.
-  const orphanIds = isCoachLoad ? [] : (sessRes.data || [])
-    .filter(s => s.ended === null && s.id !== sett.in_progress_session_id)
-    .map(s => s.id);
-  if (orphanIds.length) {
-    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
-  }
-
   // getSession() reads the session straight from local storage (no network);
   // getUser() revalidates the token against the Auth server, a full round-trip
   // serialized AFTER the whole query batch, just to read the email (which the
@@ -1379,6 +1381,31 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const exerciseBests = {};
   for (const r of (bestsRes?.data || [])) {
     if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
+  }
+
+  // Sessions with no ended timestamp that aren't the current in-progress
+  // session are orphans (app crashed / closed mid-session, or a stale local
+  // pointer a multi-device boot merge trusted over the server). Delete only
+  // the ones that are genuinely empty and untouched: a session with real
+  // logged data, entries within the boot window (entriesBySession) or the
+  // exercise_count aggregate for one that fell outside it (get_session_stats,
+  // same aggExercises > 0 signal docs/internals.md's History-Windowing
+  // section uses to tell a windowed-but-real session apart from a genuinely
+  // empty one), is left alone instead of hard-deleted: either a genuinely
+  // active device keeps syncing it, or the auto-close-sessions cron ends it
+  // later via its own timeout. Skip for coach loads, we must not clean up a
+  // client's in-progress session. Runs here (not right after settRes is read)
+  // because it needs entriesBySession/statsBySession, built just above.
+  const orphanIds = isCoachLoad ? [] : (sessRes.data || [])
+    .filter(s => {
+      if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
+      const entryRows = entriesBySession[s.id];
+      const stats = statsBySession[s.id];
+      return !(entryRows && entryRows.length > 0) && !(stats && stats.exercise_count > 0);
+    })
+    .map(s => s.id);
+  if (orphanIds.length) {
+    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
   }
 
   const result = {
@@ -2073,7 +2100,7 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodFavorites !== next.foodFavorites) {
     const { upsert, removed } = diffCollectionById(prev.foodFavorites, next.foodFavorites);
-    if (upsert.length) ops.push(_supabase.from('zane_food_favorites').upsert(upsert.map(f => ({
+    if (upsert.length) ops.push(foodFavoriteUpsertWithFkFallback(upsert.map(f => ({
       id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
       brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
       calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
@@ -2432,7 +2459,6 @@ async function syncStore(prev, next, userId) {
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
-      in_progress_session_id: next.inProgress ?? null,
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
@@ -2452,6 +2478,15 @@ async function syncStore(prev, next, userId) {
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
     if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    // in_progress_session_id gets the SAME gated treatment as the plan-position
+    // fields above, for the same reason: it's a pointer another device (or this
+    // device's own boot merge, see app.jsx's LB.resolveInProgressId) may set to
+    // a fresher value than what this flush's next holds. Used to be written
+    // unconditionally on every flush, so a device that merely opened the app
+    // (its cached inProgress unchanged from base) could still overwrite a
+    // session actively running on another device, orphaning it for the next
+    // load's cleanup to hard-delete.
+    if (prev.inProgress !== next.inProgress) settingsRow.in_progress_session_id = next.inProgress ?? null;
     // Water tracker config gets the SAME gated treatment as the plan-position
     // fields above, for the same reason: it must propagate across devices
     // (app.jsx's boot-merge WATER_SYNC_KEYS gives the READ side this
@@ -4235,6 +4270,22 @@ function withCarriedWindowEntries(freshSessions, baseSessions) {
       ? { ...s, entries: baseEntries.get(s.id) }
       : s
   );
+}
+
+// Boot merge helper for the in-progress-session pointer, extracted (like
+// mergeSessions above it) so this exact bug class is unit-tested: keep the
+// local (cur) value only if it actually differs from base, the last
+// confirmed-synced snapshot for THIS device, otherwise trust fresh (the
+// server). No base (legacy cache) → keep cur, matching every other no-base
+// fallback in the boot merge. Blindly trusting cur whenever it merely has an
+// `inProgress` key, true for every cached store, let a second device that
+// never started a session (or whose cache still held a stale local null)
+// overwrite the server's pointer to a session actively running on a first
+// device just by opening the app; the next load then treated that
+// still-open session as an orphan and deleted it, cascading away real
+// logged sets.
+function resolveInProgressId(cur, fresh, base) {
+  return (!base || cur.inProgress !== base.inProgress) ? cur.inProgress : fresh.inProgress;
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
@@ -8555,7 +8606,7 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
-  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
+  loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
