@@ -1846,12 +1846,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
             </div>
-            <Field label="Warn when below" accent style={{ marginBottom: 6 }}>
+            <Field label={`Warn when below (${medSheet.unitLabel || 'units'})`} accent style={{ marginBottom: 6 }}>
               <input value={medSheet.lowStockThresholdStr} onChange={e => setMedSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
             </Field>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
-              Running Low fires under this amount of {medSheet.unitLabel || 'units'}. Defaults to one package, raise it for anything that runs out faster than a package lasts.
+              Running Low fires under this. Defaults to one package, raise it for anything that runs out faster than a package lasts.
             </div>
             <div style={{ marginBottom: 14 }}>
               <Row label="Exclude from pillbox" first>
