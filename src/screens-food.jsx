@@ -747,7 +747,8 @@ function fdWriteLowStockAcks(v) {
 // down to a misleading 0.
 // The numeric half of fdRoundShoppingQty below, split out so a caller that
 // needs an actual gram amount (not a formatted display string) shares the
-// exact same rounding, e.g. markBought's inventory write further below.
+// exact same rounding, e.g. openBoughtPrompt's suggested quantity further
+// below (a starting point the user can still edit before it hits inventory).
 function fdRoundShoppingQtyG(grams) {
   if (!(grams > 0)) return 0;
   const unit = grams < 50 ? 5 : 25;
@@ -800,9 +801,10 @@ function fdFormatShoppingQty(grams, packageSizeG) {
 // The actual purchasable quantity in grams behind fdFormatShoppingQty's
 // headline above: whole packages only with a package size (you can't buy
 // half a pack), the same rounded estimate as fdRoundShoppingQty without
-// one. Shared with markBought below so the number written to inventory on
-// "bought it" is always exactly what the row's headline just showed, never
-// a silently different raw estimate.
+// one. Shared with openBoughtPrompt below so the "bought it" popup always
+// starts pre-filled with exactly what the row's headline just showed, never
+// a silently different raw estimate, though the user can still edit it from
+// there before it actually hits inventory.
 function fdShoppingBuyQtyG(grams, packageSizeG) {
   return packageSizeG > 0 ? Math.max(1, Math.ceil((grams || 0) / packageSizeG)) * packageSizeG : fdRoundShoppingQtyG(grams);
 }
@@ -829,7 +831,7 @@ function fdWriteShoppingDays(v) {
 // identity snapshot, like zane_food_logs/zane_food_favorites already do;
 // they don't count towards isDefault, a food's own name never keeps an
 // otherwise-empty row alive by itself. Every live call site (saveEdit,
-// markBought) always includes the item's current foodName/brand in
+// confirmBoughtPrompt) always includes the item's current foodName/brand in
 // patch, this is the only place that writes this table, so the snapshot can
 // never silently go stale relative to what the list itself shows for the
 // same key. Needed so the Inventory tab (fdBuildInventoryList) can show a
@@ -6499,28 +6501,62 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // preference: local and this-visit-only, always starts empty (see the
   // effect below), separate from the exclude/include concept entirely now
   // (that moved into the edit sheet, see excludeDraft above). Checking an
-  // item writes fdShoppingBuyQtyG's quantity, exactly what the row's
-  // headline shows, into inventory tracking straight away, on top of
-  // whatever was already on hand (not a replacement: a partial pack left
-  // over from before this trip is still real stock), stamping a fresh
-  // stockSetAt like every other stock write in this screen. One-way: there's
-  // no recorded "amount just added" to subtract back out, so unchecking only
-  // clears the local mark, it does not undo the inventory write.
+  // item opens boughtPrompt below instead of writing straight away: the
+  // suggested quantity (fdShoppingBuyQtyG, exactly what the row's headline
+  // shows) is only ever a starting guess, nothing says you actually grabbed
+  // precisely that much off the shelf. Confirming there adds the (possibly
+  // edited) amount into inventory tracking, on top of whatever was already
+  // on hand (not a replacement: a partial pack left over from before this
+  // trip is still real stock), stamping a fresh stockSetAt like every other
+  // stock write in this screen. One-way: there's no recorded "amount just
+  // added" to subtract back out, so unchecking only clears the local mark,
+  // it does not undo the inventory write.
   const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
-  useEffectFd(() => { if (!open) setBoughtSet(new Set()); }, [open]);
-  function markBought(item, bought) {
+  const [boughtPrompt, setBoughtPrompt] = useStateFd(null); // { item, packsStr, gramsStr } | null
+  useEffectFd(() => { if (!open) { setBoughtSet(new Set()); setBoughtPrompt(null); } }, [open]);
+  function unmarkBought(item) {
     setBoughtSet(prev => {
       const next = new Set(prev);
-      if (bought) next.add(item.key); else next.delete(item.key);
+      next.delete(item.key);
       return next;
     });
-    if (!bought) return;
-    const qty = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
+  }
+  // Package-aware like the edit sheet's own stock fields further down: with a
+  // package size, packs is the natural unit to buy in (same reasoning
+  // fdShoppingBuyQtyG itself rounds up to, you can't buy half a pack), plain
+  // grams otherwise. Pre-filled with fdShoppingBuyQtyG's own suggestion, so
+  // confirming without touching anything reproduces the old
+  // straight-to-inventory behavior exactly, editing it is purely opt-in.
+  function openBoughtPrompt(item) {
+    const hasPkg = item.packageSizeG > 0;
+    const suggestedG = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
+    setBoughtPrompt({
+      item,
+      packsStr: hasPkg ? String(suggestedG / item.packageSizeG) : '',
+      gramsStr: hasPkg ? '' : String(suggestedG),
+    });
+  }
+  function closeBoughtPrompt() { setBoughtPrompt(null); }
+  function fdBoughtPromptQtyG(p) {
+    if (!p) return null;
+    if (p.item.packageSizeG > 0) {
+      const packs = fdNum(p.packsStr);
+      return packs > 0 ? fdClampQtyG(packs * p.item.packageSizeG) : null;
+    }
+    const g = fdNum(p.gramsStr);
+    return g > 0 ? fdClampQtyG(g) : null;
+  }
+  function confirmBoughtPrompt() {
+    const qty = fdBoughtPromptQtyG(boughtPrompt);
+    if (!(qty > 0)) return;
+    const item = boughtPrompt.item;
+    setBoughtSet(prev => new Set(prev).add(item.key));
     fdSetShoppingPref(setStore, item, {
       stockBaselineG: (item.effectiveStockG || 0) + qty,
       stockSetAt: new Date().toISOString(),
       foodName: item.foodName, brand: item.brand ?? null,
     });
+    setBoughtPrompt(null);
   }
   // Shared row for both includedList and excludedList below: same layout,
   // just dimmed once excluded. The checkbox is a sibling button next to the
@@ -6533,7 +6569,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // reason an excluded item never shows it either (see renderShoppingRow's
   // own check below): nothing on this trip's list to mark as bought, and
   // hasEstimate gates out low-stock fallback rows with no real buy quantity
-  // for markBought to work with in the first place.
+  // for openBoughtPrompt to work with in the first place.
   function renderShoppingRow(item, inventoryMode) {
     // grams is only ever > 0 for a real fdBuildShoppingList estimate (both its
     // history and projection paths filter out non-positive grams themselves);
@@ -6561,8 +6597,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         {!inventoryMode && !item.excluded && hasEstimate && (
           <FdCheckbox
             checked={bought}
-            label={bought ? 'Bought, added to inventory' : 'Mark as bought, add the suggested amount to inventory'}
-            onToggle={() => markBought(item, !bought)}
+            label={bought ? 'Bought, added to inventory' : 'Mark as bought, choose the quantity to add to inventory'}
+            onToggle={() => bought ? unmarkBought(item) : openBoughtPrompt(item)}
           />
         )}
         <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -7013,6 +7049,43 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           {(editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
           <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
         </div>
+      </Sheet>
+      {/* Short, single-purpose popup, not the full edit sheet above: the only
+          question here is "how much did you actually get", pre-filled with
+          fdShoppingBuyQtyG's suggestion (see openBoughtPrompt). One field,
+          confirm or cancel, nothing else to configure. */}
+      <Sheet open={!!boughtPrompt} onClose={closeBoughtPrompt} title={boughtPrompt?.item?.displayName || 'Mark as bought'} titleColor="var(--accent)">
+        {boughtPrompt && (() => {
+          const hasPkg = boughtPrompt.item.packageSizeG > 0;
+          const qty = fdBoughtPromptQtyG(boughtPrompt);
+          return (
+            <>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+                How much did you actually get? Added straight to your inventory.
+              </div>
+              {hasPkg ? (
+                <>
+                  <Field label={`Packs (${fdExactShoppingQty(boughtPrompt.item.packageSizeG)} each)`} accent style={{ marginBottom: 6 }}>
+                    <input value={boughtPrompt.packsStr} onChange={e => setBoughtPrompt(p => ({ ...p, packsStr: fdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 1" style={fdInputStyle} autoFocus />
+                  </Field>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
+                    {qty > 0 ? `= ${fdExactShoppingQty(qty)} total` : 'Enter how many packs you got.'}
+                  </div>
+                </>
+              ) : (
+                <Field label="Amount (g)" accent style={{ marginBottom: 16 }}>
+                  <input value={boughtPrompt.gramsStr} onChange={e => setBoughtPrompt(p => ({ ...p, gramsStr: fdDecimalFilter(e.target.value) }))}
+                    type="text" inputMode="decimal" placeholder="e.g. 500" style={fdInputStyle} autoFocus />
+                </Field>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={closeBoughtPrompt} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={confirmBoughtPrompt} disabled={!(qty > 0)} style={{ flex: 1 }}>Add to inventory</Btn>
+              </div>
+            </>
+          );
+        })()}
       </Sheet>
     </Screen>
   );
