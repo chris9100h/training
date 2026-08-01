@@ -1223,18 +1223,23 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function openStockSheet(med) {
     setStockSheet({ id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', packageSize: med.packageSize ?? null, stockStr: '', stockPacksStr: '', stockExtraStr: '' });
   }
+  // Same pack-aware resolution as screens-food.jsx's saveEdit: with a
+  // package size known, packs+extra wins if either was touched (e.g. "10
+  // packs + 18 IU" for a 36 IU/pack HGH kit = 378 IU), otherwise falls back
+  // to the plain single-quantity field. null means nothing meaningful has
+  // been typed at all (leave-unchanged on save). Shared by saveStockSheet
+  // below and the live total preview in the JSX further down, so what's
+  // shown while typing and what actually gets saved can never drift apart.
+  function mdStockSheetTotal(sheet) {
+    if (!sheet) return null;
+    if (sheet.packageSize > 0 && (sheet.stockPacksStr.trim() || sheet.stockExtraStr.trim())) {
+      return (mdNum(sheet.stockPacksStr) || 0) * sheet.packageSize + (mdNum(sheet.stockExtraStr) || 0);
+    }
+    return sheet.stockStr.trim() ? mdNum(sheet.stockStr) : null;
+  }
   function saveStockSheet() {
     if (!stockSheet) return;
-    // Same pack-aware resolution as screens-food.jsx's saveEdit: with a
-    // package size known, packs+extra wins if either was touched (e.g. "10
-    // packs + 18 IU" for a 36 IU/pack HGH kit = 378 IU), otherwise falls
-    // back to the plain single-quantity field.
-    let stockTyped = null;
-    if (stockSheet.packageSize > 0 && (stockSheet.stockPacksStr.trim() || stockSheet.stockExtraStr.trim())) {
-      stockTyped = (mdNum(stockSheet.stockPacksStr) || 0) * stockSheet.packageSize + (mdNum(stockSheet.stockExtraStr) || 0);
-    } else if (stockSheet.stockStr.trim()) {
-      stockTyped = mdNum(stockSheet.stockStr);
-    }
+    const stockTyped = mdStockSheetTotal(stockSheet);
     if (stockTyped != null) {
       const nowISO = new Date().toISOString();
       setStore(s => ({
@@ -1677,16 +1682,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               // one on top of sealed ones) beats guessing a single number.
               // Either field alone still works. Same combo as the Food
               // Tracker's own stock update (screens-food.jsx).
-              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
-                  <input value={stockSheet.stockPacksStr} onChange={e => setStockSheet(d => ({ ...d, stockPacksStr: mdDecimalFilter(e.target.value) }))}
-                    type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} autoFocus />
-                </Field>
-                <Field label={`+ ${stockSheet.unitLabel || 'pills'}`} accent style={{ flex: 1, marginBottom: 0 }}>
-                  <input value={stockSheet.stockExtraStr} onChange={e => setStockSheet(d => ({ ...d, stockExtraStr: mdDecimalFilter(e.target.value) }))}
-                    type="text" inputMode="decimal" placeholder="e.g. 18" style={mdInputStyle} />
-                </Field>
-              </div>
+              <>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
+                    <input value={stockSheet.stockPacksStr} onChange={e => setStockSheet(d => ({ ...d, stockPacksStr: mdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} autoFocus />
+                  </Field>
+                  <Field label={`+ ${stockSheet.unitLabel || 'pills'}`} accent style={{ flex: 1, marginBottom: 0 }}>
+                    <input value={stockSheet.stockExtraStr} onChange={e => setStockSheet(d => ({ ...d, stockExtraStr: mdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 18" style={mdInputStyle} />
+                  </Field>
+                </div>
+                {/* Live confirmation of the packs+extra math while typing,
+                    same value saveStockSheet would actually write (both go
+                    through mdStockSheetTotal), only in packs mode: plain
+                    mode's single field already shows its own number, a
+                    "Total" restating it would be pure noise. */}
+                {mdStockSheetTotal(stockSheet) != null && (
+                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 12 }}>
+                    Total: <span className="num">{mdFmtQty(mdStockSheetTotal(stockSheet), stockSheet.unitLabel)}</span>
+                  </div>
+                )}
+              </>
             ) : (
               <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} accent style={{ marginBottom: 6 }}>
                 <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
