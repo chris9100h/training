@@ -4593,9 +4593,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Btn onClick={handleDescribeMeal} disabled={mealParsing || mealPhotoReading || (!mealDescription.trim() && !mealPhoto)} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
         </div>
       </Sheet>
-      {/* Hidden picker for the meal photo above: opens the native camera
-          (capture) or gallery on tap, same pattern as labelInputRef. */}
-      <input ref={mealPhotoInputRef} type="file" accept="image/*" capture="environment" onChange={handleMealPhotoFile} style={{ display: 'none' }} />
+      {/* Hidden picker for the meal photo above: no `capture` attribute
+          (unlike labelInputRef), a meal is often logged after the fact from
+          an already-taken photo, and `capture` steers mobile browsers toward
+          launching the camera directly, crowding out the library option. The
+          plain OS file picker still offers a camera shortcut alongside it. */}
+      <input ref={mealPhotoInputRef} type="file" accept="image/*" onChange={handleMealPhotoFile} style={{ display: 'none' }} />
 
       {/* ── Review list for a parsed meal-description batch: tap a row to
           adjust it (opens the quantity sheet above at zIndex 200), trash to
