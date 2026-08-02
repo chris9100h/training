@@ -13,6 +13,7 @@ const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
+const PARSE_MEAL_GROK_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-grok`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -727,7 +728,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_food_shopping_prefs').upsert(
       backup.foodShoppingPrefs.map(p => ({
         id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
-        excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+        excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null, package_size_g: p.packageSizeG ?? null,
+        low_stock_threshold_g: p.lowStockThresholdG ?? null,
         stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
         food_name: p.foodName, brand: p.brand ?? null,
         updated_at: p.updatedAt ?? new Date().toISOString(),
@@ -756,9 +758,17 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.medications.map(m => ({
         id: m.id, user_id: userId, name: m.name,
         brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
-        package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+        package_size: m.packageSize ?? null, low_stock_threshold: m.lowStockThreshold ?? null,
+        stock_baseline: m.stockBaseline ?? null,
         stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
         exclude_from_pillbox: !!m.excludeFromPillbox,
+        exclude_from_low_stock: !!m.excludeFromLowStock,
+        // A backup from before migration 0235 has no trackStock at all
+        // (undefined, not false): infer it from stock_baseline instead of
+        // defaulting to the now-opt-in false, a restored medication that
+        // was clearly already being tracked (it has a baseline) shouldn't
+        // silently vanish from Inventory just for predating this field.
+        track_stock: m.trackStock != null ? !!m.trackStock : m.stockBaseline != null,
         updated_at: m.updatedAt ?? new Date().toISOString(),
       }))
     ));
@@ -779,7 +789,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.medicationScheduleSlots.map(s => ({
         id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
         weekdays: s.weekdays || [],
-        hour: s.hour, dose_qty: s.doseQty,
+        hour: s.hour, dose_qty: s.doseQty, interval_days: s.intervalDays ?? null,
         start_date: s.startDate ?? null, end_date: s.endDate ?? null,
         updated_at: s.updatedAt ?? new Date().toISOString(),
       }))
@@ -1224,7 +1234,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // override, exclude flag, package size, stock baseline, identity
     // snapshot, own store only like the rest of the Food Tracker's personal
     // collections above.
-    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, package_size_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, excluded_until, package_size_g, low_stock_threshold_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
     // Medications feature (migration 0218): own store only for the same
     // reason as the meal-plan collections above, isCoachLoad's own narrow
     // purpose (loadClientStore, only ever used to safely append a pushed
@@ -1233,8 +1243,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
     isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
-    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
@@ -1525,7 +1535,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     foodShoppingPrefs: (foodShoppingPrefsRes?.data || []).map(p => ({
       id: p.id, foodId: p.food_id, shoppingKey: p.shopping_key, nameOverride: p.name_override ?? null, excluded: !!p.excluded,
+      excludedUntil: p.excluded_until ?? null,
       packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
+      lowStockThresholdG: p.low_stock_threshold_g != null ? parseFloat(p.low_stock_threshold_g) : null,
       stockBaselineG: p.stock_baseline_g != null ? parseFloat(p.stock_baseline_g) : null,
       stockSetAt: p.stock_set_at ?? null, foodName: p.food_name, brand: p.brand ?? null,
       createdAt: p.created_at, updatedAt: p.updated_at,
@@ -1538,16 +1550,18 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: m.id, name: m.name, brand: m.brand ?? null,
       category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      lowStockThreshold: m.low_stock_threshold != null ? parseFloat(m.low_stock_threshold) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
       excludeFromPillbox: !!m.exclude_from_pillbox,
+      excludeFromLowStock: !!m.exclude_from_low_stock, trackStock: !!m.track_stock,
       createdAt: m.created_at, updatedAt: m.updated_at,
     })),
     medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
       id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
       weekdays: s.weekdays || [],
       hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
-      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      intervalDays: s.interval_days ?? null, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
       createdAt: s.created_at, updatedAt: s.updated_at,
     })),
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
@@ -2155,7 +2169,8 @@ async function syncStore(prev, next, userId) {
     // it forever (same pattern as zane_checkins below).
     if (upsert.length) ops.push(_supabase.from('zane_food_shopping_prefs').upsert(upsert.map(p => ({
       id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
-      excluded: !!p.excluded, package_size_g: p.packageSizeG ?? null,
+      excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null, package_size_g: p.packageSizeG ?? null,
+      low_stock_threshold_g: p.lowStockThresholdG ?? null,
       stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
       food_name: p.foodName, brand: p.brand ?? null,
       updated_at: p.updatedAt ?? new Date().toISOString(),
@@ -2183,9 +2198,11 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) preOps.push(_supabase.from('zane_medications').upsert(upsert.map(m => ({
       id: m.id, user_id: userId, name: m.name,
       brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
-      package_size: m.packageSize ?? null, stock_baseline: m.stockBaseline ?? null,
+      package_size: m.packageSize ?? null, low_stock_threshold: m.lowStockThreshold ?? null,
+      stock_baseline: m.stockBaseline ?? null,
       stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
       exclude_from_pillbox: !!m.excludeFromPillbox,
+      exclude_from_low_stock: !!m.excludeFromLowStock, track_stock: !!m.trackStock,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medications').delete().in('id', removed.map(m => m.id)));
@@ -2200,7 +2217,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) preOps.push(_supabase.from('zane_medication_schedule_slots').upsert(upsert.map(s => ({
       id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
       weekdays: s.weekdays || [],
-      hour: s.hour, dose_qty: s.doseQty,
+      hour: s.hour, dose_qty: s.doseQty, interval_days: s.intervalDays ?? null,
       start_date: s.startDate ?? null, end_date: s.endDate ?? null,
       updated_at: s.updatedAt ?? new Date().toISOString(),
     }))));
@@ -2632,14 +2649,31 @@ async function scanLabel(imageBase64, mimeType, provider) {
   return { ok: true, label: data };
 }
 
-// Parses a free-text meal description (via the parse-meal edge function) into
-// estimated food items for FoodScreen's "Describe a meal" sheet. Same
+// Parses a free-text meal description, an optional photo of the meal, or
+// both, into estimated food items for FoodScreen's "Describe a meal" sheet.
+// `photo`, when given, is `{ base64, mimeType }` (same shape fdDownscaleImage
+// returns, same contract scanLabel's image argument uses), optional, may be
+// null/undefined for the text-only path. At least one of description/photo
+// must be present, the edge function 400s otherwise. `previousItems`, when
+// given a non-empty array, is `{ name, quantityG, protein, carbs, fat,
+// fiber, sugar, satFat, sodiumMg }[]` (no calories, those are always
+// derived) describing a prior estimate; the edge function then revises that
+// estimate using the new description as the correction instead of guessing
+// from scratch, optional, may be null/undefined for a fresh estimate. Two
+// interchangeable backends share the exact same request/response contract,
+// see logbook-meal-parser-provider in CLAUDE.md's localStorage-keys list for
+// how the client picks one: 'claude' (Anthropic, parse-meal, the
+// long-standing default) or 'grok' (xAI Grok, parse-meal-grok). Same
 // contract shape as scanLabel/searchFoods: never throws, { ok: false, error }
 // on any failure. Items are handed back plain (name/quantityG/calories/
 // protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
 // exactly like a manually-typed Custom Item, nothing is written here.
-async function parseMealText(description) {
-  const res = await fnFetch(PARSE_MEAL_URL, { description });
+async function parseMealText(description, provider, photo, previousItems) {
+  const url = provider === 'grok' ? PARSE_MEAL_GROK_URL : PARSE_MEAL_URL;
+  const body = { description };
+  if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
+  if (Array.isArray(previousItems) && previousItems.length) { body.previousItems = previousItems; }
+  const res = await fnFetch(url, body);
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
@@ -6262,8 +6296,8 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
@@ -6321,16 +6355,18 @@ async function refreshHealthLogs(userId) {
       id: m.id, name: m.name, brand: m.brand ?? null,
       category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
       packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+      lowStockThreshold: m.low_stock_threshold != null ? parseFloat(m.low_stock_threshold) : null,
       stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null,
       stockSetAt: m.stock_set_at ?? null, archived: !!m.archived,
       excludeFromPillbox: !!m.exclude_from_pillbox,
+      excludeFromLowStock: !!m.exclude_from_low_stock, trackStock: !!m.track_stock,
       createdAt: m.created_at, updatedAt: m.updated_at,
     })),
     medicationScheduleSlots: (medicationScheduleSlotsRes?.data || []).map(s => ({
       id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
       weekdays: s.weekdays || [],
       hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
-      startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+      intervalDays: s.interval_days ?? null, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
       createdAt: s.created_at, updatedAt: s.updated_at,
     })),
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
@@ -6351,12 +6387,18 @@ async function refreshHealthLogs(userId) {
 // ── AI Daily Summary (ai-daily-summary Edge Function) ───────────────────────
 // Self-contained copy of screens-medications.jsx's mdSlotAppliesOn: that file
 // isn't loaded by store.test.cjs's sandbox, and this needs to run there too.
+// Keep both in sync on every change to this logic (migration 0237's
+// interval_days mode included).
 function dsSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
   if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (!(slot.weekdays || []).includes(wd)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
   if (slot.endDate && dateISO > slot.endDate) return false;
-  return true;
+  if (slot.intervalDays > 0) {
+    if (!slot.startDate) return false;
+    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
+    return daysSince % slot.intervalDays === 0;
+  }
+  return (slot.weekdays || []).includes(wd);
 }
 function dsShiftDate(dateStr, deltaDays) {
   const d = new Date(dateStr + 'T12:00:00');

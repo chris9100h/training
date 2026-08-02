@@ -181,6 +181,19 @@ function fdWriteScannerProvider(v) {
   try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
   try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
 }
+// Same idea as the label-scanner provider above, one per-device setting
+// (localStorage key logbook-meal-parser-provider) for "Describe a meal"'s own
+// two interchangeable backends. No broadcast needed here unlike the scanner:
+// this sheet only ever has the one mount point (FoodScreen), not a second one
+// like the ingredient picker's search tab, so a plain per-mount useState
+// seeded from this can't drift out of sync with itself.
+function fdReadMealParserProvider() {
+  try { return localStorage.getItem('logbook-meal-parser-provider') || 'claude'; }
+  catch (_) { return 'claude'; }
+}
+function fdWriteMealParserProvider(v) {
+  try { localStorage.setItem('logbook-meal-parser-provider', v); } catch (_) {}
+}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -637,16 +650,35 @@ function fdEffectiveStockG(pref, foodLogs, todayISO) {
 // and the pref row's own shopping_key (migration 0227) use, so a
 // recipe-exploded ingredient or Custom Item with no real foodId still finds
 // its pref row via a normalized-name fallback instead of never matching one.
+// A fixed-duration "snooze": excluded_until N days from right now. Presets
+// only (1 week/2 weeks/1 month in the edit sheet below), no date picker, so
+// plain day counts are enough, no calendar-month edge cases to worry about.
+function fdSnoozeUntil(days) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
 function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
   const byKey = new Map((prefs || []).map(p => [p.shoppingKey, p]));
+  const now = new Date();
   const out = list.map(item => {
     const pref = byKey.get(item.key);
+    // Only surfaced while still in the future: an expired snooze is exactly
+    // as inert as no snooze at all, both for bucketing (excluded below) and
+    // for what the edit sheet shows as "currently active".
+    const tempExcludedUntil = (pref?.excludedUntil && new Date(pref.excludedUntil) > now) ? pref.excludedUntil : null;
     return {
       ...item,
       displayName: pref?.nameOverride || item.foodName,
       overridden: !!pref?.nameOverride,
-      excluded: !!pref?.excluded,
+      excluded: !!pref?.excluded || !!tempExcludedUntil,
+      // The raw permanent flag, kept distinct from the effective `excluded`
+      // above: the edit sheet's exclude picker needs to know specifically
+      // whether THIS item is permanently excluded (to pre-select that
+      // segment), not just "is it excluded at all" (which a temp snooze
+      // alone would also satisfy).
+      permanentExcluded: !!pref?.excluded,
+      tempExcludedUntil,
       packageSizeG: pref?.packageSizeG ?? null,
+      lowStockThresholdG: pref?.lowStockThresholdG ?? null,
       stockSetAt: pref?.stockSetAt ?? null,
       effectiveStockG: fdEffectiveStockG(pref, foodLogs, todayISO),
     };
@@ -676,6 +708,7 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
       overridden: !!p.nameOverride,
       excluded: !!p.excluded,
       packageSizeG: p.packageSizeG ?? null,
+      lowStockThresholdG: p.lowStockThresholdG ?? null,
       stockSetAt: p.stockSetAt,
       effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
       grams: 0,
@@ -683,11 +716,27 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
-// Below one package's worth: only meaningful with both a package size and
-// stock tracking enabled (see fdApplyShoppingPrefs), a food with either
-// missing has nothing to compare its stock against.
+// Below the effective threshold: lowStockThresholdG (migration 0232) when
+// set, package size otherwise, only meaningful with stock tracking enabled
+// (see fdApplyShoppingPrefs), a food with neither a threshold nor a package
+// size has nothing to compare its stock against. The override exists
+// because "below one package" alone fires too late for a food that gets
+// eaten through faster than one package lasts, by the time it dips under
+// package_size_g there might be nothing left at all.
 function fdIsLowStock(item) {
-  return item.packageSizeG > 0 && item.effectiveStockG != null && item.effectiveStockG < item.packageSizeG;
+  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG < threshold;
+}
+// The logical complement of fdIsLowStock above, same threshold precondition:
+// tracked stock, a real threshold to compare against, and currently above
+// it. Without either (no stock tracked at all, or tracked but no threshold
+// ever set) this is false, not true, on purpose, a food with nothing to
+// compare its stock against has no basis for "you have enough" either, and
+// silently hiding it from the buy list while it might genuinely be at zero
+// would be worse than just estimating demand for it like an untracked food.
+function fdIsWellStocked(item) {
+  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  return threshold > 0 && item.effectiveStockG != null && !fdIsLowStock(item);
 }
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
 // user has already seen the Running Low banner for, keyed by foodId ->
@@ -709,14 +758,22 @@ function fdWriteLowStockAcks(v) {
 // exactly "nearest 100g" once expressed in kg, reused rather than writing a
 // second decimal-rounding rule). Never rounds a genuinely non-zero amount
 // down to a misleading 0.
+// The numeric half of fdRoundShoppingQty below, split out so a caller that
+// needs an actual gram amount (not a formatted display string) shares the
+// exact same rounding, e.g. openBoughtPrompt's suggested quantity further
+// below (a starting point the user can still edit before it hits inventory).
+function fdRoundShoppingQtyG(grams) {
+  if (!(grams > 0)) return 0;
+  const unit = grams < 50 ? 5 : 25;
+  return Math.round(grams / unit) * unit || unit;
+}
 function fdRoundShoppingQty(grams) {
-  if (!(grams > 0)) return '0g';
   // Rounds to the nearest 5/25 FIRST, then checks the rounded value against
   // the 1000g cutoff, not the raw one: deciding off the raw value let
   // something like 990g round up to 1000g but still print as "1000g"
   // instead of switching to "1kg".
-  const unit = grams < 50 ? 5 : 25;
-  const rounded = Math.round(grams / unit) * unit || unit;
+  const rounded = fdRoundShoppingQtyG(grams);
+  if (!rounded) return '0g';
   if (rounded >= 1000) return `${fdRound1(rounded / 1000)}kg`;
   return `${rounded}g`;
 }
@@ -754,6 +811,16 @@ function fdFormatShoppingQty(grams, packageSizeG) {
   const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
   return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
 }
+// The actual purchasable quantity in grams behind fdFormatShoppingQty's
+// headline above: whole packages only with a package size (you can't buy
+// half a pack), the same rounded estimate as fdRoundShoppingQty without
+// one. Shared with openBoughtPrompt below so the "bought it" popup always
+// starts pre-filled with exactly what the row's headline just showed, never
+// a silently different raw estimate, though the user can still edit it from
+// there before it actually hits inventory.
+function fdShoppingBuyQtyG(grams, packageSizeG) {
+  return packageSizeG > 0 ? Math.max(1, Math.ceil((grams || 0) / packageSizeG)) * packageSizeG : fdRoundShoppingQtyG(grams);
+}
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
 // default on a fresh device. Unlike logbook-label-scanner-provider this has
@@ -777,7 +844,7 @@ function fdWriteShoppingDays(v) {
 // identity snapshot, like zane_food_logs/zane_food_favorites already do;
 // they don't count towards isDefault, a food's own name never keeps an
 // otherwise-empty row alive by itself. Every live call site (saveEdit,
-// toggleExclusion) always includes the item's current foodName/brand in
+// confirmBoughtPrompt) always includes the item's current foodName/brand in
 // patch, this is the only place that writes this table, so the snapshot can
 // never silently go stale relative to what the list itself shows for the
 // same key. Needed so the Inventory tab (fdBuildInventoryList) can show a
@@ -797,8 +864,13 @@ function fdSetShoppingPref(setStore, item, patch) {
   setStore(s => {
     const list = s.foodShoppingPrefs || [];
     const existing = list.find(p => p.shoppingKey === key);
-    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, packageSizeG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
-    const isDefault = !merged.nameOverride && !merged.excluded && merged.packageSizeG == null && merged.stockBaselineG == null;
+    const merged = { ...(existing || { id: LB.uid(), shoppingKey: key, foodId: item.foodId || null, nameOverride: null, excluded: false, excludedUntil: null, packageSizeG: null, lowStockThresholdG: null, stockBaselineG: null, stockSetAt: null, foodName: null, brand: null }), ...patch };
+    // An expired excludedUntil is as meaningless as a null one here: without
+    // this check, a snoozed item whose date has already passed would keep
+    // this row alive forever (never eligible for the delete-when-default
+    // cleanup below) even after it has no actual effect on the list anymore.
+    const tempStillActive = merged.excludedUntil && new Date(merged.excludedUntil) > new Date();
+    const isDefault = !merged.nameOverride && !merged.excluded && !tempStillActive && merged.packageSizeG == null && merged.stockBaselineG == null && merged.lowStockThresholdG == null;
     const next = isDefault
       ? list.filter(p => p.shoppingKey !== key)
       : existing
@@ -1063,7 +1135,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
+  // Which AI reads the free-text description: 'claude' (parse-meal, the
+  // long-standing default) or 'grok' (parse-meal-grok), same request/
+  // response contract either way. Per-device only, not a synced setting:
+  // this is a comparison toggle, not a user-facing preference.
+  const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
+  // Optional photo attached alongside (or instead of) mealDescription: { base64,
+  // mimeType }, same shape fdDownscaleImage returns, or null when none is
+  // attached. Text and photo are independently optional, "Estimate" only needs
+  // one of the two; when both are given the edge function treats the text as
+  // authoritative for whatever the photo alone can't show (exact size, hidden
+  // ingredients, and so on).
+  const [mealPhoto, setMealPhoto] = useStateFd(null);
+  // True only during the brief client-side read+downscale of a just-picked
+  // file, not during the network request (mealParsing covers that).
+  const [mealPhotoReading, setMealPhotoReading] = useStateFd(false);
+  const mealPhotoInputRef = useRefFd(null);
+  // Reiterate history: mealDescription is the original description and never
+  // changes again once the first estimate lands, mealReiterations is every
+  // past correction text that was actually sent (oldest first), and
+  // mealReiterateDraft is whatever is being typed for the next one. The
+  // Review sheet shows mealDescription and mealReiterations read-only and
+  // always keeps one empty field (mealReiterateDraft) ready underneath.
+  const [mealReiterations, setMealReiterations] = useStateFd([]);
+  const [mealReiterateDraft, setMealReiterateDraft] = useStateFd('');
+  // The prompt history and "Add a note" field live in their own sub-sheet
+  // (zIndex 200, opened from the Review meal Sheet) so the review list
+  // itself stays compact instead of growing with every reiteration.
+  const [mealRefineOpen, setMealRefineOpen] = useStateFd(false);
   // tempId of the mealItems row currently open in the quantity sheet, or null
   // for every other reason that sheet opens (fresh add / re-editing an
   // already-logged entry). Lets confirmLogFood route "Save" back into this
@@ -1575,14 +1675,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // scrolling back to an old day after a later macro change would show it
     // measured against TODAY's numbers here, while the Health tab's card for
     // that same day (which reads the frozen dailyLogs.adherence first)
-    // correctly kept showing the historical one. Today and future days have
-    // no snap yet, so they fall through to the live target as before.
-    const snap = dayLog?.targetsSnap;
+    // correctly kept showing the historical one. Today is explicitly
+    // excluded even when a snap already exists (the food reconciler effect
+    // or a flex day-type pick can freeze one for today too): today isn't
+    // history yet and must keep tracking the live target for as long as the
+    // day is still in progress, e.g. self-coached macros configured after
+    // already logging food earlier today. Future days have no snap either,
+    // so they fall through to the live target the same way.
+    const snap = curDate !== today ? dayLog?.targetsSnap : null;
     const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
     if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
     return LB.dayTargetFromMacros(macroTargets, isTraining);
-  }, [store, macroTargets, curDate, dayLog]);
+  }, [store, macroTargets, curDate, dayLog, today]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
   // Same weighted-macro-distance formula HealthScreen's today card uses
   // (LB.macroAdherence), computed live off dayTotals rather than reading
@@ -2853,32 +2958,112 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
 
-  // "Describe a meal": free text -> parse-meal edge function estimates macros
-  // per item -> each becomes its own staged entry, reviewed the same way as
-  // every other add path (the docked staged panel already handles quantity/
-  // macro review and per-item removal, nothing bespoke needed here). Guards
-  // against closing mid-request so a cancel can't silently stage items into
-  // a sheet the user already thinks they backed out of.
+  // "Describe a meal": free text, an attached photo, or both -> parse-meal
+  // edge function estimates macros per item -> each becomes its own staged
+  // entry, reviewed the same way as every other add path (the docked staged
+  // panel already handles quantity/macro review and per-item removal,
+  // nothing bespoke needed here). Guards against closing mid-request so a
+  // cancel can't silently stage items into a sheet the user already thinks
+  // they backed out of. A cancel keeps the draft text/photo around (matches
+  // every other sheet's cancel behavior in this file); the draft actually
+  // persists all the way through the review flow too (see clearMealDraft
+  // below), so it is still there if the user wants to reiterate.
   function closeMealDescribeSheet() {
     if (mealParsing) return;
     setMealDescribeOpen(false);
   }
-  async function handleDescribeMeal() {
-    const text = mealDescription.trim();
-    if (!text) return;
-    setMealParsing(true);
-    setMealParseError(null);
-    const res = await LB.parseMealText(text);
-    setMealParsing(false);
-    if (!res.ok) { setMealParseError(res.error); return; }
-    if (!res.items.length) { setMealParseError('Could not find any food in that description. Try rephrasing, or add it manually.'); return; }
-    setMealItems(res.items.map(it => ({
+  // Shared shape between a fresh estimate and a reiterate: the edge
+  // function's { name, quantityG, protein, carbs, fat, fiber, sugar, satFat,
+  // sodiumMg } items become mealItems rows with a fresh tempId each. Kept in
+  // one place so a field added or renamed later cannot be updated in one
+  // call site and forgotten in the other.
+  function mapParsedMealItems(items) {
+    return items.map(it => ({
       tempId: LB.uid(), foodName: it.name,
       quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
       fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
-    })));
+    }));
+  }
+  // Downscales a picked photo client-side (same fdDownscaleImage helper the
+  // label scanner uses) and stages it on mealPhoto; the network call only
+  // fires once the user taps "Estimate", so this just attaches, it never
+  // submits by itself.
+  async function handleMealPhotoFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setMealParseError(null);
+    setMealPhotoReading(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      setMealPhotoReading(false);
+      if (!base64) { setMealParseError('Could not read that image. Try again.'); return; }
+      setMealPhoto({ base64, mimeType });
+    } catch (_) {
+      setMealPhotoReading(false);
+      setMealParseError('Could not read that image. Try again.');
+    }
+  }
+  function removeMealPhoto() {
+    setMealPhoto(null);
+  }
+  async function handleDescribeMeal() {
+    const text = mealDescription.trim();
+    if (!text && !mealPhoto) return;
+    setMealParsing(true);
+    setMealParseError(null);
+    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto);
+    setMealParsing(false);
+    if (!res.ok) { setMealParseError(res.error); return; }
+    if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
+    setMealItems(mapParsedMealItems(res.items));
     setMealDescribeOpen(false);
+  }
+  // The draft description/photo now persist through the whole review flow
+  // (handleReiterateMeal below needs them around for another pass), so
+  // there's one shared place that actually clears them once the flow
+  // genuinely ends, instead of handleDescribeMeal clearing them the moment
+  // the first estimate lands.
+  function clearMealDraft() {
     setMealDescription('');
+    setMealPhoto(null);
+    setMealReiterations([]);
+    setMealReiterateDraft('');
+    setMealRefineOpen(false);
+  }
+  // "Reiterate" in the Refine sub-sheet: mealReiterateDraft (the note being
+  // typed for this round, not the original mealDescription, which stays
+  // fixed as history once shown) plus the same photo, paired with the
+  // current mealItems (as previousItems) so the edge function revises that
+  // estimate using the new text as a correction, rather than guessing from
+  // scratch again. On success the draft becomes another read-only history
+  // entry, the field empties for next time, and the sub-sheet itself closes
+  // so the Review sheet underneath is immediately visible with the fresh
+  // result, instead of leaving the user staring at their own now-stale note.
+  async function handleReiterateMeal() {
+    const text = mealReiterateDraft.trim();
+    if (!text && !mealPhoto) return;
+    setMealParsing(true);
+    setMealParseError(null);
+    const previousItems = (mealItems || []).map(i => ({
+      name: i.foodName, quantityG: i.quantityG, protein: i.protein, carbs: i.carbs, fat: i.fat,
+      fiber: i.fiber, sugar: i.sugar, satFat: i.satFat, sodiumMg: i.sodiumMg,
+    }));
+    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto, previousItems);
+    setMealParsing(false);
+    if (!res.ok) { setMealParseError(res.error); return; }
+    if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
+    setMealItems(mapParsedMealItems(res.items));
+    if (text) setMealReiterations(list => [...list, text]);
+    setMealReiterateDraft('');
+    setMealRefineOpen(false);
+  }
+  // Guards against dismissing the Refine sub-sheet mid-request, same reason
+  // and pattern as closeMealDescribeSheet: a stray close during the fetch
+  // must not leave the user unsure whether their note actually went out.
+  function closeMealRefineSheet() {
+    if (mealParsing) return;
+    setMealRefineOpen(false);
   }
   // Opens one mealItems row in the normal custom-item quantity sheet
   // (openCustomAsScalable, same one a re-logged custom entry reopens
@@ -2894,19 +3079,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   function removeMealItem(tempId) {
     // Nulls out (not []) once the last row is gone, so the review Sheet
-    // (open={mealItems != null}) closes itself instead of lingering empty.
-    setMealItems(list => {
-      const next = (list || []).filter(i => i.tempId !== tempId);
-      return next.length ? next : null;
-    });
+    // (open={mealItems != null}) closes itself instead of lingering empty;
+    // that's also a genuine end of the review flow, so the draft clears too.
+    const next = (mealItems || []).filter(i => i.tempId !== tempId);
+    if (!next.length) { clearMealDraft(); setMealItems(null); return; }
+    setMealItems(next);
   }
   // Cancel/backdrop/back on the review list: same "won't be added" dirty
   // check requestLeaveFood uses for the main staged batch, scoped to just
   // this not-yet-staged meal-description batch.
   async function requestCloseMealReview() {
+    if (mealParsing) return;
     const n = mealItems?.length || 0;
     if (n && !await confirm(`${n} item${n === 1 ? '' : 's'} from your description won't be added.`, { title: 'Discard items?', ok: 'Discard', cancel: 'Keep reviewing', danger: true })) return;
     setMealItems(null);
+    clearMealDraft();
   }
   // Blocks "Log it"/"Plan it"/"Add N items" while any row is still at a 0g
   // (or otherwise missing) amount: editMealItem (via openCustomAsScalable)
@@ -2920,6 +3107,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // meal. Calories are always derived here, never trusted from the edge
   // function's own number once it's had a chance to be hand-edited.
   function commitMealItems(planned) {
+    if (mealParsing) return;
     if (!mealItems || !mealItems.length) return;
     const time = entryTime();
     const now = new Date().toISOString();
@@ -2935,6 +3123,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     setStaged(list => [...list, ...entries]);
     setMealItems(null);
+    clearMealDraft();
   }
   const mealItemsTotals = useMemoFd(() => {
     const netCarbs = !!store.settings?.netCarbs;
@@ -4430,28 +4619,55 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      {/* ── Describe a meal: free text -> parsed into mealItems, reviewed in
-          the Sheet right below ── */}
+      {/* ── Describe a meal: free text, a photo, or both -> parsed into
+          mealItems, reviewed in the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, portions and all, in plain language. Claude estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, attach a photo, or both. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
-        <Field label="What did you eat?" style={{ marginBottom: 12 }}>
+        {mealPhoto ? (
+          <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
+            <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 88, height: 88, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block' }} />
+            <button onClick={removeMealPhoto} aria-label="Remove photo" style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', textShadow: 'none' }}>
+              <i className="fa-solid fa-xmark" style={{ fontSize: 11 }} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => mealPhotoInputRef.current && mealPhotoInputRef.current.click()} disabled={mealPhotoReading} style={{ ...fdActionCard, width: '100%', marginBottom: 12 }}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            {mealPhotoReading ? 'Reading photo…' : 'Add a photo'}
+          </button>
+        )}
+        <Field label={mealPhoto ? 'Add details (optional)' : 'What did you eat?'} style={{ marginBottom: 12 }}>
           <textarea
             value={mealDescription}
             onChange={e => setMealDescription(e.target.value)}
-            placeholder="e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll"
+            placeholder={mealPhoto ? "e.g. it's a large portion, there's sauce underneath too" : 'e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll'}
             rows={4}
-            autoFocus
+            autoFocus={!mealPhoto}
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
+        <div style={{ marginBottom: 12 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Estimator</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+            {[['claude', 'Claude'], ['grok', 'Grok']].map(([id, label]) => (
+              <button key={id} onClick={() => { setMealParserProvider(id); fdWriteMealParserProvider(id); }} style={fdSegBtn(mealParserProvider === id)}>{label}</button>
+            ))}
+          </div>
+        </div>
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={handleDescribeMeal} disabled={mealParsing || !mealDescription.trim()} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
+          <Btn onClick={handleDescribeMeal} disabled={mealParsing || mealPhotoReading || (!mealDescription.trim() && !mealPhoto)} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
         </div>
       </Sheet>
+      {/* Hidden picker for the meal photo above: no `capture` attribute
+          (unlike labelInputRef), a meal is often logged after the fact from
+          an already-taken photo, and `capture` steers mobile browsers toward
+          launching the camera directly, crowding out the library option. The
+          plain OS file picker still offers a camera shortcut alongside it. */}
+      <input ref={mealPhotoInputRef} type="file" accept="image/*" onChange={handleMealPhotoFile} style={{ display: 'none' }} />
 
       {/* ── Review list for a parsed meal-description batch: tap a row to
           adjust it (opens the quantity sheet above at zIndex 200), trash to
@@ -4459,7 +4675,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
       <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Tap an item to adjust its amount or numbers. Remove anything that doesn't belong.
+          Tap an item to adjust its amount or numbers, remove anything that doesn't belong, or refine the whole estimate with a note.
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
           <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
@@ -4486,20 +4702,87 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             );
           })}
         </div>
+        {/* Opens the Refine sub-sheet (history + note field + Reiterate) at
+            zIndex 200, same nested-sheet pattern the quantity edit above
+            already uses, kept out of this Sheet entirely so a growing
+            reiteration history never bloats the review list itself. */}
+        <Btn kind="ghost" onClick={() => setMealRefineOpen(true)} disabled={mealParsing} style={{ width: '100%', marginBottom: 16 }}>
+          <i className="fa-solid fa-wand-magic-sparkles" style={{ marginRight: 8 }} />
+          Refine estimate{mealReiterations.length ? ` (${mealReiterations.length})` : ''}
+        </Btn>
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid || mealParsing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 2 }}>
+            <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 2 }}>
               Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
             </Btn>
           </div>
         )}
+      </Sheet>
+
+      {/* ── Refine sub-sheet, opened from the Review meal Sheet above at
+          zIndex 200 (same nested-sheet pattern the quantity edit uses over
+          this same Review sheet): the original description, every past
+          reiteration, and the photo (if any) show read-only as a running
+          history, with one always-empty field underneath ready for the next
+          note. Only that note is sent on Reiterate, not the rendered
+          history text, the edge function already carries the running state
+          via previousItems (the mealItems currently shown behind this). ── */}
+      <Sheet open={mealRefineOpen} onClose={closeMealRefineSheet} title="Refine estimate" titleColor="var(--accent)" zIndex={200}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          Add a note and tap Reiterate to adjust the whole estimate. Notes stack, so you can refine more than once.
+        </div>
+        {/* Same backdrop-blur-plus-label idiom FdLabelBusy uses elsewhere in
+            this file, scoped to just the history instead of the full
+            screen: the Review sheet behind this one is fully hidden by this
+            Sheet's own backdrop for as long as mealParsing can be true
+            (closeMealRefineSheet blocks dismissing mid-request), so this is
+            the only place that loading state is actually visible. */}
+        <div style={{ position: 'relative', marginBottom: mealPhoto ? 8 : 12 }}>
+          {mealDescription.trim() && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Original description</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{mealDescription}</div>
+            </div>
+          )}
+          {mealReiterations.map((text, idx) => (
+            <div key={idx} style={{ marginBottom: 8 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Reiteration {idx + 1}</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{text}</div>
+            </div>
+          ))}
+          {mealParsing && (
+            <div style={{ position: 'absolute', inset: -6, borderRadius: 6, background: 'rgba(var(--bg-rgb),0.7)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 20, color: 'var(--accent)' }} />
+              <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em' }}>Refining…</div>
+            </div>
+          )}
+        </div>
+        {mealPhoto && (
+          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
+        )}
+        <Field label="Add a note" style={{ marginBottom: 12 }}>
+          <textarea
+            value={mealReiterateDraft}
+            onChange={e => setMealReiterateDraft(e.target.value)}
+            placeholder="e.g. it's a bigger portion, or there's sauce underneath too"
+            rows={3}
+            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+        </Field>
+        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeMealRefineSheet} disabled={mealParsing} style={{ flex: 1 }}>Done</Btn>
+          <Btn onClick={handleReiterateMeal} disabled={mealParsing || (!mealReiterateDraft.trim() && !mealPhoto)} style={{ flex: 2 }}>
+            {mealParsing ? 'Refining…' : 'Reiterate'}
+          </Btn>
+        </div>
       </Sheet>
 
       {/* ── Repeat yesterday's meal, minus whatever changed ────────────────
@@ -6236,12 +6519,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     [list, store.foodShoppingPrefs, logsForStock, today],
   );
   // What actually feeds the export/screenshot (included only) vs. what's
-  // still shown, just set aside, in the list screen's own "Excluded" section.
-  // Both stay keyed on `excluded` alone, unaffected by low stock on purpose:
-  // an excluded bulk item running low still doesn't belong in the grocery
-  // run, it needs reordering from wherever it's normally bought, and a
-  // normal included item running low is still a normal item to buy either way.
-  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded), [displayList]);
+  // still shown, just set aside, in the list screen's own "Excluded"
+  // section. excludedList stays keyed on `excluded` alone, unaffected by
+  // low stock on purpose: an excluded bulk item running low still doesn't
+  // belong in the grocery run, it needs reordering from wherever it's
+  // normally bought. includedList additionally drops anything fdIsWellStocked
+  // (tracked, real threshold, currently above it): there's nothing to buy
+  // for a food you already have plenty of, whether it's a staple/projection
+  // estimate is beside the point once inventory tracking says otherwise. A
+  // well-stocked item that later dips low reappears here on its own the
+  // moment fdIsWellStocked flips, same as everything else in this screen
+  // that self-corrects off a derived value instead of a stored flag; it's
+  // still visible the whole time via the Inventory tab regardless.
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && !fdIsWellStocked(i)), [displayList]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
   // The Inventory tab's own list, independent of `list`/`displayList` above:
   // every tracked food, not just this window's staples/projections (see
@@ -6308,6 +6598,35 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   const [stockDraft, setStockDraft] = useStateFd('');
   const [stockPacksDraft, setStockPacksDraft] = useStateFd('');
   const [stockExtraDraft, setStockExtraDraft] = useStateFd('');
+  // Running Low threshold override (migration 0232): package-aware like the
+  // stock fields above, two separate drafts rather than one field that
+  // silently changes units. Whichever one is live (toggles off pkgDraft,
+  // same condition the stock fields below use) is what saveEdit reads;
+  // switching modes mid-edit never reinterprets an already-typed number
+  // under a different unit, it just shows the other (still blank, or still
+  // holding whatever was typed into IT specifically) field instead. Both
+  // pre-fill like pkgDraft (an existing value being edited, not a blank
+  // "type to add" field like stockDraft/stockPacksDraft/stockExtraDraft).
+  // Blank on save means "no override", falls back to package size, same as
+  // the item never had this pref set at all.
+  const [thresholdPacksDraft, setThresholdPacksDraft] = useStateFd('');
+  const [thresholdGramsDraft, setThresholdGramsDraft] = useStateFd('');
+  // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
+  // ISO string (temporary, until that timestamp). One control now covers
+  // both the old permanent excluded flag and the temporary snooze, they're
+  // mutually exclusive states of the same underlying choice. Pre-fills from
+  // the item like editDraft/pkgDraft do, using permanentExcluded/
+  // tempExcludedUntil (not the raw pref) so a stale, already-expired
+  // excludedUntil doesn't come back as if still active.
+  const [excludeDraft, setExcludeDraft] = useStateFd(null);
+  // Which temporary preset (7/14/30) lights up, purely a this-visit
+  // interaction marker, separate from excludeDraft itself: an already-
+  // active snooze from a previous save has no reliable matching preset
+  // once time has passed (its remaining days no longer line up with
+  // 7/14/30), so reopening the sheet never pre-highlights one, only
+  // actually tapping a preset does. The Permanent segment needs no
+  // equivalent marker, excludeDraft === 'permanent' is unambiguous on its own.
+  const [excludeDraftDays, setExcludeDraftDays] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6315,19 +6634,29 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
+    setThresholdPacksDraft(item.lowStockThresholdG != null && item.packageSizeG > 0 ? String(fdRound1(item.lowStockThresholdG / item.packageSizeG)) : '');
+    setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? String(item.lowStockThresholdG) : '');
+    setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
+    setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
+    setThresholdPacksDraft(''); setThresholdGramsDraft('');
+    setExcludeDraft(null); setExcludeDraftDays(null);
   }
   // True if any field actually differs from what the sheet opened with.
-  // editDraft/pkgDraft are pre-filled on open (dirty means "changed from
-  // that"), the three stock drafts always start blank (dirty means "typed
-  // into at all"). Backs requestCloseEdit's confirm below.
+  // editDraft/pkgDraft/thresholdPacksDraft/thresholdGramsDraft/excludeDraft
+  // are pre-filled on open (dirty means "changed from that"), the three
+  // stock drafts always start blank (dirty means "typed into at all").
+  // Backs requestCloseEdit's confirm below.
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
     if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
+    if (thresholdPacksDraft !== (editItem.lowStockThresholdG != null && editItem.packageSizeG > 0 ? String(fdRound1(editItem.lowStockThresholdG / editItem.packageSizeG)) : '')) return true;
+    if (thresholdGramsDraft !== (editItem.lowStockThresholdG != null && !(editItem.packageSizeG > 0) ? String(editItem.lowStockThresholdG) : '')) return true;
+    if (excludeDraft !== (editItem.permanentExcluded ? 'permanent' : (editItem.tempExcludedUntil || null))) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
   // Sheet's backdrop tap calls onClose directly with no dirty-check of its
@@ -6350,7 +6679,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
     const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
-    const patch = { nameOverride, packageSizeG, foodName: editItem.foodName, brand: editItem.brand ?? null };
+    // Reads whichever unit is currently live off the just-computed
+    // packageSizeG (not editItem's old one): a package size typed in this
+    // same visit should convert its packs threshold against the NEW size,
+    // not a stale one. The other field is simply never consulted, its
+    // contents (if any, from before a mode switch) are left as-is on
+    // screen but don't affect what gets saved.
+    const thresholdPacksTyped = fdNum(thresholdPacksDraft);
+    const thresholdGramsTyped = fdNum(thresholdGramsDraft);
+    const lowStockThresholdG = packageSizeG > 0
+      ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
+      : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null);
+    const patch = {
+      nameOverride, packageSizeG, lowStockThresholdG, foodName: editItem.foodName, brand: editItem.brand ?? null,
+      excluded: excludeDraft === 'permanent',
+      excludedUntil: excludeDraft === 'permanent' ? null : excludeDraft,
+    };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
     // makes "I just restocked" mean "start counting from zero again".
@@ -6373,23 +6717,83 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   }
   async function resetEdit() {
     if (!editItem) return;
-    if (!await confirm("This clears the rename, package size, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
-    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, stockBaselineG: null, stockSetAt: null });
+    if (!await confirm("This clears the rename, package size, low-stock threshold, and stock tracking for this item.", { title: 'Reset this item?', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
+    fdSetShoppingPref(setStore, editItem, { nameOverride: null, packageSizeG: null, lowStockThresholdG: null, stockBaselineG: null, stockSetAt: null });
     closeEdit();
   }
-  // The checkbox's own handler, independent of the edit sheet: toggles
-  // straight from either list section, no sheet involved.
-  function toggleExclusion(item) {
-    fdSetShoppingPref(setStore, item, { excluded: !item.excluded, foodName: item.foodName, brand: item.brand ?? null });
+  // "Did I physically buy this on THIS shopping trip", not a persisted
+  // preference: local and this-visit-only, always starts empty (see the
+  // effect below), separate from the exclude/include concept entirely now
+  // (that moved into the edit sheet, see excludeDraft above). Checking an
+  // item opens boughtPrompt below instead of writing straight away: the
+  // suggested quantity (fdShoppingBuyQtyG, exactly what the row's headline
+  // shows) is only ever a starting guess, nothing says you actually grabbed
+  // precisely that much off the shelf. Confirming there adds the (possibly
+  // edited) amount into inventory tracking, on top of whatever was already
+  // on hand (not a replacement: a partial pack left over from before this
+  // trip is still real stock), stamping a fresh stockSetAt like every other
+  // stock write in this screen. One-way: there's no recorded "amount just
+  // added" to subtract back out, so unchecking only clears the local mark,
+  // it does not undo the inventory write.
+  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
+  const [boughtPrompt, setBoughtPrompt] = useStateFd(null); // { item, packsStr, gramsStr } | null
+  useEffectFd(() => { if (!open) { setBoughtSet(new Set()); setBoughtPrompt(null); } }, [open]);
+  function unmarkBought(item) {
+    setBoughtSet(prev => {
+      const next = new Set(prev);
+      next.delete(item.key);
+      return next;
+    });
+  }
+  // Package-aware like the edit sheet's own stock fields further down: with a
+  // package size, packs is the natural unit to buy in (same reasoning
+  // fdShoppingBuyQtyG itself rounds up to, you can't buy half a pack), plain
+  // grams otherwise. Pre-filled with fdShoppingBuyQtyG's own suggestion, so
+  // confirming without touching anything reproduces the old
+  // straight-to-inventory behavior exactly, editing it is purely opt-in.
+  function openBoughtPrompt(item) {
+    const hasPkg = item.packageSizeG > 0;
+    const suggestedG = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
+    setBoughtPrompt({
+      item,
+      packsStr: hasPkg ? String(suggestedG / item.packageSizeG) : '',
+      gramsStr: hasPkg ? '' : String(suggestedG),
+    });
+  }
+  function closeBoughtPrompt() { setBoughtPrompt(null); }
+  function fdBoughtPromptQtyG(p) {
+    if (!p) return null;
+    if (p.item.packageSizeG > 0) {
+      const packs = fdNum(p.packsStr);
+      return packs > 0 ? fdClampQtyG(packs * p.item.packageSizeG) : null;
+    }
+    const g = fdNum(p.gramsStr);
+    return g > 0 ? fdClampQtyG(g) : null;
+  }
+  function confirmBoughtPrompt() {
+    const qty = fdBoughtPromptQtyG(boughtPrompt);
+    if (!(qty > 0)) return;
+    const item = boughtPrompt.item;
+    setBoughtSet(prev => new Set(prev).add(item.key));
+    fdSetShoppingPref(setStore, item, {
+      stockBaselineG: (item.effectiveStockG || 0) + qty,
+      stockSetAt: new Date().toISOString(),
+      foodName: item.foodName, brand: item.brand ?? null,
+    });
+    setBoughtPrompt(null);
   }
   // Shared row for both includedList and excludedList below: same layout,
-  // just dimmed with the checkbox unchecked once excluded. The checkbox is a
-  // sibling button next to the name/amount button, not nested inside it,
-  // real <button> elements can't nest without the browser silently breaking
-  // the layout back out of the outer one.
-  // inventoryMode (Inventory tab, see below) drops the include/exclude
-  // checkbox (a shopping-only concept) and swaps the buy-quantity column for
-  // a quiet package-size reference instead, there's nothing to purchase here.
+  // just dimmed once excluded. The checkbox is a sibling button next to the
+  // name/amount button, not nested inside it, real <button> elements can't
+  // nest without the browser silently breaking the layout back out of the
+  // outer one.
+  // inventoryMode (Inventory tab, see below) drops the "bought it" checkbox
+  // (a shopping-only concept) and swaps the buy-quantity column for a quiet
+  // package-size reference instead, there's nothing to purchase here. Same
+  // reason an excluded item never shows it either (see renderShoppingRow's
+  // own check below): nothing on this trip's list to mark as bought, and
+  // hasEstimate gates out low-stock fallback rows with no real buy quantity
+  // for openBoughtPrompt to work with in the first place.
   function renderShoppingRow(item, inventoryMode) {
     // grams is only ever > 0 for a real fdBuildShoppingList estimate (both its
     // history and projection paths filter out non-positive grams themselves);
@@ -6406,17 +6810,19 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     const hasEstimate = item.grams > 0 || item.fromProjection;
     const low = fdIsLowStock(item);
     const { headline, sub } = hasEstimate ? fdFormatShoppingQty(item.grams, item.packageSizeG) : { headline: null, sub: null };
-    // Dimming for `excluded` is a Shopping List concept (it's what the
-    // checkbox below toggles): skipped in inventoryMode, same reasoning as
-    // hiding the checkbox itself, a food excluded from the buy list is
-    // still just a normal tracked item here, nothing to visually mute.
+    // Dimming for `excluded` is a Shopping List concept (set from the edit
+    // sheet's exclude picker, see excludeDraft above): skipped in
+    // inventoryMode, same reasoning as hiding the checkbox itself, a food
+    // excluded from the buy list is still just a normal tracked item here,
+    // nothing to visually mute.
+    const bought = boughtSet.has(item.key);
     return (
       <div key={item.key} style={{ ...fdQuickRowInner, cursor: 'default', opacity: (item.excluded && !inventoryMode) ? 0.55 : 1 }}>
-        {!inventoryMode && (
+        {!inventoryMode && !item.excluded && hasEstimate && (
           <FdCheckbox
-            checked={!item.excluded}
-            label={item.excluded ? 'Include in shopping list' : 'Exclude from shopping list'}
-            onToggle={() => toggleExclusion(item)}
+            checked={bought}
+            label={bought ? 'Bought, added to inventory' : 'Mark as bought, choose the quantity to add to inventory'}
+            onToggle={() => bought ? unmarkBought(item) : openBoughtPrompt(item)}
           />
         )}
         <button onClick={() => openEdit(item)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -6424,6 +6830,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <div style={{ ...fdEntryName, minWidth: 0 }}>{item.displayName}</div>
               {(item.overridden || item.packageSizeG || item.effectiveStockG != null) && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title="Customized" />}
+              {item.tempExcludedUntil && <i className="fa-solid fa-clock" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} title={`Back ${new Date(item.tempExcludedUntil).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`} />}
             </div>
             {hasEstimate
               ? (item.effectiveStockG != null
@@ -6605,8 +7012,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 // one), same reason the Food Log poster's entry cards use it:
                 // an opaque row blocks the watermark entirely wherever it
                 // sits, leaving it visible only in the gaps between rows.
-                // Excluded items never make it into includedList, they don't
-                // belong in a "what to buy" poster at all.
+                // Excluded and well-stocked items never make it into
+                // includedList, neither belongs in a "what to buy" poster.
                 <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{item.displayName}</div>
@@ -6771,10 +7178,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
           Original: {editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
         </div>
-        <Field label="Show as" style={{ marginBottom: 14 }}>
+        <Field label="Show as" accent style={{ marginBottom: 14 }}>
           <TextInput value={editDraft} onChange={setEditDraft} placeholder={editItem?.foodName} autoFocus />
         </Field>
-        <Field label="Package size (g)" style={{ marginBottom: 6 }}>
+        <Field label="Package size (g)" accent style={{ marginBottom: 6 }}>
           <input value={pkgDraft} onChange={e => setPkgDraft(fdDecimalFilter(e.target.value))}
             type="text" inputMode="decimal" placeholder="e.g. 400" style={fdInputStyle} />
         </Field>
@@ -6782,6 +7189,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           Rounds the shopping quantity up to whole packages instead of a raw gram estimate. Leave blank for plain grams.
         </div>
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          <span className="label-gold">Inventory</span>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', margin: '6px 0 10px' }}>
+            Optional: track what you actually have on hand, so Running Low can warn you before it's gone instead of guessing off what you usually buy.
+          </div>
           {editItem?.effectiveStockG != null && (
             <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>
               Current stock: <span className="num">{fdExactShoppingQty(editItem.effectiveStockG)}</span>
@@ -6801,29 +7212,104 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             // figure. Either field alone still works (0 + grams = pure
             // grams, packs + 0 = pure packs), this is one input, not a mode switch.
             <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-              <Field label="Full packs" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={stockPacksDraft} onChange={e => setStockPacksDraft(fdDecimalFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
               </Field>
-              <Field label="+ grams" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="+ grams" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdDecimalFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
               </Field>
             </div>
           ) : (
-            <Field label="Update stock (g)" style={{ marginBottom: 6 }}>
+            <Field label="Update stock (g)" accent style={{ marginBottom: 6 }}>
               <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
             </Field>
           )}
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
+            Tracks what's actually eaten since. Leave blank to keep the current count unchanged.
+          </div>
+          {fdNum(pkgDraft) > 0 ? (
+            <Field label="Warn when below (packs)" accent style={{ marginBottom: 6 }}>
+              <input value={thresholdPacksDraft} onChange={e => setThresholdPacksDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
+            </Field>
+          ) : (
+            <Field label="Warn when below (g)" accent style={{ marginBottom: 6 }}>
+              <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdDecimalFilter(e.target.value))}
+                type="text" inputMode="decimal" placeholder="e.g. 1000" style={fdInputStyle} />
+            </Field>
+          )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
-            Tracks what's actually eaten since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+            Running Low fires under this. Defaults to one package, raise it for anything that gets eaten through faster than a package lasts.
+          </div>
+        </div>
+        <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+          <Field label="Exclude" accent style={{ marginBottom: 6 }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(7)); setExcludeDraftDays(7); }} style={fdSegBtn(excludeDraftDays === 7)}>1 week</button>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(14)); setExcludeDraftDays(14); }} style={fdSegBtn(excludeDraftDays === 14)}>2 weeks</button>
+              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(30)); setExcludeDraftDays(30); }} style={fdSegBtn(excludeDraftDays === 30)}>1 month</button>
+              <button onClick={() => { setExcludeDraft('permanent'); setExcludeDraftDays(null); }} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
+            </div>
+          </Field>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>
+              {excludeDraft === 'permanent'
+                ? 'Off the shopping list until you pick something else here.'
+                : excludeDraft
+                  ? `Off the list until ${new Date(excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
+                  : 'On the shopping list. Pick a duration above to skip it for a while.'}
+            </span>
+            {excludeDraft && (
+              <button onClick={() => { setExcludeDraft(null); setExcludeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+                Clear
+              </button>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {(editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
-          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
+          {(editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) && <Btn kind="ghost" onClick={resetEdit} style={{ flex: 1 }}>Reset</Btn>}
+          <Btn onClick={saveEdit} style={{ flex: (editItem?.overridden || editItem?.packageSizeG || editItem?.lowStockThresholdG != null || editItem?.effectiveStockG != null) ? 2 : 1 }}>Save</Btn>
         </div>
+      </Sheet>
+      {/* Short, single-purpose popup, not the full edit sheet above: the only
+          question here is "how much did you actually get", pre-filled with
+          fdShoppingBuyQtyG's suggestion (see openBoughtPrompt). One field,
+          confirm or cancel, nothing else to configure. */}
+      <Sheet open={!!boughtPrompt} onClose={closeBoughtPrompt} title={boughtPrompt?.item?.displayName || 'Mark as bought'} titleColor="var(--accent)">
+        {boughtPrompt && (() => {
+          const hasPkg = boughtPrompt.item.packageSizeG > 0;
+          const qty = fdBoughtPromptQtyG(boughtPrompt);
+          return (
+            <>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+                How much did you actually get? Added straight to your inventory.
+              </div>
+              {hasPkg ? (
+                <>
+                  <Field label={`Packs (${fdExactShoppingQty(boughtPrompt.item.packageSizeG)} each)`} accent style={{ marginBottom: 6 }}>
+                    <input value={boughtPrompt.packsStr} onChange={e => setBoughtPrompt(p => ({ ...p, packsStr: fdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 1" style={fdInputStyle} autoFocus />
+                  </Field>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>
+                    {qty > 0 ? `= ${fdExactShoppingQty(qty)} total` : 'Enter how many packs you got.'}
+                  </div>
+                </>
+              ) : (
+                <Field label="Amount (g)" accent style={{ marginBottom: 16 }}>
+                  <input value={boughtPrompt.gramsStr} onChange={e => setBoughtPrompt(p => ({ ...p, gramsStr: fdDecimalFilter(e.target.value) }))}
+                    type="text" inputMode="decimal" placeholder="e.g. 500" style={fdInputStyle} autoFocus />
+                </Field>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={closeBoughtPrompt} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={confirmBoughtPrompt} disabled={!(qty > 0)} style={{ flex: 1 }}>Add to inventory</Btn>
+              </div>
+            </>
+          );
+        })()}
       </Sheet>
     </Screen>
   );

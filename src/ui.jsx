@@ -1209,10 +1209,14 @@ function NumInput({ value, onChange, placeholder = 'Default', disabled, style = 
   );
 }
 
-function Field({ label, children, style = {} }) {
+// accent: opt-in per call site (default off, every existing Field keeps its
+// plain faint label unchanged), swaps in .label-gold instead of .label for
+// a sheet/section that wants its field labels to read as accent-colored
+// headings rather than muted captions.
+function Field({ label, children, style = {}, accent = false }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
-      <span className="label">{label}</span>
+      <span className={accent ? 'label-gold' : 'label'}>{label}</span>
       {children}
     </label>
   );

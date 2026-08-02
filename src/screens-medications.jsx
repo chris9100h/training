@@ -283,11 +283,23 @@ function mdEffectiveStock(med, medicationLogs, todayISO) {
   if (med?.stockBaseline == null || !med.stockSetAt) return null;
   return Math.max(0, med.stockBaseline - mdConsumedSince(medicationLogs, med.id, med.stockSetAt, todayISO));
 }
-// Below one package's worth: only meaningful with both a package size and
-// stock tracking on, a medication with either missing has nothing to compare
-// its stock against.
+// Below the effective threshold: lowStockThreshold (migration 0233) when
+// set, package size otherwise, only meaningful with stock tracking on, a
+// medication with neither has nothing to compare its stock against. The
+// override exists because "below one package" alone fires too late for
+// something that gets used up faster than one package lasts, exact mirror
+// of fdIsLowStock in screens-food.jsx. excludeFromLowStock (migration 0234,
+// "Cycle only" in medSheet) short-circuits before any of that: stock
+// tracking and the effectiveStock number itself stay fully on, only the
+// warning is suppressed, for something being run for one cycle with no
+// intent to reorder. trackStock (migration 0235, the "Track Medication
+// Stock" master toggle) is checked first and is more fundamental still:
+// off means this medication opted out of the whole tracking surface, not
+// just the warning.
 function mdIsLowStock(med, effectiveStock) {
-  return med.packageSize > 0 && effectiveStock != null && effectiveStock < med.packageSize;
+  if (!med.trackStock || med.excludeFromLowStock) return false;
+  const threshold = med.lowStockThreshold ?? med.packageSize;
+  return threshold > 0 && effectiveStock != null && effectiveStock < threshold;
 }
 // Whether a medication currently belongs to at least one plan (migration
 // 0221: membership is many-to-many via zane_medication_plan_items, no single
@@ -296,19 +308,39 @@ function mdHasPlan(med, medicationPlanItems) {
   return medicationPlanItems.some(it => it.medicationId === med.id);
 }
 
-// A schedule slot applies to `dateISO` if its plan is active, today's
-// weekday is in its list, and (when set) dateISO falls inside its optional
-// start/end date phase. Both bounds null (the default) means unbounded,
-// identical to a plain always-on schedule. There is no per-slot pause flag
-// (removed, see the header comment): a slot with no plan, or whose plan
-// isn't in activePlanIds, is simply never due, exactly as if it didn't
-// exist, no separate "orphaned" handling needed.
+// A schedule slot applies to `dateISO` if its plan is active, (when set)
+// dateISO falls inside its optional start/end date phase, and then either
+// today's weekday is in its list, or, in interval mode (migration 0237,
+// intervalDays set), dateISO lands exactly on a multiple of intervalDays
+// since startDate. Both bounds null (the default, weekday mode) means
+// unbounded, identical to a plain always-on schedule. There is no per-slot
+// pause flag (removed, see the header comment): a slot with no plan, or
+// whose plan isn't in activePlanIds, is simply never due, exactly as if it
+// didn't exist, no separate "orphaned" handling needed.
+// Interval mode has no unbounded case: startDate is its anchor, so a slot
+// with intervalDays set but no startDate (shouldn't happen, saveSlotDraft
+// requires one, but a synced row from elsewhere could still lack it) is
+// simply never due rather than guessing an anchor.
+// Kept in sync with store.js's own self-contained copy, dsSlotAppliesOn
+// (used by the AI daily summary, which runs where this file isn't loaded).
 function mdSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
   if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (!(slot.weekdays || []).includes(wd)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
   if (slot.endDate && dateISO > slot.endDate) return false;
-  return true;
+  if (slot.intervalDays > 0) {
+    if (!slot.startDate) return false;
+    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
+    return daysSince % slot.intervalDays === 0;
+  }
+  return (slot.weekdays || []).includes(wd);
+}
+// Human-readable recurrence label for a schedule slot: "Every Nd" in
+// interval mode, "Every day"/"Mon/Wed/Fri" in weekday mode. Shared by
+// renderMedListRow's aggregate summary and schedMed's own per-slot list, so
+// the two never drift on how this reads.
+function mdSlotDaysLabel(slot) {
+  if (slot.intervalDays > 0) return `Every ${slot.intervalDays}d`;
+  return slot.weekdays.length === 7 ? 'Every day' : slot.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/');
 }
 function mdMaterializeSlotEntry(med, slot, dateISO) {
   return {
@@ -731,7 +763,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       ? scheduleSlots.filter(sl => sl.medicationId === m.id && sl.medicationPlanId === planId)
       : scheduleSlots.filter(sl => sl.medicationId === m.id);
     const scheduleSummary = relevantSlots.length
-      ? relevantSlots.map(sl => `${sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
+      ? relevantSlots.map(sl => `${mdSlotDaysLabel(sl)} ${String(sl.hour).padStart(2, '0')}:00 · ${mdFmtQty(sl.doseQty, m.unitLabel)}`).join('; ')
       : 'No schedule yet';
     const memberPlanNames = showPlanTag
       ? medicationPlanItems.filter(it => it.medicationId === m.id).map(it => medicationPlans.find(p => p.id === it.medicationPlanId)?.name).filter(Boolean)
@@ -824,7 +856,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function snapMedSheet(d) {
     return JSON.stringify({
       name: d.name, brand: d.brand, category: d.category, unitLabel: d.unitLabel, packageSizeStr: d.packageSizeStr,
-      excludeFromPillbox: d.excludeFromPillbox,
+      excludeFromPillbox: d.excludeFromPillbox, trackStock: d.trackStock,
     });
   }
   // Every plan this medication currently belongs to, for medSheet's own
@@ -843,10 +875,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const next = med ? {
       id: med.id, name: med.name, brand: med.brand || '', category: med.category || '',
       unitLabel: med.unitLabel || 'pills', packageSizeStr: med.packageSize != null ? String(med.packageSize) : '',
-      excludeFromPillbox: !!med.excludeFromPillbox,
+      excludeFromPillbox: !!med.excludeFromPillbox, trackStock: !!med.trackStock,
     } : {
+      // trackStock off by default for a new medication too (migration
+      // 0236): most medications (vitamins, anything nobody physically
+      // counts) are never meant to show up in the Stock sub-view at all,
+      // tracking is opt-in per medication, not opt-out.
       id: null, name: '', brand: '', category: '', unitLabel: 'pills', packageSizeStr: '',
-      excludeFromPillbox: false,
+      excludeFromPillbox: false, trackStock: false,
     };
     medSheetInitialSnap.current = snapMedSheet(next);
     setMedSheet(next);
@@ -865,19 +901,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const packageSize = mdNum(medSheet.packageSizeStr);
     const nowISO = new Date().toISOString();
     if (medSheet.id) {
+      // lowStockThreshold/excludeFromLowStock are deliberately absent from
+      // this patch: they moved to stockSheet (Inventory > Stock), the
+      // spread below leaves whatever's already stored untouched.
       setStore(s => ({
         ...s,
         medications: (s.medications || []).map(m => m.id !== medSheet.id ? m : {
           ...m, name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
           category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills',
-          packageSize, excludeFromPillbox: !!medSheet.excludeFromPillbox, updatedAt: nowISO,
+          packageSize, excludeFromPillbox: !!medSheet.excludeFromPillbox, trackStock: !!medSheet.trackStock, updatedAt: nowISO,
         }),
       }));
     } else {
       const newMed = {
         id: LB.uid(), name: medSheet.name.trim(), brand: medSheet.brand.trim() || null,
         category: medSheet.category || null, unitLabel: medSheet.unitLabel.trim() || 'pills', packageSize,
+        lowStockThreshold: null, excludeFromLowStock: false,
         stockBaseline: null, stockSetAt: null, archived: false, excludeFromPillbox: !!medSheet.excludeFromPillbox,
+        trackStock: !!medSheet.trackStock,
         createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medications: [...(s.medications || []), newMed] }));
@@ -968,21 +1009,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // No longer part of the plan being viewed, nothing left to show here.
     closeSchedMed();
   }
-  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, weekdays, hour, doseQtyStr, phaseOpen, startDate, endDate }
+  const [slotDraft, setSlotDraft] = useStateMd(null); // { id: null|id, mode: 'weekdays'|'interval', weekdays, intervalDaysNum, hour, doseQtyStr, phaseOpen, startDate, endDate }
   const slotDraftInitialSnap = useRefMd(null);
   function snapSlotDraft(d) {
-    return JSON.stringify({ weekdays: d.weekdays, hour: d.hour, doseQtyStr: d.doseQtyStr, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
+    return JSON.stringify({ mode: d.mode, weekdays: d.weekdays, intervalDaysNum: d.intervalDaysNum, hour: d.hour, doseQtyStr: d.doseQtyStr, phaseOpen: d.phaseOpen, startDate: d.startDate, endDate: d.endDate });
   }
   function openSlotDraft(slot) {
     const next = slot ? {
-      id: slot.id, weekdays: [...(slot.weekdays || [])], hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
+      id: slot.id, mode: slot.intervalDays > 0 ? 'interval' : 'weekdays',
+      weekdays: [...(slot.weekdays || [])], intervalDaysNum: slot.intervalDays > 0 ? slot.intervalDays : 2,
+      hour: slot.hour, doseQtyStr: String(slot.doseQty ?? ''),
       phaseOpen: !!(slot.startDate || slot.endDate), startDate: slot.startDate || '', endDate: slot.endDate || '',
     } : {
       // Starts with NO days selected (was all 7): a blank slate reads more
       // honestly as "pick what you actually mean" than a default that
       // happens to already be right only for an every-day dose.
       // selectAllWeekdays below is the one-tap shortcut for that common case.
-      id: null, weekdays: [], hour: 8, doseQtyStr: '',
+      // 2 is intervalDaysNum's own default once interval mode gets picked,
+      // matching the most common real case (a compound dosed every other day).
+      id: null, mode: 'weekdays', weekdays: [], intervalDaysNum: 2, hour: 8, doseQtyStr: '',
       phaseOpen: false, startDate: '', endDate: '',
     };
     slotDraftInitialSnap.current = snapSlotDraft(next);
@@ -997,7 +1042,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(null);
   }
   function saveSlotDraft() {
-    if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft || !slotDraft.weekdays.length) return;
+    if (!schedMed?.id || !schedMed.medicationPlanId || !slotDraft) return;
+    const isInterval = slotDraft.mode === 'interval';
+    // Interval mode has nothing equivalent to "no weekdays picked" to guard
+    // on, startDate is its own required field instead (it's the count-from
+    // anchor, not an optional phase bound here, see mdSlotAppliesOn).
+    if (isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     // A reversed range (From after To) would otherwise save silently and
@@ -1008,23 +1058,31 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     if (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate) return;
     const nowISO = new Date().toISOString();
     // Gated on the fields' own values, NOT on phaseOpen: phaseOpen only
-    // controls whether the date-range section is visually expanded.
-    // Collapsing it to declutter the sheet must not silently wipe a
+    // controls whether the date-range section is visually expanded in
+    // weekday mode (interval mode always shows it, startDate isn't optional
+    // there). Collapsing it to declutter the sheet must not silently wipe a
     // staged cycle's dates, only actually clearing the inputs should.
     const startDate = slotDraft.startDate || null;
     const endDate = slotDraft.endDate || null;
+    // The two modes are mutually exclusive per slot: switching a slot from
+    // one to the other on edit must clear the other mode's field rather than
+    // leave a stale value sitting there unused, mdSlotAppliesOn only ever
+    // reads intervalDays first, but a stale weekdays/intervalDays value would
+    // still be misleading to anyone inspecting the row directly.
+    const weekdays = isInterval ? [] : slotDraft.weekdays;
+    const intervalDays = isInterval ? slotDraft.intervalDaysNum : null;
     if (slotDraft.id) {
       setStore(s => ({
         ...s,
         medicationScheduleSlots: (s.medicationScheduleSlots || []).map(sl => sl.id !== slotDraft.id ? sl : {
-          ...sl, weekdays: slotDraft.weekdays, hour: slotDraft.hour, doseQty,
+          ...sl, weekdays, hour: slotDraft.hour, doseQty, intervalDays,
           startDate, endDate, updatedAt: nowISO,
         }),
       }));
     } else {
       const newSlot = {
         id: LB.uid(), medicationId: schedMed.id, medicationPlanId: schedMed.medicationPlanId,
-        weekdays: slotDraft.weekdays, hour: slotDraft.hour,
+        weekdays, hour: slotDraft.hour, intervalDays,
         doseQty, startDate, endDate, createdAt: nowISO, updatedAt: nowISO,
       };
       setStore(s => ({ ...s, medicationScheduleSlots: [...(s.medicationScheduleSlots || []), newSlot] }));
@@ -1120,8 +1178,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }, [screenTab, activeMedications, userId]);
   const logsForStock = stockBackfill || medicationLogs;
   // Computed once per medication per render and reused everywhere below
-  // (lowStockList, mainInventoryList, filteredMedicationsList, renderMedRow,
-  // the stock sheet), instead of every one of those independently re-running
+  // (lowStockList, mainInventoryList, renderMedRow, the stock sheet),
+  // instead of every one of those independently re-running
   // mdEffectiveStock's own full scan over medicationLogs, mirrors the Food
   // Shopping List's own compute-once-per-item pattern (fdApplyShoppingPrefs).
   const effectiveStockById = useMemoMd(() => {
@@ -1136,33 +1194,25 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // (screens-lib.jsx: a Field/TextInput at flex:1 next to a Filter button
   // with a GoldSectionLabel sheet, gold active-count badge). Category is
   // multi-select (an array, like that screen's own MUSCLE GROUP filter);
-  // Plan and Tracked are each a nullable single choice (like that screen's
-  // own PLAN filter: tapping the same pill again clears it back to "no
-  // filter"). Search is free text, matched against name/brand, and
-  // deliberately left out of the active-count badge, same as Exercises'
-  // own q not counting toward its activeCount either.
+  // Plan is a nullable single choice (like that screen's own PLAN filter:
+  // tapping the same pill again clears it back to "no filter"). Search is
+  // free text, matched against name/brand, and deliberately left out of
+  // the active-count badge, same as Exercises' own q not counting toward
+  // its activeCount either.
   const [invSearch, setInvSearch] = useStateMd('');
   const [stockFilterCategories, setStockFilterCategories] = useStateMd([]); // MED_CATEGORIES ids
   const [stockFilterInPlan, setStockFilterInPlan] = useStateMd(null); // 'in' | 'out' | null
-  const [stockFilterTracked, setStockFilterTracked] = useStateMd(null); // 'tracked' | 'untracked' | null
   const [stockFiltersOpen, setStockFiltersOpen] = useStateMd(false);
   const toggleStockFilterCategory = (c) => setStockFilterCategories(cats => cats.includes(c) ? cats.filter(x => x !== c) : [...cats, c]);
   const toggleStockFilterInPlan = (v) => setStockFilterInPlan(cur => cur === v ? null : v);
-  const toggleStockFilterTracked = (v) => setStockFilterTracked(cur => cur === v ? null : v);
-  const stockFilterActiveCount = stockFilterCategories.length + (stockFilterInPlan !== null ? 1 : 0) + (stockFilterTracked !== null ? 1 : 0);
+  const stockFilterActiveCount = stockFilterCategories.length + (stockFilterInPlan !== null ? 1 : 0);
   function clearStockFilters() {
     setStockFilterCategories([]);
     setStockFilterInPlan(null);
-    setStockFilterTracked(null);
   }
   // Search, Category and Plan apply everywhere this feeds into: Running Low,
   // the Stock tab's own list, and the Medications tab's own list, all three
   // are genuine "which medications" questions no matter which tab is asking.
-  // Tracked/Not-tracked is applied separately per list further down
-  // (mainInventoryList, filteredMedicationsList): Running Low is
-  // definitionally always tracked (it requires a real stock count to compare
-  // against package size), so that axis would be a no-op or always-empty
-  // there depending on which side you pick.
   const filteredInventoryBase = useMemoMd(() => inventoryList.filter(m => {
     const ql = invSearch.trim().toUpperCase();
     const matchSearch = !ql || m.name.toUpperCase().includes(ql) || (m.brand || '').toUpperCase().includes(ql);
@@ -1175,55 +1225,121 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     () => filteredInventoryBase.filter(m => mdIsLowStock(m, effectiveStockById.get(m.id))),
     [filteredInventoryBase, effectiveStockById],
   );
+  // Same computation, off inventoryList directly instead of
+  // filteredInventoryBase: the Inventory tab's own search/category/plan
+  // filters have nothing to do with whether the Timeline's own banner
+  // should show, a medication doesn't stop running low just because
+  // someone's search box (on a completely different tab) doesn't match it
+  // right now. lowStockList above stays as the Inventory tab's own
+  // filtered view, this is the "is anything genuinely low, full stop" one.
+  const allLowStockList = useMemoMd(
+    () => inventoryList.filter(m => mdIsLowStock(m, effectiveStockById.get(m.id))),
+    [inventoryList, effectiveStockById],
+  );
   const [lowStockAcks, setLowStockAcks] = useStateMd(mdReadLowStockAcks);
   const freshLowStock = useMemoMd(
     () => lowStockList.filter(m => lowStockAcks[m.id] !== m.stockSetAt),
     [lowStockList, lowStockAcks],
   );
-  function dismissLowStockBanner() {
+  // Timeline gets its own "fresh" derivation off the unfiltered list, but
+  // shares lowStockAcks with the Inventory tab's banner: dismissing either
+  // one is the same underlying "I've seen this" fact, not a per-tab one.
+  const freshAllLowStock = useMemoMd(
+    () => allLowStockList.filter(m => lowStockAcks[m.id] !== m.stockSetAt),
+    [allLowStockList, lowStockAcks],
+  );
+  // Takes the list to ack explicitly (freshLowStock from the Inventory
+  // banner, freshAllLowStock from the Timeline one) rather than always
+  // reading freshLowStock itself, so each banner only marks the items it's
+  // actually showing right now, not the other one's (usually-larger,
+  // unfiltered) set.
+  function dismissLowStockBanner(list) {
     const next = { ...lowStockAcks };
-    freshLowStock.forEach(m => { next[m.id] = m.stockSetAt; });
+    list.forEach(m => { next[m.id] = m.stockSetAt; });
     setLowStockAcks(next);
     mdWriteLowStockAcks(next);
   }
 
-  const mainInventoryList = useMemoMd(() => {
-    const rest = filteredInventoryBase.filter(m => !mdIsLowStock(m, effectiveStockById.get(m.id)));
-    if (stockFilterTracked === null) return rest;
-    return rest.filter(m => {
-      const tracked = effectiveStockById.get(m.id) != null;
-      return stockFilterTracked === 'tracked' ? tracked : !tracked;
-    });
-  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
-
-  // Same three filters, applied to the Medications sub-tab's own list. No
-  // Running Low split exists there (that's Stock-specific), so this is just
-  // filteredInventoryBase plus the Tracked axis, nothing carved out.
-  const filteredMedicationsList = useMemoMd(() => {
-    if (stockFilterTracked === null) return filteredInventoryBase;
-    return filteredInventoryBase.filter(m => {
-      const tracked = effectiveStockById.get(m.id) != null;
-      return stockFilterTracked === 'tracked' ? tracked : !tracked;
-    });
-  }, [filteredInventoryBase, effectiveStockById, stockFilterTracked]);
+  // trackStock off (migration 0235) drops a medication from this list
+  // entirely, not even as "Not tracked": the Medications sub-tab
+  // (filteredInventoryBase directly, no separate list of its own needed
+  // now that the old Tracked/Not-tracked filter is gone) stays unaffected
+  // on purpose, a medication opted out of Stock display should still be
+  // findable/editable there.
+  const mainInventoryList = useMemoMd(
+    () => filteredInventoryBase.filter(m => m.trackStock && !mdIsLowStock(m, effectiveStockById.get(m.id))),
+    [filteredInventoryBase, effectiveStockById],
+  );
 
   // Tapping a row here only ever updates stock, never identity/category/
   // schedule: those live behind the Schedule tab's own medication sheet, on
   // purpose, so Inventory stays a single-purpose "how much is left" screen.
-  const [stockSheet, setStockSheet] = useStateMd(null); // { id, name, unitLabel, stockStr } | null
+  // packageSize rides along read-only (this sheet never edits it, medSheet
+  // does) purely to decide which input mode the JSX below shows. Warn when
+  // below / Cycle only live here too, not in medSheet: this is a Stock-only
+  // sheet, reachable only for a trackStock medication (its row wouldn't
+  // otherwise show at all, see mainInventoryList/lowStockList above), so
+  // there's no separate on/off gate needed here the way medSheet needed one.
+  const [stockSheet, setStockSheet] = useStateMd(null); // { id, name, unitLabel, packageSize, stockStr, stockPacksStr, stockExtraStr, lowStockThresholdStr, excludeFromLowStock } | null
   function openStockSheet(med) {
-    setStockSheet({ id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', stockStr: '' });
+    setStockSheet({
+      id: med.id, name: med.name, unitLabel: med.unitLabel || 'pills', packageSize: med.packageSize ?? null,
+      stockStr: '', stockPacksStr: '', stockExtraStr: '',
+      lowStockThresholdStr: med.lowStockThreshold != null ? String(med.lowStockThreshold) : '',
+      excludeFromLowStock: !!med.excludeFromLowStock,
+    });
+  }
+  // Same pack-aware resolution as screens-food.jsx's saveEdit: with a
+  // package size known, packs+extra wins if either was touched (e.g. "10
+  // packs + 18 IU" for a 36 IU/pack HGH kit = 378 IU), otherwise falls back
+  // to the plain single-quantity field. null means nothing meaningful has
+  // been typed at all (leave-unchanged on save). Shared by saveStockSheet
+  // below and the live total preview in the JSX further down, so what's
+  // shown while typing and what actually gets saved can never drift apart.
+  function mdStockSheetTotal(sheet) {
+    if (!sheet) return null;
+    if (sheet.packageSize > 0 && (sheet.stockPacksStr.trim() || sheet.stockExtraStr.trim())) {
+      return (mdNum(sheet.stockPacksStr) || 0) * sheet.packageSize + (mdNum(sheet.stockExtraStr) || 0);
+    }
+    return sheet.stockStr.trim() ? mdNum(sheet.stockStr) : null;
   }
   function saveStockSheet() {
     if (!stockSheet) return;
-    const stockTyped = mdNum(stockSheet.stockStr);
-    if (stockTyped != null) {
-      const nowISO = new Date().toISOString();
-      setStore(s => ({
-        ...s,
-        medications: (s.medications || []).map(m => m.id !== stockSheet.id ? m : { ...m, stockBaseline: stockTyped, stockSetAt: nowISO, updatedAt: nowISO }),
-      }));
-    }
+    const stockTyped = mdStockSheetTotal(stockSheet);
+    // lowStockThreshold/excludeFromLowStock always commit, same "always
+    // overwrite with whatever's in the field" semantics medSheet used for
+    // these two: they're settings being actively edited, not a "log a new
+    // reading" action like the stock quantity itself, which only writes
+    // when something was actually typed (see mdStockSheetTotal's own null
+    // case), leaving stock untouched otherwise.
+    const lowStockThreshold = mdNum(stockSheet.lowStockThresholdStr);
+    const nowISO = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      medications: (s.medications || []).map(m => m.id !== stockSheet.id ? m : {
+        ...m,
+        ...(stockTyped != null ? { stockBaseline: stockTyped, stockSetAt: nowISO } : {}),
+        lowStockThreshold, excludeFromLowStock: !!stockSheet.excludeFromLowStock,
+        updatedAt: nowISO,
+      }),
+    }));
+    setStockSheet(null);
+  }
+  // Resets stockBaseline/stockSetAt to null, i.e. genuinely untracked again
+  // (mdEffectiveStock returns null, mdIsLowStock can never fire), not just a
+  // muted warning: for a compound being wound down on purpose with no
+  // intent to reorder, there's nothing left worth tracking, the exact
+  // remaining count stops mattering the moment reordering is off the table.
+  // No new column needed, this only ever touches the two fields normal
+  // restocking already writes. Re-tracking later is just typing a new count.
+  async function clearStockSheet() {
+    if (!stockSheet) return;
+    if (!await confirm("Stops tracking stock for this medication, including the Running Low warning. You can start again anytime by entering a new count.", { title: 'Clear inventory?', ok: 'Clear', cancel: 'Cancel', danger: true })) return;
+    const nowISO = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      medications: (s.medications || []).map(m => m.id !== stockSheet.id ? m : { ...m, stockBaseline: null, stockSetAt: null, updatedAt: nowISO }),
+    }));
     setStockSheet(null);
   }
 
@@ -1241,6 +1357,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <div style={{ ...mdEntryName, minWidth: 0 }}>{med.name}</div>
             {med.category && <Pill gold>{mdCategoryLabel(med.category)}</Pill>}
+            {/* mdIsLowStock always returns false for a Cycle-only medication
+                (excludeFromLowStock), so it never lands in the Running Low
+                section no matter how low it actually gets, this is the only
+                place that still says so. Bell-slash, not a rotate/cycle
+                icon: a circular arrow reads as "recurring", the opposite
+                of what "Cycle only" actually means (a one-off supply,
+                explicitly not being reordered). Bell-slash says "muted
+                warning" directly, independent of the (misleading) name. */}
+            {med.excludeFromLowStock && <i className="fa-solid fa-bell-slash" title="Cycle only, no Running Low warning" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} />}
           </div>
           {med.packageSize > 0
             ? <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{mdFmtQty(med.packageSize, med.unitLabel)}/pack</div>
@@ -1306,6 +1431,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {screenTab === 'timeline' && (
           <>
+            {/* Same dismissible warning as the Inventory tab's own (see
+                freshAllLowStock's comment above), surfaced here too since
+                Timeline is the tab people actually open day to day, not
+                everyone remembers to go check Inventory on its own. The
+                text itself is a separate sibling button that jumps straight
+                to Inventory > Stock, not the whole row: nesting the Dismiss
+                button inside a row-wide button breaks the layout, same trap
+                renderShoppingRow's own checkbox comment warns about in
+                screens-food.jsx. */}
+            {freshAllLowStock.length > 0 && (
+              <div style={{ background: 'rgba(var(--warn-rgb),0.14)', border: '1px solid rgba(var(--warn-rgb),0.45)', borderRadius: 6, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button onClick={() => { setScreenTab('inventory'); setInvSubTab('inventory'); }} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 15, color: 'var(--warn)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
+                    {freshAllLowStock.length === 1 ? `${freshAllLowStock[0].name} is running low.` : `${freshAllLowStock.length} medications are running low.`}
+                  </div>
+                </button>
+                <button onClick={() => dismissLowStockBanner(freshAllLowStock)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                  <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
+                </button>
+              </div>
+            )}
             {/* Day nav: same idiom as the Food Tracker's own Log-tab date
                 switcher (screens-food.jsx), unbounded both ways. */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1555,7 +1702,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     <div style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, lineHeight: '16px' }}>
                       {freshLowStock.length === 1 ? `${freshLowStock[0].name} is running low.` : `${freshLowStock.length} medications are running low.`}
                     </div>
-                    <button onClick={dismissLowStockBanner} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    <button onClick={() => dismissLowStockBanner(freshLowStock)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                       <i className="fa-solid fa-xmark" style={{ fontSize: 14 }} />
                     </button>
                   </div>
@@ -1604,11 +1751,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 ) : (
                   <>
                     {renderSearchAndFilterRow()}
-                    {!filteredMedicationsList.length ? (
+                    {!filteredInventoryBase.length ? (
                       <div style={mdEmptyHint}>Nothing matches this filter.</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {filteredMedicationsList.map(m => renderMedListRow(m, { showPlanTag: true }))}
+                        {filteredInventoryBase.map(m => renderMedListRow(m, { showPlanTag: true }))}
                       </div>
                     )}
                   </>
@@ -1652,14 +1799,65 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 Current stock: <span className="num">{mdFmtQty(effectiveStockById.get(stockSheet.id), stockSheet.unitLabel)}</span>
               </div>
             )}
-            <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} style={{ marginBottom: 6 }}>
-              <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
-                type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
-            </Field>
+            {stockSheet.packageSize > 0 ? (
+              // Package size known, so stock is worth entering in packs
+              // instead of doing the pack-to-unit math yourself: "10 packs"
+              // beats "360 IU", and "10 packs + 18 IU" (a partially used
+              // one on top of sealed ones) beats guessing a single number.
+              // Either field alone still works. Same combo as the Food
+              // Tracker's own stock update (screens-food.jsx).
+              <>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <Field label="Full packs" accent style={{ flex: 1, marginBottom: 0 }}>
+                    <input value={stockSheet.stockPacksStr} onChange={e => setStockSheet(d => ({ ...d, stockPacksStr: mdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} autoFocus />
+                  </Field>
+                  <Field label={`+ ${stockSheet.unitLabel || 'pills'}`} accent style={{ flex: 1, marginBottom: 0 }}>
+                    <input value={stockSheet.stockExtraStr} onChange={e => setStockSheet(d => ({ ...d, stockExtraStr: mdDecimalFilter(e.target.value) }))}
+                      type="text" inputMode="decimal" placeholder="e.g. 18" style={mdInputStyle} />
+                  </Field>
+                </div>
+                {/* Live confirmation of the packs+extra math while typing,
+                    same value saveStockSheet would actually write (both go
+                    through mdStockSheetTotal), only in packs mode: plain
+                    mode's single field already shows its own number, a
+                    "Total" restating it would be pure noise. */}
+                {mdStockSheetTotal(stockSheet) != null && (
+                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 12 }}>
+                    Total: <span className="num">{mdFmtQty(mdStockSheetTotal(stockSheet), stockSheet.unitLabel)}</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <Field label={`Update stock (${stockSheet.unitLabel || 'pills'})`} accent style={{ marginBottom: 6 }}>
+                <input value={stockSheet.stockStr} onChange={e => setStockSheet(d => ({ ...d, stockStr: mdDecimalFilter(e.target.value) }))}
+                  type="text" inputMode="decimal" placeholder="e.g. 60 after restocking" style={mdInputStyle} autoFocus />
+              </Field>
+            )}
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '16px' }}>
-              Tracks what's actually taken since, warns here once it drops below a package. Leave blank to keep the current count unchanged.
+              Tracks what's actually taken since. Leave blank to keep the current count unchanged.
             </div>
-            <Btn onClick={saveStockSheet} style={{ width: '100%' }}>Save</Btn>
+            <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
+              <Field label={`Warn when below (${stockSheet.unitLabel || 'units'})`} accent style={{ marginBottom: 6 }}>
+                <input value={stockSheet.lowStockThresholdStr} onChange={e => setStockSheet(d => ({ ...d, lowStockThresholdStr: mdDecimalFilter(e.target.value) }))}
+                  type="text" inputMode="decimal" placeholder="e.g. 10" style={mdInputStyle} />
+              </Field>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
+                Running Low fires under this. Defaults to one package, raise it for anything that runs out faster than a package lasts.
+              </div>
+              <Row label="Cycle only" first>
+                <Toggle on={!!stockSheet.excludeFromLowStock} onToggle={() => setStockSheet(d => ({ ...d, excludeFromLowStock: !d.excludeFromLowStock }))} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                Keeps tracking stock, but skips the Running Low warning. For something you're using up for one cycle and won't be reordering.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {effectiveStockById.get(stockSheet.id) != null && (
+                <Btn kind="ghost" onClick={clearStockSheet} style={{ flex: 1, color: UI.danger }}>Stop tracking</Btn>
+              )}
+              <Btn onClick={saveStockSheet} style={{ flex: effectiveStockById.get(stockSheet.id) != null ? 2 : 1 }}>Save</Btn>
+            </div>
           </>
         )}
       </Sheet>
@@ -1682,13 +1880,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', gap: 6 }}>
               <Pill gold={stockFilterInPlan === 'in'} onClick={() => toggleStockFilterInPlan('in')} style={{ cursor: 'pointer' }}>In a plan</Pill>
               <Pill gold={stockFilterInPlan === 'out'} onClick={() => toggleStockFilterInPlan('out')} style={{ cursor: 'pointer' }}>Not in a plan</Pill>
-            </div>
-          </div>
-          <div>
-            <MdGoldLabel>STOCK</MdGoldLabel>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Pill gold={stockFilterTracked === 'tracked'} onClick={() => toggleStockFilterTracked('tracked')} style={{ cursor: 'pointer' }}>Tracked</Pill>
-              <Pill gold={stockFilterTracked === 'untracked'} onClick={() => toggleStockFilterTracked('untracked')} style={{ cursor: 'pointer' }}>Not tracked</Pill>
             </div>
           </div>
           {stockFilterActiveCount > 0 && <Btn kind="ghost" onClick={clearStockFilters}>Clear all filters</Btn>}
@@ -1768,29 +1959,39 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <Sheet open={!!medSheet} onClose={requestCloseMedSheet} title={medSheet?.id ? 'Edit medication' : 'Add medication'} titleColor="var(--accent)">
         {medSheet && (
           <>
-            <Field label="Name" style={{ marginBottom: 14 }}>
+            <Field label="Name" accent style={{ marginBottom: 14 }}>
               <TextInput value={medSheet.name} onChange={v => setMedSheet(d => ({ ...d, name: v }))} placeholder="e.g. Vitamin D3" autoFocus />
             </Field>
-            <Field label="Brand (optional)" style={{ marginBottom: 14 }}>
+            <Field label="Brand (optional)" accent style={{ marginBottom: 14 }}>
               <TextInput value={medSheet.brand} onChange={v => setMedSheet(d => ({ ...d, brand: v }))} placeholder="e.g. Nature's Own" />
             </Field>
-            <div className="micro" style={{ marginBottom: 6 }}>Category</div>
+            <div className="micro-gold" style={{ marginBottom: 6 }}>Category</div>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 14 }}>
               {MED_CATEGORIES.map(c => (
                 <button key={c.id} onClick={() => setMedSheet(d => ({ ...d, category: d.category === c.id ? '' : c.id }))} style={mdSegBtn(medSheet.category === c.id)}>{c.label}</button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <Field label="Unit" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Unit" accent style={{ flex: 1, marginBottom: 0 }}>
                 <TextInput value={medSheet.unitLabel} onChange={v => setMedSheet(d => ({ ...d, unitLabel: v }))} placeholder="pills" />
               </Field>
-              <Field label="Package size" style={{ flex: 1, marginBottom: 0 }}>
+              <Field label="Package size" accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={medSheet.packageSizeStr} onChange={e => setMedSheet(d => ({ ...d, packageSizeStr: mdDecimalFilter(e.target.value) }))}
                   type="text" inputMode="decimal" placeholder="e.g. 60" style={mdInputStyle} />
               </Field>
             </div>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -8, marginBottom: 14, lineHeight: '16px' }}>
               Total amount in one container (e.g. a whole vial or bottle), not the dose. A vial labeled "250mg/ml" at 10ml holds 2500mg total. Dose is set separately per scheduled time.
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <Row label="Track Medication Stock" first>
+                <Toggle on={!!medSheet.trackStock} onToggle={() => setMedSheet(d => ({ ...d, trackStock: !d.trackStock }))} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                {medSheet.trackStock
+                  ? 'Set the Running Low threshold and Cycle only from Inventory > Stock, tap this medication there.'
+                  : "Off drops this medication from Inventory's Stock view entirely, for one you'll never bother counting."}
+              </div>
             </div>
             <div style={{ marginBottom: 14 }}>
               <Row label="Exclude from pillbox" first>
@@ -1802,7 +2003,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
             </div>
             {medSheet.id && medSheetMemberships.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <div className="micro" style={{ marginBottom: 8 }}>In these plans</div>
+                <div className="micro-gold" style={{ marginBottom: 8 }}>In these plans</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {medSheetMemberships.map(it => (
                     <div key={it.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
@@ -1865,7 +2066,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 {schedMedSlots.map(sl => (
                   <div key={sl.id} style={{ ...mdQuickRowInner, cursor: 'default' }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>
-                      {sl.weekdays.length === 7 ? 'Every day' : sl.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/')} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
+                      {mdSlotDaysLabel(sl)} {String(sl.hour).padStart(2, '0')}:00 · {mdFmtQty(sl.doseQty, schedMed.unitLabel)}
                       {(sl.startDate || sl.endDate) && <span style={{ color: UI.inkFaint }}> ({sl.startDate || '…'} → {sl.endDate || '…'})</span>}
                     </div>
                     <button onClick={() => openSlotDraft(sl)} aria-label="Edit time" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4 }}><i className="fa-solid fa-pen" style={{ fontSize: 11 }} /></button>
@@ -1903,24 +2104,47 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 
       {/* Add/edit one schedule slot, nested within the schedMed sheet above */}
       <Sheet open={!!slotDraft} onClose={requestCloseSlotDraft} title={slotDraft?.id ? 'Edit time' : 'Add time'} titleColor="var(--accent)">
-        {slotDraft && (
+        {slotDraft && (() => {
+          const isInterval = slotDraft.mode === 'interval';
+          const reversedRange = slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate;
+          return (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div className="micro">Days</div>
-              <button onClick={selectAllWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+            {/* Weekdays vs every-N-days are mutually exclusive per slot (see
+                saveSlotDraft): most compounds run on fixed weekdays, but many
+                (peptides especially) are dosed every 2/3/x days instead, with
+                no weekday pattern to pick at all. */}
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+              <button onClick={() => setSlotDraft(d => ({ ...d, mode: 'weekdays' }))} style={mdSegBtn(!isInterval)}>Weekdays</button>
+              <button onClick={() => setSlotDraft(d => ({ ...d, mode: 'interval' }))} style={mdSegBtn(isInterval)}>Every X days</button>
             </div>
-            <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-              {MD_WEEKDAY_SHORT.map((label, wd) => (
-                <button key={wd} onClick={() => toggleWeekday(wd)} style={{
-                  flex: 1, padding: '8px 2px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: UI.fontUi,
-                  border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
-                  background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
-                  color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
-                  textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
-                  WebkitTapHighlightColor: 'transparent',
-                }}>{label}</button>
-              ))}
-            </div>
+            {isInterval ? (
+              <>
+                <div className="micro" style={{ marginBottom: 6 }}>Every</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                  <Stepper value={slotDraft.intervalDaysNum} step={1} min={2} max={90} suffix={slotDraft.intervalDaysNum === 1 ? ' day' : ' days'}
+                    onChange={v => setSlotDraft(d => ({ ...d, intervalDaysNum: Math.max(2, Math.min(90, Math.round(v))) }))} big />
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div className="micro">Days</div>
+                  <button onClick={selectAllWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+                </div>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  {MD_WEEKDAY_SHORT.map((label, wd) => (
+                    <button key={wd} onClick={() => toggleWeekday(wd)} style={{
+                      flex: 1, padding: '8px 2px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: UI.fontUi,
+                      border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
+                      background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
+                      color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
+                      textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="micro" style={{ marginBottom: 6 }}>Time</div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
               <Stepper value={slotDraft.hour} step={1} min={0} max={23} suffix=":00" onChange={v => setSlotDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
@@ -1929,33 +2153,57 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               <input value={slotDraft.doseQtyStr} onChange={e => setSlotDraft(d => ({ ...d, doseQtyStr: mdDecimalFilter(e.target.value) }))}
                 type="text" inputMode="decimal" placeholder="e.g. 1" style={mdInputStyle} autoFocus />
             </Field>
-            <button onClick={() => setSlotDraft(d => ({ ...d, phaseOpen: !d.phaseOpen }))} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer', marginBottom: slotDraft.phaseOpen ? 10 : 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className={`fa-solid fa-chevron-${slotDraft.phaseOpen ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
-              Limit to a date range (for a staged cycle)
-            </button>
-            {slotDraft.phaseOpen && (
+            {isInterval ? (
+              // Not collapsible like the weekday-mode range below: startDate
+              // is the count-from anchor here, not an optional phase bound,
+              // so it's always shown and always required (see saveSlotDraft).
               <div style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
+                  <Field label="Starting" accent style={{ flex: 1, marginBottom: 0 }}>
                     <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
                   </Field>
-                  <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
+                  <Field label="Until (optional)" style={{ flex: 1, marginBottom: 0 }}>
                     <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
                   </Field>
                 </div>
-                {/* Same reversed-range check as saveSlotDraft's own guard,
-                    surfaced here so the user sees why Save is stuck instead
-                    of just finding out the button won't respond. */}
-                {slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate && (
+                {reversedRange && (
                   <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
-                    "To" must be on or after "From".
+                    "Until" must be on or after "Starting".
                   </div>
                 )}
               </div>
+            ) : (
+              <>
+                <button onClick={() => setSlotDraft(d => ({ ...d, phaseOpen: !d.phaseOpen }))} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer', marginBottom: slotDraft.phaseOpen ? 10 : 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <i className={`fa-solid fa-chevron-${slotDraft.phaseOpen ? 'down' : 'right'}`} style={{ fontSize: 9 }} />
+                  Limit to a date range (for a staged cycle)
+                </button>
+                {slotDraft.phaseOpen && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Field label="From" style={{ flex: 1, marginBottom: 0 }}>
+                        <input type="date" value={slotDraft.startDate} onChange={e => setSlotDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
+                      </Field>
+                      <Field label="To" style={{ flex: 1, marginBottom: 0 }}>
+                        <input type="date" value={slotDraft.endDate} onChange={e => setSlotDraft(d => ({ ...d, endDate: e.target.value }))} style={mdInputStyle} />
+                      </Field>
+                    </div>
+                    {/* Same reversed-range check as saveSlotDraft's own guard,
+                        surfaced here so the user sees why Save is stuck instead
+                        of just finding out the button won't respond. */}
+                    {reversedRange && (
+                      <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6, lineHeight: '16px' }}>
+                        "To" must be on or after "From".
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
-            <Btn onClick={saveSlotDraft} disabled={!slotDraft.weekdays.length || !mdNum(slotDraft.doseQtyStr) || (slotDraft.startDate && slotDraft.endDate && slotDraft.startDate > slotDraft.endDate)} style={{ width: '100%' }}>Save</Btn>
+            <Btn onClick={saveSlotDraft} disabled={(isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) || !mdNum(slotDraft.doseQtyStr) || reversedRange} style={{ width: '100%' }}>Save</Btn>
           </>
-        )}
+          );
+        })()}
       </Sheet>
 
       {/* Coach: push to client / template bucket */}

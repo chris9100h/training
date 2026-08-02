@@ -22,6 +22,27 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.692',
+    date: '2026-08-02',
+    title: 'Describe a meal, now with eyes 📸',
+    items: [
+      "📸 Snap it instead of typing it: Describe a meal now takes a photo of your plate too, straight from the camera or your photo library (handy for logging last night's dinner today). Photo alone, photo plus a quick note for whatever it can't see (a genuinely huge portion, sauce hiding underneath, only half the plate in frame), or just type it out like before, whatever's faster in the moment.",
+      '🔁 Wrong guess? Correct it, don\'t restart it: once the first estimate lands, tap Reiterate and say what\'s off ("bigger portion", "no cheese"), and it adjusts just that instead of guessing the whole meal again from scratch. Works for as many rounds as it takes.',
+    ],
+  },
+  {
+    id: 'v2.689',
+    date: '2026-08-01',
+    title: 'Smarter shelves, less noise 📦',
+    items: [
+      '🛒 Shopping List, decluttered: in the edit sheet, Exclude is one clean picker now (1 week, 2 weeks, 1 month, or for good), instead of a separate checkbox plus its own temporary section. And the checkbox on the list row itself got repurposed: it used to exclude an item on the spot, now it means "bought it", tap it and a quick popup asks how much you actually got, pre-filled with the suggested amount, then adds that to your inventory.',
+      "✅ Well-stocked items stop cluttering the list: once something's comfortably above its threshold it drops off the Shopping List entirely (still right there in the Inventory tab), and it quietly reappears the moment it's actually worth buying again.",
+      '⚠️ Running Low, tuned to reality: Food and Medications both let you set your own "warn me below X" threshold per item now, instead of always comparing to a full package. A 500g tub of Skyr you finish in a day needs a very different warning point than a 20kg bag that lasts months.',
+      '💊 Medications inventory, more precise and less naggy: stock entry is package-aware now (10 packs + 18 IU, no mental math needed), a new "Cycle only" option keeps tracking a compound you\'re winding down without nagging you to reorder it, and stock tracking itself is opt-in per medication now, so vitamins nobody physically counts stay out of the Inventory tab by default. Warn-below and Cycle only both live right in the Stock tab now, next to the stock count itself.',
+      "✨ Smaller stuff: edit sheet headings for Shopping List and Medications items are easier to read now, and Exclude moved to the bottom of the sheet so it's not sitting in the middle where it's easy to tap by accident.",
+    ],
+  },
+  {
     id: 'v2.687',
     date: '2026-07-31',
     title: "Now we're cooking 🍳",

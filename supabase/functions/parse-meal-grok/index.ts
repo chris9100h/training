@@ -1,17 +1,20 @@
 // Free-text meal description, an optional photo of the meal, or both ->
-// estimated food log items, for the Food tracker's "Describe a meal" sheet
-// (FoodScreen, screens-food.jsx). Built for informal, home-cooked,
-// multi-component meals with vague portions ("a thin slice", "one roll")
-// that search-foods has no real chance at: there is no Open Food Facts /
-// USDA / zane_foods entry for someone's own breakfast, so this never touches
-// that pipeline, it estimates directly.
+// estimated food log items, xAI Grok variant. Same contract and prompt as
+// parse-meal (Anthropic Claude, the long-standing default), so the client
+// can pick either one and get an identically-shaped response, same
+// relationship as scan-label-claude mirrors scan-label, just reversed which
+// provider is the original. Built for informal, home-cooked, multi-component
+// meals with vague portions ("a thin slice", "one roll") that search-foods
+// has no real chance at: there is no Open Food Facts / USDA / zane_foods
+// entry for someone's own breakfast, so this never touches that pipeline, it
+// estimates directly.
 //
-// The photo, when given, uses the same base64 contract as scan-label/
-// scan-label-claude (client-side downscaled first). description and image
-// are both optional, but at least one is required. When both are given, the
-// prompt treats the text as authoritative for anything the photo alone
-// can't show, see SYSTEM_PROMPT. Vision runs through the same Anthropic
-// Messages API call as the text-only path, no separate request or model.
+// The photo, when given, uses the same base64 contract as scan-label
+// (client-side downscaled first). description and image are both optional,
+// but at least one is required. When both are given, the prompt treats the
+// text as authoritative for anything the photo alone can't show, see
+// SYSTEM_PROMPT. Vision runs through the same xAI chat completion call as
+// the text-only path, no separate request or model.
 //
 // User-triggered only, one call per request. The returned items are staged
 // client-side exactly like a manually-typed Custom Item (never written to
@@ -21,9 +24,7 @@
 //
 // Calories are always DERIVED from protein/carbs/fat (4/4/9 kcal/g), never
 // trusted as a separate number from the model, same rule search-foods
-// applies to every external source: a model estimate of "calories" is one
-// more number that can silently disagree with the macros sitting right next
-// to it, deriving it removes that failure mode entirely.
+// applies to every external source.
 //
 // One action: POST { description?: string, image?: <base64, no data:
 // prefix>, mimeType?: 'image/jpeg', previousItems?: [{ name, quantityG,
@@ -37,7 +38,11 @@
 // description/image so the model revises that estimate instead of starting
 // over. See SYSTEM_PROMPT and buildUserText.
 //
-// Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses).
+// Needs the secret XAI_API_KEY (same one scan-label uses). Model configurable
+// via the optional XAI_MODEL secret (default 'grok-4.3'), same reasoning as
+// scan-label's own comment: xAI rotates and deprecates model ids quickly, if
+// grok-4.3 gets deprecated too, point XAI_MODEL at the replacement instead of
+// editing this file.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,9 +52,9 @@ const corsHeaders = {
 
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+// xAI is OpenAI-compatible, plain text-only chat completion here (no image).
+const XAI_URL = 'https://api.x.ai/v1/chat/completions';
+const DEFAULT_MODEL = 'grok-4.3';
 
 const DAILY_MEAL_PARSE_LIMIT = 60;
 const MAX_DESCRIPTION_CHARS = 2000;
@@ -62,10 +67,10 @@ const MAX_IMAGE_CHARS = 8_000_000;
 // (isAdmin = store.user?.email === this): unlimited quota for testing.
 const ADMIN_EMAIL = 'office@btc-prime.biz';
 
-// Advisory per-user daily quota (same zane_api_usage/bump_api_usage as every
-// other AI edge function, migration 0207, new kind 'meal_parse'). Fails OPEN
-// on purpose: a broken quota mechanism must never be the reason someone
-// can't log their food.
+// Advisory per-user daily quota (same zane_api_usage/bump_api_usage as
+// parse-meal, shared 'meal_parse' kind: switching providers must not double
+// the effective quota). Fails OPEN on purpose: a broken quota mechanism must
+// never be the reason someone can't log their food.
 async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
   try {
     const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -96,6 +101,8 @@ async function resolveUser(req: Request): Promise<{ id: string; email: string | 
   return user?.id ? { id: user.id, email: user.email ?? null } : null;
 }
 
+// Identical to parse-meal's own SYSTEM_PROMPT: both providers must be
+// interchangeable, including how they're instructed.
 const SYSTEM_PROMPT = `You estimate nutrition for a home-logged meal from a photo of the food, a short often informal free-text description (may be a home-cooked dish, several components at once, and vague portions like "a thin slice" or "one roll"), or both together, the way an experienced dietitian doing a quick visual or verbal estimate would, not a database lookup. When the mandatory self-check below applies, show that arithmetic in plain text first; otherwise skip straight to the answer. Either way, end your response with exactly one JSON object, no markdown code fences around it, and no text of any kind after it.
 
 Identify every separate food item, whether it's in a photo, in text, or both. For each, estimate a realistic quantity in grams and its macros, using everyday judgment for vague or visual portions the same way a dietitian eyeballing a plate would (a thin slice of a dense sliced meat is roughly 30-40 g, a bread roll is roughly 50-60 g, one egg is roughly 50-60 g, and so on; in a photo, use whatever's in frame for scale, a fork, a hand, a dinner plate is roughly 26-28 cm across). Never drop an item just because an exact amount wasn't given or isn't fully visible, make a reasonable assumption instead.
@@ -120,7 +127,7 @@ protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null
 
 // Pull the first balanced JSON object out of the model's text, tolerant of an
 // accidental ```json fence or a stray sentence around it. Same helper as
-// scan-label/scan-label-claude.
+// parse-meal/scan-label.
 function extractJson(text: string): Record<string, unknown> | null {
   if (!text) return null;
   const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -153,7 +160,7 @@ function caloriesFromMacros(p: number, c: number, f: number): number {
   return Math.round(p * 4 + c * 4 + f * 9);
 }
 
-// Best-effort short reason from an Anthropic error body, same as scan-label-claude.
+// Best-effort short reason from an xAI error body, same as scan-label.
 function errReason(raw: string): string {
   try {
     const j = JSON.parse(raw);
@@ -163,10 +170,10 @@ function errReason(raw: string): string {
   return raw.trim().slice(0, 160);
 }
 
-// Same backstop as ai-daily-summary/ai-checkin-opinion: CLAUDE.md's "no em
-// dashes" rule is enforced on committed source by tools/check-emdash.cjs,
-// which can't touch runtime LLM output, so a prompt instruction alone isn't
-// a guarantee, replace any that slip through. Matches by Unicode escape
+// Same backstop as parse-meal/ai-daily-summary/ai-checkin-opinion: CLAUDE.md's
+// "no em dashes" rule is enforced on committed source by tools/check-emdash.cjs,
+// which can't touch runtime LLM output, so a prompt instruction alone isn't a
+// guarantee, replace any that slip through. Matches by Unicode escape
 // (U+2014), not the literal character, so check-emdash.cjs's grep has
 // nothing to flag in this file.
 function stripEmDash(s: string): string {
@@ -235,17 +242,16 @@ Deno.serve(async (req) => {
     return json({ error: `That's ${DAILY_MEAL_PARSE_LIMIT} meal descriptions today, well past normal use. The limit resets tomorrow; add items manually until then.` }, 429);
   }
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  if (!apiKey) return json({ error: 'Meal parsing is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
-  const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
+  const apiKey = Deno.env.get('XAI_API_KEY') ?? '';
+  if (!apiKey) return json({ error: 'Meal parsing is not set up yet (missing XAI_API_KEY).' }, 503);
+  const model = (Deno.env.get('XAI_MODEL') ?? '').trim() || DEFAULT_MODEL;
 
   let resp: Response;
   try {
-    resp = await fetch(ANTHROPIC_URL, {
+    resp = await fetch(XAI_URL, {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -254,34 +260,38 @@ Deno.serve(async (req) => {
         // arithmetic before the JSON for a multi-item meal, needs headroom
         // so that reasoning can never truncate the JSON object itself.
         max_tokens: 2000,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          // Text first, image second, same block order scan-label-claude
-          // already uses for its single-image prompt.
-          content: image
-            ? [{ type: 'text', text: buildUserText(description, true, previousItems) }, { type: 'image', source: { type: 'base64', media_type: mimeType, data: image } }]
-            : [{ type: 'text', text: buildUserText(description, false, previousItems) }],
-        }],
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          {
+            role: 'user',
+            // Text first, image second, same block order scan-label already
+            // uses for its own vision request. Plain string (no array) when
+            // there's no image, unchanged from the original text-only shape.
+            content: image
+              ? [{ type: 'text', text: buildUserText(description, true, previousItems) }, { type: 'image_url', image_url: { url: `data:${mimeType};base64,${image}`, detail: 'high' } }]
+              : buildUserText(description, false, previousItems),
+          },
+        ],
       }),
     });
   } catch (e) {
-    console.error('[parse-meal] anthropic fetch error:', e);
+    console.error('[parse-meal-grok] xai fetch error:', e);
     return json({ error: 'Could not reach the meal estimator. Try again.' }, 502);
   }
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
-    console.error('[parse-meal] anthropic error', resp.status, detail);
+    console.error('[parse-meal-grok] xai error', resp.status, detail);
     const reason = errReason(detail);
     return json({ error: `Meal estimator failed (${resp.status})${reason ? ': ' + reason : ''}` }, 502);
   }
 
   const data = await resp.json().catch(() => null);
-  const content = data?.content;
-  const text = Array.isArray(content)
-    ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
-    : '';
+  const content = data?.choices?.[0]?.message?.content;
+  const text = typeof content === 'string'
+    ? content
+    // Some OpenAI-compatible servers return content as an array of parts.
+    : Array.isArray(content) ? content.map((p: { text?: string }) => p?.text ?? '').join('') : '';
   const parsed = extractJson(text);
   const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
 

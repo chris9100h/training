@@ -3392,20 +3392,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     if (!prRepsValid(st, exId)) return null;
     return LB.e1rm(st.kg, prReps(st, exId));
   };
+  // Whether `s` is the account's most recent ended session, full stop, across
+  // every exercise (not just this session's own dayId): if so, isPR below can
+  // safely fall back to the server aggregate to fill a local windowing gap,
+  // since nothing chronologically later exists that could have set a PR the
+  // aggregate shouldn't yet know about relative to `s`, the exact "later
+  // session bleeding backward" risk the e1RM comment above (and
+  // bestE1rmForExercise's own doc comment in store.js) warns about for an
+  // arbitrary PAST session.
+  const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
+  // Strictly local, strictly from OTHER sessions before s, so this can never
+  // be self-referential to s's own sets. A windowed-out prior session (entries:
+  // [] with aggExercises > 0, see docs/internals.md's History-Windowing section)
+  // simply contributes nothing here, same as a session that genuinely never
+  // trained that exercise, isPR below tells the two cases apart per exercise
+  // via its own fallback rather than a blanket flag, see there.
   const prMap = {};
-  // Whether any comparison-candidate session below (same filter) is windowed-out
-  // rather than genuinely empty: entries: [] with aggExercises > 0 means the session
-  // HAD sets that just aren't loaded locally (see docs/internals.md's History-Windowing
-  // section), not that it trained nothing. aggExercises is only a total count with no
-  // per-exercise breakdown, so there is no way to tell which specific exId such a gap
-  // might be hiding numbers for, any exercise in the viewed session could be the one.
-  // Left unguarded, a windowed-out prior session silently contributes zero to prMap,
-  // so whatever was lifted here would falsely read as a brand new PR. isPR below
-  // abstains (no badge at all) for every exercise in this session once a single such
-  // gap turns up among the candidates, rather than risk showing a false positive.
-  let prMapHasGap = false;
   store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
-    if (!(sess.entries || []).length && (sess.aggExercises || 0) > 0) { prMapHasGap = true; return; }
     sess.entries.forEach(e => e.sets.forEach(st => {
       const val = prValueOf(st, e.exId);
       if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
@@ -3413,25 +3416,64 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }));
   });
   const sessionBestMap = {};
+  // Real object reference to whichever set FIRST reached this exercise's
+  // session-best value, keyed by exId. Needed because two sets can tie
+  // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
+  // both share the exact same e1RM value, but only the one that actually
+  // achieved it first is the PR, a repeat of the same number right after
+  // isn't a second, brand new record. Without this, `val !== sessionBest`
+  // below can't tell the two sets apart at all, both compare equal to the
+  // shared session best and both got badged, a real bug that only became
+  // visible once the windowing fix above stopped hiding every PR star
+  // outright.
+  const sessionBestSetMap = {};
   s.entries.forEach(e => e.sets.forEach(st => {
     const val = prValueOf(st, e.exId);
     if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
     sessionBestMap[e.exId] = val;
+    sessionBestSetMap[e.exId] = st;
   }));
   const isPR = (st, exId) => {
     const val = prValueOf(st, exId);
     if (val == null) return false;
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
-    // A windowed-out prior session means prMap was built without that session's
-    // numbers, so "best" here can't be trusted as truly the best. Abstain instead
-    // of showing a badge we can't back up (see prMapHasGap above).
-    if (prMapHasGap) return false;
-    const best = prMap[exId];
-    // No prior history for this exercise at all, nothing to beat, so the
-    // first-ever session with it isn't a PR (matches the two other isPR
-    // implementations in this file, which both gate on pr > 0).
-    return best != null && val > best;
+    // Tie-break: only the specific set that FIRST reached the session best
+    // is credited, see sessionBestSetMap above. Reference equality is safe
+    // here, filteredSets/e.sets below are the same array (filtered, not
+    // cloned), so this is genuinely the same object, not a lookalike.
+    if (sessionBestSetMap[exId] !== st) return false;
+    const localBest = prMap[exId];
+    // Local history for this exercise exists (from OTHER sessions before s,
+    // never s itself), so it's the most precise source available and wins
+    // outright, no prior history for this exercise at all also lands here
+    // as localBest == null, matches the two other isPR implementations in
+    // this file, which both gate on pr > 0: a first-ever session with an
+    // exercise isn't a PR.
+    if (localBest != null) return val > localBest;
+    // No usable local history: either genuinely the first time this exercise
+    // was done, or its only prior occurrences sit in a windowed-out session.
+    // Both abstain the same way on a past session, a gap in this exercise's
+    // history must not block its own badge here, but also must not fabricate
+    // one, so only the account's latest session gets a second chance below.
+    if (!isLatestSession) return false;
+    const exObj = store.exercises.find(x => x.id === exId);
+    // exerciseBests (below) is e1RM-scale only, same type gate prValueOf
+    // itself uses for assisted/time-mode exercises.
+    if (LB.isAssisted(exObj) || LB.exerciseLogMode(exObj) === 'time') return false;
+    const serverBest = (store.exerciseBests || {})[exId];
+    if (serverBest == null) return false;
+    // >= rather than >: store.exerciseBests (the get_exercise_best_e1rm RPC
+    // result, see bestE1rmForExercise in store.js) is refetched fresh on every
+    // boot. Once s's own sets are saved server-side, the very next refresh
+    // (next app launch or training-screen mount) already includes s's own
+    // contribution, nothing excludes it after the fact, so a strict > would
+    // start comparing val against itself and always lose. An exact tie here
+    // is ambiguous between "s itself set this record" and "a genuine
+    // coincidental tie with old history", but the former is far more likely,
+    // and this app would rather badge that ambiguity than silently drop a
+    // real PR the moment the app gets killed and reopened.
+    return val >= serverBest;
   };
 
   const muscleGroups = [...new Set(
