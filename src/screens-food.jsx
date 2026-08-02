@@ -3031,15 +3031,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealReiterateDraft('');
     setMealRefineOpen(false);
   }
-  // "Reiterate" on the review Sheet: mealReiterateDraft (the note being typed
-  // for this round, not the original mealDescription, which stays fixed as
-  // history once shown) plus the same photo, paired with the current
-  // mealItems (as previousItems) so the edge function revises that estimate
-  // using the new text as a correction, rather than guessing from scratch
-  // again. On success the draft becomes another read-only history entry and
-  // the field empties for the next one. Doesn't touch mealDescribeOpen, the
-  // review sheet just shows the fresh result and the user can reiterate
-  // again if they want.
+  // "Reiterate" in the Refine sub-sheet: mealReiterateDraft (the note being
+  // typed for this round, not the original mealDescription, which stays
+  // fixed as history once shown) plus the same photo, paired with the
+  // current mealItems (as previousItems) so the edge function revises that
+  // estimate using the new text as a correction, rather than guessing from
+  // scratch again. On success the draft becomes another read-only history
+  // entry, the field empties for next time, and the sub-sheet itself closes
+  // so the Review sheet underneath is immediately visible with the fresh
+  // result, instead of leaving the user staring at their own now-stale note.
   async function handleReiterateMeal() {
     const text = mealReiterateDraft.trim();
     if (!text && !mealPhoto) return;
@@ -3056,6 +3056,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealItems(mapParsedMealItems(res.items));
     if (text) setMealReiterations(list => [...list, text]);
     setMealReiterateDraft('');
+    setMealRefineOpen(false);
   }
   // Guards against dismissing the Refine sub-sheet mid-request, same reason
   // and pattern as closeMealDescribeSheet: a stray close during the fetch
