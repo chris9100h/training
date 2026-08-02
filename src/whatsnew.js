@@ -22,6 +22,15 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.692',
+    date: '2026-08-02',
+    title: 'Describe a meal, now with eyes 📸',
+    items: [
+      "📸 Snap it instead of typing it: Describe a meal now takes a photo of your plate too, straight from the camera or your photo library (handy for logging last night's dinner today). Photo alone, photo plus a quick note for whatever it can't see (a genuinely huge portion, sauce hiding underneath, only half the plate in frame), or just type it out like before, whatever's faster in the moment.",
+      '🔁 Wrong guess? Correct it, don\'t restart it: once the first estimate lands, tap Reiterate and say what\'s off ("bigger portion", "no cheese"), and it adjusts just that instead of guessing the whole meal again from scratch. Works for as many rounds as it takes.',
+    ],
+  },
+  {
     id: 'v2.689',
     date: '2026-08-01',
     title: 'Smarter shelves, less noise 📦',
