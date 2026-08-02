@@ -2953,11 +2953,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // nothing bespoke needed here). Guards against closing mid-request so a
   // cancel can't silently stage items into a sheet the user already thinks
   // they backed out of. A cancel keeps the draft text/photo around (matches
-  // every other sheet's cancel behavior in this file), only a successful
-  // estimate clears them.
+  // every other sheet's cancel behavior in this file); the draft actually
+  // persists all the way through the review flow too (see clearMealDraft
+  // below), so it is still there if the user wants to reiterate.
   function closeMealDescribeSheet() {
     if (mealParsing) return;
     setMealDescribeOpen(false);
+  }
+  // Shared shape between a fresh estimate and a reiterate: the edge
+  // function's { name, quantityG, protein, carbs, fat, fiber, sugar, satFat,
+  // sodiumMg } items become mealItems rows with a fresh tempId each. Kept in
+  // one place so a field added or renamed later cannot be updated in one
+  // call site and forgotten in the other.
+  function mapParsedMealItems(items) {
+    return items.map(it => ({
+      tempId: LB.uid(), foodName: it.name,
+      quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
+      fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
+    }));
   }
   // Downscales a picked photo client-side (same fdDownscaleImage helper the
   // label scanner uses) and stages it on mealPhoto; the network call only
@@ -2991,14 +3004,38 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
-    setMealItems(res.items.map(it => ({
-      tempId: LB.uid(), foodName: it.name,
-      quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
-      fiber: it.fiber, sugar: it.sugar, satFat: it.satFat, sodiumMg: it.sodiumMg,
-    })));
+    setMealItems(mapParsedMealItems(res.items));
     setMealDescribeOpen(false);
+  }
+  // The draft description/photo now persist through the whole review flow
+  // (handleReiterateMeal below needs them around for another pass), so
+  // there's one shared place that actually clears them once the flow
+  // genuinely ends, instead of handleDescribeMeal clearing them the moment
+  // the first estimate lands.
+  function clearMealDraft() {
     setMealDescription('');
     setMealPhoto(null);
+  }
+  // "Reiterate" on the review Sheet: same description/photo as the initial
+  // estimate, but this time paired with the current mealItems (as
+  // previousItems) so the edge function revises that estimate using the new
+  // text as a correction, rather than guessing from scratch again. Doesn't
+  // touch mealDescribeOpen or the draft text/photo, the review sheet just
+  // shows the fresh result and the user can reiterate again if they want.
+  async function handleReiterateMeal() {
+    const text = mealDescription.trim();
+    if (!text && !mealPhoto) return;
+    setMealParsing(true);
+    setMealParseError(null);
+    const previousItems = (mealItems || []).map(i => ({
+      name: i.foodName, quantityG: i.quantityG, protein: i.protein, carbs: i.carbs, fat: i.fat,
+      fiber: i.fiber, sugar: i.sugar, satFat: i.satFat, sodiumMg: i.sodiumMg,
+    }));
+    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto, previousItems);
+    setMealParsing(false);
+    if (!res.ok) { setMealParseError(res.error); return; }
+    if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
+    setMealItems(mapParsedMealItems(res.items));
   }
   // Opens one mealItems row in the normal custom-item quantity sheet
   // (openCustomAsScalable, same one a re-logged custom entry reopens
@@ -3014,19 +3051,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   function removeMealItem(tempId) {
     // Nulls out (not []) once the last row is gone, so the review Sheet
-    // (open={mealItems != null}) closes itself instead of lingering empty.
-    setMealItems(list => {
-      const next = (list || []).filter(i => i.tempId !== tempId);
-      return next.length ? next : null;
-    });
+    // (open={mealItems != null}) closes itself instead of lingering empty;
+    // that's also a genuine end of the review flow, so the draft clears too.
+    const next = (mealItems || []).filter(i => i.tempId !== tempId);
+    if (!next.length) { clearMealDraft(); setMealItems(null); return; }
+    setMealItems(next);
   }
   // Cancel/backdrop/back on the review list: same "won't be added" dirty
   // check requestLeaveFood uses for the main staged batch, scoped to just
   // this not-yet-staged meal-description batch.
   async function requestCloseMealReview() {
+    if (mealParsing) return;
     const n = mealItems?.length || 0;
     if (n && !await confirm(`${n} item${n === 1 ? '' : 's'} from your description won't be added.`, { title: 'Discard items?', ok: 'Discard', cancel: 'Keep reviewing', danger: true })) return;
     setMealItems(null);
+    clearMealDraft();
   }
   // Blocks "Log it"/"Plan it"/"Add N items" while any row is still at a 0g
   // (or otherwise missing) amount: editMealItem (via openCustomAsScalable)
@@ -3040,6 +3079,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // meal. Calories are always derived here, never trusted from the edge
   // function's own number once it's had a chance to be hand-edited.
   function commitMealItems(planned) {
+    if (mealParsing) return;
     if (!mealItems || !mealItems.length) return;
     const time = entryTime();
     const now = new Date().toISOString();
@@ -3055,6 +3095,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     setStaged(list => [...list, ...entries]);
     setMealItems(null);
+    clearMealDraft();
   }
   const mealItemsTotals = useMemoFd(() => {
     const netCarbs = !!store.settings?.netCarbs;
@@ -4606,7 +4647,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
       <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Tap an item to adjust its amount or numbers. Remove anything that doesn't belong.
+          Tap an item to adjust its amount or numbers. Remove anything that doesn't belong, or add a note below and tap Reiterate to adjust the whole estimate at once.
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
           <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
@@ -4633,16 +4674,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             );
           })}
         </div>
+        {/* Refine the same estimate instead of starting over: the description
+            (and photo, if any) from the first pass stays right here, editing
+            it and tapping Reiterate sends it back with the current mealItems
+            as previousItems so the edge function corrects them instead of
+            guessing fresh. */}
+        <Field label="Your description" style={{ marginBottom: mealPhoto ? 8 : 12 }}>
+          <textarea
+            value={mealDescription}
+            onChange={e => setMealDescription(e.target.value)}
+            placeholder="Add a note, e.g. it's a bigger portion, or there's sauce underneath too"
+            rows={3}
+            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+        </Field>
+        {mealPhoto && (
+          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
+        )}
+        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
+        <Btn kind="ghost" onClick={handleReiterateMeal} disabled={mealParsing || (!mealDescription.trim() && !mealPhoto)} style={{ width: '100%', marginBottom: 16 }}>
+          {mealParsing ? 'Refining…' : 'Reiterate'}
+        </Btn>
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid || mealParsing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={requestCloseMealReview} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid} style={{ flex: 2 }}>
+            <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 2 }}>
               Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
             </Btn>
           </div>

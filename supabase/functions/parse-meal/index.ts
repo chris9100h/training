@@ -26,9 +26,16 @@
 // to it, deriving it removes that failure mode entirely.
 //
 // One action: POST { description?: string, image?: <base64, no data:
-// prefix>, mimeType?: 'image/jpeg' } (description/image both optional, at
-// least one required) -> { items: [{ name, quantityG, calories, protein,
-// carbs, fat, fiber, sugar, satFat, sodiumMg }] }
+// prefix>, mimeType?: 'image/jpeg', previousItems?: [{ name, quantityG,
+// protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] } (description/image
+// both optional, at least one required, previousItems does not relax that
+// rule) -> { items: [{ name, quantityG, calories, protein, carbs, fat,
+// fiber, sugar, satFat, sodiumMg }] }
+//
+// previousItems is refine mode: the caller's own prior estimate from an
+// earlier call to this same endpoint, sent back alongside new or corrected
+// description/image so the model revises that estimate instead of starting
+// over. See SYSTEM_PROMPT and buildUserText.
 //
 // Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses).
 
@@ -101,6 +108,8 @@ Explicit size, quantity, or calorie signals always win over a typical-portion as
 
 Mandatory self-check when the text states an explicit calorie floor ("over 1500 calories", "at least 2000 kcal", and similar): before the JSON, visibly write out each item's quantityG and macros, then protein*4 + carbs*4 + fat*9 for each, then the sum across all items, all in plain text with no curly braces (so it can never be mistaken for the JSON object that follows). If the sum is below the stated floor, revise quantityG and/or the macros upward and redo the sum, repeating until it clears the floor. Only then output the final JSON, reflecting those revised numbers, never the first draft you started from.
 
+Sometimes you will also be given your own previous estimate for this same meal, followed by new or corrected information from the user. When that happens, revise that previous estimate to account for the new information: keep every item, quantity, and macro exactly as it was unless the new information specifically implies a change, add or remove an item only if the new information calls for it, and do not restart the estimate from scratch or introduce unrelated changes to numbers the user did not question.
+
 Return exactly this JSON shape:
 {
   "items": [
@@ -166,10 +175,18 @@ function stripEmDash(s: string): string {
 
 // The user-message text accompanying the request, shaped for whichever of
 // description/image is actually present, see SYSTEM_PROMPT for how the
-// model is told to weigh photo vs. text when both are given.
-function buildUserText(description: string, hasImage: boolean): string {
-  if (hasImage && description) return `Meal photo attached. Additional details from the user, treat as authoritative, see the system prompt:\n${description}`;
-  if (hasImage) return 'Meal photo attached. No additional text was given, estimate from what is visible in the photo alone.';
+// model is told to weigh photo vs. text when both are given. previousItems
+// is the sanitized array from a prior call to this same endpoint (refine
+// mode): when non-empty, it is included as a labeled JSON block ahead of
+// the rest of the message, and the text-only framing changes from "Meal
+// description" (misleading once this is a revision, not a fresh one) to
+// wording that reads as new information correcting that prior answer.
+function buildUserText(description: string, hasImage: boolean, previousItems: unknown[]): string {
+  const hasPrevious = Array.isArray(previousItems) && previousItems.length > 0;
+  const previousBlock = hasPrevious ? `Previous estimate for this same meal:\n${JSON.stringify(previousItems)}\n\n` : '';
+  if (hasImage && description) return `${previousBlock}Meal photo attached. Additional details from the user, treat as authoritative, see the system prompt:\n${description}`;
+  if (hasImage) return `${previousBlock}Meal photo attached. No additional text was given, estimate from what is visible in the photo alone.`;
+  if (hasPrevious) return `${previousBlock}New information from the user, revise the previous estimate above accordingly:\n${description}`;
   return `Meal description:\n${description}`;
 }
 
@@ -188,6 +205,28 @@ Deno.serve(async (req) => {
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
   const image = typeof body?.image === 'string' ? body.image.trim() : '';
   const mimeType = ALLOWED_MIME.has(body?.mimeType) ? body.mimeType : 'image/jpeg';
+  // Refine mode: the caller's own prior estimate from an earlier call to
+  // this endpoint, sanitized the same defensive way as every other
+  // numeric/string field in this file. Optional, never relaxes the
+  // description/image requirement below.
+  const rawPreviousItems = Array.isArray(body?.previousItems) ? body.previousItems : [];
+  const previousItems = rawPreviousItems
+    .map((it: Record<string, unknown>) => {
+      const name = str(it?.name);
+      if (!name) return null;
+      return {
+        name,
+        quantityG: Math.max(0, num(it?.quantityG) ?? 100),
+        protein: Math.max(0, num(it?.protein) ?? 0),
+        carbs: Math.max(0, num(it?.carbs) ?? 0),
+        fat: Math.max(0, num(it?.fat) ?? 0),
+        fiber: num(it?.fiber),
+        sugar: num(it?.sugar),
+        satFat: num(it?.satFat),
+        sodiumMg: num(it?.sodiumMg),
+      };
+    })
+    .filter((it: unknown): it is NonNullable<typeof it> => it !== null);
   if (!description && !image) return json({ error: 'missing description or image' }, 400);
   if (description.length > MAX_DESCRIPTION_CHARS) return json({ error: 'Description too long. Try a shorter one.' }, 413);
   if (image.length > MAX_IMAGE_CHARS) return json({ error: 'Image too large. Try again.' }, 413);
@@ -221,8 +260,8 @@ Deno.serve(async (req) => {
           // Text first, image second, same block order scan-label-claude
           // already uses for its single-image prompt.
           content: image
-            ? [{ type: 'text', text: buildUserText(description, true) }, { type: 'image', source: { type: 'base64', media_type: mimeType, data: image } }]
-            : [{ type: 'text', text: buildUserText(description, false) }],
+            ? [{ type: 'text', text: buildUserText(description, true, previousItems) }, { type: 'image', source: { type: 'base64', media_type: mimeType, data: image } }]
+            : [{ type: 'text', text: buildUserText(description, false, previousItems) }],
         }],
       }),
     });
