@@ -13,6 +13,7 @@ const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
+const PARSE_MEAL_GROK_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-grok`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -2648,14 +2649,19 @@ async function scanLabel(imageBase64, mimeType, provider) {
   return { ok: true, label: data };
 }
 
-// Parses a free-text meal description (via the parse-meal edge function) into
-// estimated food items for FoodScreen's "Describe a meal" sheet. Same
-// contract shape as scanLabel/searchFoods: never throws, { ok: false, error }
-// on any failure. Items are handed back plain (name/quantityG/calories/
-// protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
-// exactly like a manually-typed Custom Item, nothing is written here.
-async function parseMealText(description) {
-  const res = await fnFetch(PARSE_MEAL_URL, { description });
+// Parses a free-text meal description into estimated food items for
+// FoodScreen's "Describe a meal" sheet. Two interchangeable backends share
+// the exact same request/response contract, see logbook-meal-parser-provider
+// in CLAUDE.md's localStorage-keys list for how the client picks one:
+// 'claude' (Anthropic, parse-meal, the long-standing default) or 'grok' (xAI
+// Grok, parse-meal-grok). Same contract shape as scanLabel/searchFoods: never
+// throws, { ok: false, error } on any failure. Items are handed back plain
+// (name/quantityG/calories/protein/carbs/fat/fiber/sugar/satFat/sodiumMg);
+// the caller stages them exactly like a manually-typed Custom Item, nothing
+// is written here.
+async function parseMealText(description, provider) {
+  const url = provider === 'grok' ? PARSE_MEAL_GROK_URL : PARSE_MEAL_URL;
+  const res = await fnFetch(url, { description });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };

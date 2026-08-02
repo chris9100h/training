@@ -181,6 +181,19 @@ function fdWriteScannerProvider(v) {
   try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
   try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
 }
+// Same idea as the label-scanner provider above, one per-device setting
+// (localStorage key logbook-meal-parser-provider) for "Describe a meal"'s own
+// two interchangeable backends. No broadcast needed here unlike the scanner:
+// this sheet only ever has the one mount point (FoodScreen), not a second one
+// like the ingredient picker's search tab, so a plain per-mount useState
+// seeded from this can't drift out of sync with itself.
+function fdReadMealParserProvider() {
+  try { return localStorage.getItem('logbook-meal-parser-provider') || 'claude'; }
+  catch (_) { return 'claude'; }
+}
+function fdWriteMealParserProvider(v) {
+  try { localStorage.setItem('logbook-meal-parser-provider', v); } catch (_) {}
+}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -1122,6 +1135,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
+  // Which AI reads the free-text description: 'claude' (parse-meal, the
+  // long-standing default) or 'grok' (parse-meal-grok), same request/
+  // response contract either way. Per-device only, not a synced setting:
+  // this is a comparison toggle, not a user-facing preference.
+  const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
   // tempId of the mealItems row currently open in the quantity sheet, or null
   // for every other reason that sheet opens (fresh add / re-editing an
@@ -2932,7 +2950,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!text) return;
     setMealParsing(true);
     setMealParseError(null);
-    const res = await LB.parseMealText(text);
+    const res = await LB.parseMealText(text, mealParserProvider);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food in that description. Try rephrasing, or add it manually.'); return; }
@@ -4498,7 +4516,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, portions and all, in plain language. Claude estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, portions and all, in plain language. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
         <Field label="What did you eat?" style={{ marginBottom: 12 }}>
           <textarea
@@ -4510,6 +4528,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
+        <div style={{ marginBottom: 12 }}>
+          <div className="micro" style={{ marginBottom: 6 }}>Estimator</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+            {[['claude', 'Claude'], ['grok', 'Grok']].map(([id, label]) => (
+              <button key={id} onClick={() => { setMealParserProvider(id); fdWriteMealParserProvider(id); }} style={fdSegBtn(mealParserProvider === id)}>{label}</button>
+            ))}
+          </div>
+        </div>
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
