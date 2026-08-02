@@ -1152,6 +1152,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // file, not during the network request (mealParsing covers that).
   const [mealPhotoReading, setMealPhotoReading] = useStateFd(false);
   const mealPhotoInputRef = useRefFd(null);
+  // Reiterate history: mealDescription is the original description and never
+  // changes again once the first estimate lands, mealReiterations is every
+  // past correction text that was actually sent (oldest first), and
+  // mealReiterateDraft is whatever is being typed for the next one. The
+  // Review sheet shows mealDescription and mealReiterations read-only and
+  // always keeps one empty field (mealReiterateDraft) ready underneath.
+  const [mealReiterations, setMealReiterations] = useStateFd([]);
+  const [mealReiterateDraft, setMealReiterateDraft] = useStateFd('');
   // tempId of the mealItems row currently open in the quantity sheet, or null
   // for every other reason that sheet opens (fresh add / re-editing an
   // already-logged entry). Lets confirmLogFood route "Save" back into this
@@ -3015,15 +3023,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function clearMealDraft() {
     setMealDescription('');
     setMealPhoto(null);
+    setMealReiterations([]);
+    setMealReiterateDraft('');
   }
-  // "Reiterate" on the review Sheet: same description/photo as the initial
-  // estimate, but this time paired with the current mealItems (as
-  // previousItems) so the edge function revises that estimate using the new
-  // text as a correction, rather than guessing from scratch again. Doesn't
-  // touch mealDescribeOpen or the draft text/photo, the review sheet just
-  // shows the fresh result and the user can reiterate again if they want.
+  // "Reiterate" on the review Sheet: mealReiterateDraft (the note being typed
+  // for this round, not the original mealDescription, which stays fixed as
+  // history once shown) plus the same photo, paired with the current
+  // mealItems (as previousItems) so the edge function revises that estimate
+  // using the new text as a correction, rather than guessing from scratch
+  // again. On success the draft becomes another read-only history entry and
+  // the field empties for the next one. Doesn't touch mealDescribeOpen, the
+  // review sheet just shows the fresh result and the user can reiterate
+  // again if they want.
   async function handleReiterateMeal() {
-    const text = mealDescription.trim();
+    const text = mealReiterateDraft.trim();
     if (!text && !mealPhoto) return;
     setMealParsing(true);
     setMealParseError(null);
@@ -3036,6 +3049,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
     setMealItems(mapParsedMealItems(res.items));
+    if (text) setMealReiterations(list => [...list, text]);
+    setMealReiterateDraft('');
   }
   // Opens one mealItems row in the normal custom-item quantity sheet
   // (openCustomAsScalable, same one a re-logged custom entry reopens
@@ -4689,25 +4704,38 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </div>
           )}
         </div>
-        {/* Refine the same estimate instead of starting over: the description
-            (and photo, if any) from the first pass stays right here, editing
-            it and tapping Reiterate sends it back with the current mealItems
-            as previousItems so the edge function corrects them instead of
-            guessing fresh. */}
-        <Field label="Your description" style={{ marginBottom: mealPhoto ? 8 : 12 }}>
+        {/* Refine the same estimate instead of starting over: the original
+            description and every past reiteration show read-only as a
+            running history, an empty field is always ready underneath for
+            the next note. Only that new note is sent on Reiterate, not the
+            whole history rendered here, the edge function already gets the
+            running total via previousItems (the current mealItems). */}
+        {mealDescription.trim() && (
+          <div style={{ marginBottom: 8 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>Original description</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{mealDescription}</div>
+          </div>
+        )}
+        {mealReiterations.map((text, idx) => (
+          <div key={idx} style={{ marginBottom: 8 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>Reiteration {idx + 1}</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{text}</div>
+          </div>
+        ))}
+        {mealPhoto && (
+          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
+        )}
+        <Field label="Add a note" style={{ marginBottom: 12 }}>
           <textarea
-            value={mealDescription}
-            onChange={e => setMealDescription(e.target.value)}
-            placeholder="Add a note, e.g. it's a bigger portion, or there's sauce underneath too"
+            value={mealReiterateDraft}
+            onChange={e => setMealReiterateDraft(e.target.value)}
+            placeholder="e.g. it's a bigger portion, or there's sauce underneath too"
             rows={3}
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
-        {mealPhoto && (
-          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
-        )}
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
-        <Btn kind="ghost" onClick={handleReiterateMeal} disabled={mealParsing || (!mealDescription.trim() && !mealPhoto)} style={{ width: '100%', marginBottom: 16 }}>
+        <Btn kind="ghost" onClick={handleReiterateMeal} disabled={mealParsing || (!mealReiterateDraft.trim() && !mealPhoto)} style={{ width: '100%', marginBottom: 16 }}>
           {mealParsing ? 'Refining…' : 'Reiterate'}
         </Btn>
         {planMode ? (
