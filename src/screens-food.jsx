@@ -1141,6 +1141,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // this is a comparison toggle, not a user-facing preference.
   const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
+  // Optional photo attached alongside (or instead of) mealDescription: { base64,
+  // mimeType }, same shape fdDownscaleImage returns, or null when none is
+  // attached. Text and photo are independently optional, "Estimate" only needs
+  // one of the two; when both are given the edge function treats the text as
+  // authoritative for whatever the photo alone can't show (exact size, hidden
+  // ingredients, and so on).
+  const [mealPhoto, setMealPhoto] = useStateFd(null);
+  // True only during the brief client-side read+downscale of a just-picked
+  // file, not during the network request (mealParsing covers that).
+  const [mealPhotoReading, setMealPhotoReading] = useStateFd(false);
+  const mealPhotoInputRef = useRefFd(null);
   // tempId of the mealItems row currently open in the quantity sheet, or null
   // for every other reason that sheet opens (fresh add / re-editing an
   // already-logged entry). Lets confirmLogFood route "Save" back into this
@@ -2935,25 +2946,51 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
 
-  // "Describe a meal": free text -> parse-meal edge function estimates macros
-  // per item -> each becomes its own staged entry, reviewed the same way as
-  // every other add path (the docked staged panel already handles quantity/
-  // macro review and per-item removal, nothing bespoke needed here). Guards
-  // against closing mid-request so a cancel can't silently stage items into
-  // a sheet the user already thinks they backed out of.
+  // "Describe a meal": free text, an attached photo, or both -> parse-meal
+  // edge function estimates macros per item -> each becomes its own staged
+  // entry, reviewed the same way as every other add path (the docked staged
+  // panel already handles quantity/macro review and per-item removal,
+  // nothing bespoke needed here). Guards against closing mid-request so a
+  // cancel can't silently stage items into a sheet the user already thinks
+  // they backed out of. A cancel keeps the draft text/photo around (matches
+  // every other sheet's cancel behavior in this file), only a successful
+  // estimate clears them.
   function closeMealDescribeSheet() {
     if (mealParsing) return;
     setMealDescribeOpen(false);
   }
+  // Downscales a picked photo client-side (same fdDownscaleImage helper the
+  // label scanner uses) and stages it on mealPhoto; the network call only
+  // fires once the user taps "Estimate", so this just attaches, it never
+  // submits by itself.
+  async function handleMealPhotoFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setMealParseError(null);
+    setMealPhotoReading(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      setMealPhotoReading(false);
+      if (!base64) { setMealParseError('Could not read that image. Try again.'); return; }
+      setMealPhoto({ base64, mimeType });
+    } catch (_) {
+      setMealPhotoReading(false);
+      setMealParseError('Could not read that image. Try again.');
+    }
+  }
+  function removeMealPhoto() {
+    setMealPhoto(null);
+  }
   async function handleDescribeMeal() {
     const text = mealDescription.trim();
-    if (!text) return;
+    if (!text && !mealPhoto) return;
     setMealParsing(true);
     setMealParseError(null);
-    const res = await LB.parseMealText(text, mealParserProvider);
+    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
-    if (!res.items.length) { setMealParseError('Could not find any food in that description. Try rephrasing, or add it manually.'); return; }
+    if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
     setMealItems(res.items.map(it => ({
       tempId: LB.uid(), foodName: it.name,
       quantityG: it.quantityG, protein: it.protein, carbs: it.carbs, fat: it.fat,
@@ -2961,6 +2998,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     })));
     setMealDescribeOpen(false);
     setMealDescription('');
+    setMealPhoto(null);
   }
   // Opens one mealItems row in the normal custom-item quantity sheet
   // (openCustomAsScalable, same one a re-logged custom entry reopens
@@ -4512,19 +4550,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      {/* ── Describe a meal: free text -> parsed into mealItems, reviewed in
-          the Sheet right below ── */}
+      {/* ── Describe a meal: free text, a photo, or both -> parsed into
+          mealItems, reviewed in the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, portions and all, in plain language. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, attach a photo, or both. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
-        <Field label="What did you eat?" style={{ marginBottom: 12 }}>
+        {mealPhoto ? (
+          <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
+            <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 88, height: 88, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block' }} />
+            <button onClick={removeMealPhoto} aria-label="Remove photo" style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', textShadow: 'none' }}>
+              <i className="fa-solid fa-xmark" style={{ fontSize: 11 }} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => mealPhotoInputRef.current && mealPhotoInputRef.current.click()} disabled={mealPhotoReading} style={{ ...fdActionCard, width: '100%', marginBottom: 12 }}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            {mealPhotoReading ? 'Reading photo…' : 'Add a photo'}
+          </button>
+        )}
+        <Field label={mealPhoto ? 'Add details (optional)' : 'What did you eat?'} style={{ marginBottom: 12 }}>
           <textarea
             value={mealDescription}
             onChange={e => setMealDescription(e.target.value)}
-            placeholder="e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll"
+            placeholder={mealPhoto ? "e.g. it's a large portion, there's sauce underneath too" : 'e.g. a thin slice of Leberkäse, one egg, a thin potato pancake and a bread roll'}
             rows={4}
-            autoFocus
+            autoFocus={!mealPhoto}
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
@@ -4539,9 +4590,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={handleDescribeMeal} disabled={mealParsing || !mealDescription.trim()} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
+          <Btn onClick={handleDescribeMeal} disabled={mealParsing || mealPhotoReading || (!mealDescription.trim() && !mealPhoto)} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
         </div>
       </Sheet>
+      {/* Hidden picker for the meal photo above: opens the native camera
+          (capture) or gallery on tap, same pattern as labelInputRef. */}
+      <input ref={mealPhotoInputRef} type="file" accept="image/*" capture="environment" onChange={handleMealPhotoFile} style={{ display: 'none' }} />
 
       {/* ── Review list for a parsed meal-description batch: tap a row to
           adjust it (opens the quantity sheet above at zIndex 200), trash to

@@ -2649,19 +2649,25 @@ async function scanLabel(imageBase64, mimeType, provider) {
   return { ok: true, label: data };
 }
 
-// Parses a free-text meal description into estimated food items for
-// FoodScreen's "Describe a meal" sheet. Two interchangeable backends share
-// the exact same request/response contract, see logbook-meal-parser-provider
-// in CLAUDE.md's localStorage-keys list for how the client picks one:
-// 'claude' (Anthropic, parse-meal, the long-standing default) or 'grok' (xAI
-// Grok, parse-meal-grok). Same contract shape as scanLabel/searchFoods: never
-// throws, { ok: false, error } on any failure. Items are handed back plain
-// (name/quantityG/calories/protein/carbs/fat/fiber/sugar/satFat/sodiumMg);
-// the caller stages them exactly like a manually-typed Custom Item, nothing
-// is written here.
-async function parseMealText(description, provider) {
+// Parses a free-text meal description, an optional photo of the meal, or
+// both, into estimated food items for FoodScreen's "Describe a meal" sheet.
+// `photo`, when given, is `{ base64, mimeType }` (same shape fdDownscaleImage
+// returns, same contract scanLabel's image argument uses), optional, may be
+// null/undefined for the text-only path. At least one of description/photo
+// must be present, the edge function 400s otherwise. Two interchangeable
+// backends share the exact same request/response contract, see
+// logbook-meal-parser-provider in CLAUDE.md's localStorage-keys list for how
+// the client picks one: 'claude' (Anthropic, parse-meal, the long-standing
+// default) or 'grok' (xAI Grok, parse-meal-grok). Same contract shape as
+// scanLabel/searchFoods: never throws, { ok: false, error } on any failure.
+// Items are handed back plain (name/quantityG/calories/protein/carbs/fat/
+// fiber/sugar/satFat/sodiumMg); the caller stages them exactly like a
+// manually-typed Custom Item, nothing is written here.
+async function parseMealText(description, provider, photo) {
   const url = provider === 'grok' ? PARSE_MEAL_GROK_URL : PARSE_MEAL_URL;
-  const res = await fnFetch(url, { description });
+  const body = { description };
+  if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
+  const res = await fnFetch(url, body);
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
