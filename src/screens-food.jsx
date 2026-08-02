@@ -1160,6 +1160,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // always keeps one empty field (mealReiterateDraft) ready underneath.
   const [mealReiterations, setMealReiterations] = useStateFd([]);
   const [mealReiterateDraft, setMealReiterateDraft] = useStateFd('');
+  // The prompt history and "Add a note" field live in their own sub-sheet
+  // (zIndex 200, opened from the Review meal Sheet) so the review list
+  // itself stays compact instead of growing with every reiteration.
+  const [mealRefineOpen, setMealRefineOpen] = useStateFd(false);
   // tempId of the mealItems row currently open in the quantity sheet, or null
   // for every other reason that sheet opens (fresh add / re-editing an
   // already-logged entry). Lets confirmLogFood route "Save" back into this
@@ -3025,6 +3029,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealPhoto(null);
     setMealReiterations([]);
     setMealReiterateDraft('');
+    setMealRefineOpen(false);
   }
   // "Reiterate" on the review Sheet: mealReiterateDraft (the note being typed
   // for this round, not the original mealDescription, which stays fixed as
@@ -3051,6 +3056,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealItems(mapParsedMealItems(res.items));
     if (text) setMealReiterations(list => [...list, text]);
     setMealReiterateDraft('');
+  }
+  // Guards against dismissing the Refine sub-sheet mid-request, same reason
+  // and pattern as closeMealDescribeSheet: a stray close during the fetch
+  // must not leave the user unsure whether their note actually went out.
+  function closeMealRefineSheet() {
+    if (mealParsing) return;
+    setMealRefineOpen(false);
   }
   // Opens one mealItems row in the normal custom-item quantity sheet
   // (openCustomAsScalable, same one a re-logged custom entry reopens
@@ -4662,81 +4674,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
       <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Tap an item to adjust its amount or numbers. Remove anything that doesn't belong, or add a note below and tap Reiterate to adjust the whole estimate at once.
+          Tap an item to adjust its amount or numbers, remove anything that doesn't belong, or refine the whole estimate with a note.
         </div>
-        {/* Wrapped together (totals + rows) so a reiterate blurs the whole
-            current estimate at once, not just the rows while the totals
-            above them stay sharp and then jump the moment the response
-            lands. Same backdrop-blur-plus-label idiom as FdLabelBusy below,
-            just scoped to this area instead of the full screen: the rest of
-            the sheet (description field, Reiterate/action buttons) stays
-            visible and already disabled via mealParsing elsewhere. */}
-        <div style={{ position: 'relative', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
-            <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-            <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {(mealItems || []).map(i => {
-              const netCarbs = !!store.settings?.netCarbs;
-              const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
-              return (
-                <div key={i.tempId} style={fdDraftRow}>
-                  <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>
-                      {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
-                      <span style={fdMetaDivider} />
-                      <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                    </span>
-                  </button>
-                  <button onClick={() => removeMealItem(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          {mealParsing && (
-            <div style={{ position: 'absolute', inset: -6, borderRadius: 6, background: 'rgba(var(--bg-rgb),0.7)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 20, color: 'var(--accent)' }} />
-              <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em' }}>Refining…</div>
-            </div>
-          )}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+          <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+          <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
         </div>
-        {/* Refine the same estimate instead of starting over: the original
-            description and every past reiteration show read-only as a
-            running history, an empty field is always ready underneath for
-            the next note. Only that new note is sent on Reiterate, not the
-            whole history rendered here, the edge function already gets the
-            running total via previousItems (the current mealItems). */}
-        {mealDescription.trim() && (
-          <div style={{ marginBottom: 8 }}>
-            <div className="micro" style={{ marginBottom: 4 }}>Original description</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{mealDescription}</div>
-          </div>
-        )}
-        {mealReiterations.map((text, idx) => (
-          <div key={idx} style={{ marginBottom: 8 }}>
-            <div className="micro" style={{ marginBottom: 4 }}>Reiteration {idx + 1}</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{text}</div>
-          </div>
-        ))}
-        {mealPhoto && (
-          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
-        )}
-        <Field label="Add a note" style={{ marginBottom: 12 }}>
-          <textarea
-            value={mealReiterateDraft}
-            onChange={e => setMealReiterateDraft(e.target.value)}
-            placeholder="e.g. it's a bigger portion, or there's sauce underneath too"
-            rows={3}
-            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
-          />
-        </Field>
-        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
-        <Btn kind="ghost" onClick={handleReiterateMeal} disabled={mealParsing || (!mealReiterateDraft.trim() && !mealPhoto)} style={{ width: '100%', marginBottom: 16 }}>
-          {mealParsing ? 'Refining…' : 'Reiterate'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+          {(mealItems || []).map(i => {
+            const netCarbs = !!store.settings?.netCarbs;
+            const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+            return (
+              <div key={i.tempId} style={fdDraftRow}>
+                <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                  <span style={fdEntryMeta}>
+                    {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                  </span>
+                </button>
+                <button onClick={() => removeMealItem(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {/* Opens the Refine sub-sheet (history + note field + Reiterate) at
+            zIndex 200, same nested-sheet pattern the quantity edit above
+            already uses, kept out of this Sheet entirely so a growing
+            reiteration history never bloats the review list itself. */}
+        <Btn kind="ghost" onClick={() => setMealRefineOpen(true)} disabled={mealParsing} style={{ width: '100%', marginBottom: 16 }}>
+          <i className="fa-solid fa-wand-magic-sparkles" style={{ marginRight: 8 }} />
+          Refine estimate{mealReiterations.length ? ` (${mealReiterations.length})` : ''}
         </Btn>
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
@@ -4752,6 +4723,65 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </Btn>
           </div>
         )}
+      </Sheet>
+
+      {/* ── Refine sub-sheet, opened from the Review meal Sheet above at
+          zIndex 200 (same nested-sheet pattern the quantity edit uses over
+          this same Review sheet): the original description, every past
+          reiteration, and the photo (if any) show read-only as a running
+          history, with one always-empty field underneath ready for the next
+          note. Only that note is sent on Reiterate, not the rendered
+          history text, the edge function already carries the running state
+          via previousItems (the mealItems currently shown behind this). ── */}
+      <Sheet open={mealRefineOpen} onClose={closeMealRefineSheet} title="Refine estimate" titleColor="var(--accent)" zIndex={200}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
+          Add a note and tap Reiterate to adjust the whole estimate. Notes stack, so you can refine more than once.
+        </div>
+        {/* Same backdrop-blur-plus-label idiom FdLabelBusy uses elsewhere in
+            this file, scoped to just the history instead of the full
+            screen: the Review sheet behind this one is fully hidden by this
+            Sheet's own backdrop for as long as mealParsing can be true
+            (closeMealRefineSheet blocks dismissing mid-request), so this is
+            the only place that loading state is actually visible. */}
+        <div style={{ position: 'relative', marginBottom: mealPhoto ? 8 : 12 }}>
+          {mealDescription.trim() && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Original description</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{mealDescription}</div>
+            </div>
+          )}
+          {mealReiterations.map((text, idx) => (
+            <div key={idx} style={{ marginBottom: 8 }}>
+              <div className="micro" style={{ marginBottom: 4 }}>Reiteration {idx + 1}</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{text}</div>
+            </div>
+          ))}
+          {mealParsing && (
+            <div style={{ position: 'absolute', inset: -6, borderRadius: 6, background: 'rgba(var(--bg-rgb),0.7)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 20, color: 'var(--accent)' }} />
+              <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em' }}>Refining…</div>
+            </div>
+          )}
+        </div>
+        {mealPhoto && (
+          <img src={`data:${mealPhoto.mimeType};base64,${mealPhoto.base64}`} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block', marginBottom: 12 }} />
+        )}
+        <Field label="Add a note" style={{ marginBottom: 12 }}>
+          <textarea
+            value={mealReiterateDraft}
+            onChange={e => setMealReiterateDraft(e.target.value)}
+            placeholder="e.g. it's a bigger portion, or there's sauce underneath too"
+            rows={3}
+            style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+        </Field>
+        {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeMealRefineSheet} disabled={mealParsing} style={{ flex: 1 }}>Done</Btn>
+          <Btn onClick={handleReiterateMeal} disabled={mealParsing || (!mealReiterateDraft.trim() && !mealPhoto)} style={{ flex: 2 }}>
+            {mealParsing ? 'Refining…' : 'Reiterate'}
+          </Btn>
+        </div>
       </Sheet>
 
       {/* ── Repeat yesterday's meal, minus whatever changed ────────────────
