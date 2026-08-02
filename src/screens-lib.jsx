@@ -3438,16 +3438,33 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     });
   }
   const sessionBestMap = {};
+  // Real object reference to whichever set FIRST reached this exercise's
+  // session-best value, keyed by exId. Needed because two sets can tie
+  // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
+  // both share the exact same e1RM value, but only the one that actually
+  // achieved it first is the PR, a repeat of the same number right after
+  // isn't a second, brand new record. Without this, `val !== sessionBest`
+  // below can't tell the two sets apart at all, both compare equal to the
+  // shared session best and both got badged, a real bug that only became
+  // visible once the windowing fix above stopped hiding every PR star
+  // outright.
+  const sessionBestSetMap = {};
   s.entries.forEach(e => e.sets.forEach(st => {
     const val = prValueOf(st, e.exId);
     if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
     sessionBestMap[e.exId] = val;
+    sessionBestSetMap[e.exId] = st;
   }));
   const isPR = (st, exId) => {
     const val = prValueOf(st, exId);
     if (val == null) return false;
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
+    // Tie-break: only the specific set that FIRST reached the session best
+    // is credited, see sessionBestSetMap above. Reference equality is safe
+    // here, filteredSets/e.sets below are the same array (filtered, not
+    // cloned), so this is genuinely the same object, not a lookalike.
+    if (sessionBestSetMap[exId] !== st) return false;
     // A windowed-out prior session means prMap was built without that session's
     // numbers, so "best" here can't be trusted as truly the best. Abstain instead
     // of showing a badge we can't back up (see prMapHasGap above), unless this is
