@@ -3392,6 +3392,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     if (!prRepsValid(st, exId)) return null;
     return LB.e1rm(st.kg, prReps(st, exId));
   };
+  // Whether `s` is the account's most recent ended session, full stop, across
+  // every exercise (not just this session's own dayId): if so, the server
+  // aggregate below can safely fill any local windowing gap, since nothing
+  // chronologically later exists that could have set a PR the aggregate
+  // shouldn't yet know about relative to `s`, the exact "later session
+  // bleeding backward" risk the e1RM comment above (and bestE1rmForExercise's
+  // own doc comment in store.js) warns about for an arbitrary PAST session.
+  const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
   const prMap = {};
   // Whether any comparison-candidate session below (same filter) is windowed-out
   // rather than genuinely empty: entries: [] with aggExercises > 0 means the session
@@ -3402,7 +3410,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Left unguarded, a windowed-out prior session silently contributes zero to prMap,
   // so whatever was lifted here would falsely read as a brand new PR. isPR below
   // abstains (no badge at all) for every exercise in this session once a single such
-  // gap turns up among the candidates, rather than risk showing a false positive.
+  // gap turns up among the candidates, rather than risk showing a false positive,
+  // UNLESS isLatestSession bailed it out below (see there).
   let prMapHasGap = false;
   store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
     if (!(sess.entries || []).length && (sess.aggExercises || 0) > 0) { prMapHasGap = true; return; }
@@ -3412,6 +3421,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       prMap[e.exId] = val;
     }));
   });
+  // On the latest session only, also fold in the server aggregate (store.
+  // exerciseBests, the get_exercise_best_e1rm RPC result, e1RM scale only,
+  // see bestE1rmForExercise in store.js) as a floor: it's computed against
+  // the FULL server-side history, unaffected by what this client happens to
+  // have loaded locally, so a long-ago windowed-out session no longer has to
+  // blank out every PR badge for the rest of the account's life. Skipped for
+  // assisted/time-mode exercises, exerciseBests is e1RM-scale only, same
+  // type gate prValueOf itself uses.
+  if (isLatestSession) {
+    Object.entries(store.exerciseBests || {}).forEach(([exId, val]) => {
+      if (val == null) return;
+      const exObj = store.exercises.find(x => x.id === exId);
+      if (LB.isAssisted(exObj) || LB.exerciseLogMode(exObj) === 'time') return;
+      if (val > (prMap[exId] ?? -Infinity)) prMap[exId] = val;
+    });
+  }
   const sessionBestMap = {};
   s.entries.forEach(e => e.sets.forEach(st => {
     const val = prValueOf(st, e.exId);
@@ -3425,8 +3450,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     if (sessionBest == null || val !== sessionBest) return false;
     // A windowed-out prior session means prMap was built without that session's
     // numbers, so "best" here can't be trusted as truly the best. Abstain instead
-    // of showing a badge we can't back up (see prMapHasGap above).
-    if (prMapHasGap) return false;
+    // of showing a badge we can't back up (see prMapHasGap above), unless this is
+    // the latest session, in which case prMap already folded in the trustworthy
+    // server aggregate regardless of local gaps.
+    if (prMapHasGap && !isLatestSession) return false;
     const best = prMap[exId];
     // No prior history for this exercise at all, nothing to beat, so the
     // first-ever session with it isn't a PR (matches the two other isPR
