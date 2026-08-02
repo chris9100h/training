@@ -4649,30 +4649,45 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           Tap an item to adjust its amount or numbers. Remove anything that doesn't belong, or add a note below and tap Reiterate to adjust the whole estimate at once.
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
-          <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-          <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-          {(mealItems || []).map(i => {
-            const netCarbs = !!store.settings?.netCarbs;
-            const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
-            return (
-              <div key={i.tempId} style={fdDraftRow}>
-                <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                  <span style={fdEntryMeta}>
-                    {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
-                    <span style={fdMetaDivider} />
-                    <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                  </span>
-                </button>
-                <button onClick={() => removeMealItem(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                </button>
-              </div>
-            );
-          })}
+        {/* Wrapped together (totals + rows) so a reiterate blurs the whole
+            current estimate at once, not just the rows while the totals
+            above them stay sharp and then jump the moment the response
+            lands. Same backdrop-blur-plus-label idiom as FdLabelBusy below,
+            just scoped to this area instead of the full screen: the rest of
+            the sheet (description field, Reiterate/action buttons) stays
+            visible and already disabled via mealParsing elsewhere. */}
+        <div style={{ position: 'relative', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+            <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{mealItemsTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+            <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(mealItems || []).map(i => {
+              const netCarbs = !!store.settings?.netCarbs;
+              const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+              return (
+                <div key={i.tempId} style={fdDraftRow}>
+                  <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    <span style={fdEntryMeta}>
+                      {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                    </span>
+                  </button>
+                  <button onClick={() => removeMealItem(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {mealParsing && (
+            <div style={{ position: 'absolute', inset: -6, borderRadius: 6, background: 'rgba(var(--bg-rgb),0.7)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 20, color: 'var(--accent)' }} />
+              <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em' }}>Refining…</div>
+            </div>
+          )}
         </div>
         {/* Refine the same estimate instead of starting over: the description
             (and photo, if any) from the first pass stays right here, editing
