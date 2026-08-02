@@ -83,6 +83,8 @@ Critical calibration: whenever the preparation involves unspecified added fat (f
 
 Explicit size, quantity, or calorie signals in the description always win over a typical-portion assumption: a stated dimension ("a 45cm pizza"), words like "whole", "large", "family-size", an instruction not to underestimate, or a stated calorie floor ("easily over 1500 calories") are hard constraints, not flavor text. Calories are computed separately from protein*4 + carbs*4 + fat*9, not taken from you directly, so make sure the quantityG and macros you output are generous enough that this derived total genuinely reflects what was stated, never quietly fall back to a smaller "typical" number once that signal is there. Reference point: a standard ~30cm pizza with cheese and a fatty topping like salami commonly totals 800-1200 kcal whole, and a large ~40-45cm one scales well past that, often 1500-2500+ kcal for the entire pie, not per slice.
 
+Mandatory self-check when the description states an explicit calorie floor ("over 1500 calories", "at least 2000 kcal", and similar): before answering, add up protein*4 + carbs*4 + fat*9 across every item you are about to output. If that sum is below the stated floor, increase quantityG and/or the macros of the relevant item(s) and recompute, repeating until the total clears the floor. Do not output a JSON object whose own total you can tell falls short of a floor the description explicitly gave.
+
 Return exactly this JSON shape:
 {
   "items": [
