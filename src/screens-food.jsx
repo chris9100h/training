@@ -7473,12 +7473,16 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const captureRef = useRefFd(null);
   // Screenshot background: same treatment as SessionCompareScreen/HomeScreen,
   // VIPs get their custom home-screen image, everyone else the faint
-  // centered ZANE mark.
+  // centered ZANE mark. Opacity bumped noticeably above those screens' own
+  // 0.04/0.14/0.16: the recipe card is mostly solid/translucent boxes
+  // (FdMacroHero, the ingredient rows), so far less open canvas ever shows
+  // the mark at all, it needs more contrast per pixel to read as intentional
+  // rather than invisible.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
-  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.24 : 0.12, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.28, objectFit: 'contain' };
   const _shotGridOn = !!window.__gridEnabled;
 
   useEffectFd(() => {
