@@ -4118,19 +4118,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               {cat.plannedCalories > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: UI.inkFaint }}> +{cat.plannedCalories}</span>}
                               <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
                             </div>
-                            <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
-                            {/* Planned macros for this category, kept a
-                                visually secondary second line (smaller,
-                                faded, "+" prefixed) rather than merged into
-                                the logged totals above: what's actually
-                                eaten must stay the number that reads at a
-                                glance, this is only here so planning ahead
-                                doesn't mean adding up dashed rows by hand. */}
-                            {cat.plannedCalories > 0 && (
-                              <div style={{ marginTop: 2, opacity: 0.75 }}>
-                                <span style={fdEntryMeta}><FdMacroBits protein={cat.plannedProtein} carbs={cat.plannedCarbs} fat={cat.plannedFat} plus /></span>
-                              </div>
-                            )}
+                            {/* Planned macros fold into the SAME line as a
+                                small "+N" per number, not a second line: the
+                                card's height must stay identical whether or
+                                not anything is planned, only this line's own
+                                width grows. */}
+                            <span style={fdEntryMeta}>
+                              <FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong
+                                plannedProtein={cat.plannedProtein} plannedCarbs={cat.plannedCarbs} plannedFat={cat.plannedFat} />
+                            </span>
                           </div>
                         )}
                       </div>
@@ -9774,16 +9770,25 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // hour rows, and FD_MACRO_COLORS's muted pastel tones lose enough contrast
 // against that darker backdrop to read as thin again even at 600, the same
 // reason that card's own label is 700 rather than the entry name's 600.
-function FdMacroBits({ protein, carbs, fat, strong, plus }) {
+// plannedProtein/Carbs/Fat (optional): a small "+N" appended per macro
+// (Plan Mode's timeline category card), folded into this SAME line rather
+// than a second one, so showing a planned amount never changes a card's
+// height, only how much this one line says.
+function FdMacroBits({ protein, carbs, fat, strong, plannedProtein, plannedCarbs, plannedFat }) {
   const w = strong ? 700 : 600;
-  const p = plus ? '+' : '';
+  const bit = (val, planned, color, label) => (
+    <span className="num" style={{ fontWeight: w, color }}>
+      {label}{Math.round(val)}
+      {planned > 0 && <span style={{ fontWeight: 600, opacity: 0.65 }}>+{Math.round(planned)}</span>}
+    </span>
+  );
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.protein }}>{p}P{Math.round(protein)}</span>
+      {bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P')}
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.carbs }}>{p}C{Math.round(carbs)}</span>
+      {bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C')}
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.fat }}>{p}F{Math.round(fat)}</span>
+      {bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F')}
     </span>
   );
 }
