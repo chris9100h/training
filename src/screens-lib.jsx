@@ -3746,16 +3746,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* PR count and volume delta, each its own pill, dumbbell/arrow on
-            both sides mirrored. Stacked (not side by side): the volume pill's
-            text is long enough that two pills side by side risked cramping
-            or wrapping on a narrow phone. Volume pill only lights up gold
-            when the delta is actually an improvement, same as the plain-text
-            version before it, a lower-volume session doesn't get a falsely
-            celebratory look. */}
+            both sides mirrored. Side by side, wrapping to its own line only
+            if the combined width doesn't fit (nowrap on each pill's own
+            content keeps a forced wrap from breaking a pill internally,
+            mid-icon). Volume pill only lights up gold when the delta is
+            actually an improvement, same as the plain-text version before
+            it, a lower-volume session doesn't get a falsely celebratory look. */}
         {(prCount > 0 || showVol) && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginTop: -8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: -8 }}>
             {prCount > 0 && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '3px 9px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '3px 9px', whiteSpace: 'nowrap' }}>
                 <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
                 {prCount} PR{prCount > 1 ? 'S' : ''}
                 <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
@@ -3763,7 +3763,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             )}
             {showVol && (
               <span className="num" style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap',
                 color: volDelta >= 0 ? UI.gold : UI.inkFaint,
                 background: volDelta >= 0 ? UI.goldFaint : UI.bgInset,
                 border: `var(--hair-width) solid ${volDelta >= 0 ? UI.goldSoft : UI.hairStrong}`,
