@@ -7717,9 +7717,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
           ) : capturing ? (
             // Plain read-only rows for the shareable card: no drag handle,
             // no edit/note/delete affordances, nothing interactive to show.
+            // fdEntryRow's normal background is opaque UI.bgInset, translucent
+            // here (no backdrop-filter, that silently no-ops under html2canvas
+            // same as the CSS grid does) so the centered watermark bleeds
+            // through the cards instead of sitting hidden behind them.
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {items.map((i, idx) => (
-                <div key={i.id} style={fdEntryRow}>
+                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <FdIngredientBadge n={idx + 1} />
                     <div style={{ minWidth: 0 }}>
