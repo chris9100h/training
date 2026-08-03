@@ -1151,6 +1151,13 @@ begin
 end;
 $function$;
 
+-- updated_at is clamped to LEAST(client value, now()) before being stored or
+-- used as the WHERE guard's comparison basis (migration 0238): a client with
+-- a fast/skewed-forward clock can never claim a timestamp beyond the
+-- server's own now(), so it can no longer "always win" a future conflict
+-- against a device with a correct clock. A client value at or before now()
+-- passes through unchanged, preserving an offline-queued write's original
+-- edit time once it finally syncs.
 CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1177,7 +1184,7 @@ AS $function$
     COALESCE((s->>'warmup')::boolean,  false),
     NULLIF(s->>'technique', ''),
     CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
-    (s->>'updated_at')::timestamptz
+    LEAST(COALESCE((s->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
     kg         = EXCLUDED.kg,
@@ -1197,7 +1204,9 @@ $function$;
 -- Batch upsert for daily logs. Resolves conflicts on (user_id, date) — keeping
 -- the existing row's id — so two devices logging the same day don't collide on
 -- the UNIQUE(user_id, date) constraint, and only overwrites when the incoming
--- updated_at is newer (no stale clobber). Migration 0096.
+-- updated_at is newer (no stale clobber). Migration 0096. updated_at is
+-- clamped to LEAST(client value, now()) since migration 0238, same
+-- clock-skew guard as sync_sets_batch above.
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql
@@ -2095,7 +2104,9 @@ CREATE POLICY "Users manage own meso states"
 -- (COALESCEd on update so an older client that doesn't send it can't null it).
 -- rep_miss_counts added in migration 0165. affinity added in migration 0169.
 -- autoreg_state added in migration 0172 (nullable, COALESCE-preserved on update
--- so an older client that omits it can't wipe live nag state).
+-- so an older client that omits it can't wipe live nag state). updated_at is
+-- clamped to LEAST(client value, now()) since migration 0238, same
+-- clock-skew guard as sync_sets_batch above.
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -2127,7 +2138,7 @@ AS $function$
     NULLIF(m->'autoreg_state', 'null'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
-    COALESCE((m->>'updated_at')::timestamptz, now())
+    LEAST(COALESCE((m->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_states) AS m
   ON CONFLICT (id) DO UPDATE SET
     weeks                 = EXCLUDED.weeks,
