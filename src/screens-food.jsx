@@ -1832,6 +1832,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
   const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
+    // Kept fully separate from the logged totals above, never merged into
+    // them: still what a planned meal WOULD add once eaten, shown as its own
+    // small "+" line in the timeline's category card so planning ahead
+    // doesn't mean adding up dashed rows by hand, see fdCategoryCard below.
+    let plannedCalories = 0, plannedProtein = 0, plannedCarbs = 0, plannedFat = 0;
     // The totals count logged entries only (a planned meal isn't eaten yet),
     // but `count` counts every entry including planned ones: it gates the
     // "Repeat yesterday" offer, and a slot that already holds planned meals is
@@ -1840,11 +1845,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
         count++;
-        if (e.planned) continue;
+        if (e.planned) {
+          plannedCalories += e.calories || 0; plannedProtein += e.protein || 0; plannedCarbs += e.carbs || 0; plannedFat += e.fat || 0;
+          continue;
+        }
         calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
       }
     }
-    return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
+    return {
+      ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat),
+      plannedCalories: Math.round(plannedCalories), plannedProtein: fdRound1(plannedProtein), plannedCarbs: fdRound1(plannedCarbs), plannedFat: fdRound1(plannedFat),
+    };
   }), [byHour, mealCats]);
 
   // settings.hideFoodCategories swaps the six meal-category groups for one
@@ -4102,8 +4113,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           </button>
                         ) : (
                           <div style={{ textAlign: 'right' }}>
-                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>
+                              {cat.calories}
+                              {cat.plannedCalories > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: UI.inkFaint }}> +{cat.plannedCalories}</span>}
+                              <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+                            </div>
                             <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                            {/* Planned macros for this category, kept a
+                                visually secondary second line (smaller,
+                                faded, "+" prefixed) rather than merged into
+                                the logged totals above: what's actually
+                                eaten must stay the number that reads at a
+                                glance, this is only here so planning ahead
+                                doesn't mean adding up dashed rows by hand. */}
+                            {cat.plannedCalories > 0 && (
+                              <div style={{ marginTop: 2, opacity: 0.75 }}>
+                                <span style={fdEntryMeta}><FdMacroBits protein={cat.plannedProtein} carbs={cat.plannedCarbs} fat={cat.plannedFat} plus /></span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -9747,15 +9774,16 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // hour rows, and FD_MACRO_COLORS's muted pastel tones lose enough contrast
 // against that darker backdrop to read as thin again even at 600, the same
 // reason that card's own label is 700 rather than the entry name's 600.
-function FdMacroBits({ protein, carbs, fat, strong }) {
+function FdMacroBits({ protein, carbs, fat, strong, plus }) {
   const w = strong ? 700 : 600;
+  const p = plus ? '+' : '';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.protein }}>{p}P{Math.round(protein)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.carbs }}>{p}C{Math.round(carbs)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.fat }}>{p}F{Math.round(fat)}</span>
     </span>
   );
 }
