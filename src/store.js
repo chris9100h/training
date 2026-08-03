@@ -5793,6 +5793,15 @@ function weeklyAverageCalories(trainingCalories, restCalories, trainingDays) {
   return Math.round((tc * d + rc * (7 - d)) / 7);
 }
 
+// Same trainingDays-weighted blend as weeklyAverageCalories, generalized to
+// protein/carbs/fat so a Training/Rest macro split can show what it actually
+// averages to across a week for each macro too, not just calories.
+function weeklyAverageMacros(training, rest, trainingDays) {
+  const d = Math.min(7, Math.max(0, Math.round(Number(trainingDays) || 0)));
+  const blend = k => Math.round(((Number(training?.[k]) || 0) * d + (Number(rest?.[k]) || 0) * (7 - d)) / 7);
+  return { protein: blend('protein'), carbs: blend('carbs'), fat: blend('fat') };
+}
+
 // Hand-edit one macro of an estimate and keep the calorie figure it was built
 // around: whatever is still free to move absorbs the difference, split in
 // proportion to the calories those macros already carry, so an edit nudges the
@@ -5978,7 +5987,14 @@ function estimateAdaptiveTdee(store, todayStr) {
     .filter(l => l.date >= winStart && l.date <= today)
     .filter(l => !statusModeForDate(store, l.date));
 
-  const calorieDays = windowLogs.filter(l => Number(l.calories) > 0);
+  // Today's own log is still being written to (the day isn't over), so its
+  // calorie total is necessarily partial: averaging it in alongside 13 full
+  // days would understate real intake, not reflect a genuinely lighter day.
+  // Weight is exempt from this: a same-day weigh-in is a complete, standalone
+  // reading the moment it's logged, and it's exactly the signal that shows
+  // yesterday's (complete) intake, so excluding today there would throw away
+  // real information rather than avoid a partial one.
+  const calorieDays = windowLogs.filter(l => l.date < today && Number(l.calories) > 0);
   if (calorieDays.length < ADAPTIVE_TDEE_MIN_CALORIE_DAYS) return { ok: false, reason: 'insufficient_data' };
   const avgCalories = calorieDays.reduce((s, l) => s + Number(l.calories), 0) / calorieDays.length;
 
@@ -8737,7 +8753,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories,
   estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,

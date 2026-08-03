@@ -2631,6 +2631,32 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             </span>
           </div>
         ))}
+        {/* Same week-average blend as the Daily Targets box above (see
+            targetWeekAvgRow): trainingDays is always on file once the
+            estimator has produced lastAppliedTargets at all, both are set
+            together by the same apply. */}
+        {calc.lastAppliedTargets && calc.trainingDays != null && (() => {
+          const weekCal = LB.weeklyAverageCalories(calc.lastAppliedTargets.caloriesTraining, calc.lastAppliedTargets.caloriesRest, calc.trainingDays);
+          const weekMacros = LB.weeklyAverageMacros(
+            { protein: calc.lastAppliedTargets.proteinTraining, carbs: calc.lastAppliedTargets.carbsTraining, fat: calc.lastAppliedTargets.fatTraining },
+            { protein: calc.lastAppliedTargets.proteinRest, carbs: calc.lastAppliedTargets.carbsRest, fat: calc.lastAppliedTargets.fatRest },
+            calc.trainingDays,
+          );
+          return (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+              <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
+              <span className="num" style={{ fontSize: 16, color: UI.inkSoft, fontWeight: 400 }}>
+                {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ display: 'flex', gap: 9 }}>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {weekMacros.protein}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {weekMacros.carbs}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {weekMacros.fat}</span>
+              </span>
+            </div>
+          );
+        })()}
 
         {status === 'insufficient' && (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
@@ -4310,6 +4336,36 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
     </span>
   );
+  // What the Training/Rest split below actually averages to across a real
+  // week, blended by how many of those 7 days are training days (same
+  // weeklyAverageCalories the estimator sheet already uses to answer this).
+  // Only meaningful next to the split itself, not macroTargetAvg's own
+  // historical-average row (1M/3M), which has no Training/Rest split to blend.
+  const targetWeekAvgRow = (() => {
+    const t = effectiveTargets || {};
+    const d = store.settings?.macroCalc?.trainingDays;
+    if (d == null || t.caloriesTraining == null || t.caloriesRest == null) return null;
+    const weekCal = LB.weeklyAverageCalories(t.caloriesTraining, t.caloriesRest, d);
+    const weekMacros = LB.weeklyAverageMacros(
+      { protein: t.proteinTraining, carbs: t.carbsTraining, fat: t.fatTraining },
+      { protein: t.proteinRest, carbs: t.carbsRest, fat: t.fatRest },
+      d,
+    );
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+        <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
+        <span className="num" style={{ fontSize: 16, color: UI.ink, fontWeight: 400 }}>
+          {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ display: 'flex', gap: 9 }}>
+          {chip('P', weekMacros.protein)}
+          {chip('C', weekMacros.carbs)}
+          {chip('F', weekMacros.fat)}
+        </span>
+      </div>
+    );
+  })();
   const targetLabel = macroTargetAvg
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
     : 'DAILY TARGETS';
@@ -4341,6 +4397,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
             {targetDayRow('Training', 'Training')}
             <div style={{ height: 0.5, background: UI.hair }} />
             {targetDayRow('Rest', 'Rest')}
+            {targetWeekAvgRow}
           </>
         )
       ) : (

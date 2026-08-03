@@ -820,6 +820,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.avgCalories, 2000);
   });
 
+  test('estimateAdaptiveTdee: today\'s own (still-partial) log never enters the calorie average', () => {
+    const days = [];
+    for (let d = 1; d <= 13; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    // Today so far: only 200kcal logged, the day isn't over yet. Averaging
+    // this in as if it were a complete day would drag avgCalories down to
+    // ~1871, a fake "you're eating less" that has nothing to do with reality.
+    days.push({ date: '2025-01-14', calories: 200, weight: 79 });
+    days[0].weight = 80;
+    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.avgCalories, 2000);
+    // Today's weight, unlike its calories, is a complete reading the moment
+    // it's logged and stays part of the trend: dropping it would throw away
+    // real signal, not avoid a partial one.
+    assert.strictEqual(r.weightChangeKg, -1);
+  });
+
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
     // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
     assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
@@ -845,6 +862,26 @@ async function testAsync(name, fn) {
     const cut = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'cut', rateKgPerWeek: 0.5, trainingDays: 4 });
     const cutAvg = LB.weeklyAverageCalories(cut.caloriesTraining, cut.caloriesRest, 4);
     assert.ok(Math.abs((3000 - cutAvg) - 550) < 20, `averages ${cutAvg}, about 550 under maintenance`);
+  });
+
+  test('weeklyAverageMacros: same trainingDays-weighted blend as weeklyAverageCalories, per macro', () => {
+    const training = { protein: 240, carbs: 605, fat: 60 };
+    const rest = { protein: 240, carbs: 537, fat: 60 };
+    // 2 training + 5 rest over the week: protein/fat are identical on both
+    // sides so they pass through unchanged, only carbs actually blends.
+    const week2 = LB.weeklyAverageMacros(training, rest, 2);
+    assert.strictEqual(week2.protein, 240);
+    assert.strictEqual(week2.fat, 60);
+    assert.strictEqual(week2.carbs, Math.round((605 * 2 + 537 * 5) / 7));
+    // The extremes are just the one day type. JSON.stringify, not
+    // deepStrictEqual, see the cross-realm note on the insufficient-data
+    // test above: LB return values come out of loadStore()'s vm sandbox.
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, rest, 7)), JSON.stringify(training));
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, rest, 0)), JSON.stringify(rest));
+    // Missing macros read as zero instead of NaN, and a missing side object
+    // doesn't throw.
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(null, rest, 0)), JSON.stringify(rest));
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, undefined, 7)), JSON.stringify(training));
   });
 
   test('rebalanceMacros: holds the calorie figure, others split proportionally', () => {
