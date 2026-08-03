@@ -3745,20 +3745,21 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* PR count, then volume delta vs previous same-day session, one
-            line joined by the same "·" separator used all over the app,
-            so a session that set new records but still landed below last
-            time's total volume doesn't read as purely a step backward. */}
+        {/* PR count as a compact pill (same gold-tag look as the per-set PR
+            badges elsewhere in this file), next to the volume delta as plain
+            text, so a session that set new records but still landed below
+            last time's total volume doesn't read as purely a step backward.
+            A pill reads as its own thing at a glance; chaining a third "·"
+            clause onto the volume line just produced a wall of micro text. */}
         {(prCount > 0 || showVol) && (
-          <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: -8 }}>
             {prCount > 0 && (
-              <span style={{ color: UI.gold }}>
-                <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
+              <span style={{ flexShrink: 0, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 7px' }}>
+                {prCount} PR{prCount > 1 ? 'S' : ''}
               </span>
             )}
-            {prCount > 0 && showVol && <span style={{ color: UI.inkFaint }}> · </span>}
             {showVol && (
-              <span style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+              <span className="micro" style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
                 {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
               </span>
             )}
