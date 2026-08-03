@@ -321,19 +321,9 @@ function mdHasPlan(med, medicationPlanItems) {
 // with intervalDays set but no startDate (shouldn't happen, saveSlotDraft
 // requires one, but a synced row from elsewhere could still lack it) is
 // simply never due rather than guessing an anchor.
-// Kept in sync with store.js's own self-contained copy, dsSlotAppliesOn
-// (used by the AI daily summary, which runs where this file isn't loaded).
-function mdSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
-  if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (slot.startDate && dateISO < slot.startDate) return false;
-  if (slot.endDate && dateISO > slot.endDate) return false;
-  if (slot.intervalDays > 0) {
-    if (!slot.startDate) return false;
-    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
-    return daysSince % slot.intervalDays === 0;
-  }
-  return (slot.weekdays || []).includes(wd);
-}
+// Lives in store.js as LB.dsSlotAppliesOn (used by the AI daily summary,
+// which runs where this file isn't loaded) and exported from there so this
+// file doesn't need its own hand-synced copy.
 // Human-readable recurrence label for a schedule slot: "Every Nd" in
 // interval mode, "Every day"/"Mon/Wed/Fri" in weekday mode. Shared by
 // renderMedListRow's aggregate summary and schedMed's own per-slot list, so
@@ -383,7 +373,7 @@ function mdAutoFillToday(store, setStore, todayISO) {
   (store.medicationScheduleSlots || []).forEach(slot => {
     const med = medsById.get(slot.medicationId);
     if (!med || existingSlotIds.has(slot.id)) return;
-    if (!mdSlotAppliesOn(slot, todayISO, wd, activePlanIds)) return;
+    if (!LB.dsSlotAppliesOn(slot, todayISO, wd, activePlanIds)) return;
     toAdd.push(mdMaterializeSlotEntry(med, slot, todayISO));
   });
   if (!toAdd.length) return;
@@ -495,6 +485,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
   const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active').sort((a, b) => (a.clientName || '').localeCompare(b.clientName || '')), [store.coaching]);
 
+  // Keep the user's UTC offset fresh so the medication-reminder cron can place
+  // "now" on the local clock. Mirrors WaterScreen's own writer (screens-water.jsx):
+  // that one only runs when the Water tab is open, and FoodScreen's only runs in
+  // Plan Mode, so a Meds-only user (independent per-tab switches since migration
+  // 0222) previously never had tzOffsetMinutes written at all, leaving the
+  // reminder cron's `?? 0` UTC fallback in place indefinitely.
+  useEffectMd(() => {
+    const off = -new Date().getTimezoneOffset();
+    if (store.settings?.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
+  }, []); // eslint-disable-line
+
   // Auto-fill today's due doses. medicationLogs is deliberately NOT a
   // dependency: it is, unavoidably, since mdAutoFillToday only skips a slot
   // that already has a log row. If it were listed here, deleting an
@@ -560,7 +561,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     scheduleSlots.forEach(slot => {
       const med = medsById.get(slot.medicationId);
       if (!med || existingSlotIds.has(slot.id)) return;
-      if (!mdSlotAppliesOn(slot, curDate, wd, activePlanIds)) return;
+      if (!LB.dsSlotAppliesOn(slot, curDate, wd, activePlanIds)) return;
       (map[slot.hour] = map[slot.hour] || []).push({
         id: `preview_${curDate}_${slot.id}`, medicationId: med.id, medicationName: med.name,
         time: `${String(slot.hour).padStart(2, '0')}:00`, doseQty: slot.doseQty, planned: true,
@@ -660,7 +661,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
     const dueSlot = scheduleSlots.find(slot =>
       slot.medicationId === med.id && slot.hour === hour && !existingSlotIds.has(slot.id) &&
-      mdSlotAppliesOn(slot, curDate, wd, activePlanIds));
+      LB.dsSlotAppliesOn(slot, curDate, wd, activePlanIds));
     const entry = dueSlot
       ? { ...mdMaterializeSlotEntry(med, dueSlot, curDate), doseQty: qty, planned: false }
       : { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
@@ -813,7 +814,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function renamePlan(id, name) {
     setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
   }
-  // Only an active plan's schedule slots fire (mdSlotAppliesOn); several
+  // Only an active plan's schedule slots fire (LB.dsSlotAppliesOn); several
   // plans can be active at once, no single active pointer (see the header
   // comment). A paused plan stays fully visible/editable, this never
   // touches its medications or their memberships/slots, purely a switch.
@@ -1046,12 +1047,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const isInterval = slotDraft.mode === 'interval';
     // Interval mode has nothing equivalent to "no weekdays picked" to guard
     // on, startDate is its own required field instead (it's the count-from
-    // anchor, not an optional phase bound here, see mdSlotAppliesOn).
+    // anchor, not an optional phase bound here, see LB.dsSlotAppliesOn).
     if (isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     // A reversed range (From after To) would otherwise save silently and
-    // just never fire: mdSlotAppliesOn rejects every date once startDate is
+    // just never fire: LB.dsSlotAppliesOn rejects every date once startDate is
     // after endDate, so the slot would sit there looking scheduled but dead.
     // Only meaningful once both ends are actually set, an open-ended range
     // (only one of the two) is fine as-is.
@@ -1066,7 +1067,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const endDate = slotDraft.endDate || null;
     // The two modes are mutually exclusive per slot: switching a slot from
     // one to the other on edit must clear the other mode's field rather than
-    // leave a stale value sitting there unused, mdSlotAppliesOn only ever
+    // leave a stale value sitting there unused, LB.dsSlotAppliesOn only ever
     // reads intervalDays first, but a stale weekdays/intervalDays value would
     // still be misleading to anyone inspecting the row directly.
     const weekdays = isInterval ? [] : slotDraft.weekdays;
@@ -2264,7 +2265,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 // Not a route: a same-file screen toggled by MedicationsScreen's own local
 // state, exactly like ShoppingListScreen sits inside FoodScreen
 // (screens-food.jsx). Bucketing is a pure display-time lens over the
-// existing schedule slots (mdSlotAppliesOn): redefining a pillbox slot later
+// existing schedule slots (LB.dsSlotAppliesOn): redefining a pillbox slot later
 // can shift which compartment an already-packed dose displays under without
 // touching or losing the pack-check itself. "Other times" catches a dose
 // whose hour matches none of the user's slots, so nothing can silently
@@ -2305,7 +2306,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
       const wd = LB.isoWd(new Date(d + 'T12:00:00'));
       const buckets = new Map();
       medicationScheduleSlots.forEach(slot => {
-        if (!mdSlotAppliesOn(slot, d, wd, activePlanIds)) return;
+        if (!LB.dsSlotAppliesOn(slot, d, wd, activePlanIds)) return;
         const med = medsById.get(slot.medicationId);
         if (!med) return;
         const bucketId = mdPillboxBucketFor(slot.hour, pillboxSlots);

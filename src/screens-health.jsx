@@ -1298,8 +1298,12 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             })}
           </div>
           {dayMode && date === todayISO && (() => {
-            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
-            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
+            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return LB.fmtISO(d); })();
+            // LB.fmtISO(new Date(...)), not a bare slice: statusModeSince is a
+            // UTC timestamp, slicing its first 10 chars gives the UTC date,
+            // which is a different calendar day than the local one for any
+            // non-UTC viewer around midnight.
+            const currentVal = store.statusModeSince ? LB.fmtISO(new Date(store.statusModeSince)) : todayISO;
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
@@ -2280,7 +2284,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Fat', (
         <>
           {seg(
-            [{ id: 'auto', label: 'Auto' }, { id: 'perKg', label: 'Per kg' }, { id: 'fixed', label: 'Fixed g' }],
+            [{ id: 'auto', label: 'Auto' }, { id: 'perKg', label: 'Per ' + UI.unit() }, { id: 'fixed', label: 'Fixed g' }],
             fatModeUI,
             v => setForm(f => ({ ...f, lowFat: v === 'perKg', fatFixed: v === 'fixed' })),
           )}
@@ -4001,7 +4005,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     setCoachingMacrosLoaded(false);
     LB.loadCoachingMacros(coachingId)
       .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
-      .catch(() => { if (!cancelled) setCoachingMacrosLoaded(true); });
+      // Left at false on failure, not flipped to true: the reconcilers below
+      // gate on this specifically to avoid scoring against the personal
+      // target while the real coaching target is still unknown. Marking a
+      // failed fetch "loaded" released them anyway, reintroducing that same
+      // race on every offline/network-error load; leaving it pending just
+      // means today's reconciliation waits for the next successful fetch
+      // (this effect reruns on every mount) instead of freezing a wrong
+      // score into a day's targets_snap.
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [coachingId]);
 

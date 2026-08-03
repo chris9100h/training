@@ -697,23 +697,36 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
 // ShoppingListScreen), just fed from this list instead of displayList.
 function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
   const foodLogs = foodLogsOverride || store.foodLogs;
+  const now = new Date();
   return (store.foodShoppingPrefs || [])
     .filter(p => p.stockBaselineG != null)
-    .map(p => ({
-      key: p.shoppingKey,
-      foodId: p.foodId,
-      foodName: p.foodName,
-      brand: p.brand || null,
-      displayName: p.nameOverride || p.foodName,
-      overridden: !!p.nameOverride,
-      excluded: !!p.excluded,
-      packageSizeG: p.packageSizeG ?? null,
-      lowStockThresholdG: p.lowStockThresholdG ?? null,
-      stockSetAt: p.stockSetAt,
-      effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
-      grams: 0,
-      fromProjection: false,
-    }))
+    .map(p => {
+      // Same permanentExcluded/tempExcludedUntil/excluded derivation as
+      // fdApplyShoppingPrefs above: Inventory rows feed the same
+      // renderShoppingRow -> openEdit sheet as the Shopping List tab, and
+      // openEdit prefills the Exclude picker from these fields. Without them
+      // here, opening an excluded or actively-snoozed item from the
+      // Inventory tab prefilled the picker as "not excluded", and Save wrote
+      // that back, silently clearing a real exclusion/snooze.
+      const tempExcludedUntil = (p.excludedUntil && new Date(p.excludedUntil) > now) ? p.excludedUntil : null;
+      return {
+        key: p.shoppingKey,
+        foodId: p.foodId,
+        foodName: p.foodName,
+        brand: p.brand || null,
+        displayName: p.nameOverride || p.foodName,
+        overridden: !!p.nameOverride,
+        excluded: !!p.excluded || !!tempExcludedUntil,
+        permanentExcluded: !!p.excluded,
+        tempExcludedUntil,
+        packageSizeG: p.packageSizeG ?? null,
+        lowStockThresholdG: p.lowStockThresholdG ?? null,
+        stockSetAt: p.stockSetAt,
+        effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
+        grams: 0,
+        fromProjection: false,
+      };
+    })
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 // Below the effective threshold: lowStockThresholdG (migration 0232) when
@@ -723,8 +736,11 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
 // because "below one package" alone fires too late for a food that gets
 // eaten through faster than one package lasts, by the time it dips under
 // package_size_g there might be nothing left at all.
+function fdStockThreshold(item) {
+  return item.lowStockThresholdG ?? item.packageSizeG;
+}
 function fdIsLowStock(item) {
-  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  const threshold = fdStockThreshold(item);
   return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG < threshold;
 }
 // The logical complement of fdIsLowStock above, same threshold precondition:
@@ -735,8 +751,8 @@ function fdIsLowStock(item) {
 // silently hiding it from the buy list while it might genuinely be at zero
 // would be worse than just estimating demand for it like an untracked food.
 function fdIsWellStocked(item) {
-  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
-  return threshold > 0 && item.effectiveStockG != null && !fdIsLowStock(item);
+  const threshold = fdStockThreshold(item);
+  return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG >= threshold;
 }
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
 // user has already seen the Running Low banner for, keyed by foodId ->
@@ -806,9 +822,18 @@ function fdExactShoppingQty(grams) {
 // case, so fdRoundShoppingQty, not fdExactShoppingQty). Exports use
 // `headline` only, "3 x 400g" reads as a normal shopping-list line same as
 // any plain amount.
+// Whole packages needed to cover `grams` (rounds UP, you can't buy half a
+// pack). Shared by fdFormatShoppingQty's headline and fdShoppingBuyQtyG
+// below, and by openBoughtPrompt's prefill (which needs the pack COUNT, not
+// just the gram total, to fill its "packs" input) so all three read the pack
+// count off one formula instead of openBoughtPrompt dividing a gram total
+// back out to recover it.
+function fdShoppingPacks(grams, packageSizeG) {
+  return Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+}
 function fdFormatShoppingQty(grams, packageSizeG) {
   if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
-  const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+  const packs = fdShoppingPacks(grams, packageSizeG);
   return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
 }
 // The actual purchasable quantity in grams behind fdFormatShoppingQty's
@@ -819,7 +844,7 @@ function fdFormatShoppingQty(grams, packageSizeG) {
 // a silently different raw estimate, though the user can still edit it from
 // there before it actually hits inventory.
 function fdShoppingBuyQtyG(grams, packageSizeG) {
-  return packageSizeG > 0 ? Math.max(1, Math.ceil((grams || 0) / packageSizeG)) * packageSizeG : fdRoundShoppingQtyG(grams);
+  return packageSizeG > 0 ? fdShoppingPacks(grams, packageSizeG) * packageSizeG : fdRoundShoppingQtyG(grams);
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
@@ -971,11 +996,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // lets the Log-tab hero show progress against the real target instead of a
   // bare total when the user (or their coach) has one set.
   const [coachingMacros, setCoachingMacros] = useStateFd(null);
+  // Mirrors HealthScreen's own coachingMacrosLoaded (screens-health.jsx):
+  // without it, setMealOfChoice below could score and freeze a day's
+  // adherence against the personal target while the real coaching target is
+  // still in flight (or after a failed fetch), the same race f1e368e fixed
+  // for HealthScreen's reconcilers. Left false on failure, not flipped true,
+  // for the same reason as there: waiting for the next successful fetch
+  // (this effect reruns on every coachingId change) beats freezing a wrong
+  // score into a day's targets_snap.
+  const [coachingMacrosLoaded, setCoachingMacrosLoaded] = useStateFd(false);
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
   useEffectFd(() => {
-    if (!coachingId) { setCoachingMacros(null); return; }
+    if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
-    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    setCoachingMacrosLoaded(false);
+    LB.loadCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [coachingId]);
 
@@ -2146,15 +2183,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         { title: 'Remove the marker?', ok: 'Remove', cancel: 'Keep' });
       if (!ok) return;
     }
+    // Wait for the real coaching target instead of scoring (and freezing)
+    // against the personal one while it's still in flight, same race
+    // f1e368e fixed for HealthScreen's reconciler effects. A narrow window
+    // (a network round-trip right after this screen mounts), silently
+    // no-op rather than committing a wrong, permanently-frozen score.
+    if (coachingId && !coachingMacrosLoaded) return;
     const now = new Date().toISOString();
     setStore(s => {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
       const isTraining = LB.isTrainingDayForDate(s, curDate);
       const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      // A past day already scored keeps the target it was scored against
+      // (same dayTargetOverride contract dayTarget above and the
+      // HealthScreen food reconciler use): without this, toggling Meal of
+      // Choice on a backdated day replaced its frozen snapshot with
+      // TODAY's live target, rewriting history the moment a macro target
+      // changed after the fact.
+      const snap = curDate !== today ? existing?.targetsSnap : null;
+      const dayTargetOverride = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
       const { adherence, targetsSnap } = unscored
         ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
-        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining);
+        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining, dayTargetOverride);
       const log = existing
         ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
@@ -6531,7 +6582,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // moment fdIsWellStocked flips, same as everything else in this screen
   // that self-corrects off a derived value instead of a stored flag; it's
   // still visible the whole time via the Inventory tab regardless.
-  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && !fdIsWellStocked(i)), [displayList]);
+  // Declared here (used by includedList right below) rather than down with
+  // the rest of the bought-prompt state further down this function: an item
+  // just confirmed via confirmBoughtPrompt writes a stock baseline that can
+  // immediately flip fdIsWellStocked true, and without checking boughtSet
+  // here too, includedList's filter would drop that row out from under the
+  // checked "Bought" state in the very same render instead of showing it
+  // checked, making unmarkBought unreachable for any item with a package
+  // size/threshold (an item with neither stays visible and checked, the
+  // inconsistency this comment exists to prevent).
+  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && (!fdIsWellStocked(i) || boughtSet.has(i.key))), [displayList, boughtSet]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
   // The Inventory tab's own list, independent of `list`/`displayList` above:
   // every tracked food, not just this window's staples/projections (see
@@ -6611,22 +6672,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // the item never had this pref set at all.
   const [thresholdPacksDraft, setThresholdPacksDraft] = useStateFd('');
   const [thresholdGramsDraft, setThresholdGramsDraft] = useStateFd('');
-  // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
-  // ISO string (temporary, until that timestamp). One control now covers
-  // both the old permanent excluded flag and the temporary snooze, they're
-  // mutually exclusive states of the same underlying choice. Pre-fills from
-  // the item like editDraft/pkgDraft do, using permanentExcluded/
-  // tempExcludedUntil (not the raw pref) so a stale, already-expired
-  // excludedUntil doesn't come back as if still active.
+  // Exclude draft: null (not excluded), 'permanent', a plain day count for a
+  // not-yet-saved snooze preset ({ days: 7|14|30 }), or an existing
+  // excludedUntil ISO string (an already-active snooze from a previous
+  // save). One control now covers both the old permanent excluded flag and
+  // the temporary snooze, they're mutually exclusive states of the same
+  // underlying choice. Pre-fills from the item like editDraft/pkgDraft do,
+  // using permanentExcluded/tempExcludedUntil (not the raw pref) so a
+  // stale, already-expired excludedUntil doesn't come back as if still
+  // active. A tapped preset stores the plain day count, not an ISO
+  // timestamp: fdSnoozeUntil(days) is only actually called at Save time (see
+  // saveEdit below), so a sheet left open for a while before saving doesn't
+  // stamp an earlier-than-intended expiry. An already-active snooze (the ISO
+  // string case) has no reliable matching preset once time has passed (its
+  // remaining days no longer line up with 7/14/30), so reopening the sheet
+  // never pre-highlights one, only actually tapping a preset does.
   const [excludeDraft, setExcludeDraft] = useStateFd(null);
-  // Which temporary preset (7/14/30) lights up, purely a this-visit
-  // interaction marker, separate from excludeDraft itself: an already-
-  // active snooze from a previous save has no reliable matching preset
-  // once time has passed (its remaining days no longer line up with
-  // 7/14/30), so reopening the sheet never pre-highlights one, only
-  // actually tapping a preset does. The Permanent segment needs no
-  // equivalent marker, excludeDraft === 'permanent' is unambiguous on its own.
-  const [excludeDraftDays, setExcludeDraftDays] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6637,13 +6698,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setThresholdPacksDraft(item.lowStockThresholdG != null && item.packageSizeG > 0 ? String(fdRound1(item.lowStockThresholdG / item.packageSizeG)) : '');
     setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? String(item.lowStockThresholdG) : '');
     setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
-    setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
     setThresholdPacksDraft(''); setThresholdGramsDraft('');
-    setExcludeDraft(null); setExcludeDraftDays(null);
+    setExcludeDraft(null);
   }
   // True if any field actually differs from what the sheet opened with.
   // editDraft/pkgDraft/thresholdPacksDraft/thresholdGramsDraft/excludeDraft
@@ -6687,13 +6747,36 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // screen but don't affect what gets saved.
     const thresholdPacksTyped = fdNum(thresholdPacksDraft);
     const thresholdGramsTyped = fdNum(thresholdGramsDraft);
-    const lowStockThresholdG = packageSizeG > 0
-      ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
-      : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null);
+    // A package size added or removed in THIS visit flips which of the two
+    // draft fields above is "live", but openEdit only ever prefilled the
+    // field matching the item's ORIGINAL mode (see its comment), so the
+    // newly-live field reads blank even when an existing threshold was never
+    // actually touched. Only in that exact case (mode switched AND the live
+    // field is still blank) fall back to carrying the stored gram value
+    // forward as-is (no unit conversion needed, it's always stored in
+    // grams); otherwise this is either the original mode (blank there
+    // legitimately means "clear it", same as an untouched nameOverride
+    // above) or the user typed a real value into the now-live field.
+    const openedWithPkg = editItem.packageSizeG > 0;
+    const modeSwitchedWithBlankLiveField = (openedWithPkg !== (packageSizeG > 0))
+      && (packageSizeG > 0 ? !thresholdPacksDraft.trim() : !thresholdGramsDraft.trim());
+    const lowStockThresholdG = modeSwitchedWithBlankLiveField
+      ? (editItem.lowStockThresholdG ?? null)
+      : (packageSizeG > 0
+          ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
+          : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null));
+    // fdSnoozeUntil(days) is only called HERE, at actual save time, not when
+    // the preset button was tapped: excludeDraft holds the plain day count
+    // for a not-yet-saved preset (see its declaration above), so a sheet
+    // left open for a while before saving still stamps the expiry from now,
+    // not from whenever the preset was tapped.
+    const excludedUntil = excludeDraft === 'permanent' ? null
+      : (excludeDraft && typeof excludeDraft === 'object') ? fdSnoozeUntil(excludeDraft.days)
+      : (excludeDraft || null);
     const patch = {
       nameOverride, packageSizeG, lowStockThresholdG, foodName: editItem.foodName, brand: editItem.brand ?? null,
       excluded: excludeDraft === 'permanent',
-      excludedUntil: excludeDraft === 'permanent' ? null : excludeDraft,
+      excludedUntil,
     };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
@@ -6735,7 +6818,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // stock write in this screen. One-way: there's no recorded "amount just
   // added" to subtract back out, so unchecking only clears the local mark,
   // it does not undo the inventory write.
-  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
   const [boughtPrompt, setBoughtPrompt] = useStateFd(null); // { item, packsStr, gramsStr } | null
   useEffectFd(() => { if (!open) { setBoughtSet(new Set()); setBoughtPrompt(null); } }, [open]);
   function unmarkBought(item) {
@@ -6756,7 +6838,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     const suggestedG = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
     setBoughtPrompt({
       item,
-      packsStr: hasPkg ? String(suggestedG / item.packageSizeG) : '',
+      // fdShoppingPacks directly, not suggestedG / item.packageSizeG: reads
+      // the same pack count the headline showed instead of dividing the
+      // gram total back out to recover it.
+      packsStr: hasPkg ? String(fdShoppingPacks(item.grams, item.packageSizeG)) : '',
       gramsStr: hasPkg ? '' : String(suggestedG),
     });
   }
@@ -7248,22 +7333,25 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
           <Field label="Exclude" accent style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(7)); setExcludeDraftDays(7); }} style={fdSegBtn(excludeDraftDays === 7)}>1 week</button>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(14)); setExcludeDraftDays(14); }} style={fdSegBtn(excludeDraftDays === 14)}>2 weeks</button>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(30)); setExcludeDraftDays(30); }} style={fdSegBtn(excludeDraftDays === 30)}>1 month</button>
-              <button onClick={() => { setExcludeDraft('permanent'); setExcludeDraftDays(null); }} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
+              <button onClick={() => setExcludeDraft({ days: 7 })} style={fdSegBtn(excludeDraft?.days === 7)}>1 week</button>
+              <button onClick={() => setExcludeDraft({ days: 14 })} style={fdSegBtn(excludeDraft?.days === 14)}>2 weeks</button>
+              <button onClick={() => setExcludeDraft({ days: 30 })} style={fdSegBtn(excludeDraft?.days === 30)}>1 month</button>
+              <button onClick={() => setExcludeDraft('permanent')} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
             </div>
           </Field>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span>
               {excludeDraft === 'permanent'
                 ? 'Off the shopping list until you pick something else here.'
+                // A not-yet-saved preset ({ days }) previews the date it WOULD
+                // expire on if saved right now, purely for display: the real
+                // expiry is only computed (and stamped) in saveEdit above.
                 : excludeDraft
-                  ? `Off the list until ${new Date(excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
+                  ? `Off the list until ${new Date(typeof excludeDraft === 'object' ? fdSnoozeUntil(excludeDraft.days) : excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
                   : 'On the shopping list. Pick a duration above to skip it for a while.'}
             </span>
             {excludeDraft && (
-              <button onClick={() => { setExcludeDraft(null); setExcludeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+              <button onClick={() => setExcludeDraft(null)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
                 Clear
               </button>
             )}

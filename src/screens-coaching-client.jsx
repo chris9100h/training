@@ -264,7 +264,12 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activationDateStr = oldestVersion?.validFrom
     ?? (isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate);
   if (activationDateStr) {
-    const d = new Date(activationDateStr); d.setHours(12, 0, 0, 0);
+    // 'T12:00:00', not a bare date string: new Date('YYYY-MM-DD') parses as
+    // UTC midnight, which lands on the PREVIOUS local day for any viewer
+    // west of UTC, and setHours(12) alone only re-anchors the time on
+    // whatever (possibly already wrong) day that parse produced. Matches
+    // store.js's own parseDate helper.
+    const d = new Date(activationDateStr + 'T12:00:00');
     const wd = LB.isoWd(d);
     planStartMonday = new Date(d);
     planStartMonday.setDate(d.getDate() - wd);

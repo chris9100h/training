@@ -57,6 +57,13 @@ const MAX_DESCRIPTION_CHARS = 2000;
 // this is just a sanity ceiling against an unexpectedly huge upload.
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
+// A legitimate refine payload only ever echoes the model's own prior output
+// (bounded by that call's own max_tokens), so both bounds are generous.
+// Unlike description/image above, previousItems had no cap at all before
+// this: unbounded, it went straight into the prompt as JSON.stringify'd
+// text, at both the client's own quota cost and the provider's.
+const MAX_PREVIOUS_ITEMS = 50;
+const MAX_ITEM_NAME_CHARS = 200;
 
 // Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
 // (isAdmin = store.user?.email === this): unlimited quota for testing.
@@ -210,12 +217,13 @@ Deno.serve(async (req) => {
   // numeric/string field in this file. Optional, never relaxes the
   // description/image requirement below.
   const rawPreviousItems = Array.isArray(body?.previousItems) ? body.previousItems : [];
+  if (rawPreviousItems.length > MAX_PREVIOUS_ITEMS) return json({ error: 'Too many items to refine at once.' }, 413);
   const previousItems = rawPreviousItems
     .map((it: Record<string, unknown>) => {
       const name = str(it?.name);
       if (!name) return null;
       return {
-        name,
+        name: name.slice(0, MAX_ITEM_NAME_CHARS),
         quantityG: Math.max(0, num(it?.quantityG) ?? 100),
         protein: Math.max(0, num(it?.protein) ?? 0),
         carbs: Math.max(0, num(it?.carbs) ?? 0),

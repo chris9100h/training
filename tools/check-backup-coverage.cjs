@@ -7,7 +7,7 @@
 //
 // Source of truth: supabase/schema.sql (already reconciled with the migrations by
 // check-db-docs.cjs and with the live DB by check-db-live.cjs). Parsed with the
-// shared helper in tools/lib/sql-schema.cjs — one parser, no second truth.
+// shared helper in tools/lib/sql-schema.cjs: one parser, no second truth.
 //
 // Three checks:
 //   IMPORT  : actually runs importFromBackup() in a vm sandbox with a recording
@@ -135,7 +135,7 @@ function captureImportedColumns() {
   const LB = sandbox.window.LB;
 
   // A minimal but structurally complete backup: one row per table so every
-  // per-table upsert runs. Values are irrelevant — the mapped upserts include
+  // per-table upsert runs. Values are irrelevant: the mapped upserts include
   // each column (defaulting to null), so the recorded keys are the full set.
   const backup = {
     user: { name: 'x' },

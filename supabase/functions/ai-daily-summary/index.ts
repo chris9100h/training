@@ -26,7 +26,8 @@
 // medsTaken, medsTakenNames, glucose, bloodPressure, bodyTemp, note,
 // training, cardio }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
-// -> { headline: string|null, body: string, generatedAt: string }
+// -> { summary: string, generatedAt: string } (summary is headline + blank
+// line + body concatenated, see the client-side splitHeadlineBody split)
 //
 // Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses), and
 // SUPABASE_SERVICE_ROLE_KEY (for the pre-read/write against zane_daily_logs,

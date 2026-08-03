@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Focused unit tests for the pure / near-pure logic in src/store.js.
-   No build step, no test framework — load store.js in a vm with a minimal
+   No build step, no test framework: load store.js in a vm with a minimal
    window/supabase stub and assert against window.LB. Run: node this file. */
 const fs = require('fs');
 const path = require('path');
@@ -100,7 +100,7 @@ async function testAsync(name, fn) {
     const next = { ...baseStore(), exercises: [{ id: 'e1', name: 'X', tags: [] }] };
     let threw = false;
     try { await LB.syncStore(prev, next, 'u1'); } catch (_) { threw = true; }
-    assert.ok(threw, 'expected syncStore to reject on a failed write — this is what makes flushSync retry');
+    assert.ok(threw, 'expected syncStore to reject on a failed write, this is what makes flushSync retry');
   });
 
   await testAsync('syncStore RESOLVES when writes succeed', async () => {
@@ -428,7 +428,7 @@ async function testAsync(name, fn) {
 
   test('detectCardioPRs only compares within the same activity type', () => {
     const prior = [cLog({ id: 'b', type: 'Cycling', dur: 120, dist: 40000, date: '2026-05-01' })];
-    // A 30-min / 5k run vs a long bike ride — no run history → null
+    // A 30-min / 5k run vs a long bike ride, no run history → null
     assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', type: 'Running', dur: 30, dist: 5000 }), prior), null);
   });
 
@@ -487,7 +487,7 @@ async function testAsync(name, fn) {
   });
 
   test('dayTargetFromMacros picks training vs rest, null when unset', () => {
-    // deepStrictEqual would trip on the vm realm's distinct Object.prototype —
+    // deepStrictEqual would trip on the vm realm's distinct Object.prototype:
     // compare by JSON instead (same as the rest of this suite avoids it).
     assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, true)), JSON.stringify({ protein: 200, carbs: 250, fat: 70, calories: 2430 }));
     assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, false)), JSON.stringify({ protein: 180, carbs: 150, fat: 60, calories: 1860 }));
@@ -507,7 +507,7 @@ async function testAsync(name, fn) {
     // calorie-weighting: small fat target (50g) has less impact than equal-weight would give
     // t2: P=150g(600kcal,24%), C=350g(1400kcal,57%), F=50g(450kcal,18%) → total=2450
     // 10g fat over (score=0.8): (1×600 + 1×1400 + 0.8×450)/2450 = 2360/2450 ≈ 0.9633 → 96
-    // equal-weight would give (1+1+0.8)/3 = 0.9333 → 93 — calorie-weighting is fairer
+    // equal-weight would give (1+1+0.8)/3 = 0.9333 → 93, calorie-weighting is fairer
     const t2 = { protein: 150, carbs: 350, fat: 50 };
     assert.strictEqual(LB.macroAdherence({ protein: 150, carbs: 350, fat: 60 }, t2), 96);
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: null, fat: 70 }, t), null);
@@ -1134,7 +1134,7 @@ async function testAsync(name, fn) {
       // prior week
       { date: '2026-06-02', weight: 85.0 },
       { date: '2026-06-04', weight: 85.4 },
-      // today's log (outside the reported week) — weight_today reads from here
+      // today's log (outside the reported week), weight_today reads from here
       { date: today, weight: 96.6 },
     ];
     const p = LB.dailyLogsWeekPrefill(logs, '2026-06-08');
@@ -1207,7 +1207,7 @@ async function testAsync(name, fn) {
     const state = { sessions: [
       wpSession('2026-06-02', [wpSet(100, 5)]), // baseline before the week
       wpSession('2026-06-09', [wpSet(110, 5)]), // earlier in the reported week
-      wpSession('2026-06-11', [wpSet(112, 5)]), // later same week — must NOT compare to Jun 9
+      wpSession('2026-06-11', [wpSet(112, 5)]), // later same week, must NOT compare to Jun 9
     ] };
     // Both week sessions improve over the Jun 2 baseline → improved
     assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'improved');
@@ -1220,7 +1220,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.growthCounts.a_d1, 1);
   });
 
-  test('pickGrowthRecipient: no ceiling — a single exercise keeps winning no matter how many grants it already has', () => {
+  test('pickGrowthRecipient: no ceiling, a single exercise keeps winning no matter how many grants it already has', () => {
     const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 7 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
     assert.strictEqual(r.growthCounts.a_d1, 8);
@@ -1237,8 +1237,8 @@ async function testAsync(name, fn) {
     assert.strictEqual(r2.growthCounts.a_d1, 2);
   });
 
-  test('pickGrowthRecipient: no ceiling — fewest grants still wins even against a much larger gap', () => {
-    // b has 20 prior grants, a has 3 — no ceiling excludes b from eligibility
+  test('pickGrowthRecipient: no ceiling, fewest grants still wins even against a much larger gap', () => {
+    // b has 20 prior grants, a has 3, no ceiling excludes b from eligibility
     // anymore, but a still wins purely because it has fewer grants so far.
     const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 3, b_d1: 20 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
@@ -2324,7 +2324,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(seeded[0].reps, 13);
   });
   test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
-    // Only a Range item's own repsMax caps the nudge — the global default /
+    // Only a Range item's own repsMax caps the nudge, the global default /
     // a custom progressionOffset ceiling is just an internal trigger
     // threshold, not a user-drawn boundary, so it keeps climbing (matches
     // classic Smart Progression's long-standing behavior).
@@ -2349,7 +2349,7 @@ async function testAsync(name, fn) {
     const it = { sets: 1, reps: 8, progressionOffset: 2 };
     const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
     const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
-    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap — keeps climbing
+    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap, keeps climbing
   });
   test('buildSeedSets respects an explicit progressionOffset of 0 (off) even with the global setting on', () => {
     const it = { sets: 1, reps: 8, progressionOffset: 0 };
@@ -2467,7 +2467,7 @@ async function testAsync(name, fn) {
     assert.ok(numAfter > 1);
   });
 
-  test('realignCycleForToday: preserves history — a past date keeps its old rotation', () => {
+  test('realignCycleForToday: preserves history, a past date keeps its old rotation', () => {
     const days = Array.from({ length: 8 }, () => ({}));
     const sch = { id: 'p1', days };
     const today = '2026-07-05';
@@ -2493,7 +2493,7 @@ async function testAsync(name, fn) {
   });
   test('exerciseLogMode: log_mode takes precedence over legacy flag', () => {
     // a bodyweight weight-mode exercise still carries no_weight_reps=false, and
-    // a reps exercise carries no_weight_reps=true — but log_mode is authoritative
+    // a reps exercise carries no_weight_reps=true, but log_mode is authoritative
     assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight', no_weight_reps: true }), 'weight');
   });
   test('shouldPullBodyweight: only bodyweight + explicit opt-in', () => {
@@ -2674,7 +2674,7 @@ async function testAsync(name, fn) {
     const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3' });
     assert.strictEqual('mesocycle_autoregulate' in plain, false);
     // Harmless alongside a bounded meso too (mesoActive is an OR, mesocycle_weeks
-    // still wins for bounded-only logic) — confirms it isn't nested inside/gated
+    // still wins for bounded-only logic), confirms it isn't nested inside/gated
     // by the mesoWeeks block.
     const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesocycleAutoregulate: true });
     assert.strictEqual(both.mesocycle_weeks, 6);

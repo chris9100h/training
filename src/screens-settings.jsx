@@ -922,7 +922,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           if (!mounted) return;
           setSupportActiveNotes(data || []);
           if (first) setSupportActiveLoading(false);
-          LB.supabase.from('zane_coaching_notes')
+          // Gated on the just-fetched rows actually containing an unread
+          // message from the other party: without this, every 12s tick fired
+          // an UPDATE that matched zero rows for as long as the sheet stayed
+          // open and idle.
+          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+          if (hasUnread) LB.supabase.from('zane_coaching_notes')
             .update({ read_at: new Date().toISOString() })
             .eq('coaching_id', supportActiveTicketId)
             .neq('author_id', userId)
@@ -966,13 +971,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           setSupportTicketNotes(data || []);
           if (first) setSupportTicketLoading(false);
           first = false;
+          // Gated on the just-fetched rows actually containing an unread
+          // message from the other party, same reasoning as the client-side
+          // poll above: without this, every 12s tick fired an UPDATE that
+          // matched zero rows for as long as the sheet stayed open and idle.
+          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+          if (!hasUnread) return;
+          LB.supabase.from('zane_coaching_notes')
+            .update({ read_at: new Date().toISOString() })
+            .eq('coaching_id', supportTicket.coachingId)
+            .neq('author_id', userId)
+            .is('read_at', null)
+            .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
         });
-      LB.supabase.from('zane_coaching_notes')
-        .update({ read_at: new Date().toISOString() })
-        .eq('coaching_id', supportTicket.coachingId)
-        .neq('author_id', userId)
-        .is('read_at', null)
-        .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
     };
     load();
     const poll = setInterval(load, 12000);
@@ -2076,7 +2087,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Active Users Sheet ══ */}
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
         {(() => {
-          const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+          // Guarded: this IIFE runs on every render of this screen regardless
+          // of whether the sheet is actually open (SettingsSheet stays
+          // mounted for its close animation), so a corrupt value under this
+          // key would otherwise throw on every single visit to Settings.
+          let dismissed = [];
+          try { dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]'); }
+          catch (_) { dismissed = []; }
           const hiddenCount = activeSessions.filter(s => s.is_finished && dismissed.includes(s.session_id)).length;
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
           const sortedSessions = [...visibleSessions].sort((a, b) =>
@@ -2578,13 +2595,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="micro" style={{ color: 'var(--accent)', marginBottom: 6 }}>{label}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <input type="date" value={p.startedAt.slice(0, 10)} max={p.endedAt ? p.endedAt.slice(0, 10) : todayStr}
+                          {/* LB.fmtISO(new Date(...)), not a bare slice: startedAt/endedAt
+                              are UTC timestamps, slicing the first 10 chars gives the UTC
+                              date, a different calendar day than local for a non-UTC viewer. */}
+                          <input type="date" value={LB.fmtISO(new Date(p.startedAt))} max={p.endedAt ? LB.fmtISO(new Date(p.endedAt)) : todayStr}
                             onChange={e => e.target.value && updatePeriod(p.id, { startedAt: LB.parseDate(e.target.value).toISOString() })}
                             style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
                           {isActive
                             ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
-                            : <input type="date" value={p.endedAt.slice(0, 10)} min={p.startedAt.slice(0, 10)} max={todayStr}
+                            : <input type="date" value={LB.fmtISO(new Date(p.endedAt))} min={LB.fmtISO(new Date(p.startedAt))} max={todayStr}
                                 onChange={e => e.target.value && updatePeriod(p.id, { endedAt: LB.parseDate(e.target.value).toISOString() })}
                                 style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           }

@@ -336,6 +336,7 @@ function App() {
   });
   const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
+  const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const intentionalSignOut        = useRefA(null);  // ms timestamp, set right before a user-initiated LB.signOut() call
@@ -426,7 +427,12 @@ function App() {
     const color = store?.settings?.accentColor;
     if (color) {
       window.applyAccentColor(color);
-      localStorage.setItem('logbook-accent-color', color);
+      // Guarded like every other localStorage write in this file: this one
+      // sits in an App-level effect, above the per-screen ErrorBoundary, so
+      // an unguarded quota/private-mode throw here (storageFull is already
+      // an anticipated state, see saveToLocal) would crash the whole app
+      // instead of just this effect's write.
+      try { localStorage.setItem('logbook-accent-color', color); } catch (_) {}
     }
   }, [store?.settings?.accentColor]);
 
@@ -434,7 +440,7 @@ function App() {
     const mode = store?.settings?.darkMode;
     if (mode) {
       window.applyDarkMode(mode);
-      localStorage.setItem('logbook-dark-mode', mode);
+      try { localStorage.setItem('logbook-dark-mode', mode); } catch (_) {}
     }
   }, [store?.settings?.darkMode]);
 
@@ -472,7 +478,16 @@ function App() {
       if (phaseRef.current !== 'ready' || !uid) return;
       LB.refreshHealthLogs(uid).then(fresh => {
         if (!fresh) return;
+        // Re-check after the await, not just before it started: a sign-out
+        // (or a different user signing in) while this fetch was in flight
+        // otherwise either crashes here on a null store (above the
+        // per-screen ErrorBoundary, white-screening the whole app) or merges
+        // this user's health/food/water/medication logs into a DIFFERENT
+        // signed-in user's store, exactly the cross-account contamination
+        // loadSeq guards against for loadData's own async path.
+        if (userIdRef.current !== uid) return;
         setStore(s => {
+          if (!s) return s;
           const serverDailyIds    = new Set(fresh.dailyLogs.map(l => l.id));
           const serverDailyDates  = new Set(fresh.dailyLogs.map(l => l.date));
           const serverCardioIds   = new Set(fresh.cardioLogs.map(l => l.id));
@@ -1506,10 +1521,49 @@ function App() {
     if (!store || !userId || phase !== 'ready') return;
     prevStore.current = store;
     pendingStore.current = store;
-    if (!LB.saveToLocal(store, userId)) setStorageFull(true);
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
+    // Debounced, not synchronous: LB.saveToLocal stringifies the ENTIRE
+    // store, and this effect runs on every store change (every set toggle,
+    // water log, note keystroke), which used to pay that cost synchronously
+    // every single time. pendingStore.current/userIdRef.current, not the
+    // captured store/userId, so whichever debounced call actually fires
+    // saves the latest value even if several store changes landed within
+    // the same window. Flushed immediately on pagehide/visibilitychange
+    // below, so the crash-safety guarantee is unchanged, just no longer
+    // synchronous on every keystroke.
+    if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
+    localSaveTimer.current = setTimeout(() => {
+      localSaveTimer.current = null;
+      // Re-checked at fire time, not just captured above: a sign-out within
+      // the debounce window clears userIdRef, and writing to a stale/absent
+      // id here would be a wasted write under the wrong key, not a real save.
+      if (pendingStore.current && userIdRef.current) {
+        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
+      }
+    }, 400);
   }, [store]);
+
+  // Flushes a pending debounced localStorage save (see the [store] effect
+  // above) immediately instead of losing up to 400ms of local edits to a
+  // background kill or tab close.
+  useEffectA(() => {
+    const flushLocalSave = () => {
+      if (!localSaveTimer.current) return;
+      clearTimeout(localSaveTimer.current);
+      localSaveTimer.current = null;
+      if (pendingStore.current && userIdRef.current) {
+        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
+      }
+    };
+    const onVisibilityHidden = () => { if (document.hidden) flushLocalSave(); };
+    window.addEventListener('pagehide', flushLocalSave);
+    document.addEventListener('visibilitychange', onVisibilityHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushLocalSave);
+      document.removeEventListener('visibilitychange', onVisibilityHidden);
+    };
+  }, []);
 
   // Check for SW updates on every screen navigation and whenever the app
   // comes back to the foreground (visibilitychange). Fetches sw.js directly

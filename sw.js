@@ -133,33 +133,6 @@ const _restTimer = { id: null, resolve: null };
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
 
-  if (e.data?.type === 'SCHEDULE_REST_TIMER') {
-    // Cancel any previously scheduled timer and release its waitUntil promise.
-    clearTimeout(_restTimer.id); _restTimer.id = null;
-    if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
-
-    const { delayMs = 0, title, body } = e.data;
-    // waitUntil keeps the SW alive for the full rest duration.
-    e.waitUntil(new Promise(resolve => {
-      _restTimer.resolve = resolve;
-      _restTimer.id = setTimeout(async () => {
-        _restTimer.id = null; _restTimer.resolve = null;
-        // Skip notification if any app window is currently focused.
-        const cs = await clients.matchAll({ type: 'window' });
-        if (!cs.some(c => c.focused)) {
-          await self.registration.showNotification(title || 'Zane · Rest done', {
-            body: body || 'Time to start your next set! 💪',
-            icon: BASE + '/icons/icon-192.png',
-            badge: BASE + '/icons/icon-192.png',
-            tag: 'rest-timer',
-          });
-        }
-        resolve();
-      }, delayMs);
-    }));
-    return;
-  }
-
   if (e.data?.type === 'CANCEL_REST_TIMER') {
     clearTimeout(_restTimer.id); _restTimer.id = null;
     if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
@@ -168,7 +141,12 @@ self.addEventListener('message', e => {
 });
 
 self.addEventListener('push', e => {
-  const data = e.data ? e.data.json() : {};
+  // A non-JSON payload (a test push, a truncated delivery) throws here; every
+  // real sender always sends JSON, but without the guard that throw aborts
+  // the whole handler before e.waitUntil ever runs, so no notification shows
+  // at all despite the userVisibleOnly subscription.
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (_) {}
   e.waitUntil(
     self.registration.showNotification(data.title || 'Zane', {
       body: data.body || '',

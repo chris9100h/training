@@ -1831,7 +1831,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     let dismissed = false;
     try { dismissed = localStorage.getItem('logbook-sick-recover-prompt') === today; } catch (_) {}
     if (dismissed) return;
-    const trainedToday = (store.sessions || []).some(s => s.ended && s.ended.slice(0, 10) === today)
+    // s.date, not s.ended.slice(0, 10): s.ended is a UTC timestamp, slicing
+    // it gives the UTC date, which is a different calendar day than `today`
+    // (local) for any evening session outside UTC. s.date is already the
+    // session's own local date, same field the cardio check right below
+    // already uses correctly.
+    const trainedToday = (store.sessions || []).some(s => s.ended && s.date === today)
       || (store.cardioLogs || []).some(l => l.date === today);
     if (!trainedToday) return;
     sickPromptShown.current = true;
@@ -2786,6 +2791,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     );
   })() : null;
 
+  // getMesoState touches localStorage and mesoCurrentWeek filters
+  // store.sessions; memoized like screens-train.jsx's own mesoWeek (same
+  // comment there: "it recomputed on every 250ms tick for meso users"
+  // without a memo) so the bounded-meso and AUTO header badges below (only
+  // one of which renders per plan) don't redo that work on every HomeScreen
+  // render, e.g. every store sync, sheet toggle, or day-strip tap.
+  const mesoBadgeState = useMemo(
+    () => (sch && typeof getMesoState === 'function' ? getMesoState(sch.id, store.mesoStates) : null),
+    [sch?.id, store.mesoStates]);
+  const mesoBadgeWeek = useMemo(
+    () => (mesoBadgeState && typeof mesoCurrentWeek === 'function' ? mesoCurrentWeek(mesoBadgeState, store) : null),
+    [mesoBadgeState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods]);
+
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -2938,13 +2956,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   </span>
                 );
               }
-              const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+              const m = mesoBadgeState;
               const weeks = sch.mesocycle_weeks;
               // completions = how many blocks finished, so the block currently
               // running is number completions+1. Shown from Meso 2 on.
               const mesoNum = (m?.completions ?? 0) + 1;
               const mesoLabel = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
-              const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
+              const week = mesoBadgeWeek;
               if (week == null) {
                 // Pending, meso hasn't started yet; show start date if known
                 const startLabel = m?.startDate
@@ -2974,14 +2992,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   // meso is still pending its aligned start, then AUTO (or AUTO ·
                   // LOAD in load-only mode) once it's running. Mirrors the bounded
                   // meso badge's pending/active split, minus the week counter.
-                  const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+                  const m = mesoBadgeState;
                   // The cycle label above already reads the browsed cycle (e.g.
                   // CYCLE 9). Drop the AUTO badge for a period that ends before
                   // autoregulation's aligned start, so a pre-autoreg cycle no
                   // longer inherits the current AUTO / LOAD flag.
                   const autoStartTs = m?.startDate ? new Date(m.startDate + 'T12:00:00').getTime() : null;
                   if (autoStartTs != null && viewedPeriodEndTs != null && viewedPeriodEndTs < autoStartTs) return null;
-                  const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
+                  const week = mesoBadgeWeek;
                   if (week == null) {
                     const startLabel = m?.startDate
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()

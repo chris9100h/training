@@ -301,6 +301,13 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)),
+    // These three don't cascade off any table already in this list (only off
+    // auth.users, which this function never deletes), so without them "delete
+    // all my data" and a backup restore's wipe-first step both left plan
+    // drafts, auto-fill markers and saved check-in schemas behind.
+    unwrap(_supabase.from('zane_plan_drafts').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_template_days').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_checkin_schema_templates').delete().eq('user_id', userId)),
   ];
   // zane_recipe_shares has RLS with no policies, so it is only reachable
   // through an RPC. Without this, every old ?share=<token> link kept serving
@@ -604,12 +611,27 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   if (importSessions.length) {
     try {
       const convertKg = kg => (kg != null ? convKg(kg) : null);
+      // st.drops carries its own weights alongside the set's top-level kg:
+      // either an array of technique rounds (drop sets / myo-reps, each round
+      // shaped { kg, reps, ..., stretch?: { kg, timeSec } }) or a standalone
+      // object { partials, stretch } for lengthened_partial/weighted_stretch
+      // (see LB.techniqueRounds). Both shapes need the same kg conversion the
+      // top-level set gets, or a unit-converting restore leaves drop-set/
+      // myo-rep/stretch weights in the old unit next to the converted top set.
+      const convertDrops = drops => {
+        if (!drops) return drops;
+        const convertStretch = s => (s ? { ...s, kg: convertKg(s.kg) } : s);
+        if (Array.isArray(drops)) {
+          return drops.map(d => ({ ...d, kg: convertKg(d.kg), stretch: convertStretch(d.stretch) }));
+        }
+        return { ...drops, stretch: convertStretch(drops.stretch) };
+      };
       const sessionsForEntries = importSessions.map(s => ({
         ...s,
         entries: (s.entries || []).map(e => ({
           ...e,
           exId: idRemap[e.exId] ?? e.exId,
-          sets: unitConvert ? (e.sets || []).map(st => ({ ...st, kg: convertKg(st.kg) })) : e.sets,
+          sets: unitConvert ? (e.sets || []).map(st => ({ ...st, kg: convertKg(st.kg), drops: convertDrops(st.drops) })) : e.sets,
         })),
       }));
       await _syncEntryRelational(sessionsForEntries, userId, null, (phase) => {
@@ -1759,7 +1781,7 @@ async function autoArchiveMissedDays(userId, state) {
   const missed = [];
   for (let daysAgo = 1; daysAgo <= 365; daysAgo++) {
     const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-    const dateKey = d.toISOString().slice(0, 10);
+    const dateKey = fmtISO(d);
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
     // Version-aware, a hand-rolled copy of this used to ignore a schedule's
     // versioned days (validFrom), so a future plan change threw off which
@@ -1805,7 +1827,12 @@ function diffCollectionById(prevList, nextList) {
   (nextList || []).forEach(item => {
     nextIds.add(item.id);
     const p = prevMap.get(item.id);
-    if (!p || JSON.stringify(p) !== JSON.stringify(item)) upsert.push(item);
+    // p === item (same object reference) means this row wasn't touched by
+    // this diff's setStore update (store updates are immutable, untouched
+    // rows keep their identity), so it can't have changed: skip the
+    // JSON.stringify comparison, which otherwise re-serializes every
+    // untouched row in the collection on every single store change.
+    if (!p || (p !== item && JSON.stringify(p) !== JSON.stringify(item))) upsert.push(item);
   });
   const removed = (prevList || []).filter(x => !nextIds.has(x.id));
   return { upsert, removed };
@@ -1956,30 +1983,42 @@ async function syncStore(prev, next, userId) {
   // be committed first (same reasoning as the sessions -> entries -> sets
   // ordering at the end of this function).
   const preOps = [];
+  // foodLogUpsertWithFkFallback is async, so calling it eagerly (like a plain
+  // `ops.push(foodLogUpsertWithFkFallback(rows))` below would) starts its
+  // internal upsert the moment this function is called, not when the caller
+  // awaits it. That used to fire the food-log request before the preOps
+  // barrier below ever resolved the parent recipe row, racing the FK. Stash a
+  // thunk instead and only invoke it (starting the request) after preOps has
+  // actually settled.
+  let foodLogUpsertThunk = null;
 
   if (prev.exercises !== next.exercises) {
+    const prevExMap = new Map(prev.exercises.map(x => [x.id, x]));
+    const nextExIds = new Set(next.exercises.map(x => x.id));
     const upsert = next.exercises.filter(e => {
-      const p = prev.exercises.find(x => x.id === e.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(e);
+      const p = prevExMap.get(e.id);
+      return !p || (p !== e && JSON.stringify(p) !== JSON.stringify(e));
     });
-    const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
+    const removed = prev.exercises.filter(e => !nextExIds.has(e.id));
     if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
   if (prev.schedules !== next.schedules) {
+    const prevSchMap = new Map(prev.schedules.map(x => [x.id, x]));
+    const nextSchIds = new Set(next.schedules.map(x => x.id));
     const upsert = next.schedules.filter(s => {
-      const p = prev.schedules.find(x => x.id === s.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(s);
+      const p = prevSchMap.get(s.id);
+      return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
     });
-    const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
+    const removed = prev.schedules.filter(s => !nextSchIds.has(s.id));
     if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
     // Fire-and-forget backup whenever days changes to a valid non-empty array.
     // Never blocks the main sync; failures are silently ignored.
     const toBackup = upsert.filter(s => {
-      const p = prev.schedules.find(x => x.id === s.id);
-      const daysChanged = !p || JSON.stringify(p.days) !== JSON.stringify(s.days);
+      const p = prevSchMap.get(s.id);
+      const daysChanged = !p || (p !== s && JSON.stringify(p.days) !== JSON.stringify(s.days));
       return daysChanged && Array.isArray(s.days) && s.days.length > 0;
     });
     if (toBackup.length) {
@@ -2003,11 +2042,13 @@ async function syncStore(prev, next, userId) {
   let sessionUpserts = [];
   let sessionsUpsertOp = null;
   if (prev.sessions !== next.sessions) {
+    const prevSessMap = new Map(prev.sessions.map(x => [x.id, x]));
+    const nextSessIds = new Set(next.sessions.map(x => x.id));
     const upsert = next.sessions.filter(s => {
-      const p = prev.sessions.find(x => x.id === s.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(s);
+      const p = prevSessMap.get(s.id);
+      return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
     });
-    const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
+    const removed = prev.sessions.filter(s => !nextSessIds.has(s.id));
     if (upsert.length) {
       // Kept OUT of `ops`: that array is awaited below as one fail-fast batch,
       // so a single unrelated table failing anywhere in the same diff (a food
@@ -2033,11 +2074,13 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.skips !== next.skips) {
+    const prevSkipMap = new Map((prev.skips || []).map(x => [x.id, x]));
+    const nextSkipIds = new Set((next.skips || []).map(x => x.id));
     const upsert = (next.skips || []).filter(s => {
-      const p = (prev.skips || []).find(x => x.id === s.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(s);
+      const p = prevSkipMap.get(s.id);
+      return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
     });
-    const removed = (prev.skips || []).filter(s => !(next.skips || []).find(x => x.id === s.id));
+    const removed = (prev.skips || []).filter(s => !nextSkipIds.has(s.id));
     if (upsert.length)  ops.push(_supabase.from('zane_skips').upsert(upsert.map(s => ({
       id: s.id, user_id: userId, date: s.date, day_id: s.dayId, day_name: s.dayName,
       skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
@@ -2068,18 +2111,21 @@ async function syncStore(prev, next, userId) {
 
   if (prev.foodLogs !== next.foodLogs) {
     const { upsert, removed } = diffCollectionById(prev.foodLogs, next.foodLogs);
-    if (upsert.length) ops.push(foodLogUpsertWithFkFallback(upsert.map(l => ({
-      id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
-      food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
-      quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
-      carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null,
-      sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
-      recipe_items: l.recipeItems ?? null,
-      recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
-      logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
-      logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
-      planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
-    }))));
+    if (upsert.length) {
+      const rows = upsert.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
+        food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
+        quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
+        carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null,
+        sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
+        recipe_items: l.recipeItems ?? null,
+        recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+        logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
+        logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
+        planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
+      }));
+      foodLogUpsertThunk = () => foodLogUpsertWithFkFallback(rows);
+    }
     if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
   }
 
@@ -2427,7 +2473,6 @@ async function syncStore(prev, next, userId) {
   if (settingsChanged) {
     const settingsRow = {
       user_id: userId,
-      active_cardio_plan_id: next.activeCardioPlanId ?? null,
       unit: next.settings?.unit ?? null,
       rest_default: next.settings?.restDefault || 120,
       rest_big:     next.settings?.restBig     || 180,
@@ -2476,9 +2521,6 @@ async function syncStore(prev, next, userId) {
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
-      status_mode: next.statusMode ?? null,
-      status_mode_since: next.statusModeSince ?? null,
-      deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
       tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
@@ -2495,6 +2537,17 @@ async function syncStore(prev, next, userId) {
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
     if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    // Cardio-plan selection and Sick/Vacation/Deload status get the SAME gated
+    // treatment as the plan-position fields above, for the same reason: they
+    // are action-advanced pointers another device may have set more recently
+    // than this device's cached copy. Used to be written unconditionally on
+    // every flush, so a stale second device syncing an unrelated setting
+    // change (e.g. dark mode) would clobber a status/cardio-plan change just
+    // made on another device back to this device's own stale value.
+    if (prev.activeCardioPlanId      !== next.activeCardioPlanId)      settingsRow.active_cardio_plan_id      = next.activeCardioPlanId ?? null;
+    if (prev.statusMode              !== next.statusMode)              settingsRow.status_mode                = next.statusMode ?? null;
+    if (prev.statusModeSince         !== next.statusModeSince)         settingsRow.status_mode_since          = next.statusModeSince ?? null;
+    if (prev.deloadPromptDismissedAt !== next.deloadPromptDismissedAt) settingsRow.deload_prompt_dismissed_at = next.deloadPromptDismissedAt ?? null;
     // in_progress_session_id gets the SAME gated treatment as the plan-position
     // fields above, for the same reason: it's a pointer another device (or this
     // device's own boot merge, see app.jsx's LB.resolveInProgressId) may set to
@@ -2534,6 +2587,9 @@ async function syncStore(prev, next, userId) {
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
   if (preOps.length) await Promise.all(preOps.map(unwrap));
+  // Only start the food-log request now that any new recipe it references
+  // has actually committed; see the foodLogUpsertThunk comment above.
+  if (foodLogUpsertThunk) ops.push(foodLogUpsertThunk());
   // allSettled, not all: ops spans ~25 unrelated tables in one diff, and the
   // sessions upsert (sessionsUpsertOp, tracked separately above) must get its
   // own result independent of whatever else in ops fails, otherwise a broken
@@ -2571,13 +2627,13 @@ function computeNextReminderAt(state) {
   const time = state.settings?.reminderTime ?? '07:00';
   const now = new Date();
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = fmtISO(today);
   const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
   const todayTimePassed = new Date(todayStr + 'T' + time + ':00') <= now;
 
   for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
     const d = new Date(today); d.setDate(today.getDate() + ahead);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = fmtISO(d);
     // Version-aware, see plannedTrainingDay; a hand-rolled copy of this used
     // to resolve weekday plans against sch.days directly, ignoring a plan
     // change scheduled with a future validFrom date. Returns null for every
@@ -2714,7 +2770,7 @@ function isoWd(d) { return (d.getDay() + 6) % 7; }
 
 // Sunday of the week that starts on weekStart (YYYY-MM-DD) → YYYY-MM-DD
 function weekEnd(weekStart) {
-  return new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
+  return fmtISO(new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000));
 }
 
 // Format a duration in seconds for display: "45s" under a minute, "1:15" at or
@@ -4234,7 +4290,7 @@ function nextDay(state) {
   }
   if (sch.versions?.length) {
     const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    const tomorrowStr = fmtISO(tomorrow);
     const pos = getCyclePosForDate(sch, tomorrowStr);
     if (pos !== null) {
       const vDays = getPlanDaysForDate(sch, tomorrowStr);
@@ -4757,13 +4813,20 @@ async function pushMedicationPlanToClient({ plan, medications, planItems, schedu
   const medCopies = (medications || []).map(m => {
     const nid = uid();
     medIdMap[m.id] = nid;
-    // stockBaseline/stockSetAt are explicitly reset, not spread from the
-    // coach's own row: those describe the coach's personal supply, not the
-    // client's, and the client has zero medicationLogs against this brand
-    // new id, so an inherited baseline would read back as real stock they
-    // never had. The client sets their own via Inventory once they actually
+    // stockBaseline/stockSetAt/trackStock/excludeFromLowStock/lowStockThreshold/
+    // excludeFromPillbox are explicitly reset, not spread from the coach's own
+    // row: those describe the coach's personal supply and inventory
+    // preferences, not the client's, and the client has zero medicationLogs
+    // against this brand new id, so an inherited baseline (or an inherited
+    // trackStock:true with no baseline) would read back as real stock, or
+    // tracked-but-uncounted clutter, they never actually had. The client
+    // opts into tracking and sets their own via Inventory once they actually
     // have the medication in hand.
-    return { ...m, id: nid, stockBaseline: null, stockSetAt: null, createdAt: nowISO, updatedAt: nowISO };
+    return {
+      ...m, id: nid, stockBaseline: null, stockSetAt: null, trackStock: false,
+      excludeFromLowStock: false, lowStockThreshold: null, excludeFromPillbox: false,
+      createdAt: nowISO, updatedAt: nowISO,
+    };
   });
   // Only ever copies memberships/slots whose medication is actually part of
   // this push (medIdMap has no entry otherwise), so a stray membership/slot
@@ -5144,8 +5207,12 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   };
   const { error } = await _supabase.from('zane_checkins').upsert(row, { onConflict: 'coaching_id,week_start' });
   if (error) throw error;
-  // Clear check-in request flag so the modal disappears
-  _supabase.from('zane_coaching').update({ checkin_requested_at: null }).eq('id', coachingId).eq('client_id', clientId).then(() => {}, () => {});
+  // Clear check-in request flag so the modal disappears. Awaited (not
+  // fire-and-forget) so a dropped request doesn't leave the flag set and the
+  // "coach wants a check-in" modal reappearing for a week already submitted;
+  // non-fatal on failure since the check-in itself is already safely stored.
+  const { error: clearErr } = await _supabase.from('zane_coaching').update({ checkin_requested_at: null }).eq('id', coachingId).eq('client_id', clientId);
+  if (clearErr) console.error('clear checkin_requested_at:', clearErr);
 
   // Send note to "Weekly Check-in" thread
   try {
@@ -5338,7 +5405,7 @@ function recentCardioTypes(cardioLogs, limit = 6) {
 function cardioWeekPrefill(cardioLogs, weekStart) {
   if (!cardioLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
-  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return fmtISO(d); })();
   const logs = cardioLogs.filter(l => l.date >= ws && l.date < we);
   if (!logs.length) return null;
   const totalMin = logs.reduce((s, l) => s + (l.durationMinutes || 0), 0);
@@ -6036,7 +6103,7 @@ function mealOfChoiceNoteName(note) {
 function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   if (!dailyLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
-  const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+  const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return fmtISO(d); };
   const we = shift(ws, 7);
   const prevWs = shift(ws, -7);
   const inRange = (lo, hi) => dailyLogs.filter(l => l.date >= lo && l.date < hi);
@@ -6093,7 +6160,7 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
 function weekPerformanceSignal(state, weekStart) {
   if (!weekStart || !state?.sessions?.length) return null;
   const ws = weekStart.slice(0, 10);
-  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return fmtISO(d); })();
   const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
 
   const weekSessions = state.sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
@@ -7509,7 +7576,7 @@ function mesoPausedDays(statusPeriods, trainedDates, mesoStartISO, todayISO) {
   const trained = trainedDates || new Set();
   const periods = statusPeriods
     .filter(p => p && p.startedAt)
-    .map(p => ({ mode: p.mode, from: p.startedAt.slice(0, 10), to: p.endedAt ? p.endedAt.slice(0, 10) : todayISO.slice(0, 10) }));
+    .map(p => ({ mode: p.mode, from: fmtISO(new Date(p.startedAt)), to: p.endedAt ? fmtISO(new Date(p.endedAt)) : todayISO.slice(0, 10) }));
   let paused = 0;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const iso = fmtISO(d);
@@ -8673,7 +8740,7 @@ window.LB = {
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, MEAL_CATEGORY_DEFS, mealCategories,
   estimateAdaptiveTdee,
   refreshHealthLogs,
-  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,

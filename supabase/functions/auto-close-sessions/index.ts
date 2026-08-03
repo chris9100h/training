@@ -80,6 +80,14 @@ Deno.serve(async (req) => {
       const settRes = await dbFetch(
         `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id`
       );
+      // Same non-2xx-reply hazard as sessRes above (an error OBJECT, not the
+      // malformed-body fallback): left unchecked, `sett` silently resolves to
+      // undefined and every field it feeds (timeoutMin, isTracked below)
+      // falls back to a default instead of this session being safely skipped.
+      if (!settRes.ok) {
+        console.error(`[auto-close] settings query failed for user ${sess.user_id}: ${settRes.status} ${await settRes.text().catch(() => '')}`);
+        continue;
+      }
       const [sett] = await settRes.json().catch(() => [null]);
       const timeoutMin: number = sett?.session_timeout_minutes ?? 90;
 
@@ -87,6 +95,16 @@ Deno.serve(async (req) => {
       const setsRes = await dbFetch(
         `zane_sets?session_id=eq.${sess.id}&select=updated_at&order=updated_at.desc&limit=1`
       );
+      // Critical guard: on a non-2xx reply the `.catch(() => [])` fallback
+      // never fires (the body parses fine as an error OBJECT), so `sets`
+      // would silently resolve to that object, `sets.length` reads
+      // undefined, hasSets becomes false, and a LIVE tracked session with
+      // real sets gets routed into the "butt start, delete everything
+      // silently" branch below, hard-deleting a workout that's still running.
+      if (!setsRes.ok) {
+        console.error(`[auto-close] sets query failed for session ${sess.id}: ${setsRes.status} ${await setsRes.text().catch(() => '')}`);
+        continue;
+      }
       const sets: { updated_at: string }[] = await setsRes.json().catch(() => []);
       const hasSets = sets.length > 0;
       // started_at is legitimately NULL until the last warmup set completes
