@@ -3747,21 +3747,34 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* PR count, then volume delta vs previous same-day session. Shown
             together (each independently, either can be absent on its own) so
             a session that set new records but still landed below last
-            time's total volume doesn't read as purely a step backward. */}
-        {(prCount > 0 || (volDelta != null && !s.isDeload)) && (
-          <div style={{ textAlign: 'center', marginTop: -8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {prCount > 0 && (
-              <div className="micro" style={{ color: UI.gold }}>
-                <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
+            time's total volume doesn't read as purely a step backward. Side
+            by side when both exist, each centered in its own half, a lone
+            survivor still gets the full centered row instead of sitting
+            off-center in a half-empty grid. */}
+        {(() => {
+          const showVol = volDelta != null && !s.isDeload;
+          const prEl = (
+            <div className="micro" style={{ textAlign: 'center', color: UI.gold }}>
+              <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
+            </div>
+          );
+          const volEl = (
+            <div className="micro" style={{ textAlign: 'center', color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+              {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+            </div>
+          );
+          if (prCount > 0 && showVol) {
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', marginTop: -8 }}>
+                {prEl}
+                {volEl}
               </div>
-            )}
-            {volDelta != null && !s.isDeload && (
-              <div className="micro" style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-                {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
-              </div>
-            )}
-          </div>
-        )}
+            );
+          }
+          if (prCount > 0) return <div style={{ marginTop: -8 }}>{prEl}</div>;
+          if (showVol) return <div style={{ marginTop: -8 }}>{volEl}</div>;
+          return null;
+        })()}
 
         {/* Compare to another session of this same day */}
         {!capturing && compareCandidates.length > 0 && (
