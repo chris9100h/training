@@ -7469,6 +7469,17 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [noteText, setNoteText] = useStateFd('');
   // Snapshot of the draft as it was opened, to detect unsaved edits on close.
   const initialSnap = useRefFd(null);
+  const [capturing, setCapturing] = useStateFd(false);
+  const captureRef = useRefFd(null);
+  // Screenshot background: same treatment as SessionCompareScreen/HomeScreen,
+  // VIPs get their custom home-screen image, everyone else the faint
+  // centered ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
 
   useEffectFd(() => {
     if (!open) return;
@@ -7602,12 +7613,25 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   }
   const canSave = !!(name.trim() && items.length);
 
+  // Same html2canvas flow as SessionDetailScreen/SessionCompareScreen's own
+  // takeScreenshot. The watermark here is a full-page centered background
+  // (HomeScreen-style), no corner avatar to dodge.
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${(name.trim() || 'recipe').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'recipe'}.png`,
+    setCapturing,
+  });
+
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={recipe ? 'Edit recipe' : 'New recipe'} onBack={requestClose}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
+            {items.length > 0 && (
+              <button onClick={takeScreenshot} disabled={capturing} aria-label="Screenshot" style={fdTopAddBtn}>
+                {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+              </button>
+            )}
             {items.length > 0 && (
               <button onClick={() => setPickerOpen(true)} aria-label="Add ingredients" style={fdTopAddBtn}>
                 <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
@@ -7618,41 +7642,98 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             </button>
           </div>
         } />
-      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
+        display: 'flex', flexDirection: 'column', gap: 16, position: 'relative',
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
+      }}>
         {confirmEl}
-        <Field label="Name">
-          <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
-        </Field>
+
+        {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
+            for the export, same as SessionDetailScreen/SessionCompareScreen. */}
+        {capturing && _shotGridOn && <SvgGrid />}
+        {/* Screenshot background watermark, centered, faint, full document. */}
+        {capturing && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {capturing ? (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+            <div className="knurl" />
+          </div>
+        ) : (
+          <Field label="Name">
+            <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
+          </Field>
+        )}
 
         <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
-        <div>
-          <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
+        {capturing ? (
+          <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+        ) : (
+          <div>
+            <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Optional: unlocks logging this recipe by grams of the finished
             dish instead of only by portions, useful for batch cooking where
             weighing out a serving is more natural than a portion fraction
             (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
             Never auto-filled from the ingredient total below: cooking loses
-            or gains water weight, so the two numbers are rarely the same. */}
-        <Field label="Cooked weight (g), optional">
-          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
-            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
-          </div>
-        </Field>
+            or gains water weight, so the two numbers are rarely the same.
+            Editing chrome, not part of the shareable card: hidden in screenshot mode. */}
+        {!capturing && (
+          <Field label="Cooked weight (g), optional">
+            <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+              Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+            </div>
+          </Field>
+        )}
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
-            <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
-              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
-            </Btn>
+            !capturing && (
+              <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
+              </Btn>
+            )
+          ) : capturing ? (
+            // Plain read-only rows for the shareable card: no drag handle,
+            // no edit/note/delete affordances, nothing interactive to show.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((i, idx) => (
+                <div key={i.id} style={fdEntryRow}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <FdIngredientBadge n={idx + 1} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={fdEntryName}>{i.foodName}</div>
+                      <div style={fdEntryMeta}>
+                        {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                        <span style={fdMetaDivider} />
+                        <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             // Array order is the deliberate prep order (the order to add
             // ingredients while cooking, see Cooking Mode below), so this list
@@ -7684,6 +7765,8 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
               ))}
             </ReorderList>
           )}
+        </div>
+
         </div>
       </div>
 
