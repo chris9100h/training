@@ -5627,6 +5627,29 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     [store.foodTemplateSlots, viewedPlanId],
   );
 
+  // A plan's real daily numbers depend on which slots apply on a given day
+  // (fdSlotMatchesDate), not just the raw slot list: "daily" slots count
+  // toward every day, "train"/"rest" slots only toward their own day type.
+  // split is false when every slot is 'any', the common case, so the detail
+  // view isn't cluttered with two identical hero cards.
+  const dayTotals = useMemoFd(() => {
+    const sum = list => list.reduce((acc, s) => ({
+      calories: acc.calories + (s.calories || 0),
+      protein: acc.protein + (s.protein || 0),
+      carbs: acc.carbs + (s.carbs || 0),
+      fat: acc.fat + (s.fat || 0),
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    const dailySlots = slots.filter(s => s.dayType === 'any' || !s.dayType);
+    const trainingSlots = slots.filter(s => s.dayType === 'training');
+    const restSlots = slots.filter(s => s.dayType === 'rest');
+    return {
+      split: trainingSlots.length > 0 || restSlots.length > 0,
+      daily: sum(dailySlots),
+      training: sum([...dailySlots, ...trainingSlots]),
+      rest: sum([...dailySlots, ...restSlots]),
+    };
+  }, [slots]);
+
   function createPlan(name) {
     const id = LB.uid();
     // A plan created while in the coach's Client Templates bucket is a template
@@ -6161,6 +6184,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
               Recurring meals for this plan. The active plan auto-fills each day as planned entries, filtered by day type. Check them off as you eat.
             </div>
+
+            {slots.length > 0 && (
+              dayTotals.split ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <FdMacroHero label="Training day" calories={dayTotals.training.calories} protein={dayTotals.training.protein} carbs={dayTotals.training.carbs} fat={dayTotals.training.fat} />
+                  <FdMacroHero label="Rest day" calories={dayTotals.rest.calories} protein={dayTotals.rest.protein} carbs={dayTotals.rest.carbs} fat={dayTotals.rest.fat} />
+                </div>
+              ) : (
+                <FdMacroHero label="Daily total" calories={dayTotals.daily.calories} protein={dayTotals.daily.protein} carbs={dayTotals.daily.carbs} fat={dayTotals.daily.fat} />
+              )
+            )}
 
             {slots.length === 0 ? (
               <Btn onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} style={{ width: '100%' }}>
