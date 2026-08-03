@@ -364,6 +364,14 @@ const FD_SHOPPING_QTY_MAX_G = 100000;
 // chart target line reuse it rather than inventing a second definition of
 // "good" for the same metric.
 const FD_STATS_GOAL_ADHERENCE = 90;
+// How many days ahead (today included) Plan Mode auto-materializes the active
+// meal plan's matching slots into the log, so tomorrow's (and the rest of the
+// week's) planned entries are already there before the user ever navigates
+// to that date, not just today's. Same 7-day default as the shopping list's
+// own lookahead (FD_SHOPPING_DAYS_DEFAULT), not user-configurable (yet):
+// no existing setting to hang it off, and 7 matches how far the day-type
+// projection (isTrainingDayForDate) is meant to be trusted anyway.
+const FD_PLAN_LOOKAHEAD_DAYS = 7;
 function fdClampQtyG(n) {
   return n == null ? null : Math.min(FD_SHOPPING_QTY_MAX_G, n);
 }
@@ -1058,38 +1066,61 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
   }, []);
 
-  // Plan Mode meal templates: on opening today, auto-materialize each matching
-  // template slot (by day-type: any / training / rest) as a planned entry at
-  // its fixed hour, unless the day already has one from that slot. Runs once
-  // per day, tracked CROSS-DEVICE by a synced marker row (store.foodTemplateDays,
-  // id `<userId>_<date>`), so deleting an auto-planned entry never makes it
-  // reappear on reopen, on any device. Only for TODAY: a backdated day is never
-  // auto-filled. The manual "Apply to today" button (FoodTemplateScreen) is the
-  // escape hatch to pull the fixums back after clearing the day on purpose.
+  // Plan Mode meal templates: auto-materialize each matching template slot
+  // (by day-type: any / training / rest) as a planned entry at its fixed
+  // hour, for today AND the next FD_PLAN_LOOKAHEAD_DAYS - 1 days, unless a
+  // given day already has one from that slot. Runs once per day, tracked
+  // CROSS-DEVICE by a synced marker row per date (store.foodTemplateDays, id
+  // `<userId>_<date>`), so deleting an auto-planned entry never makes it
+  // reappear on reopen, on any device, and a day already filled elsewhere
+  // isn't redone here. Independent of curDate (which date is currently being
+  // viewed): the whole point is that tomorrow's plan is already sitting in
+  // the log before the user ever navigates to it, not materialized on
+  // arrival. Backdated (past) days are never auto-filled. The manual "Apply
+  // to today" button (FoodTemplateScreen) is the escape hatch to pull the
+  // fixums back after clearing today's plan on purpose.
   useEffectFd(() => {
-    if (!planMode || curDate !== today) return;
-    // Only the ACTIVE meal plan's slots auto-fill the day.
+    if (!planMode) return;
+    // Only the ACTIVE meal plan's slots auto-fill days.
     const activePlanId = store.activeMealTemplateId;
     const slots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId);
     if (!activePlanId || !slots.length) return;
-    const markerId = `${userId}_${today}`;
-    if ((store.foodTemplateDays || []).some(d => d.id === markerId)) return;
-    const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
-    const toAdd = slots
-      .filter(s => fdSlotMatchesDate(s, store, today) && !existingSlotIds.has(s.id))
-      .map(s => fdMaterializeSlotEntry(s, today));
+    const markedDates = new Set((store.foodTemplateDays || []).map(d => d.id));
+    const existingByDate = new Map();
+    (store.foodLogs || []).forEach(l => {
+      if (!l.templateSlotId) return;
+      if (!existingByDate.has(l.date)) existingByDate.set(l.date, new Set());
+      existingByDate.get(l.date).add(l.templateSlotId);
+    });
+    // One entry per not-yet-marked date in the window, slots already resolved
+    // so the setStore updater below only has to re-check markers, not redo
+    // the filtering, on a double-run race.
+    const pending = [];
+    for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
+      const date = fdShiftDate(today, i);
+      const markerId = `${userId}_${date}`;
+      if (markedDates.has(markerId)) continue;
+      const existingSlotIds = existingByDate.get(date) || new Set();
+      const entries = slots
+        .filter(s => fdSlotMatchesDate(s, store, date) && !existingSlotIds.has(s.id))
+        .map(s => fdMaterializeSlotEntry(s, date));
+      pending.push({ markerId, date, entries });
+    }
+    if (!pending.length) return;
     setStore(s => {
-      // Re-check inside the updater against a double-run race (marker may have
-      // landed between read and commit).
-      if ((s.foodTemplateDays || []).some(d => d.id === markerId)) return s;
+      const already = new Set((s.foodTemplateDays || []).map(d => d.id));
+      const stillPending = pending.filter(p => !already.has(p.markerId));
+      if (!stillPending.length) return s;
+      const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
+      const newEntries = stillPending.flatMap(p => p.entries);
       return {
         ...s,
-        foodTemplateDays: [...(s.foodTemplateDays || []), { id: markerId, date: today }],
+        foodTemplateDays: [...(s.foodTemplateDays || []), ...newMarkers],
         // Planned entries never touch the daily log, so no patchDaily here.
-        foodLogs: toAdd.length ? [...toAdd, ...(s.foodLogs || [])] : (s.foodLogs || []),
+        foodLogs: newEntries.length ? [...newEntries, ...(s.foodLogs || [])] : (s.foodLogs || []),
       };
     });
-  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
+  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.

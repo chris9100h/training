@@ -352,7 +352,7 @@ Plan-Mode-Meal-Plans (Migration 0199): benannte Container (Cut/Bulk), spiegelt `
 
 ### `zane_food_template_days`
 
-Plan-Mode-Auto-Fill-Marker (Migration 0198): eine Zeile je (User, Tag), für den das Meal-Template bereits automatisch materialisiert wurde, **geräteübergreifend** (ersetzt einen früheren Per-Gerät-localStorage-Flag). Verhindert, dass ein gelöschter geplanter Eintrag beim erneuten Öffnen auf irgendeinem Gerät wieder auftaucht. Der „Apply to today"-Button (`FoodTemplateScreen`) ist die manuelle Escape-Hatch, um die Fixums nach bewusstem Leeren zurückzuholen.
+Plan-Mode-Auto-Fill-Marker (Migration 0198): eine Zeile je (User, Tag), für den das Meal-Template bereits automatisch materialisiert wurde, **geräteübergreifend** (ersetzt einen früheren Per-Gerät-localStorage-Flag). Verhindert, dass ein gelöschter geplanter Eintrag beim erneuten Öffnen auf irgendeinem Gerät wieder auftaucht. Läuft nicht nur für heute, sondern für ein rollierendes Fenster von `FD_PLAN_LOOKAHEAD_DAYS` (7) Tagen ab heute (`FoodScreen`, `screens-food.jsx`), damit z.B. morgen schon geplante Einträge zeigt, ohne dass der Tag erst geöffnet werden muss. Der „Apply to today"-Button (`FoodTemplateScreen`) bleibt auf heute beschränkt und ist die manuelle Escape-Hatch, um die Fixums nach bewusstem Leeren zurückzuholen.
 
 - `id` (text, PK, deterministisch `<user_id>_<date>`, damit zwei Geräte denselben Tag idempotent upserten), `user_id` (uuid), `date` (text, YYYY-MM-DD), `created_at` (timestamptz)
 - Store field: `store.foodTemplateDays`. Synchronisiert (Boot-Load auf jüngere Tage gefenstert, syncStore-Diff, Boot-Merge), aber **nicht im Backup** (abgeleiteter Geräte-/Sync-Status, EXCLUDED in `tools/check-backup-coverage.cjs`).
