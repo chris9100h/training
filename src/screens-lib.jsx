@@ -3745,22 +3745,33 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* PR count as a compact pill (same gold-tag look as the per-set PR
-            badges elsewhere in this file), next to the volume delta as plain
-            text, so a session that set new records but still landed below
-            last time's total volume doesn't read as purely a step backward.
-            A pill reads as its own thing at a glance; chaining a third "·"
-            clause onto the volume line just produced a wall of micro text. */}
+        {/* PR count and volume delta, each its own pill, dumbbell/arrow on
+            both sides mirrored. Stacked (not side by side): the volume pill's
+            text is long enough that two pills side by side risked cramping
+            or wrapping on a narrow phone. Volume pill only lights up gold
+            when the delta is actually an improvement, same as the plain-text
+            version before it, a lower-volume session doesn't get a falsely
+            celebratory look. */}
         {(prCount > 0 || showVol) && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: -8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginTop: -8 }}>
             {prCount > 0 && (
-              <span style={{ flexShrink: 0, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 7px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '3px 9px' }}>
+                <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
                 {prCount} PR{prCount > 1 ? 'S' : ''}
+                <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
               </span>
             )}
             {showVol && (
-              <span className="micro" style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-                {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+              <span className="num" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+                color: volDelta >= 0 ? UI.gold : UI.inkFaint,
+                background: volDelta >= 0 ? UI.goldFaint : UI.bgInset,
+                border: `var(--hair-width) solid ${volDelta >= 0 ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '3px 9px',
+              }}>
+                <span>{volDelta >= 0 ? '↑' : '↓'}</span>
+                {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} vs last {s.dayName}
+                <span>{volDelta >= 0 ? '↑' : '↓'}</span>
               </span>
             )}
           </div>
