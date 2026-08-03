@@ -6187,9 +6187,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 
             {slots.length > 0 && (
               dayTotals.split ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <FdMacroHero label="Training day" calories={dayTotals.training.calories} protein={dayTotals.training.protein} carbs={dayTotals.training.carbs} fat={dayTotals.training.fat} />
-                  <FdMacroHero label="Rest day" calories={dayTotals.rest.calories} protein={dayTotals.rest.protein} carbs={dayTotals.rest.carbs} fat={dayTotals.rest.fat} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <FdMacroHero compact label="Training day" calories={dayTotals.training.calories} protein={dayTotals.training.protein} carbs={dayTotals.training.carbs} fat={dayTotals.training.fat} />
+                  <FdMacroHero compact label="Rest day" calories={dayTotals.rest.calories} protein={dayTotals.rest.protein} carbs={dayTotals.rest.carbs} fat={dayTotals.rest.fat} />
                 </div>
               ) : (
                 <FdMacroHero label="Daily total" calories={dayTotals.daily.calories} protein={dayTotals.daily.protein} carbs={dayTotals.daily.carbs} fat={dayTotals.daily.fat} />
@@ -9690,18 +9690,18 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
 // dedicated component rather than reusing FdMacroGhosts here: that one is
 // also RecipeEditorScreen's own "Whole batch" card, and giving IT these
 // colors too was not asked for, out of scope.
-function FdMacroHero({ label, calories, protein, carbs, fat }) {
+function FdMacroHero({ label, calories, protein, carbs, fat, compact = false }) {
   return (
-    <BracketFrame gold style={{ padding: 22, textAlign: 'center' }}>
-      <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
-        <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
-        <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+    <BracketFrame gold style={{ padding: compact ? 14 : 22, textAlign: 'center' }}>
+      <div style={{ fontSize: compact ? 11 : 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: compact ? 4 : 6 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: compact ? 4 : 6 }}>
+        <span className="num" style={{ fontSize: compact ? 26 : 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+        <span style={{ fontSize: compact ? 11 : 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
       </div>
-      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 12 }}>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
+      <div style={{ display: 'flex', gap: compact ? 8 : 14, justifyContent: 'center', marginTop: compact ? 8 : 12, flexWrap: compact ? 'wrap' : 'nowrap' }}>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
       </div>
     </BracketFrame>
   );
