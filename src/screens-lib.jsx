@@ -797,6 +797,17 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   scrollParent.style.height = 'auto';
   scrollParent.style.minHeight = 'auto';
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // Custom webfonts (JetBrains Mono for .num, Big Shoulders Display for
+  // .display) can still be mid-swap the first time capturing mode mounts a
+  // batch of brand new text nodes (e.g. a recipe's whole ingredient list only
+  // exists once screenshot mode turns on): html2canvas paints whatever's on
+  // screen at call time, so any element caught before its font finished
+  // loading renders in fallback metrics, the exact same value sitting right
+  // next to another element in the correct font, at a different size/baseline.
+  // document.fonts.ready blocks until every font already requested by the
+  // page (including whatever the capturing re-render above just triggered)
+  // has finished loading.
+  if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
