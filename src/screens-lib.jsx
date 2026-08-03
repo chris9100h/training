@@ -1467,7 +1467,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const valForSet = (s) => {
     if (isTimeEx) return (!s.warmup && s.timeSec != null ? s.timeSec : 0);
     if (isAssistedEx) return (!s.warmup && s.kg != null ? s.kg : null);
-    return e1rmForSet(s);
+    return s.warmup ? 0 : e1rmForSet(s);
   };
 
   const points = history.map(h => {
@@ -3404,7 +3404,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // time → seconds. The maps are keyed by exId, so every value for one exId
     // shares a scale and comparisons stay valid.
     const prValueOf = (st, exId) => {
-      if (!st.done) return null;
+      if (!st.done || st.warmup) return null;
       const exObj = store.exercises.find(x => x.id === exId);
       if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
       if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
