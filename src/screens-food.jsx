@@ -7481,7 +7481,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
-  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.24 : 0.12, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.24 : 0.16, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.28, objectFit: 'contain' };
   const _shotGridOn = !!window.__gridEnabled;
 
@@ -7727,7 +7727,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             // through the cards instead of sitting hidden behind them.
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {items.map((i, idx) => (
-                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)' }}>
+                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <FdIngredientBadge n={idx + 1} />
                     <div style={{ minWidth: 0 }}>
@@ -7739,6 +7739,17 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                       </div>
                     </div>
                   </div>
+                  {/* Prep note, same inline style as RecipeShareSheet's own
+                      preview: a shared card is exactly the "someone else is
+                      cooking this" case that note exists for, whoever it's
+                      shared with gets the same prep guidance, not just a
+                      bare ingredient list. */}
+                  {i.note && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                      <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
