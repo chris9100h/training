@@ -3523,6 +3523,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
   }, [store.sessions, store.exercises, s]);
 
+  // How many exercises this session actually set a PR on, a counterpoint to
+  // volDelta below: total volume can land lower than last time even on a
+  // session that set new records (fewer sets, a lighter secondary exercise,
+  // ...), so leading with the count keeps that from reading as a step back.
+  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
+
   const muscleGroups = [...new Set(
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
   )];
@@ -3738,10 +3744,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* Volume delta vs previous same-day session */}
-        {volDelta != null && !s.isDeload && (
-          <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+        {/* PR count, then volume delta vs previous same-day session. Shown
+            together (each independently, either can be absent on its own) so
+            a session that set new records but still landed below last
+            time's total volume doesn't read as purely a step backward. */}
+        {(prCount > 0 || (volDelta != null && !s.isDeload)) && (
+          <div style={{ textAlign: 'center', marginTop: -8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {prCount > 0 && (
+              <div className="micro" style={{ color: UI.gold }}>
+                <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
+              </div>
+            )}
+            {volDelta != null && !s.isDeload && (
+              <div className="micro" style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+                {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+              </div>
+            )}
           </div>
         )}
 
