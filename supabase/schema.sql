@@ -1459,6 +1459,12 @@ $function$;
 
 -- ── Server-side history aggregation RPCs (migration 0059) ───────────────
 
+-- Excludes deload sessions from the MAX (migration 0239): every client-side
+-- "is this a PR" check (screens-lib.jsx isPR) deliberately excludes deload
+-- sessions from counting as a PR baseline, and store.exerciseBests (fed by
+-- this RPC) is used as a hard floor by SessionDetailScreen's isPR, so an
+-- inflated deload-session e1RM here could permanently block a genuine new
+-- all-time best from ever badging.
 CREATE OR REPLACE FUNCTION public.get_exercise_best_e1rm(p_user_id uuid DEFAULT NULL)
  RETURNS TABLE(ex_id text, best_e1rm double precision)
  LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
@@ -1477,6 +1483,7 @@ AS $function$
   WHERE e.user_id = (SELECT id FROM uid)
     AND e.ex_id IS NOT NULL
     AND s.ended IS NOT NULL
+    AND NOT s.is_deload
     AND ex.movement_type IS DISTINCT FROM 'assisted'
     AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
     AND COALESCE(
