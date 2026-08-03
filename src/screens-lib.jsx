@@ -3528,6 +3528,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // session that set new records (fewer sets, a lighter secondary exercise,
   // ...), so leading with the count keeps that from reading as a step back.
   const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
+  const showVol = volDelta != null && !s.isDeload;
 
   const muscleGroups = [...new Set(
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
@@ -3744,37 +3745,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* PR count, then volume delta vs previous same-day session. Shown
-            together (each independently, either can be absent on its own) so
-            a session that set new records but still landed below last
-            time's total volume doesn't read as purely a step backward. Side
-            by side when both exist, each centered in its own half, a lone
-            survivor still gets the full centered row instead of sitting
-            off-center in a half-empty grid. */}
-        {(() => {
-          const showVol = volDelta != null && !s.isDeload;
-          const prEl = (
-            <div className="micro" style={{ textAlign: 'center', color: UI.gold }}>
-              <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
-            </div>
-          );
-          const volEl = (
-            <div className="micro" style={{ textAlign: 'center', color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-              {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
-            </div>
-          );
-          if (prCount > 0 && showVol) {
-            return (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', marginTop: -8 }}>
-                {prEl}
-                {volEl}
-              </div>
-            );
-          }
-          if (prCount > 0) return <div style={{ marginTop: -8 }}>{prEl}</div>;
-          if (showVol) return <div style={{ marginTop: -8 }}>{volEl}</div>;
-          return null;
-        })()}
+        {/* PR count, then volume delta vs previous same-day session, one
+            line joined by the same "·" separator used all over the app,
+            so a session that set new records but still landed below last
+            time's total volume doesn't read as purely a step backward. */}
+        {(prCount > 0 || showVol) && (
+          <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
+            {prCount > 0 && (
+              <span style={{ color: UI.gold }}>
+                <i className="fa-solid fa-dumbbell" style={{ marginRight: 5, fontSize: 9 }} /> {prCount} PR{prCount > 1 ? 's' : ''}
+              </span>
+            )}
+            {prCount > 0 && showVol && <span style={{ color: UI.inkFaint }}> · </span>}
+            {showVol && (
+              <span style={{ color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+                {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Compare to another session of this same day */}
         {!capturing && compareCandidates.length > 0 && (
