@@ -3489,7 +3489,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // as an upper bound). Without this, any exercise with even one
         // in-window session, however far below the real all-time best, lost
         // the server floor entirely.
-        if (isLatestSession && serverBest != null && val < serverBest) return false;
+        // 0.01 tolerance: serverBest is computed by Postgres (numeric, cast to
+        // float) and val by JS (chained double ops), confirmed live to
+        // sometimes land one ULP apart for the exact same real-world kg/reps
+        // (e.g. 40kg x 11 nets 54.666666666666664 vs 54.66666666666667), a
+        // strict < falsely treated that as "a higher real best exists" and
+        // blocked a genuine, badge-worthy set.
+        if (isLatestSession && serverBest != null && val < serverBest - 0.01) return false;
         return true;
       }
       // No usable local history: either genuinely the first time this exercise
@@ -3509,7 +3515,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // coincidental tie with old history", but the former is far more likely,
       // and this app would rather badge that ambiguity than silently drop a
       // real PR the moment the app gets killed and reopened.
-      return val >= serverBest;
+      // Same 0.01 tolerance as above: val and serverBest come from two
+      // different arithmetic engines and can be a ULP apart for an intended
+      // exact tie.
+      return val >= serverBest - 0.01;
     };
     return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
   }, [store.sessions, store.exercises, s]);
