@@ -6,12 +6,17 @@
 // USDA / zane_foods entry for someone's own breakfast, so this never touches
 // that pipeline, it estimates directly.
 //
-// THREE BACKENDS, ONE FUNCTION. Claude (the default), Grok and Qwen all run
-// through this endpoint; the caller names one in `provider` and gets an
-// identically-shaped response whichever it picks. They used to be three
-// separate functions kept in step by a rule in CLAUDE.md, which drifted, see
-// the note at the top of _shared/ai.ts. The prompt, the validation and the
-// response shape now exist once, so they cannot disagree.
+// THREE BACKENDS, ONE FUNCTION. Claude, Grok and Qwen all run through this
+// endpoint behind one identical contract; Qwen is the one actually called,
+// for the cost, with Claude as the automatic fallback if Qwen itself is
+// unreachable, see PRIMARY_PROVIDER/FALLBACK_PROVIDER below and
+// callModelWithFallback in _shared/ai.ts. `provider` in the request body
+// still forces one exact backend with no fallback, but nothing in the app
+// sends it any more; it is a manual-testing hook, not a user-facing toggle.
+// The three used to be separate functions kept in step by a rule in
+// CLAUDE.md, which drifted, see the note at the top of _shared/ai.ts. The
+// prompt, the validation and the response shape now exist once, so they
+// cannot disagree.
 //
 // The photo, when given, uses the same base64 contract as scan-label
 // (client-side downscaled first). description and image are both optional,
@@ -51,9 +56,10 @@
 import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
 import {
   callModel,
+  callModelWithFallback,
   extractJson,
+  isProviderId,
   num,
-  resolveProvider,
   str,
   stripEmDash,
   type ModelImage,
@@ -98,9 +104,11 @@ const MAX_TOKENS = 8000;
 // the JSON object.
 const REASONING_BUDGET = 1200;
 
-// Claude has been the default since this feature shipped; an unrecognised
-// provider falls back to it.
-const DEFAULT_PROVIDER = 'claude';
+// Qwen runs first for the cost; Claude was the long-standing default before
+// Qwen existed and is what a Qwen failure falls back to, see
+// callModelWithFallback in _shared/ai.ts.
+const PRIMARY_PROVIDER = 'qwen';
+const FALLBACK_PROVIDER = 'claude';
 
 const LABELS = { tag: 'parse-meal', feature: 'Meal parsing', subject: 'meal estimator' };
 
@@ -162,7 +170,8 @@ Deno.serve(async (req) => {
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
   const rawImage = typeof body?.image === 'string' ? body.image.trim() : '';
   const mimeType = ALLOWED_MIME.has(body?.mimeType) ? body.mimeType : 'image/jpeg';
-  const provider = resolveProvider(body?.provider, DEFAULT_PROVIDER);
+  // Manual-testing override only, see the file header; the app never sends this.
+  const explicitProvider = isProviderId(body?.provider) ? body.provider : null;
   // Refine mode: the caller's own prior estimate from an earlier call to
   // this endpoint, sanitized the same defensive way as every other
   // numeric/string field in this file. Optional, never relaxes the
@@ -195,13 +204,16 @@ Deno.serve(async (req) => {
   }
 
   const image: ModelImage | null = rawImage ? { base64: rawImage, mimeType } : null;
-  const result = await callModel(provider, {
+  const modelCall = {
     system: SYSTEM_PROMPT,
     userText: buildUserText(description, !!rawImage, previousItems),
     image,
     maxTokens: MAX_TOKENS,
     reasoningBudget: REASONING_BUDGET,
-  }, LABELS);
+  };
+  const result = explicitProvider
+    ? await callModel(explicitProvider, modelCall, LABELS)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
   if (!result.ok) return jsonResponse({ error: result.error }, result.status);
 
   // The prompt's visible self-check arithmetic is deliberately brace-free, so

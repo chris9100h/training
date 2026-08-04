@@ -230,13 +230,13 @@ const PROVIDERS: Record<ProviderId, Provider> = {
 // check and then blow up on an undefined entry.
 const PROVIDER_IDS: string[] = ['claude', 'grok', 'qwen'];
 
-// The provider is client input, a per-device debug toggle (see
-// logbook-label-scanner-provider / logbook-meal-parser-provider in CLAUDE.md).
-// It may only select a key in the fixed table above, never carry a URL or a
-// secret name of its own. Anything unrecognised falls back to the feature's
-// default, which is also what store.js does on its side.
-export function resolveProvider(raw: unknown, fallback: ProviderId): ProviderId {
-  return typeof raw === 'string' && PROVIDER_IDS.includes(raw) ? raw as ProviderId : fallback;
+// There is no client-facing provider picker any more (see callModelWithFallback
+// below for why claude/grok still sit in the table). This only exists so a
+// manual curl can still force one exact provider for debugging. It may only
+// select a key in the fixed table above, never carry a URL or a secret name
+// of its own.
+export function isProviderId(raw: unknown): raw is ProviderId {
+  return typeof raw === 'string' && PROVIDER_IDS.includes(raw);
 }
 
 // One request to one provider. Never throws: every failure comes back as
@@ -272,6 +272,27 @@ export async function callModel(id: ProviderId, call: ModelCall, labels: CallLab
 
   const data = await resp.json().catch(() => null);
   return { ok: true, text: provider.text((data ?? {}) as Json) };
+}
+
+// Tries `primary`; only a transport/HTTP-level failure (network error, non-2xx,
+// missing API key) triggers a retry against `fallback`. A successful response
+// that happens to be empty or unparseable ("not a nutrition label", "no food
+// found") is a valid answer, not a failure, and is returned as-is rather than
+// silently redone on another model at the caller's expense.
+//
+// This is the whole reason claude and grok stay in the provider table even
+// though nothing points a user at them any more: Qwen runs by default for the
+// cost, and the other one is the safety net for when Qwen itself is down.
+export async function callModelWithFallback(
+  primary: ProviderId,
+  fallback: ProviderId,
+  call: ModelCall,
+  labels: CallLabels,
+): Promise<ModelResult> {
+  const result = await callModel(primary, call, labels);
+  if (result.ok) return result;
+  console.error(`[${labels.tag}] ${primary} failed (${result.status}): ${result.error}. Falling back to ${fallback}.`);
+  return callModel(fallback, call, labels);
 }
 
 // Pull the first balanced JSON object out of the model's text, tolerant of an

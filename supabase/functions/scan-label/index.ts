@@ -5,16 +5,16 @@
 // label a single user photographed is per-user data (zane_food_logs), never a
 // vetted, shared reference the way an Open Food Facts / USDA hit is.
 //
-// THREE BACKENDS, ONE FUNCTION. Grok (the default), Claude and Qwen all run
-// through this endpoint; the caller names one in `provider` and gets an
-// identically-shaped response whichever it picks. They used to be three
-// separate functions kept in step by a rule in CLAUDE.md, which drifted, see
-// the note at the top of _shared/ai.ts. The prompt and the response shape now
-// exist once, so they cannot disagree.
-//
-// Whether one model actually READS labels better than another is the open
-// question the toggle exists to answer, which only works if everything except
-// the model is held identical. Cost was never the bottleneck at our volume.
+// THREE BACKENDS, ONE FUNCTION. Grok, Claude and Qwen all run through this
+// endpoint behind one identical contract; Qwen is the one actually called,
+// for the cost, with Grok as the automatic fallback if Qwen itself is
+// unreachable, see PRIMARY_PROVIDER/FALLBACK_PROVIDER below and
+// callModelWithFallback in _shared/ai.ts. `provider` in the request body
+// still forces one exact backend with no fallback, but nothing in the app
+// sends it any more; it is a manual-testing hook, not a user-facing toggle.
+// The three used to be separate functions kept in step by a rule in
+// CLAUDE.md, which drifted, see the note at the top of _shared/ai.ts. The
+// prompt and the response shape now exist once, so they cannot disagree.
 //
 // Needs whichever secret the chosen provider uses (XAI_API_KEY,
 // ANTHROPIC_API_KEY, QWEN_API_KEY); the model ids and endpoints are
@@ -30,16 +30,18 @@
 //      returned in MILLIGRAMS whatever unit the label printed.
 
 import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
-import { callModel, extractJson, num, resolveProvider, str } from '../_shared/ai.ts';
+import { callModel, callModelWithFallback, extractJson, isProviderId, num, str } from '../_shared/ai.ts';
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
 const DAILY_SCAN_LIMIT = 60;
 const MAX_TOKENS = 1500;
 
-// Grok has been the default since this feature shipped; an unrecognised
-// provider falls back to it.
-const DEFAULT_PROVIDER = 'grok';
+// Qwen runs first for the cost; Grok was the long-standing default before
+// Qwen existed and is what a Qwen failure falls back to, see
+// callModelWithFallback in _shared/ai.ts.
+const PRIMARY_PROVIDER = 'qwen';
+const FALLBACK_PROVIDER = 'grok';
 
 // No reasoning in any label scanner. Reading numbers off a printed table needs
 // no deliberation, and the reasoning is billed as output tokens while somebody
@@ -96,17 +98,21 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const image = typeof body?.image === 'string' ? body.image.trim() : '';
   const mimeType = ALLOWED_MIME.has(body?.mimeType) ? body.mimeType : 'image/jpeg';
-  const provider = resolveProvider(body?.provider, DEFAULT_PROVIDER);
+  // Manual-testing override only, see the file header; the app never sends this.
+  const explicitProvider = isProviderId(body?.provider) ? body.provider : null;
   if (!image) return jsonResponse({ error: 'missing image' }, 400);
   if (image.length > MAX_IMAGE_CHARS) return jsonResponse({ error: 'Image too large. Try again.' }, 413);
 
-  const result = await callModel(provider, {
+  const modelCall = {
     system: SYSTEM_PROMPT,
     userText: USER_PROMPT,
     image: { base64: image, mimeType },
     maxTokens: MAX_TOKENS,
     reasoningBudget: REASONING_BUDGET,
-  }, LABELS);
+  };
+  const result = explicitProvider
+    ? await callModel(explicitProvider, modelCall, LABELS)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
   if (!result.ok) return jsonResponse({ error: result.error }, result.status);
 
   const parsed = extractJson(result.text);

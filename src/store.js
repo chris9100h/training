@@ -2697,16 +2697,15 @@ function cacheFood(source, sourceId) {
 }
 
 // Reads a nutrition label from a photo (base64, no data: prefix) via the
-// scan-label edge function. `provider` is the per-device pick between three
-// interchangeable AI backends, 'grok' (the long-standing default), 'claude'
-// or 'qwen', see logbook-label-scanner-provider in CLAUDE.md's
-// localStorage-keys list; it is passed straight through and the edge function
-// falls back to Grok for anything it does not recognise, so an unset or stale
-// value is always safe. Returns the extracted macros so the client can
-// prefill the Custom Item form. Scanned labels are logged as per-user custom
-// items, never written to the shared zane_foods cache.
-async function scanLabel(imageBase64, mimeType, provider) {
-  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType, provider });
+// scan-label edge function. Qwen runs the scan; the function falls back to
+// Grok server-side if Qwen itself is unreachable, see PRIMARY_PROVIDER /
+// FALLBACK_PROVIDER and callModelWithFallback in
+// supabase/functions/_shared/ai.ts. No provider choice travels from the
+// client any more, there is nothing to pick. Returns the extracted macros so
+// the client can prefill the Custom Item form. Scanned labels are logged as
+// per-user custom items, never written to the shared zane_foods cache.
+async function scanLabel(imageBase64, mimeType) {
+  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
@@ -2723,18 +2722,17 @@ async function scanLabel(imageBase64, mimeType, provider) {
 // fiber, sugar, satFat, sodiumMg }[]` (no calories, those are always
 // derived) describing a prior estimate; the edge function then revises that
 // estimate using the new description as the correction instead of guessing
-// from scratch, optional, may be null/undefined for a fresh estimate.
-// `provider` is the per-device pick between three interchangeable AI
-// backends, 'claude' (the long-standing default), 'grok' or 'qwen', see
-// logbook-meal-parser-provider in CLAUDE.md's localStorage-keys list; it is
-// passed straight through and the edge function falls back to Claude for
-// anything it does not recognise, so an unset or stale value is always safe.
+// from scratch, optional, may be null/undefined for a fresh estimate. Qwen
+// parses the description; the function falls back to Claude server-side if
+// Qwen itself is unreachable, see PRIMARY_PROVIDER / FALLBACK_PROVIDER and
+// callModelWithFallback in supabase/functions/_shared/ai.ts. No provider
+// choice travels from the client any more, there is nothing to pick.
 // Same contract shape as scanLabel/searchFoods: never throws, { ok: false,
 // error } on any failure. Items are handed back plain (name/quantityG/
 // calories/protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages
 // them exactly like a manually-typed Custom Item, nothing is written here.
-async function parseMealText(description, provider, photo, previousItems) {
-  const body = { description, provider };
+async function parseMealText(description, photo, previousItems) {
+  const body = { description };
   if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
   if (Array.isArray(previousItems) && previousItems.length) { body.previousItems = previousItems; }
   const res = await fnFetch(PARSE_MEAL_URL, body);

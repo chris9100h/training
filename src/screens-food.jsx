@@ -167,37 +167,6 @@ async function ensureFoodCached(pendingFoodOrItem) {
   }
   return true;
 }
-// Label-scanner provider: one per-device setting (localStorage key
-// logbook-label-scanner-provider) read by TWO components that can be mounted
-// at the same time (FoodScreen and the ingredient picker's search tab). Each
-// held its own useState seeded once at mount, so toggling in one left the
-// other on the old provider for the rest of the session. Route every read and
-// write through here and broadcast the change.
-function fdReadScannerProvider() {
-  try { return localStorage.getItem('logbook-label-scanner-provider') || 'grok'; }
-  catch (_) { return 'grok'; }
-}
-function fdWriteScannerProvider(v) {
-  try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
-  try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
-}
-// Same idea as the label-scanner provider above, one per-device setting
-// (localStorage key logbook-meal-parser-provider) for "Describe a meal"'s own
-// two interchangeable backends. No broadcast needed here unlike the scanner:
-// this sheet only ever has the one mount point (FoodScreen), not a second one
-// like the ingredient picker's search tab, so a plain per-mount useState
-// seeded from this can't drift out of sync with itself.
-// Display names for the meal-parser providers, keyed by the same ids the
-// toggle writes. Lives next to the reader so a fourth backend is one entry
-// here plus one in the toggle row, not a ternary chain to re-derive.
-const FD_MEAL_PARSER_LABEL = { claude: 'Claude', grok: 'Grok', qwen: 'Qwen' };
-function fdReadMealParserProvider() {
-  try { return localStorage.getItem('logbook-meal-parser-provider') || 'claude'; }
-  catch (_) { return 'claude'; }
-}
-function fdWriteMealParserProvider(v) {
-  try { localStorage.setItem('logbook-meal-parser-provider', v); } catch (_) {}
-}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -860,9 +829,8 @@ function fdShoppingBuyQtyG(grams, packageSizeG) {
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
-// default on a fresh device. Unlike logbook-label-scanner-provider this has
-// exactly one simultaneous reader (ShoppingListScreen itself), so no
-// cross-component broadcast is needed.
+// default on a fresh device. Exactly one simultaneous reader
+// (ShoppingListScreen itself), so no cross-component broadcast is needed.
 function fdReadShoppingDays() {
   try { const v = parseInt(localStorage.getItem('logbook-shopping-list-days'), 10); return v > 0 ? v : FD_SHOPPING_DAYS_DEFAULT; }
   catch (_) { return FD_SHOPPING_DAYS_DEFAULT; }
@@ -1187,17 +1155,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // text search or did find something.
   const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
-  // Which AI reads the nutrition label photo: 'grok' (the long-standing
-  // default), 'claude' or 'qwen'. Travels to the scan-label edge function in
-  // the request body, which holds all three behind one identical contract.
-  // Per-device only, not a synced setting: this is a comparison toggle, not a
-  // user-facing preference.
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
 
   // "Describe a meal" sheet: free-text -> parse-meal edge function -> a
   // review list (mealItems) the user picks through before anything is
@@ -1208,12 +1165,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
-  // Which AI reads the free-text description: 'claude' (the long-standing
-  // default), 'grok' or 'qwen'. Travels to the parse-meal edge function in
-  // the request body, which holds all three behind one identical contract.
-  // Per-device only, not a synced setting: this is a comparison toggle, not a
-  // user-facing preference.
-  const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
   // Optional photo attached alongside (or instead of) mealDescription: { base64,
   // mimeType }, same shape fdDownscaleImage returns, or null when none is
@@ -2524,10 +2475,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Nutrition-label scan: the user photographs a Nährwerttabelle, we shrink it
-  // client-side and send it to the scan-label edge function (labelScannerProvider
-  // picks xAI Grok or Claude vision, see the Scan sheet's toggle below), then
-  // prefill the Custom Item form with what it read for the user to verify.
-  // A scanned label is a per-user custom item, never a shared zane_foods entry.
+  // client-side and send it to the scan-label edge function (Qwen vision,
+  // Grok as the server-side fallback), then prefill the Custom Item form with
+  // what it read for the user to verify. A scanned label is a per-user custom
+  // item, never a shared zane_foods entry.
   async function handleLabelFile(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = ''; // let the user re-pick the same photo after an error
@@ -2537,7 +2488,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -3111,7 +3062,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!text && !mealPhoto) return;
     setMealParsing(true);
     setMealParseError(null);
-    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto);
+    const res = await LB.parseMealText(text, mealPhoto);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
@@ -3148,7 +3099,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       name: i.foodName, quantityG: i.quantityG, protein: i.protein, carbs: i.carbs, fat: i.fat,
       fiber: i.fiber, sugar: i.sugar, satFat: i.satFat, sodiumMg: i.sodiumMg,
     }));
-    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto, previousItems);
+    const res = await LB.parseMealText(text, mealPhoto, previousItems);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
@@ -4734,7 +4685,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           mealItems, reviewed in the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, attach a photo, or both. {FD_MEAL_PARSER_LABEL[mealParserProvider] || FD_MEAL_PARSER_LABEL.claude} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, attach a photo, or both. We'll estimate each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
         {mealPhoto ? (
           <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
@@ -4759,14 +4710,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
-        <div style={{ marginBottom: 12 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Estimator</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['claude', 'Claude'], ['grok', 'Grok'], ['qwen', 'Qwen']].map(([id, label]) => (
-              <button key={id} onClick={() => { setMealParserProvider(id); fdWriteMealParserProvider(id); }} style={fdSegBtn(mealParserProvider === id)}>{label}</button>
-            ))}
-          </div>
-        </div>
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
@@ -5154,14 +5097,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
         </div>
       </Sheet>
 
@@ -5623,19 +5558,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   // and the filter has nothing to act on before there are results.
   const [pickerSource, setPickerSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
-  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
-  // quintet (same shared per-device localStorage key, see
-  // logbook-label-scanner-provider in CLAUDE.md).
+  // scanPickerOpen/scanOpen/labelScanning/labelError quartet.
   const [pickerScanPickerOpen, setPickerScanPickerOpen] = useStateFd(false);
   const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
-  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setPickerLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
   const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
@@ -5948,7 +5875,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setPickerLabelScanning(false); setPickerLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, pickerLabelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setPickerLabelScanning(false);
       if (!res.ok) { setPickerLabelError(res.error || 'Scan failed. Try again.'); return; }
       openAddFromLabel(res.label);
@@ -6407,14 +6334,6 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
-              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
         </div>
       </Sheet>
 
@@ -8718,19 +8637,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // search has run (see the template picker for the same reasoning).
   const [pickSource, setPickSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
-  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
-  // quintet (same shared per-device localStorage key, see
-  // logbook-label-scanner-provider in CLAUDE.md).
+  // scanPickerOpen/scanOpen/labelScanning/labelError quartet.
   const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
   const [scanOpen, setScanOpen] = useStateFd(false);
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
   const labelInputRef = useRefFd(null);
 
   useEffectFd(() => {
@@ -8776,7 +8687,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -9235,14 +9146,6 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
         </div>
       </Sheet>
 
