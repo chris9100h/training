@@ -132,6 +132,12 @@
   .foot{max-width:var(--maxw);margin:0 auto;padding:28px 24px 56px;display:flex;flex-wrap:wrap;gap:20px;justify-content:space-between;align-items:baseline;}
   .foot p{margin:0;color:var(--ink-faint);font-size:12.5px;max-width:60ch;line-height:1.6;}
   .foot .stamp{font-family:var(--f-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);}
+  /* Cross-links so a shared link to this page can reach the rest of the site. */
+  .foot .links{display:flex;flex-wrap:wrap;gap:16px;}
+  .foot .links a{color:var(--ink-soft);text-decoration:none;font-size:13px;}
+  .foot .links a:hover{color:var(--accent);}
+  a.homelink{text-decoration:none;color:inherit;display:inline-block;}
+  a.homelink:hover .k{color:var(--accent-light,var(--accent));}
   html{scroll-behavior:smooth;}
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}.card .chev,.card{transition:none;}}
 </style>
@@ -140,7 +146,7 @@
 <div class="hero knurl">
   <div class="hero-inner">
     <div class="eyebrow"><span class="dot"></span><span class="micro">Feature overview</span><span class="rule"></span><span class="micro" id="stampTop"></span></div>
-    <h1 class="wordmark">ZA<span class="k">N</span>E</h1>
+    <h1 class="wordmark"><a class="homelink" href="welcome.html" title="Back to the Zane home page">ZA<span class="k">N</span>E</a></h1>
     <p class="tagline">Everything you can <b>track, log, plan and coach</b> in one place. This is the full picture of what Zane does, on your side of the barbell and your coach's.</p>
     <div class="plate knurl" id="plate"></div>
   </div>
@@ -169,7 +175,12 @@
 <div class="empty" id="empty">No features match that search.</div>
 
 <footer><div class="foot">
-  <p>Zane is a strength-training logbook and coaching platform. This page lists what the app can do for lifters and coaches. Want it? Ask whoever shared this with you.</p>
+  <p>Zane is a strength-training logbook and coaching platform. This page lists what the app can do for lifters and coaches.</p>
+  <div class="links">
+    <a href="welcome.html">Home</a>
+    <a href="autoreg.html">Autoregulation guide</a>
+    <a href="index.html">Open the app</a>
+  </div>
   <div class="stamp" id="stampFoot"></div>
 </div></footer>
 
