@@ -1190,24 +1190,34 @@ function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart, busy
 // a database trigger once an account clears the founding-member bar, and a
 // client write to it is reverted, so this only ever reflects the real state.
 //
-// 'free' deliberately renders nothing. Almost every account is free, and a chip
-// on all of them is noise rather than information. Once paid plans exist, give
-// FREE an entry in the map below and it will start showing.
+// Free is deliberately neutral rather than gold. Gold is the reward colour used
+// for the founding-member seat, and spending it on the default state would make
+// the distinction meaningless. There is no 'premium' entry: paid accounts do not
+// exist yet, so a chip for them would be inventing a state the app cannot reach.
 const TIER_CHIPS = {
-  lifetime: { label: 'Lifetime Premium', title: 'Founding member. Every paid feature, permanently, at no cost.' },
-  premium:  { label: 'Premium',          title: 'Premium account.' },
+  lifetime: {
+    label: 'Lifetime Premium',
+    title: 'Founding member. Every paid feature, permanently, at no cost.',
+    color: UI.gold,
+    background: 'rgba(var(--accent-rgb),0.14)',
+  },
+  free: {
+    label: 'Free',
+    title: 'Free account. Everything in the app is currently free.',
+    color: UI.inkFaint,
+    background: 'rgba(var(--knurl-rgb),0.08)',
+  },
 };
 
 function TierChip({ tier }) {
-  const chip = TIER_CHIPS[tier];
-  if (!chip) return null;
+  const chip = TIER_CHIPS[tier] || TIER_CHIPS.free;
   return (
     <span
       className="micro"
       title={chip.title}
       style={{
-        color: UI.gold,
-        background: 'rgba(var(--accent-rgb),0.14)',
+        color: chip.color,
+        background: chip.background,
         borderRadius: 4,
         // No border and 1px of vertical padding: the chip costs 10px of height
         // instead of 17, which is what keeps the header at its original size.
