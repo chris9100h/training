@@ -1218,7 +1218,10 @@ function TierChip({ tier }) {
       style={{
         color: chip.color,
         background: chip.background,
-        borderRadius: 4,
+        // 2 rather than the usual chip 4: at 10px tall a 4px corner eats most of
+        // the edge and reads as a pill, which fights the squared-off look
+        // everything else has. 1 would be sub-pixel on a 2x screen and vanish.
+        borderRadius: 2,
         // No border and 1px of vertical padding: the chip costs 10px of height
         // instead of 17, which is what keeps the header at its original size.
         padding: '1px 6px',

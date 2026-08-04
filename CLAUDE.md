@@ -68,6 +68,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 - **Akzentfarbe** läuft über `--accent`, `--accent-light`, `--accent-deep`, `--accent-rgb`. Keine hardcodierten `rgba(r,g,b,x)`-Werte für die Akzentfarbe, immer `rgba(var(--accent-rgb), x)`.
 - Farb-Tokens im Code immer über `UI.xxx` referenzieren (z.B. `UI.gold`, `UI.ink`, `UI.hairStrong`).
 - **Border-Radius-Skala** (strikte Hierarchie, nie größere Werte verwenden):
+  - `2`: Micro-Badges unter ~12px Höhe (z.B. `TierChip`). Auf der Höhe frisst ein 4er-Radius die halbe Kante und wirkt wie eine Pille. Nur für diese Größenklasse, kein Ersatz für die 4er-Stufe.
   - `4`: Inputs, kleine Buttons, Tags, Chips
   - `6`: Buttons (`Btn`-Komponente), Container, Cards (Standard)
   - `8`: große Cards/Sections (Maximum für normale UI-Elemente)
