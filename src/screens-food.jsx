@@ -187,6 +187,10 @@ function fdWriteScannerProvider(v) {
 // this sheet only ever has the one mount point (FoodScreen), not a second one
 // like the ingredient picker's search tab, so a plain per-mount useState
 // seeded from this can't drift out of sync with itself.
+// Display names for the meal-parser providers, keyed by the same ids the
+// toggle writes. Lives next to the reader so a fourth backend is one entry
+// here plus one in the toggle row, not a ternary chain to re-derive.
+const FD_MEAL_PARSER_LABEL = { claude: 'Claude', grok: 'Grok', qwen: 'Qwen' };
 function fdReadMealParserProvider() {
   try { return localStorage.getItem('logbook-meal-parser-provider') || 'claude'; }
   catch (_) { return 'claude'; }
@@ -1205,9 +1209,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
   // Which AI reads the free-text description: 'claude' (parse-meal, the
-  // long-standing default) or 'grok' (parse-meal-grok), same request/
-  // response contract either way. Per-device only, not a synced setting:
-  // this is a comparison toggle, not a user-facing preference.
+  // long-standing default), 'grok' (parse-meal-grok) or 'qwen'
+  // (parse-meal-qwen), same request/response contract whichever is picked.
+  // Per-device only, not a synced setting: this is a comparison toggle, not a
+  // user-facing preference.
   const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
   // Optional photo attached alongside (or instead of) mealDescription: { base64,
@@ -4729,7 +4734,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           mealItems, reviewed in the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, attach a photo, or both. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, attach a photo, or both. {FD_MEAL_PARSER_LABEL[mealParserProvider] || FD_MEAL_PARSER_LABEL.claude} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
         {mealPhoto ? (
           <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
@@ -4757,7 +4762,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ marginBottom: 12 }}>
           <div className="micro" style={{ marginBottom: 6 }}>Estimator</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['claude', 'Claude'], ['grok', 'Grok']].map(([id, label]) => (
+            {[['claude', 'Claude'], ['grok', 'Grok'], ['qwen', 'Qwen']].map(([id, label]) => (
               <button key={id} onClick={() => { setMealParserProvider(id); fdWriteMealParserProvider(id); }} style={fdSegBtn(mealParserProvider === id)}>{label}</button>
             ))}
           </div>

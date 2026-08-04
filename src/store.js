@@ -15,6 +15,7 @@ const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
 const PARSE_MEAL_GROK_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-grok`;
+const PARSE_MEAL_QWEN_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-qwen`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -2737,7 +2738,13 @@ async function scanLabel(imageBase64, mimeType, provider) {
 // protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
 // exactly like a manually-typed Custom Item, nothing is written here.
 async function parseMealText(description, provider, photo, previousItems) {
-  const url = provider === 'grok' ? PARSE_MEAL_GROK_URL : PARSE_MEAL_URL;
+  // Three interchangeable backends, identical request/response contract; the
+  // per-device pick is logbook-meal-parser-provider (CLAUDE.md). Anything
+  // unrecognised falls through to Claude, which is the long-standing default
+  // and the one guaranteed to be deployed.
+  const url = provider === 'grok' ? PARSE_MEAL_GROK_URL
+    : provider === 'qwen' ? PARSE_MEAL_QWEN_URL
+    : PARSE_MEAL_URL;
   const body = { description };
   if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
   if (Array.isArray(previousItems) && previousItems.length) { body.previousItems = previousItems; }
