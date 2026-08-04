@@ -121,7 +121,7 @@
   .card .body{display:none;padding:0 16px 15px 18px;}
   .card.open .body{display:block;}
   .chip{display:inline-block;font-family:var(--f-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;padding:4px 7px;border-radius:4px;border:1px solid var(--role-color);color:var(--role-color);background:color-mix(in srgb,var(--role-color) 12%,transparent);}
-  .card p.sum{color:var(--ink-soft);font-size:13.5px;line-height:1.5;margin:10px 0 0;}
+  .card p.sum{color:var(--ink-soft);font-size:13.5px;line-height:1.5;margin:10px 0 0;white-space:pre-wrap;}
   .acts{list-style:none;margin:12px 0 0;padding:11px 0 0;border-top:1px dashed var(--hair);display:flex;flex-direction:column;gap:7px;}
   .acts li{position:relative;padding-left:18px;font-size:13px;color:var(--ink);line-height:1.4;}
   .acts li::before{content:"";position:absolute;left:2px;top:6px;width:6px;height:6px;border-right:1.5px solid var(--accent);border-bottom:1.5px solid var(--accent);transform:rotate(-45deg);}
@@ -309,12 +309,18 @@
         '<div class="cat-meta"><div class="c num">'+items.length+'</div><div class="l">features</div></div></div>'+
         '<div class="grid"></div>';
       var grid=sec.querySelector('.grid');
+      // A lone card in its category (currently just the TL;DR overview) would
+      // otherwise sit in the left cell of the 2-column grid below with an
+      // empty cell beside it, looking like a layout bug rather than a
+      // deliberate single big card.
+      if(items.length===1) grid.style.gridTemplateColumns='1fr';
       items.forEach(function(f){
         var r=ROLE[f.role]||ROLE.user;
-        var card=document.createElement('article'); card.className='card'; card.style.setProperty('--role-color',r.color);
+        var openByDefault=f.id==='overview.tldr';
+        var card=document.createElement('article'); card.className='card'+(openByDefault?' open':''); card.style.setProperty('--role-color',r.color);
         card.dataset.role=f.role; card.dataset.text=(f.name+' '+f.summary+' '+(f.actions||[]).join(' ')).toLowerCase();
         var acts=(f.actions||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('');
-        card.innerHTML='<button class="head" aria-expanded="false"><h3>'+esc(f.name)+'</h3>'+
+        card.innerHTML='<button class="head" aria-expanded="'+(openByDefault?'true':'false')+'"><h3>'+esc(f.name)+'</h3>'+
           '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>'+
           '<div class="body"><span class="chip">'+r.label+'</span><p class="sum">'+esc(f.summary)+'</p>'+(acts?'<ul class="acts">'+acts+'</ul>':'')+'</div>';
         var head=card.querySelector('.head');
