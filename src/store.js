@@ -3084,7 +3084,7 @@ function isAssisted(ex) {
 }
 
 // Should a set's weight be pre-filled from the user's logged bodyweight? Only for
-// bodyweight-equipment exercises that explicitly opted in (pull_bodyweight). The
+// bodyweight-equipment exercises whose mode is 'pull' (see bodyweightMode). The
 // caller still has to have a logged weight (latestBodyweight != null) for it to
 // actually fill anything.
 function shouldPullBodyweight(ex) {
@@ -3145,7 +3145,7 @@ function systemExerciseToRow(sysEx) {
   return {
     id: uid(), name: sysEx.name, tags: sysEx.tags ? [...sysEx.tags] : [], note: '',
     category: sysEx.category ?? null, unilateral: mv === 'unilateral', movement_type: mv,
-    log_mode: lm, no_weight_reps: lm !== 'weight', pull_bodyweight: false,
+    log_mode: lm, no_weight_reps: lm !== 'weight', pull_bodyweight: false, bodyweight_mode: null,
     equipment: sysEx.equipment ?? null, progression_reps: null, youtube_url: null,
   };
 }

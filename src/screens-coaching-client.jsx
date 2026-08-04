@@ -1192,7 +1192,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             idMap[ex.id] = newId;
             // Carry the behavior flags so imported time/cardio/bodyweight
             // exercises keep their logging mode (mirrors the own-side import).
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -1275,7 +1275,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         if (existing) { idMap[ex.id] = existing.id; return; }
         const newId = LB.uid();
         idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
       });
       copy.days = (copy.days || []).map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
       if (copy.program_data && typeof copy.program_data === 'object') {
