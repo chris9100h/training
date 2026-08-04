@@ -935,7 +935,7 @@ function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
-function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullBodyweight, onPullBodyweight, hasLoggedWeight }) {
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight }) {
   if (!loggingPickerVisible(equipment, movementType)) return null;
   const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
@@ -956,10 +956,12 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
           {hasLoggedWeight ? (
             <>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
-                <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
+                <Chip on={bwMode === 'pull'} onClick={() => onBwMode('pull')}>Use my bodyweight</Chip>
+                <Chip on={bwMode === 'plus_load'} onClick={() => onBwMode('plus_load')}>Bodyweight + load</Chip>
+                <Chip on={!bwMode} onClick={() => onBwMode(null)}>Enter manually</Chip>
               </div>
-              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab, tap Log there to record it.</div>}
+              {bwMode === 'pull' && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab, tap Log there to record it.</div>}
+              {bwMode === 'plus_load' && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>For weighted pull-ups, belted dips and the like: log just the load you add, and your bodyweight is added on top for volume and records.</div>}
             </>
           ) : (
             <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
@@ -1023,7 +1025,7 @@ const WIZARD_EQUIP_META = {
 function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
-  pullBodyweight, setPullBodyweight }) {
+  bwMode, setBwMode }) {
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -1116,8 +1118,10 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
           {hasLoggedWeight
-            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab, tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
-                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
+            ? [['pull', 'pull', 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab, tap Log there to record it'],
+               ['plus', 'plus_load', 'fa-plus', 'Bodyweight + load', 'Log just the load you add; your bodyweight is added on top'],
+               ['manual', null, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
+                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: bwMode === v, onClick: () => setBwMode(v) }))
             : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
         </div>
       )}
@@ -1185,7 +1189,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [category, setCategory] = useStateL(seed?.category ?? null);
   const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
   const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
-  const [pullBodyweight, setPullBodyweight] = useStateL(false);
+  const [bwMode, setBwMode] = useStateL(null); // null | 'pull' | 'plus_load'
   const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
@@ -1225,7 +1229,10 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null),
+      // Written in lockstep so a client still running an older cached build,
+      // which only knows the boolean, keeps pre-filling bodyweight.
+      pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -1249,7 +1256,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         equipment={equipment} onEquipment={wizardSetEquipment}
         movementType={movementType} setMovementType={setMovementType}
         logMode={logMode} pickLogMode={pickLogMode}
-        pullBodyweight={pullBodyweight} setPullBodyweight={setPullBodyweight}
+        bwMode={bwMode} setBwMode={setBwMode}
       />
     ) : (
     <Sheet open={true} onClose={requestClose} title={seed ? 'Review & add' : 'New exercise'}>
@@ -1303,7 +1310,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <LoggingModeSection
           equipment={equipment} movementType={movementType}
           logMode={logMode} onLogMode={pickLogMode}
-          pullBodyweight={pullBodyweight} onPullBodyweight={setPullBodyweight}
+          bwMode={bwMode} onBwMode={setBwMode}
           hasLoggedWeight={LB.latestBodyweight(store) != null}
         />
         <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
@@ -1360,7 +1367,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
   const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
-  const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
+  const [editBwMode, setEditBwMode] = useStateL(autoEdit ? LB.bodyweightMode(ex) : null);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
@@ -1386,14 +1393,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditBwMode(LB.bodyweightMode(ex)); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1609,7 +1616,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <LoggingModeSection
               equipment={editEquipment} movementType={editMovementType}
               logMode={editLogMode} onLogMode={setEditLogMode}
-              pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
+              bwMode={editBwMode} onBwMode={setEditBwMode}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
             <Field label="Progression increment (optional)">
@@ -4404,7 +4411,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                               <IntensityBadge label="PARTIALS" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                                {LB.setLoadLabel(st) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                               {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
@@ -4426,7 +4433,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                               <IntensityBadge label="STRETCH" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                                {LB.setLoadLabel(st) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               <StretchChipLib tr={tr} />
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
@@ -4499,7 +4506,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         }}>
                           {st.timeSec != null ? LB.fmtDuration(st.timeSec) : isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                            {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
                         </span>
                       );
@@ -5248,11 +5255,11 @@ function fmtCompareSet(st) {
   const strTxt = stretchText(tr);
   const strSfx = strTxt ? ` +stretch ${strTxt}` : '';
   if (tr.kind === 'weighted_stretch') {
-    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    const main = `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${st.reps ?? '—'}`;
     return `${main}${strSfx}`;
   }
   if (tr.kind === 'lengthened_partial') {
-    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    const main = `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${st.reps ?? '—'}`;
     return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
   }
   if (tr.kind) {
@@ -5263,7 +5270,7 @@ function fmtCompareSet(st) {
   // Checkbox / no-numeric completed set: show a tick, not a meaningless row of placeholder dashes.
   if (st.done && st.kg == null && st.reps == null && st.repsL == null && st.repsR == null) return '✓';
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
-  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+  return `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${repsStr}`;
 }
 
 const isTechniqueSet = (st) => !!st && !!st.technique;
@@ -5294,7 +5301,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
           {tr.partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
           {tr.partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>}
@@ -5312,7 +5319,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
           <StretchChipLib tr={tr} />
         </div>
@@ -6547,7 +6554,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                       {st.timeSec != null ? (
                         LB.fmtDuration(st.timeSec)
                       ) : (tr.kind === 'lengthened_partial' || tr.kind === 'weighted_stretch') ? (
-                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
+                        <>{LB.setLoadLabel(st) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
                       ) : tr.kind ? (
                         tr.rounds.map((d, di) => (
                           <React.Fragment key={di}>
@@ -6557,7 +6564,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                           </React.Fragment>
                         ))
                       ) : (
-                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
+                        <>{LB.setLoadLabel(st) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
                       )}
                       {tr.partials > 0 && <span style={{ color: UI.inkFaint }}> +{tr.partials}</span>}
                       {stretchText(tr) && <span style={{ color: UI.inkFaint }}> +stretch {stretchText(tr)}</span>}

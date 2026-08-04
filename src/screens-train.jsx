@@ -1153,6 +1153,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // undefined (const TDZ folded to var by the loader), which killed the time
   // branch and would ReferenceError if the transpile target ever kept const.
   const isAssistedEx = LB.isAssisted(exercise);
+
+  // ── Bodyweight + added load ────────────────────────────────────────────────
+  // For a plus_load exercise the number the user types is what is on the belt,
+  // not what moved. `kg` keeps holding the TOTAL so e1RM, PRs, volume and the
+  // meso gates read exactly what they always read; `addedKg` records the typed
+  // number so the field can show it again later. Everything routes through these
+  // two helpers: kbApply is the single write path (typing, backspace and the
+  // ± / stepper keys all call it), and dispWeight is the single read path.
+  const isPlusLoad = LB.isBodyweightPlusLoad(exercise);
+  const plusLoadBw = isPlusLoad ? (LB.latestBodyweight(store) ?? null) : null;
+  // Patch for a weight entry. `typed` is the added load in plus_load mode and
+  // the plain weight otherwise. Bodyweight is folded in at write time, which is
+  // what freezes it: a later weigh-in cannot rewrite this set.
+  const weightPatch = (typed) => {
+    if (!isPlusLoad) return { kg: typed };
+    if (typed == null) return { kg: null, addedKg: null };
+    const base = plusLoadBw ?? 0;
+    return { kg: Math.round((base + typed) * 100) / 100, addedKg: typed };
+  };
+  // What the input and the set rows should show for a set.
+  const dispWeight = (st) => (isPlusLoad ? (st?.addedKg ?? null) : (st?.kg ?? null));
+
   const prValOf = (st) => {
     // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
     // this session's side and the historical side must share one scale.
@@ -4629,8 +4651,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // editing, clear the stale technique/drops so it doesn't carry
             // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
-              si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: num ?? null }
+              si === setIdx ? { ...st, ...weightPatch(num ?? null), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(num ?? null) }
               : st
             ),
           }),
@@ -6669,7 +6691,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ textAlign: 'right' }}>
                   {prevHeroSet && prevHeroSet.kg ? (
                     <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
+                      LAST TIME <span style={{ color: UI.inkSoft }}>{isPlusLoad && prevHeroSet.addedKg != null ? `+${prevHeroSet.addedKg}` : prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                     </span>
                   ) : null}
                   {progressionTarget && (
@@ -6706,7 +6728,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {!isNoWeightReps && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <KgInput
-                    value={heroSet.kg}
+                    value={dispWeight(heroSet)}
                     done={false}
                     style={{
                       background: 'transparent', border: 'none', outline: 'none',
@@ -6724,14 +6746,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                         ...en,
                         sets: en.sets.map((st, si) =>
-                          si === bgSetIdx ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
+                          si === bgSetIdx ? { ...st, ...weightPatch(kg), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(kg) }
                           : st
                         ),
                       }),
                     }))}
                   />
-                  <div className="micro" style={{ marginTop: 2 }}>{UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS'}</div>
+                  {isPlusLoad ? (() => {
+                    // Spell out the arithmetic the user did not have to do. The
+                    // total is what counts for volume and records, so it should
+                    // be visible even though it is not what they typed.
+                    const typed = kbField?.setIdx === bgSetIdx && kbField?.field === 'kg' && kbRaw !== ''
+                      ? parseFloat(kbRaw.replace(',', '.')) : dispWeight(heroSet);
+                    const u = UI.unit();
+                    if (plusLoadBw == null) return <div className="micro" style={{ marginTop: 2, color: 'rgba(var(--danger-rgb),0.7)' }}>ADDED {u.toUpperCase()} · NO BODYWEIGHT LOGGED</div>;
+                    const tot = typed == null || isNaN(typed) ? null : Math.round((plusLoadBw + typed) * 100) / 100;
+                    return <div className="micro" style={{ marginTop: 2 }}>
+                      ADDED {u.toUpperCase()}{tot != null && <span style={{ color: UI.gold }}> · {String(tot).replace('.', ',')} {u} TOTAL</span>}
+                    </div>;
+                  })() : (
+                    <div className="micro" style={{ marginTop: 2 }}>{UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS'}</div>
+                  )}
                 </div>
                 <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 {isUnilateral ? (
@@ -6808,7 +6844,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>
               <div />
               <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{isPlusLoad ? '+' : ''}{UI.unit()}</span>
               {isUnilateral ? (
                 <>
                   <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
@@ -6941,13 +6977,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
                                 : isRepsOnly
                                   ? (prevSet && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps} reps` : '—')
-                                  : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                                  : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${isPlusLoad && prevSet.addedKg != null ? `+${prevSet.addedKg}` : prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                               }
                             </div>
                       )}
 
                       {!isIntensityActive && !isNoWeightReps && <KgInput
-                        value={s.kg}
+                        value={dispWeight(s)}
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
                         onActivate={() => activateKb(i, 'kg')}
@@ -6959,8 +6995,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                             ...en,
                             sets: en.sets.map((st, si) =>
-                              si === i ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
+                              si === i ? { ...st, ...weightPatch(kg), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, ...weightPatch(kg) }
                               : st
                             ),
                           }),

@@ -4749,6 +4749,85 @@ async function testAsync(name, fn) {
   });
   testSession = null; // restore the default for any test appended after this block
 
+  // ── Bodyweight + added load ────────────────────────────────────────────────
+  // kg keeps the TOTAL so e1RM/PR/volume are untouched; addedKg is what the user
+  // typed. These guard the split staying consistent in both directions.
+  const bwPlusStore = {
+    exercises: [
+      { id: 'pu', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' },
+      { id: 'dip', equipment: 'bodyweight', bodyweight_mode: 'pull', log_mode: 'weight' },
+      { id: 'legacy', equipment: 'bodyweight', pull_bodyweight: true, log_mode: 'weight' },
+      { id: 'plain', equipment: 'bodyweight', log_mode: 'weight' },
+      { id: 'bar', equipment: 'dual_plates', log_mode: 'weight' },
+    ],
+    dailyLogs: [{ date: '2026-08-01', weight: 80 }],
+    settings: {},
+  };
+  test('bodyweightMode: reads the new column', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[0]), 'plus_load');
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[1]), 'pull');
+  });
+  test('bodyweightMode: falls back to the legacy boolean', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[2]), 'pull');
+  });
+  test('bodyweightMode: null for a plain bodyweight exercise and for non-bodyweight gear', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[3]), null);
+    assert.strictEqual(LB.bodyweightMode({ equipment: 'dual_plates', bodyweight_mode: 'plus_load' }), null);
+  });
+  test('shouldPullBodyweight: true for pull, false for plus_load', () => {
+    // plus_load must NOT pre-fill the field with bodyweight: the field holds the
+    // belt load, so pre-filling 80 there would log 160 total.
+    assert.strictEqual(LB.shouldPullBodyweight(bwPlusStore.exercises[1]), true);
+    assert.strictEqual(LB.shouldPullBodyweight(bwPlusStore.exercises[0]), false);
+  });
+  test('isBodyweightPlusLoad: only for the plus_load mode', () => {
+    assert.strictEqual(LB.isBodyweightPlusLoad(bwPlusStore.exercises[0]), true);
+    assert.strictEqual(LB.isBodyweightPlusLoad(bwPlusStore.exercises[1]), false);
+  });
+  test('setLoadLabel: belt load for a plus_load set, plain weight otherwise', () => {
+    assert.strictEqual(LB.setLoadLabel({ kg: 90, addedKg: 10 }), '+10');
+    assert.strictEqual(LB.setLoadLabel({ kg: 90 }), '90');
+    assert.strictEqual(LB.setLoadLabel({ kg: null }), null);
+    assert.strictEqual(LB.setLoadLabel(null), null);
+  });
+  test('setLoadLabel: a zero added load still reads as +0, not as the total', () => {
+    // Bodyweight-only set on a plus_load exercise: the belt was empty, and it
+    // must not suddenly render as "80".
+    assert.strictEqual(LB.setLoadLabel({ kg: 80, addedKg: 0 }), '+0');
+  });
+  test('splitBodyweightLoad: recovers the frozen bodyweight from the stored pair', () => {
+    const r = LB.splitBodyweightLoad({ kg: 90, addedKg: 10 });
+    assert.strictEqual(r.total, 90); assert.strictEqual(r.added, 10); assert.strictEqual(r.base, 80);
+  });
+  test('splitBodyweightLoad: a set with no addedKg is all bodyweight', () => {
+    const r = LB.splitBodyweightLoad({ kg: 82 });
+    assert.strictEqual(r.total, 82); assert.strictEqual(r.added, null); assert.strictEqual(r.base, 82);
+  });
+  test('buildSeedSets: plus_load repeats the belt load and rebuilds the total from today', () => {
+    // Last session: 78 kg bodyweight + 10 on the belt = 88 total.
+    // Today the user weighs 80, so the same belt load is 90 total.
+    const it = { sets: 1, exId: 'pu', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 88, addedKg: 10, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].addedKg, 10);
+    assert.strictEqual(seeded[0].kg, 90);
+  });
+  test('buildSeedSets: plus_load with no previous belt load seeds empty, not a bare bodyweight', () => {
+    const it = { sets: 1, exId: 'pu', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 80, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].addedKg, null);
+    assert.strictEqual(seeded[0].kg, null);
+  });
+  test('buildSeedSets: a normal exercise is untouched by the plus_load path', () => {
+    const it = { sets: 1, exId: 'bar', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].kg, 100);
+    assert.strictEqual(seeded[0].addedKg, undefined);
+  });
+
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

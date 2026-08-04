@@ -401,7 +401,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), user_id: userId };
   });
   // Exercises got fresh ids above, everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -1117,6 +1117,7 @@ function mapEntryRows(entryRows) {
         repsL: st.reps_l,
         repsR: st.reps_r,
         timeSec: st.time_sec ?? null,
+        addedKg: st.added_kg ?? null,
         done: st.done,
         skipped: st.skipped,
         warmup: st.warmup,
@@ -1164,7 +1165,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
     _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
@@ -1857,7 +1858,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   // Normalize set fields for comparison, guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
-                        s.timeSec ?? null,
+                        s.timeSec ?? null, s.addedKg ?? null,
                         s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
                         s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
@@ -1910,6 +1911,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
             reps_l: set.repsL ?? null,
             reps_r: set.repsR ?? null,
             time_sec: set.timeSec ?? null,
+            added_kg: set.addedKg ?? null,
             done: set.done ?? false,
             skipped: set.skipped ?? false,
             warmup: set.warmup ?? false,
@@ -2003,7 +2005,7 @@ async function syncStore(prev, next, userId) {
       return !p || (p !== e && JSON.stringify(p) !== JSON.stringify(e));
     });
     const removed = prev.exercises.filter(e => !nextExIds.has(e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -3086,7 +3088,48 @@ function isAssisted(ex) {
 // caller still has to have a logged weight (latestBodyweight != null) for it to
 // actually fill anything.
 function shouldPullBodyweight(ex) {
-  return ex?.equipment === 'bodyweight' && ex?.pull_bodyweight === true;
+  return ex?.equipment === 'bodyweight' && bodyweightMode(ex) === 'pull';
+}
+
+// The three-way bodyweight handling for a bodyweight exercise:
+//   null        enter the weight by hand
+//   'pull'      pre-fill the last logged bodyweight, then edit freely
+//   'plus_load' type only what is on the belt; the app adds bodyweight to it
+// Reads the newer bodyweight_mode column and falls back to the old boolean, so
+// an exercise written by a client on an older cached build still resolves.
+function bodyweightMode(ex) {
+  if (ex?.equipment !== 'bodyweight') return null;
+  if (ex?.bodyweight_mode) return ex.bodyweight_mode;
+  return ex?.pull_bodyweight ? 'pull' : null;
+}
+
+// Does this exercise log an added load on top of bodyweight (weighted pull-ups,
+// belted dips)? The set's `kg` still carries the TOTAL, this only changes what
+// the user types and reads.
+function isBodyweightPlusLoad(ex) {
+  return bodyweightMode(ex) === 'plus_load';
+}
+
+// Display label for a set's load. A plus_load set carries addedKg and is shown
+// as the belt load ("+10"); everything else shows the plain weight. Keyed off the
+// SET rather than the exercise on purpose: any renderer can format a row without
+// having to look the exercise up, and a set logged before the exercise switched
+// modes still renders as what it actually was.
+function setLoadLabel(st) {
+  if (st?.addedKg != null) return '+' + st.addedKg;
+  return st?.kg != null ? String(st.kg) : null;
+}
+
+// Split a stored set back into what the user typed and what carried it, for a
+// plus_load exercise. `added` is the belt load, `base` the bodyweight frozen at
+// logging time. Falls back to treating the whole thing as bodyweight when a set
+// predates the column, which is what an untouched legacy row means.
+function splitBodyweightLoad(set) {
+  const total = set?.kg ?? null;
+  if (total == null) return { total: null, added: null, base: null };
+  const added = set?.addedKg ?? null;
+  if (added == null) return { total, added: null, base: total };
+  return { total, added, base: +(total - added).toFixed(2) };
 }
 
 // Normalize a read-only system-catalog entry (window.SYSTEM_EXERCISES: compact
@@ -3148,7 +3191,24 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
   const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
   const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
-  return Array.from({ length: it.sets }).map((_, i) => {
+
+  // A plus_load exercise seeds the load that was on the BELT, not last session's
+  // total: bodyweight may have moved since, and repeating a stale total would
+  // quietly mis-state today's load. The belt figure is what the lifter repeats,
+  // so carry addedKg forward and rebuild the total from today's weigh-in.
+  const plusLoadEx = isBodyweightPlusLoad((store?.exercises || []).find(e => e.id === it.exId));
+  const plusLoadBw = plusLoadEx ? (latestBodyweight(store) ?? null) : null;
+  const withPlusLoad = (seeded) => {
+    if (!plusLoadEx) return seeded;
+    return seeded.map((st, i) => {
+      const prevAdded = workingSets[i]?.addedKg ?? null;
+      if (prevAdded == null) return { ...st, kg: null, addedKg: null };
+      const total = plusLoadBw == null ? null : Math.round((plusLoadBw + prevAdded) * 100) / 100;
+      return { ...st, kg: total, addedKg: prevAdded };
+    });
+  };
+
+  return withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
     // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
@@ -3192,7 +3252,7 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     return isUni
       ? { kg: dl(seedKg), repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
       : { kg: dl(seedKg), reps: prev?.reps ?? null, done: false };
-  });
+  }));
 }
 
 function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
@@ -8824,7 +8884,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,

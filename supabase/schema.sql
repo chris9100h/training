@@ -101,6 +101,12 @@ CREATE TABLE public.zane_exercises (
   no_weight_reps boolean NOT NULL DEFAULT false,
   log_mode text,
   pull_bodyweight boolean NOT NULL DEFAULT false,
+  -- Migration 0243. Three-way successor to pull_bodyweight for bodyweight
+  -- exercises: null = type the weight, 'pull' = pre-fill the last logged
+  -- bodyweight, 'plus_load' = type only the added load (weighted pull-ups,
+  -- belted dips). pull_bodyweight is still written in lockstep so a client on
+  -- an older cached build keeps pre-filling.
+  bodyweight_mode text CHECK (bodyweight_mode IS NULL OR bodyweight_mode IN ('pull', 'plus_load')),
   youtube_url text,
   note_pinned boolean NOT NULL DEFAULT false,
   progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0)
@@ -185,6 +191,11 @@ CREATE TABLE public.zane_sets (
   warmup boolean NOT NULL DEFAULT false,
   technique text,
   drops jsonb,
+  -- Migration 0243. Load added on top of bodyweight for a plus_load exercise.
+  -- kg still holds the TOTAL, so e1RM/PR/volume/autoregulation are unchanged;
+  -- this is only what the user typed. Implied bodyweight = kg - added_kg, which
+  -- freezes it at logging time.
+  added_kg numeric,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
