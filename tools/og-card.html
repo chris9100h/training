@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Zane OG card source</title>
+<!--
+  Source for icons/og-card.jpg, the 1200x630 preview image every chat app
+  renders when someone pastes a link to Zane. Kept as HTML so it can be
+  edited and re-rendered instead of living in a design tool.
+
+  Render it (needs network for the webfonts, and a Chrome or Chromium binary):
+
+    cd <repo root>
+    python3 -m http.server 8899 &
+    chromium --headless --disable-gpu --hide-scrollbars \
+      --window-size=1200,630 --screenshot=/tmp/og-card.png \
+      http://localhost:8899/tools/og-card.html
+    # then compress to JPEG (any tool) and save as icons/og-card.jpg
+
+  Keep it at exactly 1200x630. That is what og:image expects for the wide
+  card; a square image gets cropped or demoted to a small thumbnail
+  depending on the platform. Also keep the text big: a preview often
+  renders around 300px wide in a chat, so anything subtle disappears.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#141218; --panel:#1a1820;
+    --ink:#ece4d0; --ink-soft:rgba(236,228,208,0.62);
+    --accent:#c9a961; --accent-rgb:201,169,97;
+    --hair:rgba(236,228,208,0.10); --hair-strong:rgba(236,228,208,0.20);
+    --knurl:236,228,208;
+    --f-display:"Big Shoulders Display","Arial Narrow",sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{width:1200px;height:630px;overflow:hidden;}
+  body{
+    background:var(--bg);color:var(--ink);
+    background-image:
+      repeating-linear-gradient(45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px),
+      repeating-linear-gradient(-45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px);
+    position:relative;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* Warm pool of light behind the phones, so the right half is not a void. */
+  .glow{position:absolute;top:-160px;right:-120px;width:820px;height:820px;border-radius:50%;
+        background:radial-gradient(circle,rgba(var(--accent-rgb),0.16) 0%,rgba(var(--accent-rgb),0.05) 42%,transparent 68%);}
+  .card{position:relative;width:100%;height:100%;display:flex;align-items:center;padding:0 0 0 72px;gap:36px;}
+
+  .left{flex:1;min-width:0;}
+  .eyebrow{display:flex;align-items:center;gap:12px;color:var(--accent);margin-bottom:22px;}
+  .eyebrow .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 14px rgba(var(--accent-rgb),0.8);}
+  .eyebrow .t{font-family:var(--f-mono);font-size:15px;letter-spacing:0.22em;text-transform:uppercase;font-weight:600;}
+  .wordmark{font-family:var(--f-display);font-weight:900;text-transform:uppercase;
+            font-size:186px;line-height:0.78;letter-spacing:0.01em;}
+  .wordmark .k{color:var(--accent);}
+  .tagline{margin-top:20px;font-family:var(--f-display);font-weight:700;text-transform:uppercase;
+           font-size:44px;line-height:1.02;letter-spacing:0.02em;}
+  .rule{margin-top:26px;width:190px;height:2px;
+        background:linear-gradient(90deg,var(--accent),rgba(var(--accent-rgb),0));}
+  .url{margin-top:18px;font-family:var(--f-mono);font-size:17px;letter-spacing:0.14em;
+       text-transform:uppercase;color:var(--accent);font-weight:600;}
+
+  /* Two phones, the front one raised and overlapping, so the card reads as a
+     product shot rather than a logo on a background. */
+  .right{position:relative;width:470px;height:630px;flex:none;}
+  .phone{position:absolute;border-radius:14px;overflow:hidden;background:var(--panel);
+         border:1px solid var(--hair-strong);box-shadow:0 34px 70px rgba(0,0,0,0.55);}
+  .phone img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block;}
+  .phone.back{width:260px;height:530px;top:52px;left:6px;transform:rotate(-5deg);opacity:0.92;}
+  .phone.front{width:286px;height:582px;top:88px;left:196px;transform:rotate(3.5deg);}
+
+  /* Accent hairline along the bottom, same device the site header uses. */
+  .hair-bottom{position:absolute;left:0;right:0;bottom:0;height:3px;
+               background:linear-gradient(90deg,transparent,rgba(var(--accent-rgb),0.85),transparent);}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="card">
+  <div class="left">
+    <div class="eyebrow"><span class="dot"></span><span class="t">The all-in-one fitness app</span></div>
+    <div class="wordmark">ZA<span class="k">N</span>E</div>
+    <div class="tagline">Train with Zane<br />or remain the same</div>
+    <div class="rule"></div>
+    <div class="url">zane-wo.com</div>
+  </div>
+  <div class="right">
+    <div class="phone back"><img src="../screenshots/train.jpg" alt="" /></div>
+    <div class="phone front"><img src="../screenshots/home.jpg" alt="" /></div>
+  </div>
+</div>
+<div class="hair-bottom"></div>
+</body>
+</html>

@@ -14,20 +14,20 @@
      "/" ships no share metadata, so every link anyone pastes into WhatsApp,
      Instagram or Discord renders as a bare URL. Absolute URLs are required,
      scrapers do not resolve relative ones.
-     TODO: swap og:image for a purpose-built 1200x630 PNG when there is one.
-     The 512 icon works (square art gets a thumbnail treatment) but a real
-     landscape card with the wordmark reads far better in a chat preview. -->
+     og:image is icons/og-card.jpg, built from tools/og-card.html. Edit and
+     re-render that file rather than the image. 1200x630 is what the wide
+     card expects; square art gets cropped or demoted to a thumbnail. -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Zane" />
 <meta property="og:url" content="https://zane-wo.com/welcome.html" />
 <meta property="og:title" content="Zane · Train with Zane or remain the same" />
 <meta property="og:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
-<meta property="og:image" content="https://zane-wo.com/icons/icon-512.png" />
-<meta property="og:image:alt" content="The Zane app icon" />
+<meta property="og:image" content="https://zane-wo.com/icons/og-card.jpg" />
+<meta property="og:image:alt" content="The Zane wordmark beside the app running on two phones" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Zane · Train with Zane or remain the same" />
 <meta name="twitter:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
-<meta name="twitter:image" content="https://zane-wo.com/icons/icon-512.png" />
+<meta name="twitter:image" content="https://zane-wo.com/icons/og-card.jpg" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
