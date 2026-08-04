@@ -1184,9 +1184,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
   // Which AI reads the nutrition label photo: 'grok' (scan-label, the
-  // long-standing default) or 'claude' (scan-label-claude), same request/
-  // response contract either way. Per-device only, not a synced setting:
-  // this is a comparison toggle, not a user-facing preference.
+  // long-standing default), 'claude' (scan-label-claude) or 'qwen'
+  // (scan-label-qwen), same request/response contract whichever is picked.
+  // Per-device only, not a synced setting: this is a comparison toggle, not a
+  // user-facing preference.
   const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
   useEffectFd(() => {
     const onChange = e => setLabelScannerProvider(e.detail);
@@ -5152,7 +5153,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ marginTop: 14 }}>
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
               <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
             ))}
           </div>
@@ -6405,7 +6406,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         <div style={{ marginTop: 14 }}>
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
               <button key={id} onClick={() => { setPickerLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
             ))}
           </div>
@@ -9233,7 +9234,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
         <div style={{ marginTop: 14 }}>
           <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+            {[['grok', 'Grok'], ['claude', 'Claude'], ['qwen', 'Qwen']].map(([id, label]) => (
               <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
             ))}
           </div>

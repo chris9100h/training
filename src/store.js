@@ -10,6 +10,7 @@ const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
+const SCAN_LABEL_QWEN_URL   = `${SUPABASE_URL}/functions/v1/scan-label-qwen`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
@@ -2702,7 +2703,13 @@ function cacheFood(source, sourceId) {
 // macros so the client can prefill the Custom Item form. Scanned labels are
 // logged as per-user custom items, never written to the shared zane_foods cache.
 async function scanLabel(imageBase64, mimeType, provider) {
-  const url = provider === 'claude' ? SCAN_LABEL_CLAUDE_URL : SCAN_LABEL_URL;
+  // Three interchangeable backends, identical request/response contract; the
+  // per-device pick is logbook-label-scanner-provider (CLAUDE.md). Anything
+  // unrecognised falls through to Grok, which is the long-standing default and
+  // the one guaranteed to be deployed.
+  const url = provider === 'claude' ? SCAN_LABEL_CLAUDE_URL
+    : provider === 'qwen' ? SCAN_LABEL_QWEN_URL
+    : SCAN_LABEL_URL;
   const res = await fnFetch(url, { image: imageBase64, mimeType });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
