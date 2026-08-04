@@ -258,6 +258,23 @@
   .founding-badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;color:var(--bg);background:var(--accent);border-radius:4px;padding:6px 11px;}
   .founding h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(30px,5.2vw,46px);line-height:0.98;margin:0;text-wrap:balance;}
   .founding h3 .k{color:var(--accent);}
+  /* Live seat count, read from the database on load. Starts hidden and only
+     unhides once a real number arrives: on the one time-limited claim on the
+     page, a stale or guessed number is worse than no number at all. */
+  /* The 18px under .founding-head plus this 4px sit above the meter, so the 20px
+     below it balances the block instead of letting the body text crowd it. */
+  .seatmeter{display:none;width:100%;max-width:330px;margin:4px auto 20px;flex-direction:column;align-items:center;gap:9px;}
+  .seatmeter.on{display:flex;}
+  .seatmeter-n{display:flex;align-items:baseline;gap:9px;}
+  .seatmeter-n b{font-family:var(--f-display);font-weight:800;font-size:46px;line-height:0.82;color:var(--accent);}
+  .seatmeter-n i{font-style:normal;font-family:var(--f-mono);font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink-soft);}
+  .seatmeter-track{width:100%;height:7px;border-radius:2px;background:rgba(var(--knurl),0.09);border:1px solid var(--hair);overflow:hidden;}
+  .seatmeter-track i{display:block;height:100%;width:0;background:var(--accent);transition:width 1.1s cubic-bezier(.2,.7,.2,1);}
+  .seatmeter-sub{font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);}
+  /* Sold out: the gold is a reward colour, and there is nothing left to win. */
+  .seatmeter.full b{color:var(--ink-soft);}
+  .seatmeter.full .seatmeter-track i{background:var(--ink-faint);}
+  @media (prefers-reduced-motion:reduce){ .seatmeter-track i{transition:none;} }
   .founding-body{max-width:64ch;margin:0 auto;text-align:left;}
   .founding p{margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;}
   .founding p b{color:var(--ink);font-weight:600;}
@@ -410,14 +427,19 @@
     <div class="founding knurl">
       <div class="founding-head">
         <span class="founding-badge">Founding offer</span>
-        <h3>The first <span class="k">75</span> never pay</h3>
+        <h3>The first <span class="k" id="seatTotalHead">75</span> never pay</h3>
+      </div>
+      <div class="seatmeter" id="seatMeter">
+        <div class="seatmeter-n"><b id="seatN">0</b><i id="seatU">seats left</i></div>
+        <div class="seatmeter-track"><i id="seatBar"></i></div>
+        <div class="seatmeter-sub" id="seatSub"></div>
       </div>
       <div class="founding-body">
-      <p>The first 75 people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
-      <p>You do not sign up for it or enter a code. Train, and the seat is yours.</p>
+      <p>The first <span id="seatTotalBody">75</span> people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
+      <p id="seatClaim">You do not sign up for it or enter a code. Train, and the seat is yours.</p>
       <div class="qual">
         <span class="lbl">What counts</span>
-        <p class="txt">Five completed workouts. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
+        <p class="txt">Five completed workouts, on separate days, with real training behind them. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
       </div>
       </div>
     </div>
@@ -682,6 +704,58 @@
   if (priceCount && cards.length) priceCount.textContent = 'All ' + cards.length + ' features';
 
   if (FM.version) document.getElementById('stampFoot').textContent = 'Catalog ' + FM.version;
+
+  // ---- live founding seat count ----
+  // No login here and no Supabase client on this page, so this is the same raw
+  // REST call features.html makes for the published feature map, against a
+  // function that returns two aggregate numbers and nothing per-account.
+  //
+  // Every failure path is the same: the meter never unhides and the card reads
+  // exactly as it did before it existed. The seat total is written into the
+  // headline too, so raising the cap later cannot leave a stale 75 on the page.
+  var SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+  var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
+
+  fetch(SUPABASE_URL + '/rest/v1/rpc/get_founding_seats', {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+  .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+  .then(function(rows){
+    var d = Array.isArray(rows) ? rows[0] : rows;
+    if (!d) return;
+    var total = Number(d.total), taken = Number(d.taken), left = Number(d.remaining);
+    // A total of 0 would divide by zero on the bar and means the config row is
+    // broken anyway, so treat it like a failed call rather than rendering 0%.
+    if (!isFinite(total) || !isFinite(taken) || !isFinite(left) || total <= 0) return;
+
+    document.getElementById('seatTotalHead').textContent = total;
+    document.getElementById('seatTotalBody').textContent = total;
+
+    var meter = document.getElementById('seatMeter');
+    if (left > 0) {
+      document.getElementById('seatN').textContent = left;
+      document.getElementById('seatU').textContent = left === 1 ? 'seat left' : 'seats left';
+      document.getElementById('seatSub').textContent = taken + ' of ' + total + ' claimed';
+    } else {
+      // Sold out. "Train, and the seat is yours" would now be a promise the app
+      // cannot keep, so that one sentence goes with it.
+      meter.className = 'seatmeter full';
+      document.getElementById('seatN').textContent = total;
+      document.getElementById('seatU').textContent = 'seats claimed';
+      document.getElementById('seatSub').textContent = 'Founding offer closed';
+      document.getElementById('seatClaim').innerHTML =
+        'Every founding seat is taken. <b>Zane is still free to use in full</b>, and it stays that way until pricing actually lands.';
+    }
+    meter.classList.add('on');
+    // Paint at 0 first so the bar animates in from empty rather than appearing
+    // pre-filled; two frames, because the first one is the unhide itself.
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      document.getElementById('seatBar').style.width = Math.min(100, (taken / total) * 100) + '%';
+    }); });
+  })
+  .catch(function(){});
 
   // ---- theme toggle (same behaviour as features.html / autoreg.html) ----
   document.getElementById('themeBtn').addEventListener('click', function(){

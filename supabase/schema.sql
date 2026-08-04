@@ -3190,6 +3190,27 @@ $function$;
 REVOKE EXECUTE ON FUNCTION public.get_public_feature_map() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_public_feature_map() TO anon, authenticated;
 
+-- Founding-seat count for the login-free landing page (welcome.html). Returns
+-- three aggregates and nothing per-account. anon is granted execute by design;
+-- this is the second such function. The seat definition mirrors
+-- grant_lifetime_if_qualified() and must stay in step with it. Migration 0244.
+CREATE OR REPLACE FUNCTION public.get_founding_seats()
+ RETURNS TABLE (total int, taken int, remaining int)
+ LANGUAGE sql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT t.total,
+         s.taken,
+         GREATEST(t.total - s.taken, 0) AS remaining
+    FROM (SELECT COALESCE((SELECT lifetime_seats_total FROM zane_app_config WHERE id = 1), 75)::int AS total) t,
+         (SELECT COUNT(*)::int AS taken FROM zane_profiles WHERE tier = 'lifetime') s;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_founding_seats() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_founding_seats() TO anon, authenticated;
+
 -- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
 
 CREATE OR REPLACE FUNCTION public.admin_schema_inventory()
