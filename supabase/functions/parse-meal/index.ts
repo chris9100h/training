@@ -69,6 +69,24 @@ const MAX_ITEM_NAME_CHARS = 200;
 // (isAdmin = store.user?.email === this): unlimited quota for testing.
 const ADMIN_EMAIL = 'office@btc-prime.biz';
 
+// How many tokens the model may spend deliberating before it has to start
+// writing the answer. The same 1200 in all three meal parsers, so the provider
+// toggle compares models rather than how much rope each one was handed.
+//
+// Calibrated from measurement, not taste. On one meal photo with no
+// accompanying text: Grok at reasoning_effort 'low' spent 1224 reasoning
+// tokens, uncapped Qwen spent roughly 2950 on the identical picture, and the
+// visible JSON was about 150 tokens either way. Uncapped Qwen took 24.1s for
+// that, where its own label scanner (no reasoning at all, same route, same
+// image) answered in 1.7s, so almost the entire wait was deliberation. 1200 is
+// Grok's own measured appetite, which makes it the honest number to hold the
+// other two to.
+//
+// This bounds ONLY the thinking. When the budget runs out the model stops
+// deliberating and writes the answer, so unlike the max_tokens ceiling below
+// it cannot truncate the JSON object. Anthropic's floor for it is 1024.
+const REASONING_BUDGET = 1200;
+
 // Advisory per-user daily quota (same zane_api_usage/bump_api_usage as every
 // other AI edge function, migration 0207, new kind 'meal_parse'). Fails OPEN
 // on purpose: a broken quota mechanism must never be the reason someone
@@ -262,10 +280,8 @@ Deno.serve(async (req) => {
         // clears a stated calorie floor is what reasoning is for, so all three
         // meal parsers run with it on. Haiku 4.5 predates adaptive thinking
         // and reasons only when handed an explicit budget; the other two
-        // default it on. budget_tokens must stay below max_tokens (minimum
-        // 1024), and thinking is billed and counted as output, hence the
-        // ceiling below rather than the 2000 this used to carry.
-        thinking: { type: 'enabled', budget_tokens: 4000 },
+        // default it on. See REASONING_BUDGET for where the number comes from.
+        thinking: { type: 'enabled', budget_tokens: REASONING_BUDGET },
         // 8000 across all three meal parsers: the only variable the toggle
         // should expose is the model, not how much room each one was given.
         max_tokens: 8000,

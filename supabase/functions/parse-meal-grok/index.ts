@@ -267,6 +267,15 @@ Deno.serve(async (req) => {
         // while its Claude twin was not, which made the toggle compare
         // configurations instead of models. On is the right setting here, see
         // the same note in parse-meal.
+        //
+        // The other two parsers cap deliberation at a token budget of 1200
+        // (their REASONING_BUDGET). xAI exposes no equivalent knob, only these
+        // effort levels, so there is nothing to set here. That costs nothing:
+        // 'low' is where the 1200 came from in the first place, measured at
+        // 1224 reasoning tokens on one meal photo. This endpoint IS the
+        // reference point the other two were held to, so leaving it alone is
+        // what keeps the three comparable. If xAI ever ships a numeric budget,
+        // it belongs here at 1200 like everywhere else.
         reasoning_effort: 'low',
         // 8000 across all three meal parsers: the only variable the toggle
         // should expose is the model, not how much room each one was given.

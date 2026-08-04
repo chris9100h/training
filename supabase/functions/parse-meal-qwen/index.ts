@@ -48,9 +48,10 @@
 // defaults (Qwen 3.7 on, Grok 4.3 on at effort 'low', Haiku 4.5 off unless
 // handed a budget), so each file states its setting rather than inheriting
 // one; otherwise the toggle compares configurations instead of models.
-// Nothing is sent here because Qwen's default already matches the policy.
-// Set QWEN_NO_THINK=1 to turn it off if the wait proves worse than the
-// estimate is good.
+// Qwen's own default already matches the policy, so the only thing sent here
+// is a ceiling on how long it may deliberate, see REASONING_BUDGET. Set
+// QWEN_NO_THINK=1 to turn reasoning off entirely if the wait ever proves
+// worse than the estimate is good.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -87,6 +88,22 @@ const MAX_ITEM_NAME_CHARS = 200;
 // stays at the proven 2000.
 const MAX_TOKENS_THINKING = 8000;
 const MAX_TOKENS_NO_THINK = 2000;
+
+// How many tokens the model may spend deliberating before it has to start
+// writing the answer. The same 1200 in all three meal parsers, so the provider
+// toggle compares models rather than how much rope each one was handed. This
+// endpoint is the reason the cap exists at all: left to its own default it
+// spent roughly 2950 reasoning tokens on a single meal photo and took 24.1s,
+// while the Qwen label scanner (no reasoning, same route, same image) answered
+// in 1.7s, so almost the entire wait was deliberation. 1200 is what Grok
+// actually spends on the identical photo at effort 'low', which makes it the
+// honest number rather than an arbitrary squeeze.
+//
+// Bounds ONLY the thinking: when it runs out the model stops deliberating and
+// starts the answer, so unlike MAX_TOKENS_THINKING above it cannot truncate
+// the JSON object. Ignored by any front door that drops the field, in which
+// case the request simply behaves as it did before.
+const REASONING_BUDGET = 1200;
 
 // Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
 // (isAdmin = store.user?.email === this): unlimited quota for testing.
@@ -293,7 +310,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model,
         max_tokens: noThink ? MAX_TOKENS_NO_THINK : MAX_TOKENS_THINKING,
-        ...(noThink ? { enable_thinking: false } : {}),
+        ...(noThink ? { enable_thinking: false } : { thinking_budget: REASONING_BUDGET }),
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {
