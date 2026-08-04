@@ -3015,7 +3015,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                     MESO · DELOAD
                   </span>
                 );
@@ -3033,7 +3033,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                   : 'D1';
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                     {mesoLabel} · starts {startLabel}
                   </span>
                 );
@@ -3043,7 +3043,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
-                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                   {mesoLabel} {unit}{week}/{weeks}{rir != null ? ` · ${rir} RIR` : ''}
                 </span>
               );
@@ -3069,19 +3069,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                       : null;
                     return (
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                         {startLabel ? `AUTO · starts ${startLabel}` : 'AUTO · pending'}
                       </span>
                     );
                   }
                   return (
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                       {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   );
                 })()}
                 {deloadHintActive && (
-                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                     Deload ready
                   </span>
                 )}

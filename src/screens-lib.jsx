@@ -2661,11 +2661,11 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
-                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
-                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -3593,8 +3593,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
-            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
-            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3668,8 +3668,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
-                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -3781,7 +3781,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {(prCount > 0 || showVol) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: -8 }}>
             {prCount > 0 && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '3px 9px', whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 2, padding: '3px 9px', whiteSpace: 'nowrap' }}>
                 <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
                 {prCount} PR{prCount > 1 ? 'S' : ''}
                 <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
