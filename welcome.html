@@ -248,16 +248,21 @@
   /* The founding offer is the one time-limited thing on the page, so it gets a
      full accent border and a tinted fill rather than the coach block's single
      left rail. It should read as the loudest thing in the section. */
-  .founding{position:relative;margin-top:22px;border:1px solid rgba(var(--accent-rgb),0.55);border-radius:8px;padding:24px 24px 22px;overflow:hidden;
+  .founding{position:relative;margin-top:22px;border:1px solid rgba(var(--accent-rgb),0.55);border-radius:8px;padding:30px 24px 26px;overflow:hidden;text-align:center;
             background:linear-gradient(180deg,rgba(var(--accent-rgb),0.10),rgba(var(--accent-rgb),0.03));}
-  .founding-head{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px;}
-  .founding-badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;color:var(--bg);background:var(--accent);border-radius:4px;padding:6px 10px;}
-  .founding h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(24px,4vw,34px);line-height:1;margin:0;}
+  /* The head is centred and stacked: it gives the block a clear axis and lets
+     the headline run at full size. The prose below stays ranged left inside a
+     narrower centred column, because centred body copy has no fixed left edge
+     and the eye has to find the start of every line. */
+  .founding-head{display:flex;flex-direction:column;align-items:center;gap:13px;margin-bottom:18px;}
+  .founding-badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;color:var(--bg);background:var(--accent);border-radius:4px;padding:6px 11px;}
+  .founding h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(30px,5.2vw,46px);line-height:0.98;margin:0;text-wrap:balance;}
   .founding h3 .k{color:var(--accent);}
-  .founding p{margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;max-width:70ch;}
+  .founding-body{max-width:64ch;margin:0 auto;text-align:left;}
+  .founding p{margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;}
   .founding p b{color:var(--ink);font-weight:600;}
-  .founding .qual{margin:16px 0 0;padding-top:14px;border-top:1px solid rgba(var(--accent-rgb),0.28);display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;}
-  .founding .qual .lbl{font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);flex:none;}
+  .founding .qual{margin:18px 0 0;padding-top:15px;border-top:1px solid rgba(var(--accent-rgb),0.28);}
+  .founding .qual .lbl{display:block;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);margin-bottom:7px;}
   .founding .qual .txt{margin:0;font-size:14px;line-height:1.55;color:var(--ink-soft);}
   .founding .qual .txt b{color:var(--ink);font-weight:600;}
 
@@ -407,11 +412,13 @@
         <span class="founding-badge">Founding offer</span>
         <h3>The first <span class="k">75</span> never pay</h3>
       </div>
+      <div class="founding-body">
       <p>The first 75 people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
       <p>You do not sign up for it or enter a code. Train, and the seat is yours.</p>
       <div class="qual">
         <span class="lbl">What counts</span>
         <p class="txt">Five completed workouts. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
+      </div>
       </div>
     </div>
 
