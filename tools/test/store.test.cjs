@@ -3050,6 +3050,82 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.sq.newTm, 105);
   });
 
+  test('prev531MainLiftSession: pairs a session only with the SAME week of the PREVIOUS cycle', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}],
+      program_data: { includeDeload: true, mainLifts: { dips: { tm: 100, kind: 'upper' } } } };
+    const store = { schedules: [sch], sessions: [] };
+    const mkSess = (i) => ({ id: 'dips_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p531',
+      entries: [{ exId: 'dips', sets: [] }] });
+    // dayCount 1, includeDeload true -> maxWeek 4: idx 0-3 = cycle0 weeks 1-4
+    // (4 = deload), idx 4-7 = cycle1 weeks 1-4.
+    store.sessions = Array.from({ length: 8 }, (_, i) => mkSess(i));
+
+    // The exact bug: cycle1 week1 (idx4) must pair with cycle0 week1 (idx0),
+    // never with the chronologically-closer, but heavier, cycle0 week3 (idx2)
+    // or the deload week4 (idx3) that actually ran right before it.
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[4], 'dips').id, 'dips_0');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[5], 'dips').id, 'dips_1');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[6], 'dips').id, 'dips_2');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[7], 'dips').id, 'dips_3'); // deload vs deload
+
+    // Cycle 0 has no earlier cycle to pair with at all.
+    for (let i = 0; i < 4; i++) assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[i], 'dips'), null);
+
+    // Not a main lift on this plan (e.g. an assistance exercise sharing the
+    // same day): assistance keeps the normal "most recent session" behavior,
+    // so this must abstain rather than pair it up too.
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[4], 'cable_fly'), null);
+
+    // A session not itself a counted 531 position (bonus, still in progress,
+    // or from a different plan entirely) has nothing to be positioned against.
+    const bonus = { id: 'bonus', scheduleId: 'p531', isBonus: true, entries: [{ exId: 'dips', sets: [] }] };
+    assert.strictEqual(LB.prev531MainLiftSession(store, bonus, 'dips'), null);
+    assert.strictEqual(LB.prev531MainLiftSession(store, { id: 'nope', scheduleId: 'other-plan' }, 'dips'), null);
+  });
+
+  test('prev531MainLiftSession: interleaved multi-lift plan still pairs by exId, not array position', () => {
+    // dayCount 2 (squat, bench), includeDeload false -> maxWeek 3. Logged in
+    // strict squat-then-bench order each week: idx 0-5 = cycle0 (sq/bp x3
+    // weeks), idx 6-7 = cycle1 week1's sq/bp.
+    const sch = { id: 'p2', program_type: '531', days: [{}, {}],
+      program_data: { includeDeload: false, mainLifts: { sq: { tm: 100, kind: 'squat' }, bp: { tm: 80, kind: 'bench' } } } };
+    const mk = (exId, i) => ({ id: exId + '_' + i, ended: '2026-03-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p2',
+      entries: [{ exId, sets: [] }] });
+    const store = { schedules: [sch], sessions: [
+      mk('sq', 0), mk('bp', 1), mk('sq', 2), mk('bp', 3), mk('sq', 4), mk('bp', 5), mk('sq', 6), mk('bp', 7),
+    ] };
+    const sqCycle1Week1 = store.sessions[6];
+    const bpCycle1Week1 = store.sessions[7];
+    assert.strictEqual(LB.prev531MainLiftSession(store, sqCycle1Week1, 'sq').id, 'sq_0');
+    assert.strictEqual(LB.prev531MainLiftSession(store, bpCycle1Week1, 'bp').id, 'bp_1');
+  });
+
+  test('prev531MainLiftSessionLive: the in-progress session pairs as if it had just been appended', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}],
+      program_data: { includeDeload: true, mainLifts: { dips: { tm: 100, kind: 'upper' } } } };
+    const mkSess = (i) => ({ id: 'dips_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p531',
+      entries: [{ exId: 'dips', sets: [] }] });
+    // 4 ended sessions = cycle0 weeks 1-4 (4 = deload). The live session
+    // (ended: null, still being logged) is the 5th, cycle1 week1, so it must
+    // pair with idx0 (cycle0 week1), exactly like prev531MainLiftSession
+    // would once this session itself finishes and becomes idx4.
+    const store = { schedules: [sch], sessions: Array.from({ length: 4 }, (_, i) => mkSess(i)) };
+    const live = { id: 'live', scheduleId: 'p531', dayId: 'd1', ended: null, entries: [{ exId: 'dips', sets: [] }] };
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, live, 'dips').id, 'dips_0');
+
+    // Still cycle 0 (only 2 ended sessions so far): no earlier cycle yet.
+    const store2 = { schedules: [sch], sessions: [mkSess(0), mkSess(1)] };
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store2, live, 'dips'), null);
+
+    // A bonus (or app-deload) live session never counts toward the rotation,
+    // so it has no real position to derive a pairing from either.
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, { ...live, isBonus: true }, 'dips'), null);
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, { ...live, isDeload: true }, 'dips'), null);
+
+    // Not a main lift: abstains, same as the ended-session version.
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, live, 'cable_fly'), null);
+  });
+
   test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
     // 102 x 12 -> est 1RM 142.8 -> fair TM 90% = 128.52 -> round 127.5, above 120 + 2.5
     let s = LB.suggest531Tm(LB.e1rm(102, 12), 120, 'bench', 'kg');

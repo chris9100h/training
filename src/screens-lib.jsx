@@ -3373,14 +3373,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // entry index so a twice-in-a-day exercise's second slot reads its own prev
       // instead of sharing the first slot's.
       const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
-      const prev = store.sessions
+      // A 5/3/1 main lift's weekly weight is a fixed Training-Max percentage
+      // (FTO_WAVES), not progressive session-to-session, so its "last time" is
+      // the same week of the PREVIOUS cycle, not whichever session of this day
+      // happened to run most recently (see prev531MainLiftSession's own
+      // comment: that's very often a heavier week from last cycle, reading as
+      // a false decline). Only the main lift itself: assistance work on a
+      // 5/3/1 day still compares against the plain most-recent session below.
+      const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
+      const prev = cyclePrev || store.sessions
         .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
         .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
       map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
     });
     return map;
-  }, [store.sessions, s]);
+  }, [store.sessions, store.schedules, s]);
 
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)

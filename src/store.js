@@ -3737,6 +3737,16 @@ function week531(completedWeeks, includeDeload) {
   return Math.min(maxWeek, Math.max(1, w));
 }
 
+// (week, cycle) for the Nth (0-based) session in a 531 plan's own
+// chronological order, given how many days the plan's rotation has. Shared
+// by compute531CycleBumps and prev531MainLiftSession so "which week/cycle a
+// session belongs to" is computed exactly one way everywhere, not two
+// formulas that could quietly drift apart.
+function week531At(idx, dayCount, maxWeek) {
+  const completedWeeks = Math.floor(idx / dayCount);
+  return { week: (completedWeeks % maxWeek) + 1, cycle: Math.floor(completedWeeks / maxWeek) };
+}
+
 // The three prescribed working sets for one lift in a given week. Each set's
 // load is round(pct * tm); a null tm yields null loads (preview before setup).
 // The top set of weeks 1-3 is an AMRAP ("+"), its reps being the required
@@ -3887,9 +3897,9 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
   const perLift = {}; // exId -> [hitBool, ...] across weeks 1-3
   planSessions.forEach((s, idx) => {
-    const completedWeeks = Math.floor(idx / dayCount);
-    if (Math.floor(completedWeeks / maxWeek) !== cycleIdx) return;
-    const min = amrapMin((completedWeeks % maxWeek) + 1);
+    const { week, cycle } = week531At(idx, dayCount, maxWeek);
+    if (cycle !== cycleIdx) return;
+    const min = amrapMin(week);
     if (min == null) return; // deload week: no AMRAP, no signal
     const mainEntry = (s.entries || []).find(e => mainLifts[e.exId]);
     if (!mainEntry) return;
@@ -3913,6 +3923,83 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     result[exId] = { exId, kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm), missed: hits.length > 0 && !allHit };
   }
   return result;
+}
+
+// The correct "last time" baseline for a 5/3/1 main lift's set-by-set
+// improvement/decline comparison (SessionDetailScreen, the live training
+// screen, via prev531MainLiftSession/prev531MainLiftSessionLive below): the
+// session at the SAME week but the PREVIOUS cycle, e.g. cycle 2 week 1 pairs
+// only with cycle 1 week 1. 5/3/1's weekly weights are a fixed Training-Max
+// percentage (FTO_WAVES), not progressive session-to-session, so comparing
+// against whichever session of this day happened to run most recently is
+// very often comparing week 1's deliberately light 65/75/85% against a
+// HEAVIER week from the previous cycle (week 3's 75/85/95%, or week 2's
+// 70/80/90%), reading as a false decline the moment a new, lighter cycle
+// starts.
+//
+// find531PrevCycleSession is the shared core: scans backward from idx
+// (exclusive) through planSessions (already count531Sessions-filtered and
+// chronologically sorted) for the nearest one at (week, cycle - 1) that also
+// logged exId as a main lift entry, rather than assuming a rigid day-count
+// stride, so an out-of-rotation-order session (flex plans don't enforce one)
+// still lands on the right week/cycle for the exercise actually being
+// compared, not just whatever sat at the same array offset. null when exId
+// isn't a main lift of the plan, or idx's own cycle is 0 (no earlier cycle
+// exists yet, the existing "most recent session" comparison is already
+// correct there).
+function find531PrevCycleSession(planSessions, idx, dayCount, maxWeek, exId) {
+  const { week, cycle } = week531At(idx, dayCount, maxWeek);
+  if (cycle < 1) return null;
+  for (let i = idx - 1; i >= 0; i--) {
+    const pos = week531At(i, dayCount, maxWeek);
+    if (pos.cycle < cycle - 1) break; // walked past the target cycle, nothing earlier can match
+    if (pos.cycle === cycle - 1 && pos.week === week && (planSessions[i].entries || []).some(e => e.exId === exId)) {
+      return planSessions[i];
+    }
+  }
+  return null;
+}
+
+// For an already-ended session s: find531PrevCycleSession at s's own
+// position. null (in addition to the cases above) when exId isn't a main
+// lift of s's own plan, or s isn't itself a counted 531 session (still in
+// progress, a bonus, or an app-deload day, see count531Sessions), in which
+// case the caller should fall back to its normal "most recent session"
+// comparison.
+function prev531MainLiftSession(store, s, exId) {
+  if (!s?.scheduleId) return null;
+  const sch = (store?.schedules || []).find(x => x.id === s.scheduleId);
+  if (!sch || !is531Plan(sch) || !(sch.program_data?.mainLifts || {})[exId]) return null;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const maxWeek = weeks531(includeDeload);
+  const planSessions = count531Sessions(sch, store?.sessions)
+    .slice()
+    .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
+  const idx = planSessions.findIndex(x => x.id === s.id);
+  if (idx === -1) return null;
+  return find531PrevCycleSession(planSessions, idx, dayCount, maxWeek, exId);
+}
+
+// Same pairing as prev531MainLiftSession, for the LIVE in-progress session
+// (screens-train.jsx): it hasn't ended yet, so it can never be found by id in
+// count531Sessions the way a finished session can. Positioned as whatever
+// index it will occupy once it lands there (planSessions.length, one past
+// every already-ended session on this plan), which is correct as long as it
+// will actually count once finished; isBonus/isDeload are already decided at
+// session start (see startBonusSession et al.), not something that changes
+// between now and finish, so they can be checked directly instead of guessed.
+function prev531MainLiftSessionLive(store, session, exId) {
+  if (!session?.scheduleId || session.isBonus || session.isDeload) return null;
+  const sch = (store?.schedules || []).find(x => x.id === session.scheduleId);
+  if (!sch || !is531Plan(sch) || !(sch.program_data?.mainLifts || {})[exId]) return null;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const maxWeek = weeks531(includeDeload);
+  const planSessions = count531Sessions(sch, store?.sessions)
+    .slice()
+    .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
+  return find531PrevCycleSession(planSessions, planSessions.length, dayCount, maxWeek, exId);
 }
 
 // Reset a lift after this many missed cycles in a row (Wendler's stall rule).
@@ -8733,7 +8820,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,

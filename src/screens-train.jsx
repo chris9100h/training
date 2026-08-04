@@ -1060,6 +1060,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
+  // 5/3/1 main lift: the correct "last time" for both the regression/
+  // improvement flash and the plain "Last time" reference displays below is
+  // the SAME WEEK of the PREVIOUS CYCLE, not `last`'s usual "best of the last
+  // 3 sessions": a wave-scheduled lift's weight is a fixed Training-Max
+  // percentage per week (FTO_WAVES), not progressive session-to-session, so
+  // the chronologically closest session is very often a HEAVIER week from
+  // the previous cycle, reading as a false decline the moment a new, lighter
+  // cycle starts (see LB.prev531MainLiftSessionLive's own comment). Only
+  // overrides the comparison SETS these specific displays read, never `last`
+  // itself: the outlier check above and the progression-suggestion mirror
+  // already carry their own is531MainLift exemptions and must keep reading
+  // the plain `last` unchanged. Falls back to last?.entry?.sets untouched for
+  // everything else (assistance work, non-531 plans, cycle 0 with no earlier
+  // cycle to compare against yet).
+  const cyclePrevSession531 = useMemoT(
+    () => (entry ? LB.prev531MainLiftSessionLive(store, session, entry.exId) : null),
+    [store.sessions, store.schedules, session.scheduleId, session.isBonus, session.isDeload, entry?.exId]
+  );
+  const cyclePrevEntrySets531 = useMemoT(() => {
+    if (!cyclePrevSession531 || !entry) return null;
+    const en = (cyclePrevSession531.entries || []).find(e => e.exId === entry.exId);
+    return en?.sets || null;
+  }, [cyclePrevSession531, entry?.exId]);
+  const lastEntrySets = cyclePrevEntrySets531 || last?.entry?.sets || [];
 
   // Cross-day history for the tapped exercise name. The in-training "last time"
   // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
@@ -1615,7 +1639,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Match the current set to the same working-set position in the previous
     // session. Either session may carry a different number of warm-up sets, so
     // compare by working-set index (warm-ups excluded), never the raw index.
-    const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+    const prevWorkingSets = lastEntrySets.filter(s => !s.warmup);
     const prevWorkingSetFor = (idx) => {
       if (entry.sets[idx]?.warmup) return undefined;
       const wIdx = entry.sets.slice(0, idx + 1).filter(s => !s.warmup).length - 1;
@@ -1740,7 +1764,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const prevWS = lastEntrySets.filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const isNewBest = isNewBestSet(firstSet.kg, firstSet.reps);
@@ -5815,7 +5839,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // COMPLETE screen below looks it up by content instead of assuming index 0.
   const warmupEntry = session.entries.find(e => (e.sets || []).some(s => s.warmup)) || session.entries[0];
   // For warmup sets there's no meaningful "last session" comparison
-  const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const prevHeroSet = isCurrentWarmup ? null : lastEntrySets.filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
   const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
@@ -6804,7 +6828,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // Hide warmup rows once training has started, they're done and tapping them would re-trigger the overlay
               if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
-              const prevSet = isWarmupRow ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[i - warmupCount];
+              const prevSet = isWarmupRow ? null : lastEntrySets.filter(s => !s.warmup)[i - warmupCount];
               const isCurrent = i === currentSetIdx;
               const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
