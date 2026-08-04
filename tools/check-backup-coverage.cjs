@@ -76,7 +76,10 @@ const EXCLUDED = {
 // Columns that legitimately never round-trip.
 const GLOBAL_ALLOW = new Set(['user_id', 'created_at', 'updated_at', 'next_reminder_at']);
 const PER_TABLE_ALLOW = {
-  zane_sessions: new Set(['entries']),         // legacy JSONB, never written (relational is source of truth)
+  // completed_server_at: server-stamped and client-unwritable by design (it is
+  // what makes the founding-member day spread forgery-resistant). Restoring it
+  // from a user-editable backup file would hand that back.
+  zane_sessions: new Set(['entries', 'completed_server_at']),  // entries: legacy JSONB, never written (relational is source of truth)
   // sw_version: internal client marker. auto_close_notify / manual_calories: not
   // part of the store model (never loaded/synced), so nothing to round-trip; add
   // them to loadFromSupabase + the store if they ever become real settings.

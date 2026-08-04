@@ -144,7 +144,12 @@ CREATE TABLE public.zane_sessions (
   meso_recap jsonb,
   readiness text,
   signal_weight text,
-  cycle_pos integer
+  cycle_pos integer,
+  -- Server clock at first completion (Migration 0242). Written only by
+  -- zane_sessions_stamp_completion, immutable afterwards, never accepted from
+  -- the client: it is the only session timestamp a client cannot forge, and the
+  -- founding-member day-spread check depends on that.
+  completed_server_at timestamptz
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -1667,11 +1672,42 @@ DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
+-- ── Session completion stamp (Migration 0242) ─────────────────────────────────
+CREATE OR REPLACE FUNCTION public.zane_sessions_stamp_completion()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.completed_server_at := CASE WHEN NEW.ended IS NOT NULL THEN now() ELSE NULL END;
+    RETURN NEW;
+  END IF;
+  IF OLD.completed_server_at IS NOT NULL THEN
+    NEW.completed_server_at := OLD.completed_server_at;
+  ELSIF NEW.ended IS NOT NULL THEN
+    NEW.completed_server_at := now();
+  ELSE
+    NEW.completed_server_at := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.zane_sessions_stamp_completion() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_sessions_stamp_completion ON public.zane_sessions;
+CREATE TRIGGER zane_sessions_stamp_completion
+  BEFORE INSERT OR UPDATE ON public.zane_sessions
+  FOR EACH ROW EXECUTE FUNCTION public.zane_sessions_stamp_completion();
+
 -- ── Founding-member tier (Migration 0240) ─────────────────────────────────────
--- Grants tier = 'lifetime' the moment an account clears both bars: 5 completed
--- workouts AND 150 logged minutes. The time floor is deliberate and unadvertised:
--- the workout count is public on the landing page and would otherwise be
--- satisfiable by starting and ending five empty sessions in a row.
+-- Grants tier = 'lifetime' once an account clears all three bars (Migration
+-- 0242 hardened this): 5 completed workouts, 150 minutes counting at most 120
+-- per session, and completions on 3 distinct SERVER days. duration_minutes and
+-- ended are client-supplied, so the first two alone were forgeable in one
+-- request; the day spread reads completed_server_at, which the client cannot
+-- write, and costs a forger three real calendar days.
 CREATE OR REPLACE FUNCTION public.grant_lifetime_if_qualified()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1682,6 +1718,7 @@ DECLARE
   v_tier      text;
   v_workouts  int;
   v_minutes   int;
+  v_days      int;
   v_taken     int;
   v_total     int;
 BEGIN
@@ -1695,12 +1732,14 @@ BEGIN
   END IF;
 
   SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL),
-         COALESCE(SUM(duration_minutes) FILTER (WHERE ended IS NOT NULL), 0)
-    INTO v_workouts, v_minutes
+         COALESCE(SUM(LEAST(COALESCE(duration_minutes, 0), 120))
+                  FILTER (WHERE ended IS NOT NULL), 0),
+         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL)
+    INTO v_workouts, v_minutes, v_days
     FROM zane_sessions
    WHERE user_id = NEW.user_id;
 
-  IF v_workouts < 5 OR v_minutes < 150 THEN
+  IF v_workouts < 5 OR v_minutes < 150 OR v_days < 3 THEN
     RETURN NEW;
   END IF;
 
