@@ -21,60 +21,34 @@
 // read the same way a coach reading this same form would: from the trend
 // itself and the client's own free-text goal notes, never assumed.
 //
+// Qwen writes the opinion, for the cost; Claude is the automatic fallback if
+// Qwen itself is unreachable, same PRIMARY_PROVIDER/FALLBACK_PROVIDER +
+// callModelWithFallback pattern as scan-label/parse-meal/ai-daily-summary,
+// see supabase/functions/_shared/ai.ts. No reasoning either way
+// (reasoningBudget: null), same reasoning as ai-daily-summary: the numbers
+// are already computed, the job is a casual read, not arithmetic.
+//
 // One action: POST { checkinId } -> { opinion: string, generatedAt: string }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
+import { callModel, callModelWithFallback, isProviderId, stripEmDash } from '../_shared/ai.ts';
 
+// Handed to callerGet below as the anon key for RLS-scoped reads under the
+// caller's own bearer token; kept local rather than imported because every
+// function in this codebase carries its own copy of this same fallback
+// constant (see CLAUDE.md), _shared/edge.ts's copy is not exported.
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
 const CHECKIN_OPINION_LIMIT = 5;
 const ALLOWED_PHASES = new Set(['cut', 'maintain', 'bulk']);
 
-// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
-// (isAdmin = store.user?.email === this). The admin gets unlimited quota AND can
-// re-generate past the once-per-check-in gate below, so testing a prompt change
-// never needs a manual DB reset.
-const ADMIN_EMAIL = 'office@btc-prime.biz';
+// Qwen runs first for the cost; Claude was the long-standing default before
+// Qwen existed and is what a Qwen failure falls back to, see
+// callModelWithFallback in _shared/ai.ts.
+const PRIMARY_PROVIDER = 'qwen';
+const FALLBACK_PROVIDER = 'claude';
 
-// Same shape/reasoning as ai-daily-summary's withinQuota: advisory, fails
-// OPEN, only a backstop against a retry storm, not the real once-per-check-in
-// gate (that's ai_opinion_generated_at, checked further down).
-async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
-  try {
-    const base = Deno.env.get('SUPABASE_URL') ?? '';
-    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    if (!base || !key) return true;
-    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
-    });
-    if (!r.ok) return true;
-    return (await r.json()) !== false;
-  } catch (_) {
-    return true;
-  }
-}
-
-async function resolveUser(token: string): Promise<{ id: string; email: string | null } | null> {
-  if (!token) return null;
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
-    headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
-  }).catch(() => null);
-  if (!r?.ok) return null;
-  const user = await r.json().catch(() => null);
-  return user?.id ? { id: user.id, email: user.email ?? null } : null;
-}
+const LABELS = { tag: 'ai-checkin-opinion', feature: 'AI opinions', subject: 'opinion writer' };
 
 // A PostgREST GET using the CALLER'S OWN token: RLS decides what comes back,
 // same as if the client had queried directly. An empty array is the correct,
@@ -245,11 +219,7 @@ function buildUserPrompt(
   return lines.join('\n');
 }
 
-function stripEmDash(s: string): string {
-  return s.replace(/\u2014/g, ', ');
-}
-
-// Best-effort rollback for a claim that didn't pan out (Anthropic failed, or
+// Best-effort rollback for a claim that didn't pan out (the model call failed, or
 // the content write after it failed): resets the gate back to NULL so the
 // user can simply retry, exactly as if this request had never claimed it.
 // Without this, a transient failure AFTER a successful claim would leave
@@ -278,27 +248,25 @@ async function releaseClaim(base: string, serviceKey: string, checkinId: string)
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
-  const json = (body: unknown, status: number) =>
-    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  const pre = preflight(req);
+  if (pre) return pre;
 
   const callerToken = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const caller = await resolveUser(callerToken);
-  if (!caller) return json({ error: 'unauthorized' }, 401);
+  const caller = await resolveUser(req);
+  if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
   const userId = caller.id;
   const isAdmin = caller.email === ADMIN_EMAIL;
 
   const payload = await req.json().catch(() => ({}));
   const checkinId = typeof payload?.checkinId === 'string' ? payload.checkinId : '';
-  if (!checkinId) return json({ error: 'missing checkinId' }, 400);
+  if (!checkinId) return jsonResponse({ error: 'missing checkinId' }, 400);
   const rawPhase = typeof payload?.phase === 'string' ? payload.phase.toLowerCase().trim() : '';
   const phase = ALLOWED_PHASES.has(rawPhase) ? rawPhase : null;
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  if (!base || !serviceKey) return json({ error: 'Not set up yet (missing SUPABASE_SERVICE_ROLE_KEY).' }, 503);
+  if (!base || !serviceKey) return jsonResponse({ error: 'Not set up yet (missing SUPABASE_SERVICE_ROLE_KEY).' }, 503);
 
   // Read WITH THE CALLER'S OWN TOKEN: existing RLS (checkins_client /
   // checkins_coach_read) decides whether this comes back at all, no
@@ -307,8 +275,8 @@ Deno.serve(async (req) => {
   const checkinRows = await callerGet(base, callerToken, anon,
     `zane_checkins?id=eq.${encodeURIComponent(checkinId)}&select=id,coaching_id,responses,ai_opinion_generated_at`);
   const checkin = checkinRows[0];
-  if (!checkin) return json({ error: 'Check-in not found, or you are not authorized to view it.' }, 403);
-  if (checkin.ai_opinion_generated_at && !isAdmin) return json({ error: 'Already generated for that check-in.' }, 409);
+  if (!checkin) return jsonResponse({ error: 'Check-in not found, or you are not authorized to view it.' }, 403);
+  if (checkin.ai_opinion_generated_at && !isAdmin) return jsonResponse({ error: 'Already generated for that check-in.' }, 409);
 
   const responses = checkin.responses || {};
   const coachingId = checkin.coaching_id;
@@ -341,14 +309,13 @@ Deno.serve(async (req) => {
   const priorMacros = macroRows[1] || null;
 
   if (!isAdmin && !await withinQuota(userId, 'checkin_opinion', CHECKIN_OPINION_LIMIT)) {
-    return json({ error: `That's ${CHECKIN_OPINION_LIMIT} check-in opinions today, well past normal use. The limit resets tomorrow.` }, 429);
+    return jsonResponse({ error: `That's ${CHECKIN_OPINION_LIMIT} check-in opinions today, well past normal use. The limit resets tomorrow.` }, 429);
   }
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  if (!apiKey) return json({ error: 'AI opinions are not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
-  const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
+  // Manual-testing override only, see the file header; the app never sends this.
+  const explicitProvider = isProviderId(payload?.provider) ? payload.provider : null;
 
-  // Atomic claim, performed right before the (slow, paid) Anthropic call: the
+  // Atomic claim, performed right before the (slow, paid) model call: the
   // read above is only a fast-path check, two concurrent requests could both
   // pass it before either writes, both then paying for a full Anthropic
   // call. A conditional UPDATE, only when still NULL, closes that race: at
@@ -377,58 +344,39 @@ Deno.serve(async (req) => {
       );
     } catch (e) {
       console.error('[ai-checkin-opinion] claim fetch error:', e);
-      return json({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
     }
     if (!claimResp.ok) {
       console.error('[ai-checkin-opinion] claim error', claimResp.status, await claimResp.text().catch(() => ''));
-      return json({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check this check-in\'s opinion status. Try again.' }, 502);
     }
     const claimedRows = await claimResp.json().catch(() => []);
     if (!Array.isArray(claimedRows) || !claimedRows.length) {
       // Someone else's request already flipped ai_opinion_generated_at
       // between our read above and this UPDATE: same outcome as the
       // already-generated case above.
-      return json({ error: 'Already generated for that check-in.' }, 409);
+      return jsonResponse({ error: 'Already generated for that check-in.' }, 409);
     }
   }
 
-  let resp: Response;
-  try {
-    resp = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 350,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(effectiveSchema, responses, priorResponses, earlierWeeks, macros, priorMacros, phase) }] }],
-      }),
-    });
-  } catch (e) {
-    console.error('[ai-checkin-opinion] anthropic fetch error:', e);
+  const modelCall = {
+    system: SYSTEM_PROMPT,
+    userText: buildUserPrompt(effectiveSchema, responses, priorResponses, earlierWeeks, macros, priorMacros, phase),
+    maxTokens: 350,
+    reasoningBudget: null,
+  };
+  const result = explicitProvider
+    ? await callModel(explicitProvider, modelCall, LABELS)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
+  if (!result.ok) {
     if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
-    return json({ error: 'Could not reach the opinion writer. Try again.' }, 502);
+    return jsonResponse({ error: result.error }, result.status);
   }
 
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    console.error('[ai-checkin-opinion] anthropic error', resp.status, detail);
-    if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
-    return json({ error: `Opinion writer failed (${resp.status}). Try again.` }, 502);
-  }
-
-  const data = await resp.json().catch(() => null);
-  const content = data?.content;
-  const text = Array.isArray(content)
-    ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
-    : '';
+  const text = result.text;
   if (!text.trim()) {
     if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
-    return json({ error: 'Got an empty response. Try again.' }, 422);
+    return jsonResponse({ error: 'Got an empty response. Try again.' }, 422);
   }
 
   const opinion = stripEmDash(text).trim();
@@ -455,13 +403,13 @@ Deno.serve(async (req) => {
       const detail = await r.text().catch(() => '');
       console.error('[ai-checkin-opinion] update error', r.status, detail);
       if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
-      return json({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
+      return jsonResponse({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
     }
   } catch (e) {
     console.error('[ai-checkin-opinion] update fetch error:', e);
     if (!isAdmin) await releaseClaim(base, serviceKey, checkinId);
-    return json({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
+    return jsonResponse({ error: 'Generated the opinion but could not save it. Try again.' }, 502);
   }
 
-  return json({ opinion, generatedAt }, 200);
+  return jsonResponse({ opinion, generatedAt }, 200);
 });
