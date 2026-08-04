@@ -15,11 +15,11 @@ markup change needed.
 | `coaching.jpg` | Coaching section | Delivered |
 | `train.jpg` | Gallery, "Logging a set" | Delivered |
 | `plan.jpg` | Gallery, "Your week" | Delivered |
-| `progress.jpg` | Gallery, "Progress and PRs" | **Missing.** A progress chart or the records screen |
-| `health.jpg` | Gallery, "Daily log" | **Missing.** The daily health log with weight, steps, water |
+| `progress.jpg` | Gallery, "Progress and PRs" | Delivered |
+| `health.jpg` | Gallery, "Daily log" | Delivered |
 
-The two missing ones are optional. Their slots show a placeholder until the
-files land.
+All seven slots are filled. Replacing one is a matter of dropping a new file
+over the old name, no markup change.
 
 ## Format
 
