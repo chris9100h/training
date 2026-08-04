@@ -1207,10 +1207,12 @@ function TierChip({ tier }) {
       title={chip.title}
       style={{
         color: UI.gold,
-        background: 'rgba(var(--accent-rgb),0.12)',
-        border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`,
+        background: 'rgba(var(--accent-rgb),0.14)',
         borderRadius: 4,
-        padding: '3px 7px',
+        // No border and 1px of vertical padding: the chip costs 10px of height
+        // instead of 17, which is what keeps the header at its original size.
+        padding: '1px 6px',
+        fontSize: 8,
         lineHeight: 1,
         whiteSpace: 'nowrap',
       }}
@@ -2877,9 +2879,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
+          {/* Column, not a row: the tier chip sits under the wordmark. ZANE is 26
+              rather than its original 34 and the gap is 0 so the two-line block
+              still measures 36px, exactly what the date + greeting on the right
+              measures. The header keeps the height it had before the chip. */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
               {(() => {
                 const isProblem = storageFull || syncStatus === 'error';
                 const isSaving  = syncStatus === 'pending' && !storageFull;
@@ -2890,7 +2896,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     className="fa-solid fa-dumbbell"
                     onClick={isProblem ? onRetrySync : undefined}
                     title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
-                    style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+                    style={{ fontSize: 15, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
                   />
                 );
               })()}
