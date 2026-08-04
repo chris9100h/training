@@ -22,7 +22,7 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
-    id: 'v2.696',
+    id: 'v2.697',
     date: '2026-08-04',
     title: 'Badges, and where this is going \ud83c\udfc5',
     items: [
