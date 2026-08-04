@@ -261,9 +261,10 @@
   /* Live seat count, read from the database on load. Starts hidden and only
      unhides once a real number arrives: on the one time-limited claim on the
      page, a stale or guessed number is worse than no number at all. */
-  /* The 18px under .founding-head plus this 4px sit above the meter, so the 20px
-     below it balances the block instead of letting the body text crowd it. */
-  .seatmeter{display:none;width:100%;max-width:330px;margin:4px auto 20px;flex-direction:column;align-items:center;gap:9px;}
+  /* Sits at the foot of the card, after the qualifying rule, as its closing
+     line. No separator of its own: the card already has one and a second would
+     read as a fourth section rather than a sign-off. */
+  .seatmeter{display:none;width:100%;max-width:330px;margin:26px auto 0;flex-direction:column;align-items:center;gap:9px;}
   .seatmeter.on{display:flex;}
   .seatmeter-n{display:flex;align-items:baseline;gap:9px;}
   .seatmeter-n b{font-family:var(--f-display);font-weight:800;font-size:46px;line-height:0.82;color:var(--accent);}
@@ -429,17 +430,17 @@
         <span class="founding-badge">Founding offer</span>
         <h3>The first <span class="k" id="seatTotalHead">75</span> never pay</h3>
       </div>
-      <div class="seatmeter" id="seatMeter">
-        <div class="seatmeter-n"><b id="seatN">0</b><i id="seatU">seats left</i></div>
-        <div class="seatmeter-track"><i id="seatBar"></i></div>
-        <div class="seatmeter-sub" id="seatSub"></div>
-      </div>
       <div class="founding-body">
       <p>The first <span id="seatTotalBody">75</span> people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
       <p id="seatClaim">You do not sign up for it or enter a code. Train, and the seat is yours.</p>
       <div class="qual">
         <span class="lbl">What counts</span>
         <p class="txt">Five completed workouts, on separate days, with real training behind them. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
+      </div>
+      <div class="seatmeter" id="seatMeter">
+        <div class="seatmeter-n"><b id="seatN">0</b><i id="seatU">seats left</i></div>
+        <div class="seatmeter-track"><i id="seatBar"></i></div>
+        <div class="seatmeter-sub" id="seatSub"></div>
       </div>
       </div>
     </div>
