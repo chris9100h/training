@@ -5348,7 +5348,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
+      <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} onShare={openShareRecipe} recipe={recipeEditorRecipe} store={store} />
 
       {/* Rendered AFTER recipeLogPrompt's own Sheet above (both z-index 100,
           see CookingModeScreen's own comment on why not a literal 200): later
@@ -7506,7 +7506,7 @@ function FdIngredientBadge({ n, size = 20 }) {
   );
 }
 
-function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
+function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
   const [items, setItems] = useStateFd([]);
@@ -7688,6 +7688,11 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             {items.length > 0 && (
               <button onClick={takeScreenshot} disabled={capturing} aria-label="Screenshot" style={fdTopAddBtn}>
                 {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+              </button>
+            )}
+            {recipe?.id && (
+              <button onClick={() => onShare((store.foodRecipes || []).find(r => r.id === recipe.id) || recipe)} aria-label="Share recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
               </button>
             )}
             {items.length > 0 && (
