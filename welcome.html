@@ -149,7 +149,9 @@
   }
 
   /* ---- section scaffolding ---- */
-  section.band{padding:64px 0;border-bottom:1px solid var(--hair);}
+  /* The header is sticky, so an anchor jump would land the section title
+     underneath it. Offset the scroll target by a bit more than its height. */
+  section.band{padding:64px 0;border-bottom:1px solid var(--hair);scroll-margin-top:72px;}
   section.band.tight{padding:48px 0;}
   .sec-head{display:flex;align-items:center;gap:12px;color:var(--accent);margin-bottom:18px;}
   .sec-head .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);}
@@ -243,6 +245,22 @@
   .price-meta div{font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);}
   .price-meta div b{display:block;margin-top:5px;font-size:15px;letter-spacing:0.02em;color:var(--ink);font-family:var(--f-display);font-weight:700;}
 
+  /* The founding offer is the one time-limited thing on the page, so it gets a
+     full accent border and a tinted fill rather than the coach block's single
+     left rail. It should read as the loudest thing in the section. */
+  .founding{position:relative;margin-top:22px;border:1px solid rgba(var(--accent-rgb),0.55);border-radius:8px;padding:24px 24px 22px;overflow:hidden;
+            background:linear-gradient(180deg,rgba(var(--accent-rgb),0.10),rgba(var(--accent-rgb),0.03));}
+  .founding-head{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px;}
+  .founding-badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;color:var(--bg);background:var(--accent);border-radius:4px;padding:6px 10px;}
+  .founding h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(24px,4vw,34px);line-height:1;margin:0;}
+  .founding h3 .k{color:var(--accent);}
+  .founding p{margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;max-width:70ch;}
+  .founding p b{color:var(--ink);font-weight:600;}
+  .founding .qual{margin:16px 0 0;padding-top:14px;border-top:1px solid rgba(var(--accent-rgb),0.28);display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;}
+  .founding .qual .lbl{font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);flex:none;}
+  .founding .qual .txt{margin:0;font-size:14px;line-height:1.55;color:var(--ink-soft);}
+  .founding .qual .txt b{color:var(--ink);font-weight:600;}
+
   /* Coach seats sit apart from the personal pricing: different payer, different
      rules, and it uses the coach accent the pillars already established. */
   .seats{margin-top:22px;background:var(--panel);border:1px solid var(--hair);border-left:3px solid var(--coach);border-radius:8px;padding:22px 22px 20px;}
@@ -312,7 +330,7 @@
         </a>
         <a class="btn ghost" href="features.html">See every feature</a>
       </div>
-      <p class="cta-note">Runs in the browser, installs to your home screen, logs a full workout with no signal.</p>
+      <p class="cta-note">Free, no card, nothing to cancel. Runs in your browser, installs to your home screen.</p>
     </div>
     <div class="split-media">
       <div class="phone">
@@ -355,6 +373,55 @@
         <h3>Coach</h3>
         <p>A coach writes plans, macro targets and protocols straight into your app, and can watch a session as it happens. What you logged, they read but never rewrite.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="pricing">
+  <div class="wrap">
+    <div class="sec-head"><span class="dot"></span><span class="micro">Pricing</span><span class="rule"></span></div>
+    <h2 class="sec">Free, and honest about why</h2>
+    <p class="sec-lede">Everything on this page is free right now. Not a trial with a timer running behind it, not a stripped-down tier with the good parts locked. <b>The whole app.</b></p>
+
+    <div class="price">
+      <div class="price-panel knurl">
+        <span class="price-stamp"><span class="dot"></span>Today</span>
+        <div class="price-tag">Free</div>
+        <p class="price-sub"><b id="priceCount">Every feature</b>, for everyone, with no card on file and nothing to cancel.</p>
+        <div class="price-meta">
+          <div>Trial length<b>None, it is just free</b></div>
+          <div>Card required<b>No</b></div>
+        </div>
+      </div>
+
+      <ul class="bullets">
+        <li><b>It costs me a database, not a company.</b> Zane runs on modest infrastructure and I am building it because I use it. While the bill stays small, carrying it myself is easier than charging for it.</li>
+        <li><b>If that changes, it covers the bill.</b> The goal of ever charging would be to pay for hosting and the database, not to turn this into a business. I would rather keep it small and honest than grow it into something that needs your money.</li>
+        <li><b>I genuinely do not know yet what would sit behind it.</b> No tier list, no feature held back in advance waiting to be locked. That decision deserves proper thought, and I would rather make it late than guess now.</li>
+        <li><b>It will not be another $15 a month.</b> Whatever it lands on, I am aiming under $5, and everything you have already logged stays yours and stays exportable either way.</li>
+      </ul>
+    </div>
+
+    <div class="founding knurl">
+      <div class="founding-head">
+        <span class="founding-badge">Founding offer</span>
+        <h3>The first <span class="k">75</span> never pay</h3>
+      </div>
+      <p>The first 75 people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
+      <p>You do not sign up for it or enter a code. Train, and the seat is yours.</p>
+      <div class="qual">
+        <span class="lbl">What counts</span>
+        <p class="txt">Five completed workouts. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
+      </div>
+    </div>
+
+    <div class="seats">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6"/><path d="M17 8.5h4.5M19.25 6.25v4.5"/></svg>
+        Coached? Your coach covers it
+      </h3>
+      <p>When Zane starts charging, coaches will buy client seats rather than every lifter paying separately. If you train with a coach inside the app, <b>your seat comes out of theirs</b>. Nothing is asked of you, and nothing changes about what you can do.</p>
+      <p>If the coaching relationship ends, the account stays yours either way. Take over the seat yourself, or drop back to the free side and keep training. <b>Your history does not move, and nothing gets locked behind you.</b></p>
     </div>
   </div>
 </section>
@@ -513,42 +580,6 @@
       </div>
     </div>
     <p class="cta-note" style="margin-top:16px">On iPhone and iPad, push notifications only work once Zane is installed this way and switched on in Settings.</p>
-  </div>
-</section>
-
-<section class="band" id="pricing">
-  <div class="wrap">
-    <div class="sec-head"><span class="dot"></span><span class="micro">Pricing</span><span class="rule"></span></div>
-    <h2 class="sec">Free, and honest about why</h2>
-    <p class="sec-lede">Everything on this page is free right now. Not a trial with a timer running behind it, not a stripped-down tier with the good parts locked. <b>The whole app.</b></p>
-
-    <div class="price">
-      <div class="price-panel knurl">
-        <span class="price-stamp"><span class="dot"></span>Today</span>
-        <div class="price-tag">Free</div>
-        <p class="price-sub"><b id="priceCount">Every feature</b>, for everyone, with no card on file and nothing to cancel.</p>
-        <div class="price-meta">
-          <div>Trial length<b>None, it is just free</b></div>
-          <div>Card required<b>No</b></div>
-        </div>
-      </div>
-
-      <ul class="bullets">
-        <li><b>It costs me a database, not a company.</b> Zane runs on modest infrastructure and I am building it because I use it. While the bill stays small, carrying it myself is easier than charging for it.</li>
-        <li><b>If that changes, it covers the bill.</b> The goal of ever charging would be to pay for hosting and the database, not to turn this into a business. I would rather keep it small and honest than grow it into something that needs your money.</li>
-        <li><b>I genuinely do not know yet what would sit behind it.</b> No tier list, no feature held back in advance waiting to be locked. That decision deserves proper thought, and I would rather make it late than guess now.</li>
-        <li><b>It will not be another $15 a month.</b> Whatever it lands on, I am aiming under $5, and everything you have already logged stays yours and stays exportable either way.</li>
-      </ul>
-    </div>
-
-    <div class="seats">
-      <h3>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6"/><path d="M17 8.5h4.5M19.25 6.25v4.5"/></svg>
-        Coached? Your coach covers it
-      </h3>
-      <p>When Zane starts charging, coaches will buy client seats rather than every lifter paying separately. If you train with a coach inside the app, <b>your seat comes out of theirs</b>. Nothing is asked of you, and nothing changes about what you can do.</p>
-      <p>If the coaching relationship ends, the account stays yours either way. Take over the seat yourself, or drop back to the free side and keep training. <b>Your history does not move, and nothing gets locked behind you.</b></p>
-    </div>
   </div>
 </section>
 
