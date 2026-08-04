@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.696',
+    date: '2026-08-04',
+    title: 'Badges, and where this is going \ud83c\udfc5',
+    items: [
+      "\ud83c\udfc5 There's a badge under the wordmark now: your home screen shows whether you're on Free or Lifetime Premium, right below ZANE. That's the whole feature, and it's the groundwork for the point below.",
+      "\ud83c\udf96\ufe0f Lifetime Premium goes to the first 75 people who genuinely use Zane. No code, no signup, nothing to claim: just train, and it lands on your account by itself. 21 of you already have it as of today, which means you were here early and stuck around. Thank you, genuinely. 54 seats are still open.",
+      { text: "Nothing is behind a paywall today, and nothing is about to be. Paid plans will happen eventually, that's the honest version, but it is not close and nothing is being held back in the meantime. When it does arrive it's there to cover the server bill rather than build a business, and the aim is under $5 a month. Those 75 accounts never pay it, and everything you have logged stays yours and stays exportable either way.", emphasis: true },
+      "\ud83d\udeaa The app is open to everyone now. Registration has been open for a while already, but with a limited number of seats behind the scenes. That cap is gone entirely, no server-side limit left: send the link to whoever you like.",
+    ],
+  },
+  {
     id: 'v2.695',
     date: '2026-08-04',
     title: 'Recipes, camera-ready 📸',
