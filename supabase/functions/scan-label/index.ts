@@ -185,6 +185,13 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model,
         max_tokens: 1500,
+        // Reasoning is ALWAYS on by default on Grok 4.3 (effort 'low') unless
+        // this is set, which it had not been: the label scanner was quietly
+        // paying for deliberation nobody asked for. Reading numbers off a
+        // printed table needs none, and it is latency somebody feels standing
+        // at a shelf. All three label scanners now run without it, so the
+        // toggle compares models and not accidental per-provider defaults.
+        reasoning_effort: 'none',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {

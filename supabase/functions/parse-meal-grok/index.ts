@@ -262,10 +262,15 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model,
-        // Bumped from 1200: the mandatory self-check can now show visible
-        // arithmetic before the JSON for a multi-item meal, needs headroom
-        // so that reasoning can never truncate the JSON object itself.
-        max_tokens: 2000,
+        // Grok 4.3 reasons by default at effort 'low'. Stated explicitly
+        // rather than inherited: this endpoint had been reasoning all along
+        // while its Claude twin was not, which made the toggle compare
+        // configurations instead of models. On is the right setting here, see
+        // the same note in parse-meal.
+        reasoning_effort: 'low',
+        // 8000 across all three meal parsers: the only variable the toggle
+        // should expose is the model, not how much room each one was given.
+        max_tokens: 8000,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {

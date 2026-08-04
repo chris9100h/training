@@ -258,10 +258,17 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model,
-        // Bumped from 1200: the mandatory self-check can now show visible
-        // arithmetic before the JSON for a multi-item meal, needs headroom
-        // so that reasoning can never truncate the JSON object itself.
-        max_tokens: 2000,
+        // Estimating portions by eye and then redoing the arithmetic until it
+        // clears a stated calorie floor is what reasoning is for, so all three
+        // meal parsers run with it on. Haiku 4.5 predates adaptive thinking
+        // and reasons only when handed an explicit budget; the other two
+        // default it on. budget_tokens must stay below max_tokens (minimum
+        // 1024), and thinking is billed and counted as output, hence the
+        // ceiling below rather than the 2000 this used to carry.
+        thinking: { type: 'enabled', budget_tokens: 4000 },
+        // 8000 across all three meal parsers: the only variable the toggle
+        // should expose is the model, not how much room each one was given.
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
         messages: [{
           role: 'user',

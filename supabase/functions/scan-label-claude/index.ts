@@ -185,6 +185,11 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model,
         max_tokens: 1500,
+        // No `thinking` block on purpose, not by omission: Haiku 4.5 predates
+        // adaptive thinking and only reasons when handed an explicit
+        // {type:'enabled', budget_tokens}. Leaving it out is what keeps this
+        // scanner aligned with the other two, which disable reasoning
+        // explicitly because their models default it on.
         system: SYSTEM_PROMPT,
         messages: [
           {

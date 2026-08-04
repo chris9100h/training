@@ -181,9 +181,11 @@ Deno.serve(async (req) => {
   if (!image) return json({ error: 'missing image' }, 400);
   if (image.length > MAX_IMAGE_CHARS) return json({ error: 'Image too large. Try again.' }, 413);
 
-  // Thinking is ON by default on the Qwen3.7 generation, and it is the wrong
-  // trade here twice over: reading numbers off a table needs no deliberation,
-  // and the reasoning is billed as output tokens while somebody stands in a
+  // App-wide policy: no reasoning in any label scanner, reasoning in every
+  // meal parser (the counterpart note lives in parse-meal-qwen). Thinking is
+  // ON by default on the Qwen3.7 generation, and it is the wrong trade here
+  // twice over: reading numbers off a table needs no deliberation, and the
+  // reasoning is billed as output tokens while somebody stands in a
   // supermarket aisle waiting for the sheet to fill in. Two independent kill
   // switches because different front doors honour different ones: the body
   // flag is Alibaba's own extension, /no_think is the in-prompt equivalent

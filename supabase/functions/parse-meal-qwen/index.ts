@@ -40,14 +40,17 @@
 // Alibaba Cloud Model Studio's international host) and QWEN_MODEL (default
 // 'qwen3.7-flash').
 //
-// THINKING POLICY, and note it is the opposite of scan-label-qwen's. There,
-// reasoning is dead weight: reading numbers off a printed table needs no
-// deliberation. Here it is the actual job. This prompt asks the model to
-// estimate portions by eye and then, when a calorie floor is stated, to redo
-// its own arithmetic until the total clears that floor. Qwen 3.7 has thinking
-// on by default and that default is correct for this endpoint, so nothing is
-// sent to change it. Set QWEN_NO_THINK=1 to turn it off if the wait proves
-// worse than the estimate is good.
+// THINKING POLICY, app-wide and the opposite of the label scanners'. Reading
+// numbers off a printed table needs no deliberation, so all three scanners
+// run without reasoning. Estimating portions by eye and then redoing the
+// arithmetic until it clears a stated calorie floor is what reasoning is for,
+// so all three meal parsers run with it. The three models disagree on their
+// defaults (Qwen 3.7 on, Grok 4.3 on at effort 'low', Haiku 4.5 off unless
+// handed a budget), so each file states its setting rather than inheriting
+// one; otherwise the toggle compares configurations instead of models.
+// Nothing is sent here because Qwen's default already matches the policy.
+// Set QWEN_NO_THINK=1 to turn it off if the wait proves worse than the
+// estimate is good.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
