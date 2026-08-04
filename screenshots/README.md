@@ -1,40 +1,51 @@
 # Screenshots for the public pages
 
-`welcome.html` renders each screenshot slot as an `<img>` sitting on top of a
-placeholder. If the file is missing, the image removes itself and the
-placeholder shows through, so the page never looks broken while a shot is
-still outstanding. **Dropping a file in here is the whole job**, no markup
-change needed.
+`welcome.html` renders each screenshot slot as an `<img>` on top of a
+placeholder. If the file is missing, the image removes itself via `onerror`
+and the placeholder shows through, so the page never looks broken while a
+shot is still outstanding. **Dropping a file in here is the whole job**, no
+markup change needed.
 
-## Expected files
+## Status
 
-| File | Where it appears | What to capture |
+| File | Where it appears | Status |
 | --- | --- | --- |
-| `home.png` | Hero, next to the headline | The Home dashboard, ideally with a plan running and something already logged |
-| `food.png` | Health & nutrition section | The food tracker with a day's meals logged, macros visible |
-| `coaching.png` | Coaching section | A coaching thread or the check-in view |
-| `train.png` | Gallery, "Logging a set" | The live workout screen with the lifting keypad open |
-| `plan.png` | Gallery, "Your week" | The training plan / week view |
-| `progress.png` | Gallery, "Progress and PRs" | A progress chart or the records screen |
-| `health.png` | Gallery, "Daily log" | The daily health log with weight, steps, water |
+| `home.jpg` | Hero, next to the headline | Delivered |
+| `food.jpg` | Health & nutrition section | Delivered |
+| `coaching.jpg` | Coaching section | Delivered |
+| `train.jpg` | Gallery, "Logging a set" | Delivered |
+| `plan.jpg` | Gallery, "Your week" | Delivered |
+| `progress.jpg` | Gallery, "Progress and PRs" | **Missing.** A progress chart or the records screen |
+| `health.jpg` | Gallery, "Daily log" | **Missing.** The daily health log with weight, steps, water |
 
-All seven are optional and independent. Ship two, ship all of them, the page
-holds either way.
+The two missing ones are optional. Their slots show a placeholder until the
+files land.
+
+## Format
+
+The delivered shots are 1320x2580 (an iPhone screenshot), and the frames in
+`welcome.html` follow that aspect through `--shot-ratio`, so a phone shot fits
+edge to edge without losing its sides. Two consequences worth knowing:
+
+- **A shot from a differently proportioned device gets cropped.** Images are
+  `object-fit: cover` anchored to the **top**, so a taller image loses its
+  bottom edge rather than its header. `food.jpg` is a share card at 1:2.45 and
+  is cropped that way on purpose.
+- **If every future shot comes from a different device**, change
+  `--shot-ratio` in `welcome.html` rather than padding the images.
+
+Files are resized to **800px wide** and saved as JPEG at quality 86. The
+frames are at most 290 CSS px, so 800px covers a 3x display with room to
+spare, and the whole set stays around 700 KB. Source screenshots do not need
+resizing before handing them over.
 
 ## How to capture
-
-The frames are `9 / 19.5` (a modern phone) and the image is cropped with
-`object-fit: cover` anchored to the **top**, so anything important should sit
-in the upper two thirds. A tall screenshot loses its bottom edge, not its
-header.
 
 - Take them on a real phone with the app installed to the home screen, so
   there is no browser chrome in the shot.
 - Use the **dark theme** with the **gold accent**, which is what the page is
-  built around. A light-theme shot will look correct but will not sit as well
-  next to the surrounding panels.
-- PNG, at native device resolution. No need to downscale, but do run them
-  through an optimizer if any single file lands above ~500 KB.
+  built around.
+- Full device resolution is fine. Resizing happens on the way in.
 
 ## Before you commit
 

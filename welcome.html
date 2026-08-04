@@ -45,6 +45,10 @@
     --f-body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
     --maxw:1100px;
+    /* Aspect of the delivered screenshots. Frames follow the source so a
+       phone shot is not cropped at the sides; a taller image (the food log
+       share card) is anchored top and loses its tail instead. */
+    --shot-ratio:1320/2580;
   }
   @media (prefers-color-scheme: light){
     :root{
@@ -118,9 +122,9 @@
   .cta-note{margin:14px 0 0;font-family:var(--f-mono);font-size:11px;letter-spacing:0.04em;color:var(--ink-faint);}
 
   /* ---- phone frame ---- */
-  .phone{position:relative;width:100%;max-width:290px;margin:0 auto;aspect-ratio:9/19.5;border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;box-shadow:var(--shadow-phone),0 0 0 1px rgba(var(--accent-rgb),0.12);}
+  .phone{position:relative;width:100%;max-width:290px;margin:0 auto;aspect-ratio:var(--shot-ratio);border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;box-shadow:var(--shadow-phone),0 0 0 1px rgba(var(--accent-rgb),0.12);}
   .phone::before{content:"";position:absolute;top:9px;left:50%;transform:translateX(-50%);width:64px;height:5px;border-radius:999px;background:rgba(var(--knurl),0.22);z-index:3;}
-  .phone img{width:100%;height:100%;object-fit:cover;object-position:top center;}
+  .phone img{position:relative;z-index:2;width:100%;height:100%;object-fit:cover;object-position:top center;}
   .phone .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px;color:var(--ink-faint);}
   .phone .ph svg{width:34px;height:34px;color:var(--accent);opacity:0.6;}
   .phone .ph .t{font-family:var(--f-mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;line-height:1.7;}
@@ -200,8 +204,8 @@
     .shots::-webkit-scrollbar{display:none;}
     .shot{scroll-snap-align:center;}
   }
-  .shot .frame{position:relative;aspect-ratio:9/19.5;border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;}
-  .shot .frame img{width:100%;height:100%;object-fit:cover;object-position:top center;}
+  .shot .frame{position:relative;aspect-ratio:var(--shot-ratio);border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;}
+  .shot .frame img{position:relative;z-index:2;width:100%;height:100%;object-fit:cover;object-position:top center;}
   .shot .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;color:var(--ink-faint);}
   .shot .ph svg{width:26px;height:26px;color:var(--accent);opacity:0.55;}
   .shot .ph .t{font-family:var(--f-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;line-height:1.7;}
@@ -281,7 +285,7 @@
     </div>
     <div class="split-media">
       <div class="phone">
-        <img src="screenshots/home.png" alt="The Zane home dashboard on a phone" loading="lazy" onerror="this.remove()" />
+        <img src="screenshots/home.jpg" alt="The Zane home dashboard on a phone" fetchpriority="high" onerror="this.remove()" />
         <div class="ph">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
           <div class="t">Home<br />screenshot</div>
@@ -376,7 +380,7 @@
       </div>
       <div class="split-media">
         <div class="phone">
-          <img src="screenshots/food.png" alt="The Zane food and macro tracker" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/food.jpg" alt="The Zane food and macro tracker" loading="lazy" onerror="this.remove()" />
           <div class="ph">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
             <div class="t">Food tracker<br />screenshot</div>
@@ -404,7 +408,7 @@
       </div>
       <div class="split-media">
         <div class="phone">
-          <img src="screenshots/coaching.png" alt="The Zane coaching screen" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/coaching.jpg" alt="The Zane coaching screen" loading="lazy" onerror="this.remove()" />
           <div class="ph">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
             <div class="t">Coaching<br />screenshot</div>
@@ -429,28 +433,28 @@
     <div class="shots">
       <figure class="shot">
         <div class="frame">
-          <img src="screenshots/train.png" alt="Logging a set during a workout" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/train.jpg" alt="Logging a set during a workout" loading="lazy" onerror="this.remove()" />
           <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">train.png</div></div>
         </div>
         <figcaption>Logging a set</figcaption>
       </figure>
       <figure class="shot">
         <div class="frame">
-          <img src="screenshots/plan.png" alt="The training plan editor" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/plan.jpg" alt="The training plan editor" loading="lazy" onerror="this.remove()" />
           <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">plan.png</div></div>
         </div>
         <figcaption>Your week</figcaption>
       </figure>
       <figure class="shot">
         <div class="frame">
-          <img src="screenshots/progress.png" alt="Progress charts and personal records" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/progress.jpg" alt="Progress charts and personal records" loading="lazy" onerror="this.remove()" />
           <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">progress.png</div></div>
         </div>
         <figcaption>Progress and PRs</figcaption>
       </figure>
       <figure class="shot">
         <div class="frame">
-          <img src="screenshots/health.png" alt="The daily health log" loading="lazy" onerror="this.remove()" />
+          <img src="screenshots/health.jpg" alt="The daily health log" loading="lazy" onerror="this.remove()" />
           <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">health.png</div></div>
         </div>
         <figcaption>Daily log</figcaption>
@@ -580,7 +584,8 @@
   // ---- screenshot slots ----
   // Every <img> in a .phone / .shot frame removes itself if the file is not
   // there yet (onerror in the markup), which uncovers the placeholder sitting
-  // behind it. Dropping a PNG into screenshots/ is therefore the whole job,
+  // behind it (the image is lifted above the placeholder with z-index, so a
+  // present image hides it). Dropping a file into screenshots/ is the whole job,
   // no markup change needed. Guard against a cached 0-byte or broken decode
   // too, which fires load rather than error in some browsers.
   document.querySelectorAll('.phone img, .shot img').forEach(function(img){
