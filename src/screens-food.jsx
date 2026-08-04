@@ -1187,9 +1187,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // text search or did find something.
   const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
-  // Which AI reads the nutrition label photo: 'grok' (scan-label, the
-  // long-standing default), 'claude' (scan-label-claude) or 'qwen'
-  // (scan-label-qwen), same request/response contract whichever is picked.
+  // Which AI reads the nutrition label photo: 'grok' (the long-standing
+  // default), 'claude' or 'qwen'. Travels to the scan-label edge function in
+  // the request body, which holds all three behind one identical contract.
   // Per-device only, not a synced setting: this is a comparison toggle, not a
   // user-facing preference.
   const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
@@ -1208,9 +1208,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
-  // Which AI reads the free-text description: 'claude' (parse-meal, the
-  // long-standing default), 'grok' (parse-meal-grok) or 'qwen'
-  // (parse-meal-qwen), same request/response contract whichever is picked.
+  // Which AI reads the free-text description: 'claude' (the long-standing
+  // default), 'grok' or 'qwen'. Travels to the parse-meal edge function in
+  // the request body, which holds all three behind one identical contract.
   // Per-device only, not a synced setting: this is a comparison toggle, not a
   // user-facing preference.
   const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);

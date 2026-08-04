@@ -8,14 +8,15 @@ const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
+// One endpoint each, whichever AI backend the device is set to. Both used to
+// be three endpoints (scan-label-claude/-qwen, parse-meal-grok/-qwen) that the
+// client picked between by URL; the provider now travels in the request body
+// and the edge function holds all three. Anything the function does not
+// recognise falls back to that feature's default on its side too.
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
-const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
-const SCAN_LABEL_QWEN_URL   = `${SUPABASE_URL}/functions/v1/scan-label-qwen`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
-const PARSE_MEAL_GROK_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-grok`;
-const PARSE_MEAL_QWEN_URL   = `${SUPABASE_URL}/functions/v1/parse-meal-qwen`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -2696,22 +2697,16 @@ function cacheFood(source, sourceId) {
 }
 
 // Reads a nutrition label from a photo (base64, no data: prefix) via the
-// scan-label edge function. Two interchangeable backends share the exact
-// same request/response contract, see logbook-label-scanner-provider in
-// CLAUDE.md's localStorage-keys list for how the client picks one:
-// 'grok' (xAI Grok vision, scan-label, the long-standing default) or
-// 'claude' (Anthropic vision, scan-label-claude). Returns the extracted
-// macros so the client can prefill the Custom Item form. Scanned labels are
-// logged as per-user custom items, never written to the shared zane_foods cache.
+// scan-label edge function. `provider` is the per-device pick between three
+// interchangeable AI backends, 'grok' (the long-standing default), 'claude'
+// or 'qwen', see logbook-label-scanner-provider in CLAUDE.md's
+// localStorage-keys list; it is passed straight through and the edge function
+// falls back to Grok for anything it does not recognise, so an unset or stale
+// value is always safe. Returns the extracted macros so the client can
+// prefill the Custom Item form. Scanned labels are logged as per-user custom
+// items, never written to the shared zane_foods cache.
 async function scanLabel(imageBase64, mimeType, provider) {
-  // Three interchangeable backends, identical request/response contract; the
-  // per-device pick is logbook-label-scanner-provider (CLAUDE.md). Anything
-  // unrecognised falls through to Grok, which is the long-standing default and
-  // the one guaranteed to be deployed.
-  const url = provider === 'claude' ? SCAN_LABEL_CLAUDE_URL
-    : provider === 'qwen' ? SCAN_LABEL_QWEN_URL
-    : SCAN_LABEL_URL;
-  const res = await fnFetch(url, { image: imageBase64, mimeType });
+  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType, provider });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
@@ -2728,27 +2723,21 @@ async function scanLabel(imageBase64, mimeType, provider) {
 // fiber, sugar, satFat, sodiumMg }[]` (no calories, those are always
 // derived) describing a prior estimate; the edge function then revises that
 // estimate using the new description as the correction instead of guessing
-// from scratch, optional, may be null/undefined for a fresh estimate. Two
-// interchangeable backends share the exact same request/response contract,
-// see logbook-meal-parser-provider in CLAUDE.md's localStorage-keys list for
-// how the client picks one: 'claude' (Anthropic, parse-meal, the
-// long-standing default) or 'grok' (xAI Grok, parse-meal-grok). Same
-// contract shape as scanLabel/searchFoods: never throws, { ok: false, error }
-// on any failure. Items are handed back plain (name/quantityG/calories/
-// protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages them
-// exactly like a manually-typed Custom Item, nothing is written here.
+// from scratch, optional, may be null/undefined for a fresh estimate.
+// `provider` is the per-device pick between three interchangeable AI
+// backends, 'claude' (the long-standing default), 'grok' or 'qwen', see
+// logbook-meal-parser-provider in CLAUDE.md's localStorage-keys list; it is
+// passed straight through and the edge function falls back to Claude for
+// anything it does not recognise, so an unset or stale value is always safe.
+// Same contract shape as scanLabel/searchFoods: never throws, { ok: false,
+// error } on any failure. Items are handed back plain (name/quantityG/
+// calories/protein/carbs/fat/fiber/sugar/satFat/sodiumMg); the caller stages
+// them exactly like a manually-typed Custom Item, nothing is written here.
 async function parseMealText(description, provider, photo, previousItems) {
-  // Three interchangeable backends, identical request/response contract; the
-  // per-device pick is logbook-meal-parser-provider (CLAUDE.md). Anything
-  // unrecognised falls through to Claude, which is the long-standing default
-  // and the one guaranteed to be deployed.
-  const url = provider === 'grok' ? PARSE_MEAL_GROK_URL
-    : provider === 'qwen' ? PARSE_MEAL_QWEN_URL
-    : PARSE_MEAL_URL;
-  const body = { description };
+  const body = { description, provider };
   if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
   if (Array.isArray(previousItems) && previousItems.length) { body.previousItems = previousItems; }
-  const res = await fnFetch(url, body);
+  const res = await fnFetch(PARSE_MEAL_URL, body);
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };

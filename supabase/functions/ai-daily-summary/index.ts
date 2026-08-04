@@ -4,7 +4,7 @@
 // is still null, and this function re-checks that same gate server-side (a
 // client-only gate is trivially bypassed by calling this endpoint directly).
 //
-// Unlike scan-label-claude, this is plain text in, plain text out, no vision,
+// Unlike the label scanner, this is plain text in, plain text out, no vision,
 // no strict JSON: a model instructed to "keep it casual" can and does malform
 // JSON, so the contract here is a simple two-part text format instead (see
 // SYSTEM_PROMPT). All the day's numbers/trends, including the training
@@ -29,7 +29,8 @@
 // -> { summary: string, generatedAt: string } (summary is headline + blank
 // line + body concatenated, see the client-side splitHeadlineBody split)
 //
-// Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses), and
+// Needs the secret ANTHROPIC_API_KEY (the same one scan-label and parse-meal
+// use for their Claude backend), and
 // SUPABASE_SERVICE_ROLE_KEY (for the pre-read/write against zane_daily_logs,
 // which bypasses RLS: see the comment above upsertSummary for why that's
 // needed here specifically, not just convenient).
@@ -55,7 +56,7 @@ const ADMIN_EMAIL = 'office@btc-prime.biz';
 const DAILY_SUMMARY_LIMIT = 5;
 
 // Advisory per-user daily quota (same zane_api_usage/bump_api_usage as
-// scan-label-claude, migration 0207, new kind 'daily_summary'). Fails OPEN on
+// scan-label, migration 0207, new kind 'daily_summary'). Fails OPEN on
 // purpose, same reasoning as there: a broken quota mechanism must never be
 // the reason someone can't get their summary. The REAL once-a-day gate is
 // ai_summary_generated_at below; this is only a backstop against a retry
