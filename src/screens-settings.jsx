@@ -684,19 +684,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [activeSessions, setActiveSessions] = useStateSet([]);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
-  const [pendingUsers, setPendingUsers] = useStateSet([]);
-  const [approvingId, setApprovingId] = useStateSet(null);
-  const [decliningId, setDecliningId] = useStateSet(null);
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
-  const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
-  const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
   const [periodsSheet, setPeriodsSheet] = useStateSet(false);
   const [showAllPeriods, setShowAllPeriods] = useStateSet(false);
   const [confirmDeletePeriodId, setConfirmDeletePeriodId] = useStateSet(null);
-  const [budgetSheet, setBudgetSheet] = useStateSet(false);
-  const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [allUsers, setAllUsers] = useStateSet([]);
   const [allUsersSheet, setAllUsersSheet] = useStateSet(false);
   const [allUsersSearch, setAllUsersSearch] = useStateSet('');
@@ -862,8 +855,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview').then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
-    const loadPending = () => LB.supabase.rpc('get_pending_users').then(({ data }) => { if (mounted) setPendingUsers(data || []); }).catch(() => {});
-    loadSessions(); if (isAdmin) { loadGrants(); loadPending(); }
+    loadSessions(); if (isAdmin) { loadGrants(); }
     // 2s only while the sheet is actually open (that view has live timers); a
     // slow heartbeat otherwise, just to keep the badge count honest. This used
     // to hammer the RPC every 2 seconds for as long as the Settings screen was
@@ -990,16 +982,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 
-  // Admin-only: load all admin state on mount (signup config, support inbox).
+  // Admin-only: load all admin state on mount (support inbox).
   useEffectSet(() => {
     if (!isAdmin) return;
     let mounted = true;
-    LB.supabase.rpc('get_signup_config').then(({ data, error }) => {
-      if (!mounted || error) return;
-      const row = Array.isArray(data) ? data[0] : data;
-      setSignupApproval(row ? row.requires_approval !== false : true);
-      setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
-    }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
@@ -1082,51 +1068,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (seenSignups.has(u.user_id)) return false;
     if (!u.created_at) return false;
     return (Date.now() - new Date(u.created_at).getTime()) < NEW_SIGNUP_DAYS * 24 * 60 * 60 * 1000;
-  };
-
-  const toggleSignupApproval = async () => {
-    const next = !signupApproval;
-    setSignupApproval(next);
-    setAutoApproveLeft(null); // manual toggle clears any batch budget
-    const { error } = await LB.supabase.rpc('set_signup_requires_approval', { p_value: next });
-    if (error) { setSignupApproval(!next); await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' }); }
-  };
-
-  const saveBudget = async () => {
-    const n = budgetDraft;
-    setBudgetSheet(false);
-    const prevApproval = signupApproval;
-    const prevLeft = autoApproveLeft;
-    setSignupApproval(n <= 0);            // n>0 → open for a batch; n<=0 → re-lock now
-    setAutoApproveLeft(n > 0 ? n : null);
-    const { error } = await LB.supabase.rpc('set_auto_approve_budget', { p_count: n });
-    if (error) {
-      setSignupApproval(prevApproval);
-      setAutoApproveLeft(prevLeft);
-      await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
-    }
-  };
-
-  const approveUser = async (uid) => {
-    setApprovingId(uid);
-    try {
-      const { error } = await LB.supabase.rpc('approve_user', { p_user_id: uid });
-      if (error) { await confirm(error.message || 'Could not approve this user.', { title: 'Approve failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== uid));
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const declineUser = async (uid) => {
-    setDecliningId(uid);
-    try {
-      const { error } = await LB.supabase.rpc('decline_user', { p_user_id: uid });
-      if (error) { await confirm(error.message || 'Could not decline this user.', { title: 'Decline failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== uid));
-    } finally {
-      setDecliningId(null);
-    }
   };
 
   const addGrant = async () => {
@@ -1988,45 +1929,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <NavRow label="Data" onTap={() => setDataSheet(true)} />
         </Frame>
 
-        {/* ─── Admin: pending registrations ─── */}
-        {isAdmin && pendingUsers.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>Pending registrations</div>
-            <Frame style={{ padding: '0 16px' }}>
-              {pendingUsers.map((u, i) => (
-                <React.Fragment key={u.user_id}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</div>
-                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                    </div>
-                    <button onClick={() => approveUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
-                      padding: '6px 12px', borderRadius: 4,
-                      background: approvingId === u.user_id ? UI.goldFaint : 'rgba(var(--accent-rgb),0.12)',
-                      border: `1px solid rgba(var(--accent-rgb),0.3)`,
-                      color: UI.gold, fontFamily: UI.fontUi, fontSize: 10,
-                      letterSpacing: '0.1em', textTransform: 'uppercase',
-                      cursor: approvingId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
-                    }}>
-                      {approvingId === u.user_id ? '…' : 'Approve'}
-                    </button>
-                    <button onClick={() => declineUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
-                      padding: '6px 12px', borderRadius: 4,
-                      background: 'transparent',
-                      border: `1px solid rgba(var(--danger-rgb),0.25)`,
-                      color: 'rgba(var(--danger-rgb),0.7)', fontFamily: UI.fontUi, fontSize: 10,
-                      letterSpacing: '0.1em', textTransform: 'uppercase',
-                      cursor: decliningId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
-                    }}>
-                      {decliningId === u.user_id ? '…' : 'Decline'}
-                    </button>
-                  </div>
-                  {i < pendingUsers.length - 1 && <div className="knurl" />}
-                </React.Fragment>
-              ))}
-            </Frame>
-          </div>
-        )}
       </div>
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, backgroundImage: 'var(--bg-texture)' }}>
@@ -3265,21 +3167,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Frame style={{ padding: '0 14px' }}>
-                <Row label="Registrations need approval" first>
-                  <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
-                </Row>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
-                  When on, new sign-ups wait for approval. When off, accounts activate immediately.
-                </div>
-                <Row label="Auto-approve batch">
-                  <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
-                    {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
-                  </button>
-                </Row>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
-                  Open registration for a batch, auto-approved until used up, then turns back on.
-                </div>
-                <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
+                <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
@@ -3412,18 +3300,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Auto-approve batch sheet (admin), rendered after adminSheet so it sits on top ══ */}
-      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <div>
-            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
-            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=" sign-ups" onChange={setBudgetDraft} />
-          </div>
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, "Registrations need approval" switches back on automatically. Set to 0 to re-lock now.
-          </div>
-          <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
-        </div>
-      </SettingsSheet>
 
       {/* ══ Support Center full-screen sheet (user) ══ */}
       <FullSheet
@@ -3895,7 +3771,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
-                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                            {u.tier && u.tier !== 'free' && (
+                              <span className="micro" style={{ flexShrink: 0, color: 'var(--accent)' }}>{u.tier === 'lifetime' ? 'LIFETIME' : 'PREMIUM'}</span>
+                            )}
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

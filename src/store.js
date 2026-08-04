@@ -1163,7 +1163,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
@@ -1441,7 +1441,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
 
   const result = {
-    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
+    // tier is server-authored (granted by the founding-member trigger) and never
+    // written back by syncStore. Defaults to 'free' so a profile row that predates
+    // the column, or a coach-side load, renders as an ordinary account.
+    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), tier: profileRes.data?.tier || 'free' },
     exercises: exRes.data || [],
     schedules: (schRes.data || []).map(s => healScheduleWeekdays({
       ...s,

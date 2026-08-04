@@ -1186,6 +1186,40 @@ function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart, busy
   );
 }
 
+// Account tier badge under the wordmark. Server-authored: `tier` is granted by
+// a database trigger once an account clears the founding-member bar, and a
+// client write to it is reverted, so this only ever reflects the real state.
+//
+// 'free' deliberately renders nothing. Almost every account is free, and a chip
+// on all of them is noise rather than information. Once paid plans exist, give
+// FREE an entry in the map below and it will start showing.
+const TIER_CHIPS = {
+  lifetime: { label: 'Lifetime Premium', title: 'Founding member. Every paid feature, permanently, at no cost.' },
+  premium:  { label: 'Premium',          title: 'Premium account.' },
+};
+
+function TierChip({ tier }) {
+  const chip = TIER_CHIPS[tier];
+  if (!chip) return null;
+  return (
+    <span
+      className="micro"
+      title={chip.title}
+      style={{
+        color: UI.gold,
+        background: 'rgba(var(--accent-rgb),0.12)',
+        border: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`,
+        borderRadius: 4,
+        padding: '3px 7px',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {chip.label}
+    </span>
+  );
+}
+
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
@@ -2843,22 +2877,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
-            {(() => {
-              const isProblem = storageFull || syncStatus === 'error';
-              const isSaving  = syncStatus === 'pending' && !storageFull;
-              const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
-              const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
-              return (
-                <i
-                  className="fa-solid fa-dumbbell"
-                  onClick={isProblem ? onRetrySync : undefined}
-                  title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
-                  style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
-                />
-              );
-            })()}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+              {(() => {
+                const isProblem = storageFull || syncStatus === 'error';
+                const isSaving  = syncStatus === 'pending' && !storageFull;
+                const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
+                const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
+                return (
+                  <i
+                    className="fa-solid fa-dumbbell"
+                    onClick={isProblem ? onRetrySync : undefined}
+                    title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                    style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+                  />
+                );
+              })()}
+            </div>
+            <TierChip tier={store.user?.tier} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{ textAlign: 'right', minWidth: 0 }}>
@@ -3800,34 +3837,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   );
 }
 
-// ─── PENDING APPROVAL ────────────────────────────────────────────────────────
-function PendingApprovalScreen({ onSignOut }) {
-  return (
-    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
-      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
-        <span className="micro">ZANE TRAINING</span>
-      </div>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1, gap: 16 }}>
-        <img src="icons/zane-logo.png" style={{ width: '70%', maxWidth: 380, objectFit: 'contain', marginBottom: 8 }} />
-        <div className="display" style={{ fontSize: 22, color: UI.ink, fontWeight: 400, textAlign: 'center' }}>
-          Waiting for approval
-        </div>
-        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, maxWidth: 280 }}>
-          Your account has been created. The admin will review and approve your access shortly.
-        </div>
-        <button onClick={onSignOut} style={{
-          marginTop: 8, padding: '10px 20px', borderRadius: 4,
-          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
-          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
-        }}>
-          Sign out
-        </button>
-      </div>
-    </Screen>
-  );
-}
 
 // ─── UNIT PROMPT (existing users) ────────────────────────────────────────────
 function UnitPromptModal({ onDone }) {
@@ -3887,4 +3896,4 @@ function UnitPromptModal({ onDone }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet, UnitPromptModal });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, CardioQuickLogSheet, UnitPromptModal });

@@ -304,7 +304,7 @@ function ErrorScreen({ onRetry }) {
 
 function App() {
   const isPad = useIsPad();
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite' | 'pending'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
   // Detect invite/password-reset link before Supabase clears the hash
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
@@ -1183,7 +1183,6 @@ function App() {
               planDrafts,
             };
           }
-          if (!fresh.user.approved) { setPhase('pending'); return; }
           prevStore.current = merged;
           setStore(merged);
         })
@@ -1194,7 +1193,6 @@ function App() {
         const loaded = await LB.loadFromSupabase(uid);
         // Same guard as the cached path: this await can outlive the account.
         if (isStale()) return;
-        if (!loaded.user.approved) { setPhase('pending'); return; }
         // PASSWORD_RECOVERY event may have fired while we were fetching, don't override the reset screen
         if (recoveryInProgress.current) return;
         prevStore.current = loaded;
@@ -1224,7 +1222,7 @@ function App() {
       } else if (event === 'SIGNED_IN') {
         // Re-arm the onboarding check for the freshly signed-in user. The ref is
         // a one-shot guard that survives in-session account switches (logout →
-        // login without a page reload), so without this a new/approved user
+        // login without a page reload), so without this a newly registered user
         // logging in after a previous 'ready' session would never be prompted.
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
@@ -1384,32 +1382,6 @@ function App() {
     return () => document.removeEventListener('visibilitychange', recheck);
   }, [phase, userId, store?.settings?.unit]);
 
-  // While the account is pending approval, re-check on every foreground (and a
-  // light poll), same idea as the SW-update banner. A PWA resumes on the stale
-  // pending screen otherwise: the 30-min background reload above doesn't cover a
-  // quick approval, so the user would sit on "Waiting for approval" even after
-  // being approved. We poll the cheap `approved` flag and only escalate to a
-  // full loadData (→ ready → onboarding prompt) the moment it flips true.
-  useEffectA(() => {
-    if (phase !== 'pending' || !userId) return;
-    let cancelled = false;
-    let done = false;
-    const recheck = () => {
-      if (cancelled || done || document.visibilityState !== 'visible') return;
-      LB.supabase.from('zane_profiles').select('approved').eq('id', userId).maybeSingle()
-        .then(({ data }) => {
-          if (cancelled || done || !data?.approved) return;
-          done = true;
-          loadData(userId);
-        })
-        .catch(() => {});
-    };
-    const onVisible = () => { if (document.visibilityState === 'visible') recheck(); };
-    document.addEventListener('visibilitychange', onVisible);
-    const iv = setInterval(recheck, 15000);
-    recheck();
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); clearInterval(iv); };
-  }, [phase, userId]);
 
 
   // was removed, the local store is the single source of truth for a session.)
@@ -1741,7 +1713,6 @@ function App() {
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
-  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => { markIntentionalSignOut(); LB.signOut(); }} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
