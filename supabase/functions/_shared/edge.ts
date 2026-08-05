@@ -8,10 +8,11 @@
 // Supabase CLI bundles it into whichever function imports it. Changing
 // anything here therefore only reaches a deployed function when THAT function
 // is redeployed, so a change to this file means redeploying every importer.
-// Today that is parse-meal and scan-label. The remaining functions still carry
-// their own copies on purpose: migrating one means redeploying it for no
-// behavioural gain, which is pure risk, so they move over one at a time
-// whenever they are next touched for another reason.
+// Today that is parse-meal, scan-label, ai-daily-summary and
+// ai-checkin-opinion. The remaining functions still carry their own copies on
+// purpose: migrating one means redeploying it for no behavioural gain, which
+// is pure risk, so they move over one at a time whenever they are next
+// touched for another reason.
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

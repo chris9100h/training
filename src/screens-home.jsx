@@ -1064,7 +1064,13 @@ function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStar
     if (weekdayMode) {
       if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
       const wd = LB.isoWd(d);
-      trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      // The version active on dateKey, not whatever sch.days currently holds
+      // (L4, audit-2026-08): a plan edit since that day (weekdays moved
+      // around a version boundary) must not retroactively judge a past day
+      // by today's schedule. Same helper the cycle-mode branch below already
+      // uses for the same reason.
+      const vDays = LB.getPlanDaysForDate(sch, dateKey);
+      trainingDay = vDays.find(day => day.weekday === wd && day.items?.length > 0) || null;
     } else if (cycleStartDate) {
       const vDays = LB.getPlanDaysForDate(sch, dateKey);
       if (!vDays.length) continue;

@@ -3086,6 +3086,29 @@ function hlShiftDate(dateStr, deltaDays) {
   return LB.fmtISO(d);
 }
 
+// A zane_daily_logs row counts as "logged" only if it carries real content,
+// not merely by existing: a flex day-type-only override (just
+// targetsSnap.dayType) must not light up as logged, and neither should the
+// phantom row AiSummaryCard.generate() below can leave behind (a day with
+// only training/cardio logged, nothing in zane_daily_logs itself, still gets
+// a row here once an AI summary is generated for it, id/date/aiSummary only,
+// see its own comment). Module-level so both HealthDateStrip and
+// ExportSheet's "N days logged" count (L8, audit-2026-08: that counter used
+// to be a bare row-count, which a phantom AI-summary-only row inflated)
+// agree on the same definition instead of drifting.
+function hlHasLogContent(l) {
+  return !!l && (
+    l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
+    l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
+    (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
+    // A meal-of-choice marker is content in its own right. Without this,
+    // HealthDateStrip's setFlexDayType DELETES an otherwise-empty row when
+    // the day is set to Rest, silently unmarking it.
+    l.mealOfChoice ||
+    (l.coachFields && Object.keys(l.coachFields).length)
+  );
+}
+
 // ─── AI Daily Summary card ──────────────────────────────────────────────────
 // User-triggered (button, never automatic) once-a-day AI read on yesterday's
 // tracked data. readOnly (the coach view) renders no button at all: a
@@ -3306,18 +3329,10 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const jsDow = anchorDate.getDay();
   const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  // A day counts as "logged" (gold marker) only if it carries real content, a
-  // flex day-type-only override log (just targetsSnap.dayType) must not light up.
-  const hasLogContent = l => l && (
-    l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
-    l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
-    (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
-    // A meal-of-choice marker is content in its own right. Without this,
-    // setFlexDayType below DELETES an otherwise-empty row when the day is
-    // set to Rest, silently unmarking it.
-    l.mealOfChoice ||
-    (l.coachFields && Object.keys(l.coachFields).length)
-  );
+  // A day counts as "logged" (gold marker) only if it carries real content,
+  // not merely by row existence, see hlHasLogContent above (a flex day-type-
+  // only override log, just targetsSnap.dayType, must not light up either).
+  const hasLogContent = hlHasLogContent;
   const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
   // Navigation itself is unbounded forward (a flex plan's Training|Rest
   // override needs to reach future dates, same reasoning as the food
@@ -5215,7 +5230,11 @@ function ExportSheet({ open, onClose, store, userId }) {
             </div>
           </div>
           {(() => {
-            const count = (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).length;
+            // Field content, not row existence (L8, audit-2026-08): a bare
+            // row count double-counted a day whose only zane_daily_logs row
+            // is the phantom one AiSummaryCard.generate() leaves behind for
+            // a training/cardio-only day (id/date/aiSummary, nothing else).
+            const count = logsInRange().filter(hlHasLogContent).length;
             return <div style={{ marginTop: 8, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{count} day{count !== 1 ? 's' : ''} logged in this range</div>;
           })()}
         </div>
