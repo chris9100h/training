@@ -176,5 +176,6 @@ Der Boot lädt konstant viele Sets, unabhängig vom Account-Alter (Details und a
 ## Deployment
 
 - PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
+- **Deploy läuft direkt vom jeweiligen Feature-Branch, kein Merge nach `main` nötig.** Ein Push (inkl. Cache-Bump) auf den Branch reicht.
 - **SW-Cache-Version (`const CACHE = 'zane-vX.XXX'` in `sw.js`) nur auf ausdrückliche Aufforderung erhöhen.** Nicht automatisch bei jedem Commit: mit vielen aktiven Usern würde jedes kleinste Code-Update einen Update-Banner auslösen. Format `zane-vMAJOR.MINOR`, fortlaufend hochgezählt (z.B. `zane-v2.350` → `zane-v2.351`).
 - **Nach einem Cache-Bump die neue Versionsnummer im Chat melden**, z.B. „SW-Cache → zane-v2.351".
