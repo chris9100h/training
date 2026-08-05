@@ -7430,32 +7430,26 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
 
 // ── Recipe poster (the shareable image, RecipeEditorScreen's camera button) ──
 //
-// Deliberately self-contained: it does not reuse FdMacroHero, Bezel,
-// FdMacroBits, FdIngredientBadge or the .display/.micro/.num classes, and it
-// takes NO webfont. Everything below renders in fonts the device already has.
+// Self-contained by design: it does not reuse FdMacroHero, Bezel, FdMacroBits
+// or FdIngredientBadge, and it styles everything through plain objects rather
+// than the .display/.micro/.num classes, so the exported card can be tuned
+// without touching how those read anywhere else in the app.
 //
-// That is the whole point of this component. html2canvas measures text in an
-// <iframe> clone of the document and then draws the glyphs onto the canvas
-// with the fonts of the MAIN document. The clone re-requests every webfont
-// from scratch, so for as long as one has not arrived there, the clone
-// measures a fallback while the canvas paints the real family: the two
-// disagree about where each run sits, and the export comes back with pieces
-// of lines floating a few px above the rest (support reports, 2026-08-05,
-// reproducible on a cold profile). With locally installed families there is
-// nothing to arrive, nothing to swap mid-measurement, and the two documents
-// cannot disagree. Everything else about the export is downstream of that.
-//
-// Keep it that way: no className on anything in here, no shared UI component
-// that might reach for UI.fontUi/fontNum/fontDisplay, and no new font stack
-// that is not resolvable offline.
-const RCP_UI = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-const RCP_MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
-// Stands in for the .display family (Big Shoulders Display, a webfont): heavy,
-// wide-tracked and uppercase reads as a deliberate title in any grotesque, so
-// the card keeps its voice without depending on a download.
-const rcpTitle = { fontFamily: RCP_UI, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' };
-const rcpMicro = { fontFamily: RCP_UI, fontSize: 9, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: UI.inkFaint };
-const rcpNum = { fontFamily: RCP_MONO, fontVariantNumeric: 'tabular-nums' };
+// The type IS the app's, though. This briefly ran on system fonts while the
+// export bug was still being hunted, on the theory that the clone html2canvas
+// measures in could be laying out in a fallback while the canvas painted the
+// real family. It could not: the actual cause was an animated ancestor (see
+// shotFreezeAnimations in screens-lib.jsx), and captureNodeAsPng now waits for
+// the clone's fonts by comparing a rendered probe against the live document,
+// so the card is back on Big Shoulders Display / Inter / JetBrains Mono like
+// every other surface.
+const RCP_UI = UI.fontUi;
+const RCP_MONO = UI.fontNum;
+// Mirrors the .display class (see index.html): same family, weight and tracking.
+const rcpTitle = { fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' };
+// Mirrors .micro; the accent variant below bumps the weight the way .micro-gold does.
+const rcpMicro = { fontFamily: RCP_UI, fontSize: 9, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: UI.inkFaint };
+const rcpNum = { fontFamily: RCP_MONO, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' };
 const RCP_MACRO_LABELS = [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']];
 
 function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, logo, logoStyle, grid }) {
@@ -7481,14 +7475,14 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ ...rcpTitle, fontSize: 25, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ ...rcpTitle, fontSize: 26, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {name.trim() || 'Recipe'}
           </div>
-          <div style={{ ...rcpMicro, color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
+          <div style={{ ...rcpMicro, fontWeight: 600, color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
         </div>
 
         <BracketFrame gold style={{ padding: 22, marginTop: 18, textAlign: 'center' }}>
-          <div style={{ ...rcpMicro, letterSpacing: '0.08em', fontSize: 14, fontWeight: 700, color: UI.gold, marginBottom: 6 }}>Whole batch</div>
+          <div style={{ ...rcpMicro, letterSpacing: '0.08em', fontSize: 15, fontWeight: 700, color: UI.gold, marginBottom: 6 }}>Whole batch</div>
           <div style={{ ...rcpNum, fontSize: 42, fontWeight: 300, color: UI.gold, lineHeight: 1.1 }}>
             {Math.round(totals.calories || 0)}<span style={{ fontFamily: RCP_UI, fontSize: 15, fontWeight: 400, color: UI.inkFaint }}> kcal</span>
           </div>
