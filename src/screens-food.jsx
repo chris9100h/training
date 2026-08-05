@@ -7419,6 +7419,120 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   );
 }
 
+// ── Recipe poster (the shareable image, RecipeEditorScreen's camera button) ──
+//
+// Deliberately self-contained: it does not reuse FdMacroHero, Bezel,
+// FdMacroBits, FdIngredientBadge or the .display/.micro/.num classes, and it
+// takes NO webfont. Everything below renders in fonts the device already has.
+//
+// That is the whole point of this component. html2canvas measures text in an
+// <iframe> clone of the document and then draws the glyphs onto the canvas
+// with the fonts of the MAIN document. The clone re-requests every webfont
+// from scratch, so for as long as one has not arrived there, the clone
+// measures a fallback while the canvas paints the real family: the two
+// disagree about where each run sits, and the export comes back with pieces
+// of lines floating a few px above the rest (support reports, 2026-08-05,
+// reproducible on a cold profile). With locally installed families there is
+// nothing to arrive, nothing to swap mid-measurement, and the two documents
+// cannot disagree. Everything else about the export is downstream of that.
+//
+// Keep it that way: no className on anything in here, no shared UI component
+// that might reach for UI.fontUi/fontNum/fontDisplay, and no new font stack
+// that is not resolvable offline.
+const RCP_UI = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const RCP_MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+// Stands in for the .display family (Big Shoulders Display, a webfont): heavy,
+// wide-tracked and uppercase reads as a deliberate title in any grotesque, so
+// the card keeps its voice without depending on a download.
+const rcpTitle = { fontFamily: RCP_UI, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' };
+const rcpMicro = { fontFamily: RCP_UI, fontSize: 9, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: UI.inkFaint };
+const rcpNum = { fontFamily: RCP_MONO, fontVariantNumeric: 'tabular-nums' };
+const RCP_MACRO_LABELS = [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']];
+
+function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, logo, logoStyle, grid }) {
+  return (
+    // Same sheet geometry as the Plan poster, at the width the Food Log and
+    // Shopping List posters use. Asymmetric padding on purpose: the card opens
+    // on a full-width gold hairline, which needs room above it to read as a
+    // rule rather than a cropped edge, and it ends on an ingredient row that
+    // already carries its own padding, so the image should stop just past it.
+    <div ref={captureRef} style={{
+      padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
+      background: UI.bg, fontFamily: RCP_UI, color: UI.ink, textShadow: 'none',
+    }}>
+      {/* The live CSS grid never survives html2canvas, so redraw it with an
+          SVG pattern instead when the grid toggle is on (see SvgGrid). */}
+      {grid && <SvgGrid />}
+      {/* Watermark: centered, faint, full poster. Needs its own stacking
+          context below the real content, hence the zIndex:1 sibling. */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src={logo} data-shot-avatar="1" style={logoStyle} />
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ ...rcpTitle, fontSize: 25, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name.trim() || 'Recipe'}
+          </div>
+          <div style={{ ...rcpMicro, color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
+        </div>
+
+        <BracketFrame gold style={{ padding: 22, marginTop: 18, textAlign: 'center' }}>
+          <div style={{ ...rcpMicro, letterSpacing: '0.08em', fontSize: 14, fontWeight: 700, color: UI.gold, marginBottom: 6 }}>Whole batch</div>
+          <div style={{ ...rcpNum, fontSize: 42, fontWeight: 300, color: UI.gold, lineHeight: 1.1 }}>
+            {Math.round(totals.calories || 0)}<span style={{ fontFamily: RCP_UI, fontSize: 15, fontWeight: 400, color: UI.inkFaint }}> kcal</span>
+          </div>
+          <div style={{ ...rcpNum, fontSize: 13, fontWeight: 700, marginTop: 10 }}>
+            {RCP_MACRO_LABELS.map(([k, label], i) => (
+              <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: i ? 14 : 0 }}>{label} {Math.round(totals[k] || 0)}g</span>
+            ))}
+          </div>
+        </BracketFrame>
+
+        <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 16 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+        <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 14, marginBottom: 12 }}>Ingredients · prep order</div>
+
+        {items.map((i, idx) => {
+          const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+          return (
+            // Translucent fill rather than fdEntryRow's opaque one, so the
+            // watermark reads through the cards instead of only in the gaps.
+            <div key={i.id} style={{
+              background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, padding: '10px 12px', marginBottom: 6, overflow: 'hidden',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                <span style={{
+                  ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
+                  display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
+                  background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
+                }}>{idx + 1}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
+                  <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
+                    {i.quantityG}g<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
+                    {RCP_MACRO_LABELS.map(([k, label]) => (
+                      <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* Prep note: a shared card is exactly the "someone else is
+                  cooking this" case the note exists for. */}
+              {i.note && (
+                <div style={{ marginTop: 8, paddingTop: 7, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                  <span style={{ fontSize: 11, color: UI.inkSoft, lineHeight: 1.45 }}>{String(i.note)}</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Circular position badge (1, 2, 3, ...) reflecting an ingredient's place in
 // the recipe's prep order (array order). Shared by the ingredient list above
 // and Cooking Mode's one-at-a-time hero card below, so the same number means
@@ -7666,90 +7780,18 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             </button>
           </div>
         } />
-      {/* Poster tree: its own fixed-width sheet, always mounted, only ever
-          hidden via display:none, exactly like the Food Log, Shopping List
-          and Plan posters. Never conditionally rendered on `capturing`
-          itself: captureNodeAsPng only flips capturing to true AFTER
-          checking captureRef.current is non-null, so a tree gated on
-          `capturing` would still be unmounted at that exact check.
-
-          Deliberately NOT the live editing tree with `capturing ?` branches
-          the way this screen used to do it. That made the exported card
-          inherit the phone's viewport width, so on a narrow screen every
-          ingredient's meta line and prep note wrapped, and html2canvas's
-          text measurement mis-places runs that sit after a soft line break
-          (see shotSplitWordsForMeasurement in screens-lib.jsx): the export
-          came back with tails of lines drawn a few px too high while the
-          rows around them kept their real, taller height. A fixed 480px
-          poster is both the width the other three posters already use and
-          wide enough that the usual line fits in one go. */}
+      {/* Poster tree, built to the Plan poster's shape (screens-schedule.jsx):
+          a dedicated full-screen scroll container, one fixed-width sheet
+          inside it, always mounted and only ever hidden via display:none.
+          Never conditionally rendered on `capturing` itself: captureNodeAsPng
+          only flips capturing to true AFTER checking captureRef.current is
+          non-null, so a tree gated on `capturing` would still be unmounted at
+          that exact check. That dedicated container is also what
+          captureNodeAsPng expects, since it expands captureRef's own
+          parentElement around the capture. */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
-        {/* Asymmetric on purpose, unlike the other posters' even 26/32: the
-            card opens on a full-width gold hairline, which needs room above it
-            to read as a rule rather than as a cropped edge, and it ends on an
-            ingredient row that already carries its own padding, so the image
-            should stop just past it instead of on another block of empty. */}
-        <div ref={captureRef} style={{ padding: '32px 28px 20px', width: 480, margin: '0 auto', position: 'relative' }}>
-          {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
-              for the export, same as SessionDetailScreen/SessionCompareScreen. */}
-          {_shotGridOn && <SvgGrid />}
-          {/* Screenshot background watermark, centered, faint, full card. */}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
-          </div>
-          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ marginBottom: -4 }}>
-              <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 12 }}>
-                <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
-                <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0 }}>ZANE</div>
-              </div>
-              <div className="knurl" />
-            </div>
-
-            <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
-
-            <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
-
-            <div>
-              <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
-              {/* Plain read-only rows for the shareable card: no drag handle,
-                  no edit/note/delete affordances, nothing interactive to show.
-                  fdEntryRow's normal background is opaque UI.bgInset, translucent
-                  here (no backdrop-filter, that silently no-ops under html2canvas
-                  same as the CSS grid does) so the centered watermark bleeds
-                  through the cards instead of sitting hidden behind them. */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {items.map((i, idx) => (
-                  <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      <FdIngredientBadge n={idx + 1} />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={fdEntryName}>{i.foodName}</div>
-                        <div style={fdEntryMeta}>
-                          {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
-                          <span style={fdMetaDivider} />
-                          <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                        </div>
-                      </div>
-                    </div>
-                    {/* Prep note, same inline style as RecipeShareSheet's own
-                        preview: a shared card is exactly the "someone else is
-                        cooking this" case that note exists for, whoever it's
-                        shared with gets the same prep guidance, not just a
-                        bare ingredient list. */}
-                    {i.note && (
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                        <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <RecipePoster captureRef={captureRef} name={name} items={items} portions={portions} totals={totals} netCarbs={netCarbs}
+          logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
       </div>
 
       <div style={{
