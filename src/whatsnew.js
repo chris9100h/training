@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.704',
+    date: '2026-08-05',
+    title: 'No new features, just a lot fixed 🔧',
+    items: [
+      "🛡️ Your numbers now actually stick: a rare sync timing issue could silently revert a corrected set's weight or reps back to the old value. Fixed, your edits always win now.",
+      "📅 Plan changes behave correctly now: moving a training day to a new weekday used to lose its history (seeded weights/reps came back empty), and schedule changes could wrongly flag old days as missed. Both fixed.",
+      "🎨 A proper pass on colors and contrast: checked every theme × accent color combo and fixed the ones that were hard to read, faint numbers on light themes, a red accent that nearly vanished on Dark/Black, weak secondary text on Black. Should look right everywhere now.",
+      "✨ Smaller stuff: medication reminders now fire reliably without opening the Meds tab first, plus quieter sync fixes throughout.",
+    ],
+  },
+  {
     id: 'v2.697',
     date: '2026-08-04',
     title: 'Badges, and where this is going \ud83c\udfc5',
