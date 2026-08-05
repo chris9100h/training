@@ -540,7 +540,7 @@ function PreviewSection({ title, subtitle, children }) {
       <button onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', gap: 10, WebkitTapHighlightColor: 'transparent' }}>
         <div style={{ flex: 1, textAlign: 'left' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{title}</div>
-          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>{subtitle}</div>
+          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>{subtitle}</div>
         </div>
         <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
       </button>
@@ -939,7 +939,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>Choose Icon</span>
           {fieldDraft.icon && (
             <button onClick={() => { setFieldDraft(f => ({ ...f, icon: '' })); setView('edit-field'); }}
-              style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
+              style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
               Clear
             </button>
           )}
@@ -955,7 +955,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                     <div key={icon} onClick={() => { setFieldDraft(f => ({ ...f, icon })); setView('edit-field'); }}
                       style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '12px 4px 8px', borderRadius: 6, cursor: 'pointer', background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `var(--hair-width) solid ${sel ? 'var(--hair-accent)' : UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
                       <i className={`fa-solid ${icon}`} style={{ fontSize: 22, color: sel ? 'var(--accent)' : UI.inkSoft }} />
-                      <span style={{ fontSize: 9, color: sel ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.2, wordBreak: 'break-word' }}>{icon.replace('fa-', '')}</span>
+                      <span style={{ fontSize: 9, color: sel ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.2, wordBreak: 'break-word' }}>{icon.replace('fa-', '')}</span>
                     </div>
                   );
                 })}
@@ -1035,7 +1035,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>
-                  <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
                     Client logs this field daily, weekly aggregate prefills the check-in
                   </div>
                 </div>
@@ -1068,7 +1068,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                     <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{fd.icon}</span>
                   </>
                 ) : (
-                  <span style={{ fontSize: 13, color: UI.inkGhost, fontFamily: UI.fontUi }}>Tap to choose…</span>
+                  <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>Tap to choose…</span>
                 )}
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkGhost, marginLeft: 'auto', flexShrink: 0 }} />
               </div>
@@ -1090,11 +1090,11 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               {renderHelp('min')}
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MIN</div>
+                  <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 3 }}>MIN</div>
                   <input type="text" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MAX</div>
+                  <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 3 }}>MAX</div>
                   <input type="text" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
                 </div>
               </div>
@@ -1125,7 +1125,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {fd.options.map((o, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <div style={{ width: 22, flex: '0 0 22px', textAlign: 'center', fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi }}>{i + 1}</div>
+                    <div style={{ width: 22, flex: '0 0 22px', textAlign: 'center', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{i + 1}</div>
                     <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
                       placeholder="e.g. Improved" style={{ ...inp, flex: 1, fontSize: 13 }} />
                     <button onClick={() => set('options', fd.options.filter((_, j) => j !== i))}
@@ -1134,7 +1134,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                     </button>
                   </div>
                 ))}
-                {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet, tap + ADD</div>}
+                {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet, tap + ADD</div>}
               </div>
               {fd.direction && fd.options.length > 0 && (
                 <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.16)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -1205,7 +1205,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           {backBtn(() => setView('list'))}
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Preview</span>
-            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap a section to expand</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>Tap a section to expand</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
@@ -1298,7 +1298,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           {backBtn(() => setView('list'))}
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Add Default Fields</span>
-            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap to add a removed field back</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>Tap to add a removed field back</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
@@ -1318,7 +1318,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                       style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, textShadow: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
                       {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
                       <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
                     </button>
                   ))}
@@ -1407,7 +1407,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           </button>
         )}
         <button onClick={handleReset}
-          style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
+          style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
           Reset
         </button>
         <button onClick={() => onSaveForAll ? setSavePicker(true) : handleSave()} disabled={saving}
@@ -1422,7 +1422,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sec.label}</span>
-                {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
+                {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <button data-reorder-ignore="true" onClick={() => openEditSection(sIdx)}
@@ -1446,9 +1446,9 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <i className="fa-solid fa-fire" style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />
                           <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Macros</span>
-                          <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}` }}>Cal · Protein · Carbs · Fat</span>
+                          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}` }}>Cal · Protein · Carbs · Fat</span>
                         </div>
-                        <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{presentMacros.length} fields bundled</div>
+                        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{presentMacros.length} fields bundled</div>
                       </div>
                       <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove macro fields (Cal / Protein / Carbs / Fat)?', { ok: 'Remove', danger: true })) removeMacroGroup(sIdx); }}
                         style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
@@ -1466,11 +1466,11 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                         {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
                         <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                        <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
-                        {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}` }}>½</span>}
+                        <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                        {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 2, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}` }}>½</span>}
                         {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
                       </div>
-                      <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                       <button data-reorder-ignore="true" onClick={() => openEditField(sIdx, fIdx)}
@@ -1776,7 +1776,7 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
 
   // Plain render helpers (not React components), avoids remount-on-render keyboard bug
   const inputStyle = { width: '100%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 36px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
-  const unitStyle  = { position: 'absolute', right: 8, fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, pointerEvents: 'none' };
+  const unitStyle  = { position: 'absolute', right: 8, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, pointerEvents: 'none' };
 
   const renderInput = (fieldKey, label, unit) => (
     <div style={{ flex: 1 }}>

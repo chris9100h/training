@@ -1,6 +1,6 @@
 # Theme-/Akzent-Audit 2026-08
 
-Datum: 2026-08-05. Lesbarkeits-Audit über alle Themes (dark, black, light, paper inkl. Paper-Akzent-Opt-out) × 10 Akzentfarben. Methodik: deterministische WCAG-Kontrastmatrix (50 effektive Kombinationen, 22 Farbpaare, exakt mit den Formeln aus `index.html` gerechnet: 439 geflaggte Zellen im Ausgangszustand) + 6 semantische Verify-Agents über alle Screens (~55 CONFIRMED, ~4 PLAUSIBLE, ~9 REFUTED) + 1 abschließende adversariale Verifikation der Fixes.
+Datum: 2026-08-05. Lesbarkeits-Audit über alle Themes (dark, black, light, paper inkl. Paper-Akzent-Opt-out) × 10 Akzentfarben. Methodik: deterministische WCAG-Kontrastmatrix (50 effektive Kombinationen, 22 Farbpaare, exakt mit den Formeln aus `index.html` gerechnet: 439 geflaggte Zellen im Ausgangszustand) + 6 semantische Verify-Agents über alle Screens (~55 CONFIRMED, ~4 PLAUSIBLE, ~9 REFUTED) + 1 abschließende adversariale Verifikation der Fixes. **„über alle Screens" stimmte beim ersten Durchgang nicht ganz: siehe „Nachtrag: Abdeckungslücke" unten, inzwischen geschlossen.**
 
 Status: **[BEHOBEN]** auf Branch `claude/theme-audit-fixes-2026-08` (Commit siehe Git-Log). SW-Cache-Bump nur auf Ansage.
 
@@ -34,8 +34,22 @@ Status: **[BEHOBEN]** auf Branch `claude/theme-audit-fixes-2026-08` (Commit sieh
 
 ## Verifikation
 
-- **Matrix final**: 439 → 169 geflaggte Zellen; davon 61 BAD<3 ausschließlich in den bewusst-dekorativen Klassen (accent-deep als Border/Gradient, inkGhost-Dekoration; alle Echttext-Nutzungen migriert). **Alle Text-Token ≥ 4.5:1 auf allen Flächen aller 50 Kombinationen; Akzent-Text ≥ 3.0:1 überall** (worst: red auf dark 3.91).
+- **Matrix final**: 439 → 169 geflaggte Zellen; davon 61 BAD<3 ausschließlich in den bewusst-dekorativen Klassen (accent-deep als Border/Gradient, inkGhost-Dekoration). Token-Ebene (`--ok`/`--warn`/`--info`/`--danger`/Akzente/`inkFaint`) ist damit vollständig erfasst. Die Behauptung "alle Echttext-Nutzungen migriert" war beim ersten Durchgang zu optimistisch, siehe Nachtrag. **Alle Text-Token ≥ 4.5:1 auf allen Flächen aller 50 Kombinationen; Akzent-Text ≥ 3.0:1 überall** (worst: red auf dark 3.91) gilt weiterhin für die Token selbst, unabhängig davon, welcher Screen sie referenziert.
 - **Adversariale Verifikation** (unabhängiger Agent, 7 Angriffswinkel): alle kontrastkritischen Claims bestätigt; gefundene Reste wurden nachgezogen (ok↔info-Kollision im Makro-Pairing durch Periwinkle-info gelöst, 7 übersehene inkGhost-Duplikatstellen, Ember-light-Werte nachjustiert, `rowFlash`/`:root`-Fallbacks, Kommentar-Akkuratheit wiederhergestellt). Gates: check-syntax 26/26, check-emdash clean, store.test 504/504.
+
+## Nachtrag: Abdeckungslücke (2026-08-05, zweite Runde)
+
+Unabhängige Review (eigene Nachrechnung aller WCAG-Werte oben gegen die tatsächlichen Hex-Werte in `index.html`, alle bestätigt exakt) fand eine Lücke in der Screen-Abdeckung, nicht in der Farbmathematik: tatsächlich angefasst wurden cardio, coaching-**client** (nicht core/detail/tabs), food, health, home, lib, medications, settings, train. Vier Coaching-Dateien minus eine, plus **`screens-onboarding.jsx`** (Welcome-Tour) und **`screens-schedule.jsx`**, waren nie Teil des Fix-Durchgangs, obwohl `inkGhost` ein globales Token ist und dieselbe 1.33-1.97:1-Lücke dort identisch zuschlägt. Stichprobe zeigte echten Fließtext, keine Deko, u.a. Onboarding-Instruktionen ("Tap the ✓ on the active row to confirm the set", "Marks unchecked sets as skipped and moves to the next exercise"), eine Chat-Meta-Zeile in `screens-coaching-core.jsx` (exakt die Kategorie, die der ursprüngliche Fix für die Coaching-Client-Tabs schon als behoben auflistete, nur eine Datei weiter) und Instruktionstext im Check-in-Schema-Builder (`screens-coaching-detail.jsx`).
+
+**Fix:** dieselbe `inkGhost` → `inkFaint`-Migration wie im ersten Durchgang, jetzt für die fünf übersprungenen Dateien, mit derselben Abgrenzungsregel (reiner Icon-Glyph, rein dekoratives Füllelement ohne Text, oder ein bewusster "—"-Platzhalter im leeren Zustand einer sonst befüllten Werteanzeige bleiben `inkGhost`; jeder Fließtext/Zahlenwert, den ein Nutzer liest, wechselt zu `inkFaint`):
+
+- `screens-onboarding.jsx`: 29 von 38 Stellen migriert (9 Icons/Deko-Balken bleiben)
+- `screens-coaching-detail.jsx`: 20 von 31 (11 Icons/Disabled-Reset-Button/"—"-Platzhalter bleiben)
+- `screens-coaching-core.jsx`: 1 von 2 (Chat-Sender+Zeitstempel-Zeile; das "×"-Glyph im Delete-Button bleibt)
+- `screens-schedule.jsx`: 3 von 6 (Technique-"none"-Label, Exercise-DB-Hinweistext, Wizard-Fortschrittszähler migriert; zwei Disabled-Button-Farben und ein "—"-Platzhalter bleiben)
+- `screens-coaching-tabs.jsx`: 0 von 4 (alle vier bereits korrekt: 3 Icons, 1 Status-Dot-Füllung ohne Text)
+
+53 Stellen migriert. Gates erneut grün: check-syntax 26/26, check-emdash clean, store.test 504/504.
 
 ## Dokumentierte Rest-Nähen (bewusst, kein Fix)
 
