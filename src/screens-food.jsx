@@ -7440,6 +7440,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
+  // Display name only (items[i].foodName): renaming here never touches
+  // zane_foods or foodId, it's a per-recipe snapshot already, see the
+  // comment on the "Edit ingredient" Sheet below. Followers reading a
+  // shared recipe (RecipeShareSheet renders this same foodName verbatim)
+  // don't need to know the raw product name a search result came with.
+  const [editName, setEditName] = useStateFd('');
   // Per-ingredient note (items[i].note, optional): the item being edited, or
   // null while closed. Carried through to Cooking Mode below, where it's the
   // whole point of being permanent (shown prominently on that ingredient's
@@ -7529,8 +7535,8 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
       return next;
     });
   }
-  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
-  function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); }
+  function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); }
   function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
   function closeNoteItem() { setNoteItem(null); setNoteText(''); }
   function saveNote() {
@@ -7563,10 +7569,11 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // fewer intermediate step.
   function saveEditItem() {
     const g = fdNum(editGrams);
-    if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return;
+    const trimmedName = editName.trim();
+    if (!editItem || !(g > 0) || !(editItem.quantityG > 0) || !trimmedName) return;
     const factor = g / editItem.quantityG;
     setItems(list => list.map(i => i.id !== editItem.id ? i : {
-      ...i, quantityG: Math.round(g),
+      ...i, quantityG: Math.round(g), foodName: trimmedName,
       calories: Math.round((i.calories || 0) * factor),
       protein: fdRound1((i.protein || 0) * factor),
       carbs: fdRound1((i.carbs || 0) * factor),
@@ -7773,9 +7780,17 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
         </div>
       </div>
 
-      {/* ── Edit an already-added ingredient's amount, rescaling its macros
-          proportionally ── */}
-      <Sheet open={!!editItem} onClose={closeEditItem} title={editItem?.foodName || 'Ingredient'} titleColor="var(--accent)">
+      {/* ── Edit an already-added ingredient: rename it for display (this
+          recipe's own foodName snapshot only, never zane_foods or foodId,
+          see the editName state comment above) and/or resize its amount,
+          rescaling macros proportionally. A share link renders this same
+          foodName verbatim (RecipeShareSheet below), so a rename here is
+          also how a shared recipe stops showing raw database product
+          names. ── */}
+      <Sheet open={!!editItem} onClose={closeEditItem} title="Edit ingredient" titleColor="var(--accent)">
+        <Field label="Name" style={{ marginBottom: 16 }}>
+          <TextInput value={editName} onChange={setEditName} placeholder={editItem?.foodName} />
+        </Field>
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
           <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
@@ -7788,7 +7803,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
           </button>
           <Btn kind="ghost" onClick={closeEditItem} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0) || !editName.trim()} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
