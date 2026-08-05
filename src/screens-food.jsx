@@ -7684,7 +7684,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
           poster is both the width the other three posters already use and
           wide enough that the usual line fits in one go. */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
-        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+        {/* Asymmetric on purpose, unlike the other posters' even 26/32: the
+            card opens on a full-width gold hairline, which needs room above it
+            to read as a rule rather than as a cropped edge, and it ends on an
+            ingredient row that already carries its own padding, so the image
+            should stop just past it instead of on another block of empty. */}
+        <div ref={captureRef} style={{ padding: '38px 28px 20px', width: 480, margin: '0 auto', position: 'relative' }}>
           {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
               for the export, same as SessionDetailScreen/SessionCompareScreen. */}
           {_shotGridOn && <SvgGrid />}

@@ -807,25 +807,43 @@ async function shotFontsUsable(doc, fonts) {
   }
 }
 
-// html2canvas measures every text run with a DOM Range over the text node
-// (Range.getClientRects). iOS Safari gets that wrong as soon as a range
-// crosses a soft line break: the fragments after the break come back with the
-// previous line's y and an x that just keeps advancing, so a wrapped
-// paragraph exports as one long line whose tail sits a few px too high, while
-// the box around it keeps its real, taller height (support report, recipe
-// screenshot, 2026-08-05). html2canvas 1.4.1 still ships the probe for this
-// (testIOSLineBreak) but no longer reads its result anywhere.
+// Marks the one-word wrappers the two helpers below cooperate through.
+const SHOT_WORD_ATTR = 'data-shot-word';
+
+// html2canvas positions every text run from a DOM Range over the text node
+// (Range.getClientRects), and that is the one measurement Safari on the
+// reported device gets wrong: the boxes it draws around the text (plain
+// element rects) land correctly, but runs of text inside them come out a few
+// px too high, so a wrapped paragraph exports as one long line whose tail
+// floats above the baseline while the row around it keeps its real, taller
+// height (support report, recipe + shopping list screenshots, 2026-08-05).
+// html2canvas 1.4.1 still ships a probe for this class of bug
+// (testIOSLineBreak, "ios does not handle range getBoundingClientRect line
+// changes correctly") but no longer reads its result anywhere.
 //
-// Sidestepped here by making sure no text node can span a line break in the
-// first place: every word gets its own <span>, and the whitespace between
-// them stays plain text, so the soft-wrap opportunities (and therefore the
-// layout) are byte for byte what they were. Runs on html2canvas's CLONE only
-// (via its onclone hook), never on the live DOM that React owns.
+// Fixed in two steps, both on html2canvas's CLONE only (via its onclone
+// hook), never on the live DOM that React owns:
 //
-// Skipped where a <span> would not be inert: inside a flex/grid/table
-// container each word would become its own item (and the whitespace between
-// them would be dropped), and under a text-decoration the words would leave
-// the decorated element's own text run, losing the underline/line-through.
+//   1. shotSplitWordsForMeasurement wraps every single word in its own
+//      <span data-shot-word>. Whitespace stays plain text between them, so
+//      the soft-wrap opportunities (and therefore the layout) are byte for
+//      byte what they were, but now every text node html2canvas measures
+//      sits inside a box of its own that can only ever be on one line.
+//   2. shotPinTextRectsToTheirBox makes Range.getClientRects inside those
+//      wrappers take its vertical position from the wrapper's own
+//      getBoundingClientRect. Horizontal stays with the range (it is
+//      correct, and per-glyph advances have to come from there).
+//
+// Splitting alone is not enough: a per-word range still reports the wrong y
+// on the affected device. Pinning alone is not enough either: without the
+// one-word wrappers there is no single-line box to pin to. Together they
+// take Range's y out of the picture entirely.
+//
+// Splitting is skipped where a <span> would not be inert: inside a
+// flex/grid/table container each word would become its own item (and the
+// whitespace between them would be dropped), and under a text-decoration the
+// words would leave the decorated element's own text run, losing the
+// underline/line-through.
 function shotSplitWordsForMeasurement(root) {
   const doc = root && root.ownerDocument;
   const view = doc && doc.defaultView;
@@ -839,10 +857,7 @@ function shotSplitWordsForMeasurement(root) {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const parent = n.parentNode;
     if (!parent || parent.nodeType !== 1 || parent.namespaceURI !== XHTML || SKIP_TAGS[parent.nodeName]) continue;
-    // A text node with no interior whitespace has no break opportunity inside
-    // it, so its range can never span two lines: nothing to gain, and one
-    // fewer element for html2canvas to walk.
-    if (!/\S/.test(n.data) || !/\s/.test(n.data.trim())) continue;
+    if (!/\S/.test(n.data)) continue;
     const cs = view.getComputedStyle(parent);
     if (!cs || SKIP_DISPLAY.test(cs.display) || (cs.textDecorationLine && cs.textDecorationLine !== 'none')) continue;
     targets.push(n);
@@ -857,11 +872,36 @@ function shotSplitWordsForMeasurement(root) {
       if (!part) return;
       if (/^\s+$/.test(part)) { frag.appendChild(doc.createTextNode(part)); return; }
       const span = doc.createElement('span');
+      span.setAttribute(SHOT_WORD_ATTR, '');
       span.textContent = part;
       frag.appendChild(span);
     });
     parent.replaceChild(frag, node);
   });
+}
+
+// Step 2 of the pair documented above: inside a one-word wrapper, a range's
+// vertical position comes from the wrapper's element rect instead of from the
+// range itself. Element rects are what html2canvas already positions every
+// box with, and they are demonstrably right on the affected device.
+//
+// A no-op on a browser that reports ranges correctly: there the two rects
+// have the same top and height by definition, so the substituted values are
+// the values that were already there (asserted in the repro harness, the
+// exported PNG comes out byte-identical). Patches the clone's own Range
+// prototype, so nothing outside this one throwaway document is affected.
+function shotPinTextRectsToTheirBox(doc) {
+  const view = doc && doc.defaultView;
+  if (!view || !view.Range || !view.DOMRect) return;
+  const original = view.Range.prototype.getClientRects;
+  view.Range.prototype.getClientRects = function () {
+    const rects = original.call(this);
+    const start = this.startContainer;
+    const box = start && start.nodeType === 3 && start.parentElement;
+    if (!box || !box.hasAttribute || !box.hasAttribute(SHOT_WORD_ATTR)) return rects;
+    const el = box.getBoundingClientRect();
+    return Array.from(rects).map(r => new view.DOMRect(r.left, el.top, r.width, el.height));
+  };
 }
 
 // Shared html2canvas capture flow for SessionDetailScreen, SessionCompareScreen,
@@ -1010,6 +1050,7 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
         try {
           await shotFontsUsable(clonedDoc, SHOT_FONTS);
           shotSplitWordsForMeasurement(clonedNode);
+          shotPinTextRectsToTheirBox(clonedDoc);
         } catch (_) { /* export with whatever the clone already has */ }
       },
     });
