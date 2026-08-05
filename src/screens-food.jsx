@@ -7075,9 +7075,16 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           non-null, so if this tree were gated on `capturing` the ref would
           still be null at that exact check, same reasoning as the Food Log
           poster above it in this file). No rename affordance, no Plan-mode
-          controls: this is a static image, not another interactive surface. */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
-        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          controls: this is a static image, not another interactive surface.
+
+          Portalled to <body> for the same reason the recipe poster is (see
+          RecipeEditorScreen): this sheet opens with `animation: sheet-up`, a
+          translateY, and html2canvas clones into a fresh iframe where that
+          animation restarts from zero, so measuring happens against a moving
+          ancestor. Out here there is nothing above the poster to move. */}
+      {ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative', background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none' }}>
           {_shotGridOn && <SvgGrid />}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
@@ -7133,7 +7140,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             </div>
           </div>
         </div>
-      </div>
+        </div>,
+        document.body
+      )}
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {stockBackfillError && inventoryList.length > 0 && (
           // Companion to the backfill fetch's catch above: a failed fetch
