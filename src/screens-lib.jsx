@@ -776,6 +776,94 @@ function GoldSectionLabel({ children, style }) {
   );
 }
 
+// The three custom families every exported card mixes: Inter for body copy,
+// JetBrains Mono for `.num`, Big Shoulders Display for `.display` titles.
+// Checked twice per export, once in the live document (whose layout decides
+// scrollHeight, avatar box and knurl widths) and once inside html2canvas's
+// own clone (whose layout decides every text position), see shotFontsUsable.
+const SHOT_FONTS = ['600 14px "Inter"', '400 14px "JetBrains Mono"', '700 14px "Big Shoulders Display"'];
+
+// Actively load and poll `fonts` in `doc` until they're all usable. Capped so
+// a genuinely unreachable font host can't hang an export forever; falling
+// through after the cap just means the old fallback-metrics behaviour.
+//
+// Needed for html2canvas's clone in particular: it paints into an <iframe>
+// copy of the document, and that copy re-requests the Google-Fonts stylesheet
+// from scratch. html2canvas does await the clone's `document.fonts.ready`,
+// but on a fresh document that resolves as soon as nothing is *pending*,
+// which is true before the font CSS has even been parsed (no @font-face is
+// registered yet, so there is nothing to wait for). The clone then lays text
+// out in fallback metrics while the canvas draws the glyphs with the real,
+// long-since-loaded family from the main document: every run of an affected
+// family lands a few px off its measured box, and lines wrap at different
+// points than the live view, which is also where a too-tall canvas (dead
+// space at the bottom of the export) comes from.
+async function shotFontsUsable(doc, fonts) {
+  if (!doc || !doc.fonts || !doc.fonts.check) return;
+  const allReady = () => fonts.every(f => { try { return doc.fonts.check(f); } catch (_) { return true; } });
+  for (let attempt = 0; attempt < 20 && !allReady(); attempt++) {
+    await Promise.all(fonts.map(f => Promise.resolve(doc.fonts.load(f)).catch(() => {})));
+    await new Promise(r => setTimeout(r, 50));
+  }
+}
+
+// html2canvas measures every text run with a DOM Range over the text node
+// (Range.getClientRects). iOS Safari gets that wrong as soon as a range
+// crosses a soft line break: the fragments after the break come back with the
+// previous line's y and an x that just keeps advancing, so a wrapped
+// paragraph exports as one long line whose tail sits a few px too high, while
+// the box around it keeps its real, taller height (support report, recipe
+// screenshot, 2026-08-05). html2canvas 1.4.1 still ships the probe for this
+// (testIOSLineBreak) but no longer reads its result anywhere.
+//
+// Sidestepped here by making sure no text node can span a line break in the
+// first place: every word gets its own <span>, and the whitespace between
+// them stays plain text, so the soft-wrap opportunities (and therefore the
+// layout) are byte for byte what they were. Runs on html2canvas's CLONE only
+// (via its onclone hook), never on the live DOM that React owns.
+//
+// Skipped where a <span> would not be inert: inside a flex/grid/table
+// container each word would become its own item (and the whitespace between
+// them would be dropped), and under a text-decoration the words would leave
+// the decorated element's own text run, losing the underline/line-through.
+function shotSplitWordsForMeasurement(root) {
+  const doc = root && root.ownerDocument;
+  const view = doc && doc.defaultView;
+  if (!doc || !view || !doc.createTreeWalker) return;
+  const XHTML = 'http://www.w3.org/1999/xhtml';
+  const SKIP_TAGS = { STYLE: 1, SCRIPT: 1, TEXTAREA: 1, TITLE: 1, NOSCRIPT: 1 };
+  const SKIP_DISPLAY = /flex|grid|table|ruby|box/;
+  const walker = doc.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
+  const targets = [];
+  // Collect first, mutate after: replacing nodes mid-walk invalidates the walk.
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const parent = n.parentNode;
+    if (!parent || parent.nodeType !== 1 || parent.namespaceURI !== XHTML || SKIP_TAGS[parent.nodeName]) continue;
+    // A text node with no interior whitespace has no break opportunity inside
+    // it, so its range can never span two lines: nothing to gain, and one
+    // fewer element for html2canvas to walk.
+    if (!/\S/.test(n.data) || !/\s/.test(n.data.trim())) continue;
+    const cs = view.getComputedStyle(parent);
+    if (!cs || SKIP_DISPLAY.test(cs.display) || (cs.textDecorationLine && cs.textDecorationLine !== 'none')) continue;
+    targets.push(n);
+  }
+  targets.forEach(node => {
+    const parent = node.parentNode;
+    if (!parent) return;
+    const frag = doc.createDocumentFragment();
+    // Split on whitespace runs but keep them: they are the line-break
+    // opportunities, and under white-space: pre(-wrap) they are the layout.
+    node.data.split(/(\s+)/).forEach(part => {
+      if (!part) return;
+      if (/^\s+$/.test(part)) { frag.appendChild(doc.createTextNode(part)); return; }
+      const span = doc.createElement('span');
+      span.textContent = part;
+      frag.appendChild(span);
+    });
+    parent.replaceChild(frag, node);
+  });
+}
+
 // Shared html2canvas capture flow for SessionDetailScreen, SessionCompareScreen,
 // and the plan poster: expand the scroll parent, draw the imperative knurl
 // canvases, wait for the watermark avatar to decode, capture, then share/
@@ -825,15 +913,11 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   // reports on slow connections match this app's exact symptom, squished/
   // overlapping text from fallback-font metrics baked into the export).
   // Explicitly re-check and, if anything's still missing, actively load and
-  // poll for it, capped so a genuinely offline font host can't hang the
-  // export forever.
-  if (document.fonts?.check) {
-    const REQUIRED = ['600 14px "Inter"', '400 14px "JetBrains Mono"', '700 14px "Big Shoulders Display"'];
-    for (let attempt = 0; attempt < 20 && !REQUIRED.every(f => document.fonts.check(f)); attempt++) {
-      await Promise.all(REQUIRED.map(f => document.fonts.load(f).catch(() => {})));
-      await new Promise(r => setTimeout(r, 50));
-    }
-  }
+  // poll for it. This covers the LIVE document only, which is what everything
+  // measured below (scrollHeight, avatar box, knurl widths) depends on; the
+  // clone html2canvas actually renders from gets the same treatment in its
+  // own document, see the onclone hook further down.
+  await shotFontsUsable(document, SHOT_FONTS);
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
@@ -903,13 +987,31 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
     const canvas = await html2canvas(node, {
       backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
       scale: 2, useCORS: true, logging: false,
-      height: node.scrollHeight, windowHeight: node.scrollHeight,
+      // windowHeight only sizes the iframe the clone is laid out in, so a
+      // full-height capture never depends on how much of the node happens to
+      // be scrolled into view. The canvas HEIGHT is deliberately left to
+      // html2canvas, which takes it from the cloned node's own box: passing
+      // node.scrollHeight here (as this used to) measures the LIVE DOM but
+      // crops the CLONE, so any reflow between the two, a font resolving
+      // differently or a line wrapping one word earlier, showed up as dead
+      // space at the bottom of the export or a cut-off last row.
+      windowHeight: node.scrollHeight,
       // fitWidth: capture the node's own full width rather than whatever's
       // currently scrolled into view. Only needed by content intentionally
       // wider than the viewport (the plan poster); every other caller's
       // content is never wider than its own viewport, so this is opt-in
       // rather than applied unconditionally to node.scrollWidth for everyone.
       ...(fitWidth ? { width: node.scrollWidth, windowWidth: node.scrollWidth } : {}),
+      // Last stop before html2canvas measures anything: this runs on its
+      // iframe clone, after the clone's own fonts.ready, and html2canvas
+      // awaits whatever it returns. Both helpers are best-effort, a throw in
+      // here would reject the whole export, so neither is allowed to escape.
+      onclone: async (clonedDoc, clonedNode) => {
+        try {
+          await shotFontsUsable(clonedDoc, SHOT_FONTS);
+          shotSplitWordsForMeasurement(clonedNode);
+        } catch (_) { /* export with whatever the clone already has */ }
+      },
     });
     // Report the outcome so callers can confirm success or surface a failure,
     // instead of the export silently doing nothing.

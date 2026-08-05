@@ -7666,113 +7666,126 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             </button>
           </div>
         } />
-      <div ref={captureRef} style={{
-        padding: capturing ? '20px 22px 24px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
-        display: 'flex', flexDirection: 'column', gap: 16, position: 'relative',
-        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
-      }}>
-        {confirmEl}
+      {/* Poster tree: its own fixed-width sheet, always mounted, only ever
+          hidden via display:none, exactly like the Food Log, Shopping List
+          and Plan posters. Never conditionally rendered on `capturing`
+          itself: captureNodeAsPng only flips capturing to true AFTER
+          checking captureRef.current is non-null, so a tree gated on
+          `capturing` would still be unmounted at that exact check.
 
-        {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
-            for the export, same as SessionDetailScreen/SessionCompareScreen. */}
-        {capturing && _shotGridOn && <SvgGrid />}
-        {/* Screenshot background watermark, centered, faint, full document. */}
-        {capturing && (
+          Deliberately NOT the live editing tree with `capturing ?` branches
+          the way this screen used to do it. That made the exported card
+          inherit the phone's viewport width, so on a narrow screen every
+          ingredient's meta line and prep note wrapped, and html2canvas's
+          text measurement mis-places runs that sit after a soft line break
+          (see shotSplitWordsForMeasurement in screens-lib.jsx): the export
+          came back with tails of lines drawn a few px too high while the
+          rows around them kept their real, taller height. A fixed 480px
+          poster is both the width the other three posters already use and
+          wide enough that the usual line fits in one go. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
+              for the export, same as SessionDetailScreen/SessionCompareScreen. */}
+          {_shotGridOn && <SvgGrid />}
+          {/* Screenshot background watermark, centered, faint, full card. */}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
           </div>
-        )}
-
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {capturing ? (
-          <div style={{ marginBottom: -4 }}>
-            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
-              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ marginBottom: -4 }}>
+              <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 12 }}>
+                <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
+                <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0 }}>ZANE</div>
+              </div>
+              <div className="knurl" />
             </div>
-            <div className="knurl" />
+
+            <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
+
+            <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+
+            <div>
+              <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
+              {/* Plain read-only rows for the shareable card: no drag handle,
+                  no edit/note/delete affordances, nothing interactive to show.
+                  fdEntryRow's normal background is opaque UI.bgInset, translucent
+                  here (no backdrop-filter, that silently no-ops under html2canvas
+                  same as the CSS grid does) so the centered watermark bleeds
+                  through the cards instead of sitting hidden behind them. */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {items.map((i, idx) => (
+                  <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <FdIngredientBadge n={idx + 1} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={fdEntryName}>{i.foodName}</div>
+                        <div style={fdEntryMeta}>
+                          {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                          <span style={fdMetaDivider} />
+                          <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                        </div>
+                      </div>
+                    </div>
+                    {/* Prep note, same inline style as RecipeShareSheet's own
+                        preview: a shared card is exactly the "someone else is
+                        cooking this" case that note exists for, whoever it's
+                        shared with gets the same prep guidance, not just a
+                        bare ingredient list. */}
+                    {i.note && (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                        <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        ) : (
-          <Field label="Name">
-            <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
-          </Field>
-        )}
+        </div>
+      </div>
+
+      <div style={{
+        padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        {confirmEl}
+
+        <Field label="Name">
+          <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
+        </Field>
 
         <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
-        {capturing ? (
-          <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
-        ) : (
-          <div>
-            <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
-            </div>
+        <div>
+          <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
           </div>
-        )}
+        </div>
 
         {/* Optional: unlocks logging this recipe by grams of the finished
             dish instead of only by portions, useful for batch cooking where
             weighing out a serving is more natural than a portion fraction
             (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
             Never auto-filled from the ingredient total below: cooking loses
-            or gains water weight, so the two numbers are rarely the same.
-            Editing chrome, not part of the shareable card: hidden in screenshot mode. */}
-        {!capturing && (
-          <Field label="Cooked weight (g), optional">
-            <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
-              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-              Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
-            </div>
-          </Field>
-        )}
+            or gains water weight, so the two numbers are rarely the same. */}
+        <Field label="Cooked weight (g), optional">
+          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+          </div>
+        </Field>
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
-            !capturing && (
-              <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
-                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
-              </Btn>
-            )
-          ) : capturing ? (
-            // Plain read-only rows for the shareable card: no drag handle,
-            // no edit/note/delete affordances, nothing interactive to show.
-            // fdEntryRow's normal background is opaque UI.bgInset, translucent
-            // here (no backdrop-filter, that silently no-ops under html2canvas
-            // same as the CSS grid does) so the centered watermark bleeds
-            // through the cards instead of sitting hidden behind them.
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map((i, idx) => (
-                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                    <FdIngredientBadge n={idx + 1} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={fdEntryName}>{i.foodName}</div>
-                      <div style={fdEntryMeta}>
-                        {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
-                        <span style={fdMetaDivider} />
-                        <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                      </div>
-                    </div>
-                  </div>
-                  {/* Prep note, same inline style as RecipeShareSheet's own
-                      preview: a shared card is exactly the "someone else is
-                      cooking this" case that note exists for, whoever it's
-                      shared with gets the same prep guidance, not just a
-                      bare ingredient list. */}
-                  {i.note && (
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                      <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
+            </Btn>
           ) : (
             // Array order is the deliberate prep order (the order to add
             // ingredients while cooking, see Cooking Mode below), so this list
@@ -7804,8 +7817,6 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
               ))}
             </ReorderList>
           )}
-        </div>
-
         </div>
       </div>
 
