@@ -39,6 +39,13 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
   const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  // A non-2xx PostgREST reply still parses as JSON (an error object, not an
+  // array), so the .catch fallback below never fires and rows[0] would read
+  // undefined off that object. Fail OPEN (still current) rather than
+  // treating a transient DB blip as "cancel this delayed push": the caller
+  // reads `false` here as "the user aborted", which would silently kill a
+  // legitimate rest-timer/reminder relay that never asked to be cancelled.
+  if (!r.ok) { console.error(`[web-push] nonce check failed: ${r.status} ${await r.text().catch(() => '')}`); return true; }
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
 }
@@ -60,6 +67,13 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
 
 async function deliverPush(userId: string, title: string, text: string, url: string) {
   const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=id,endpoint,p256dh,auth`);
+  // Same non-2xx-still-parses-as-JSON trap as isNonceCurrent above: an error
+  // object's .length is undefined, `undefined === 0` is false, so the "no
+  // subscriptions" early return below was skipped and subs.map (an object
+  // has none) threw inside run()'s EdgeRuntime.waitUntil, after the 202
+  // response had already gone out, silently killing the push with nothing
+  // ever surfacing the failure.
+  if (!subRes.ok) { console.error(`[web-push] subscriptions query failed for ${userId}: ${subRes.status} ${await subRes.text().catch(() => '')}`); return; }
   const subs: { id: string; endpoint: string; p256dh: string; auth: string }[] = await subRes.json().catch(() => []);
   if (subs.length === 0) { console.log(`[web-push] no subscriptions for ${userId}`); return; }
 

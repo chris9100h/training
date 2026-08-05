@@ -59,6 +59,16 @@ Deno.serve(async (req) => {
   // Determine recipient (the other party in the coaching relationship).
   // The author is always the authenticated caller, never taken from the body.
   const coachingRes = await dbFetch(`zane_coaching?id=eq.${encodeURIComponent(coachingId)}&select=coach_id,client_id`);
+  // A non-2xx PostgREST reply still parses as JSON (an error object, not an
+  // array), so the .catch fallback never fires; without this guard that
+  // object's undefined [0] read the same as a genuine "not found" below,
+  // masking a real query failure as a 404.
+  if (!coachingRes.ok) {
+    console.error(`[coaching-notify] coaching query failed: ${coachingRes.status} ${await coachingRes.text().catch(() => '')}`);
+    return new Response(JSON.stringify({ error: 'could not resolve coaching relationship' }), {
+      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
   const coaching: { coach_id: string; client_id: string }[] = await coachingRes.json().catch(() => []);
   if (!coaching[0]) {
     return new Response(JSON.stringify({ error: 'coaching not found' }), {
@@ -76,6 +86,16 @@ Deno.serve(async (req) => {
 
   // Check recipient push settings
   const settingsRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(recipientId)}&select=push_enabled,pushover_user_key,use_pushover`);
+  // Same trap as the coaching query above: an error object's settings[0]
+  // reads undefined, which would otherwise fall through to the same
+  // {skipped:true} 200 as "recipient has push disabled", silently losing a
+  // real notification instead of surfacing the failure.
+  if (!settingsRes.ok) {
+    console.error(`[coaching-notify] settings query failed: ${settingsRes.status} ${await settingsRes.text().catch(() => '')}`);
+    return new Response(JSON.stringify({ error: 'could not resolve recipient settings' }), {
+      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
   const settings: { push_enabled: boolean; pushover_user_key: string | null; use_pushover: boolean | null }[] = await settingsRes.json().catch(() => []);
 
   if (!settings[0]?.push_enabled) {
@@ -88,8 +108,15 @@ Deno.serve(async (req) => {
   let threadName = '';
   if (threadId) {
     const threadRes = await dbFetch(`zane_coaching_threads?id=eq.${encodeURIComponent(threadId)}&select=name`);
-    const thread: { name: string }[] = await threadRes.json().catch(() => []);
-    threadName = thread[0]?.name ?? '';
+    // Lower stakes than the two guards above (worst case on failure: the
+    // generic "New message" title instead of the thread's name), but same
+    // error-object trap, so guarded the same way rather than sending anyway.
+    if (threadRes.ok) {
+      const thread: { name: string }[] = await threadRes.json().catch(() => []);
+      threadName = thread[0]?.name ?? '';
+    } else {
+      console.error(`[coaching-notify] thread query failed: ${threadRes.status} ${await threadRes.text().catch(() => '')}`);
+    }
   }
 
   const isSupport = coachingId.startsWith('support_');

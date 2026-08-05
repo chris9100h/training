@@ -103,7 +103,22 @@ Deno.serve(async (req) => {
     }
   }
 
-  const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
+  // No hardcoded fallback: a live Pushover user key committed to a public
+  // repo is a real credential leak (fixed after an audit flagged it, see
+  // docs/audit.md H15 / docs/audit-2026-08.md M15; the exposed key itself
+  // still needs rotating on the Pushover dashboard, this only stops the
+  // committed literal from being used going forward). An internal
+  // (service-role) caller with no userKey and no PUSHOVER_USER env set has
+  // nowhere to actually deliver to, same "nothing to send to" outcome the
+  // app-caller branch above already returns for a missing key.
+  const user = userKey || Deno.env.get('PUSHOVER_USER') || '';
+  if (!cancel && !user) {
+    console.error('[pushover] no target user key available (missing userKey and PUSHOVER_USER env)');
+    return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   // First call only: register this nonce as the currently active one.
   // Relay hops skip this, the nonce is already stored from the initial call.

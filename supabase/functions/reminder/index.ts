@@ -73,12 +73,22 @@ async function sendReminders() {
       await sendWebPush(row.user_id, title, message);
     }
 
-    // Clear next_reminder_at regardless of push success so we don't retry endlessly
-    await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
+    // Clear next_reminder_at regardless of push success so we don't retry
+    // endlessly. A failed clear (network reject OR a non-2xx PostgREST
+    // reply, which .catch alone never sees) leaves next_reminder_at stale
+    // in the past, and this function runs every minute (migration
+    // 0028_reminder_cron.sql), so the same reminder keeps re-sending until
+    // the separate oneHourAgo staleness cutoff above finally skips the row.
+    // Not retried here (that cutoff is the existing backstop), just logged
+    // properly instead of looking identical to a successful clear.
+    const clearResp = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
       method: 'PATCH',
       headers: { 'Prefer': 'return=minimal' },
       body: JSON.stringify({ next_reminder_at: null }),
-    }).catch(e => console.error(`[reminder] clear error for ${row.user_id}:`, e));
+    }).catch(e => { console.error(`[reminder] clear error for ${row.user_id}:`, e); return null; });
+    if (clearResp && !clearResp.ok) {
+      console.error(`[reminder] clear failed for ${row.user_id}: ${clearResp.status} ${await clearResp.text().catch(() => '')}`);
+    }
   }
 }
 

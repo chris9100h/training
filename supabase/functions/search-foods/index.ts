@@ -43,6 +43,13 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 const DAILY_SEARCH_LIMIT = 400;
+// select/cache each do their own live upstream lookup on a cache miss
+// (resolveFood -> lookupOffBarcode/lookupUsdaById) and cache uses the
+// service-role key to write into the shared zane_foods table, the same
+// cost/abuse profile as a real search, just uncounted until now. A
+// separate kind (not 'search') so the user-facing "400 searches" copy
+// stays literally true, same reasoning as the comment below.
+const DAILY_FOOD_LOOKUP_LIMIT = 400;
 
 // Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
 // (isAdmin = store.user?.email === this): unlimited quota for testing.
@@ -539,6 +546,11 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    if (!isAdmin && !await withinQuota(userId, 'food_lookup', DAILY_FOOD_LOOKUP_LIMIT)) {
+      return new Response(JSON.stringify({ error: `That is ${DAILY_FOOD_LOOKUP_LIMIT} food lookups today, well past normal use. The limit resets tomorrow.` }), {
+        status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     const { food, fromCache } = await resolveFood(source, sourceId);
     if (!food) {
       return new Response(JSON.stringify({ error: 'food not found' }), {
@@ -558,6 +570,11 @@ Deno.serve(async (req) => {
     if (!source || !sourceId) {
       return new Response(JSON.stringify({ error: 'missing source/sourceId' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!isAdmin && !await withinQuota(userId, 'food_lookup', DAILY_FOOD_LOOKUP_LIMIT)) {
+      return new Response(JSON.stringify({ error: `That is ${DAILY_FOOD_LOOKUP_LIMIT} food lookups today, well past normal use. The limit resets tomorrow.` }), {
+        status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
     const cached = await cacheFood(source, sourceId);

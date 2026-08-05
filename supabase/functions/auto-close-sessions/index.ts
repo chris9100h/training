@@ -150,11 +150,23 @@ Deno.serve(async (req) => {
         // multi-million-minute duration.
         const startedAt = sess.started_at ? new Date(sess.started_at) : null;
         const durationMinutes = startedAt ? Math.round((lastActivity.getTime() - startedAt.getTime()) / 60000) : null;
-        await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
+        const closeResp = await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
           method: 'PATCH',
           headers: { 'Prefer': 'return=minimal' },
           body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}) }),
         });
+        // Unlike the three read queries above, this write was never checked:
+        // a transient non-2xx here (still `ok`-checkable, dbFetch never
+        // throws on it) left the session open but the very next line cleared
+        // in_progress_session_id unconditionally anyway. The next tick then
+        // saw isTracked=false for a session that never actually closed and
+        // hard-deleted it as an "orphan", sets and all. Skip to the next
+        // session instead, session stays open and tracked, this same close
+        // is retried next tick.
+        if (!closeResp.ok) {
+          console.error(`[auto-close] close-PATCH failed for session ${sess.id}: ${closeResp.status} ${await closeResp.text().catch(() => '')}`);
+          continue;
+        }
         console.log(`[auto-close] closed session ${sess.id} (${durationMinutes ?? 'unknown'} min)`);
 
         // Write notification for next app start
