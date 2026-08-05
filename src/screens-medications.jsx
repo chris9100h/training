@@ -1102,6 +1102,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           startDate, endDate, updatedAt: nowISO,
         }),
       }));
+      // Today's already-materialized row (if any) still reflects the slot's
+      // OLD shape (M6-Rest, audit-2026-08 verification): a weekday/hour/
+      // dose/interval/phase-date edit can leave it stale (wrong hour/dose
+      // shown) or outright wrong (no longer applies today at all), same
+      // disharmony class as the original M6 finding, just triggered by an
+      // edit instead of a pause/delete. Reconciling unconditionally is safe:
+      // the auto-fill effect below (already keyed on
+      // medicationScheduleSlots) re-materializes a fresh, correct row on
+      // its very next run if the edited slot is still due today.
+      mdReconcilePlannedLogs(setStore, today, new Set([slotDraft.id]));
     } else {
       const newSlot = {
         id: LB.uid(), medicationId: schedMed.id, medicationPlanId: schedMed.medicationPlanId,
