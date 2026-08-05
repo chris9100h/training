@@ -609,7 +609,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -1109,8 +1109,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setPendingCountdown(120);
     await LB.unsubscribeWebPush(userId).catch(() => {});
     setWebPushSub(null);
-    setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
-    setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+    setPushEnabled(false);
+    setWebPushVerified(false);
+    try { localStorage.setItem('logbook-push-enabled', 'false'); localStorage.removeItem('logbook-push-verified'); } catch (_) {}
     setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
   };
@@ -1128,7 +1129,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (!pushEnabled) {
         const sub = await LB.subscribeWebPush(userId);
         setWebPushSub(sub);
-        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setWebPushVerified(false);
+        try { localStorage.removeItem('logbook-push-verified'); } catch (_) {}
         setWebPushPending(true);
         setPendingCountdown(120);
         clearInterval(countdownIntervalRef.current);
@@ -1144,8 +1146,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       } else {
         await LB.unsubscribeWebPush(userId);
         setWebPushSub(null);
-        setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
-        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setPushEnabled(false);
+        setWebPushVerified(false);
+        try { localStorage.setItem('logbook-push-enabled', 'false'); localStorage.removeItem('logbook-push-verified'); } catch (_) {}
         setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
         setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
       }
@@ -1175,9 +1178,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     clearTimeout(pendingTimeoutRef.current);
     clearInterval(countdownIntervalRef.current);
     setPendingCountdown(120);
-    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+    setPushEnabled(true);
     setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
-    setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushVerified(true);
+    try { localStorage.setItem('logbook-push-enabled', 'true'); localStorage.setItem('logbook-push-verified', 'true'); } catch (_) {}
     setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
     clearTimeout(pushStatusTimer.current);
@@ -1260,6 +1264,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // fail without a single visible sign while step 2 stayed armed.
   // Returns true only when a file actually reached the user.
   const exportData = async (filename) => {
+    // A non-'synced' status means the store has edits the server doesn't
+    // have yet (flushSync only retries on its own 15s timer, app.jsx), and
+    // exportBackup refetches session entries/sets straight from the server,
+    // overwriting the store's own (unsynced) copies with whatever's already
+    // there (store.js:1008): exporting mid-failure would silently bake the
+    // OLDER, already-synced version into the backup instead of the latest
+    // edits, exactly the "Step 1" safety net the Restore flow's own copy
+    // tells the user to rely on before the risky, destructive Step 2.
+    if (syncStatus !== 'synced') {
+      const proceed = await confirm(
+        "You have changes that haven't finished syncing yet. A backup taken right now would save the older, already-synced version of that data instead of your latest edits. Wait a moment and try again, or export anyway?",
+        { title: 'Unsynced changes', ok: 'Export anyway', cancel: 'Wait' },
+      );
+      if (!proceed) return false;
+    }
     try {
       const backup = await LB.exportBackup(store, userId);
       const { blob, gz } = await LB.backupToBlob(backup);
@@ -2730,7 +2749,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
               const active = (store.settings?.accentColor ?? 'copper') === key;
               return (
-                <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
+                <button key={key} onClick={() => { window.applyAccentColor(key); try { localStorage.setItem('logbook-accent-color', key); } catch (_) {} setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
                   title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
                   <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
                   {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
@@ -2770,12 +2789,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             How visible the logo (or your VIP background) is behind the Home screen.
           </div>
           <Row label="Week view in cycle mode" first>
-            <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
+            <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); try { localStorage.setItem('logbook-cycle-week-view', String(n)); } catch (_) {} setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
           </Row>
           <Row label="Theme">
             <div style={{ display: 'flex', gap: 4 }}>
               {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light'], ['paper', 'Paper']].map(([key, label]) => (
-                <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
+                <button key={key} onClick={() => { setDarkMode(key); try { localStorage.setItem('logbook-dark-mode', key); } catch (_) {} window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
                   padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
                   background: darkMode === key ? UI.goldFaint : UI.bgInset,
                   border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
@@ -2798,7 +2817,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <Toggle on={paperAccentEnabled} onToggle={() => {
                 const n = !paperAccentEnabled;
                 setPaperAccentEnabled(n);
-                localStorage.setItem('logbook-paper-accent-enabled', String(n));
+                try { localStorage.setItem('logbook-paper-accent-enabled', String(n)); } catch (_) {}
                 window.applyAccentColor(store.settings?.accentColor || 'gold');
               }} />
             </Row>
@@ -2819,7 +2838,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+            {/* backupOk is NOT reset here: it starts false and is only ever
+                set by exportData itself (true on success, false on failure),
+                so a backup already downloaded earlier this session still
+                counts, reopening this sheet shouldn't re-arm the "no backup
+                yet" warning under it for no reason. */}
+            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
@@ -3947,7 +3971,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
-              <button onClick={() => { setIosDisclaimerSeen(true); localStorage.setItem('logbook-push-ios-hint-seen', 'true'); }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
+              <button onClick={() => { setIosDisclaimerSeen(true); try { localStorage.setItem('logbook-push-ios-hint-seen', 'true'); } catch (_) {} }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
             </div>
           )}
           <Row label="This device" first>
