@@ -796,27 +796,6 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   scrollParent.style.overflow = 'visible';
   scrollParent.style.height = 'auto';
   scrollParent.style.minHeight = 'auto';
-  // Pin node to the viewport's own top-left instead of leaving it positioned
-  // under whatever sits above it in scrollParent (every caller has a TopBar
-  // sibling there). html2canvas's x/y crop origin defaults to
-  // getBoundingClientRect(), measured on THIS live page; TopBar's real height
-  // includes env(safe-area-inset-top) on a notched/Dynamic-Island phone, and
-  // html2canvas renders into its own internal document clone that does not
-  // reliably reproduce that same safe-area value, so the crop's y (from the
-  // live page) can land past where node actually starts in the clone,
-  // clipping node's own top padding, hairline and title into the TopBar gap
-  // (recipe screenshot support report, 2026-08-05). Fixing node to (0,0)
-  // removes TopBar's height from the equation entirely: the default x/y
-  // become ~(0,0) on both sides, nothing left to disagree about. Width is
-  // pinned explicitly since position:fixed drops node out of scrollParent's
-  // flex sizing, it would otherwise shrink to content width.
-  const nodeRect = node.getBoundingClientRect();
-  const savedNodeStyle = { position: node.style.position, top: node.style.top, left: node.style.left, width: node.style.width, margin: node.style.margin };
-  node.style.position = 'fixed';
-  node.style.top = '0';
-  node.style.left = '0';
-  node.style.width = nodeRect.width + 'px';
-  node.style.margin = '0';
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   // Custom webfonts (JetBrains Mono for .num, Big Shoulders Display for
   // .display) can still be mid-swap the first time capturing mode mounts a
@@ -841,6 +820,20 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   // every other path (including scrollHeight itself, read further down) had
   // no such guarantee.
   if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
+  // fonts.ready resolving is not proof every family is actually usable yet:
+  // Safari has shipped versions where it fires early (public html2canvas
+  // reports on slow connections match this app's exact symptom, squished/
+  // overlapping text from fallback-font metrics baked into the export).
+  // Explicitly re-check and, if anything's still missing, actively load and
+  // poll for it, capped so a genuinely offline font host can't hang the
+  // export forever.
+  if (document.fonts?.check) {
+    const REQUIRED = ['600 14px "Inter"', '400 14px "JetBrains Mono"', '700 14px "Big Shoulders Display"'];
+    for (let attempt = 0; attempt < 20 && !REQUIRED.every(f => document.fonts.check(f)); attempt++) {
+      await Promise.all(REQUIRED.map(f => document.fonts.load(f).catch(() => {})));
+      await new Promise(r => setTimeout(r, 50));
+    }
+  }
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
@@ -945,11 +938,6 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
     scrollParent.style.overflow = saved.overflow;
     scrollParent.style.height = saved.height;
     scrollParent.style.minHeight = saved.minHeight;
-    node.style.position = savedNodeStyle.position;
-    node.style.top = savedNodeStyle.top;
-    node.style.left = savedNodeStyle.left;
-    node.style.width = savedNodeStyle.width;
-    node.style.margin = savedNodeStyle.margin;
     setCapturing?.(false);
   }
 }
