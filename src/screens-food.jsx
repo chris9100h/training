@@ -7495,7 +7495,17 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // at all. Every item's id then read as undefined, so removeItem's
     // list.filter(i => i.id !== id) matched that same undefined on EVERY
     // item and wiped the whole recipe instead of the one being removed.
-    const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
+    //
+    // Same idea for originalFoodName (see the editName state comment
+    // further down): an item saved before that field existed has none, so
+    // it's backfilled here from whatever foodName currently is. That's the
+    // best available anchor, NOT the item's true original name if it was
+    // already renamed under the old code before originalFoodName existed,
+    // that earlier name is genuinely gone, there is nowhere it could have
+    // been kept. `|| i.foodName` only ever fires on a still-missing field,
+    // so a real originalFoodName from a previous backfill or a normal add
+    // is never clobbered on a later re-open.
+    const it = (recipe?.items || []).map(i => ({ ...i, id: i.id || LB.uid(), originalFoodName: i.originalFoodName || i.foodName }));
     const p = recipe?.portions || 1;
     const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
     setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
