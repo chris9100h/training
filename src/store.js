@@ -6286,12 +6286,21 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
   const stepsLogs = week.filter(l => l.steps != null);
   if (stepsLogs.length) out.steps = stepsLogs.reduce((s, l) => s + l.steps, 0);
-  const cal = avg(week, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
-  const p = avg(week, 'protein'); if (p != null) out.protein_avg = Math.round(p);
-  const c = avg(week, 'carbs'); if (c != null) out.carbs_avg = Math.round(c);
-  const f = avg(week, 'fat'); if (f != null) out.fat_avg = Math.round(f);
-  const hyd = avg(week, 'waterMl'); if (hyd != null) out.hydration_ml = Math.round(hyd);
-  const adh = avg(week, 'adherence'); if (adh != null) out.macro_adherence = Math.round(adh);
+  // Nutrition and adherence build up over the course of a day (today's log is
+  // only ever as complete as however much has been eaten and entered so
+  // far), unlike a single weight reading: averaging today in with fully-
+  // logged days drags calories_avg/macro_adherence toward "under target" on
+  // a week that wasn't, worst on "preview this week" (mid-week by design)
+  // but wrong on any day this runs before midnight. dailyLogAdherence scores
+  // whatever's logged so far against the full day's target, so a same-day
+  // read is never comparable to a finished day's.
+  const weekComplete = week.filter(l => l.date < todayStr);
+  const cal = avg(weekComplete, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
+  const p = avg(weekComplete, 'protein'); if (p != null) out.protein_avg = Math.round(p);
+  const c = avg(weekComplete, 'carbs'); if (c != null) out.carbs_avg = Math.round(c);
+  const f = avg(weekComplete, 'fat'); if (f != null) out.fat_avg = Math.round(f);
+  const hyd = avg(weekComplete, 'waterMl'); if (hyd != null) out.hydration_ml = Math.round(hyd);
+  const adh = avg(weekComplete, 'adherence'); if (adh != null) out.macro_adherence = Math.round(adh);
   if (sessions != null) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });

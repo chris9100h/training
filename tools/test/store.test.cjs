@@ -1185,6 +1185,30 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.dailyLogsWeekPrefill([], '2026-06-08'), null);
   });
 
+  test('dailyLogsWeekPrefill: excludes today from nutrition/adherence averages', () => {
+    // Today is still accumulating (dailyLogAdherence scores whatever's logged
+    // so far against the full day's target), so it must never be averaged in
+    // alongside genuinely finished days, that would drag calories_avg/
+    // macro_adherence toward "under target" on a week that wasn't. weekStart
+    // is placed 3 days before today so today always lands mid-week no matter
+    // which real weekday the test happens to run on.
+    const today = LB.todayISO();
+    const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+    const weekStart = shift(today, -3);
+    const logs = [
+      { date: weekStart, calories: 2000, protein: 180, carbs: 200, fat: 60, adherence: 100 },
+      { date: shift(weekStart, 1), calories: 2000, protein: 180, carbs: 200, fat: 60, adherence: 100 },
+      // Only breakfast logged so far today, a naive average would read this
+      // as a bad day instead of an unfinished one.
+      { date: today, calories: 400, protein: 30, carbs: 40, fat: 10, adherence: 20 },
+    ];
+    const p = LB.dailyLogsWeekPrefill(logs, weekStart);
+    assert.strictEqual(p.calories_avg, 2000);   // not (2000+2000+400)/3
+    assert.strictEqual(p.protein_avg, 180);
+    assert.strictEqual(p.macro_adherence, 100); // not (100+100+20)/3
+    assert.strictEqual(p.count, 3);             // today still counts as a logged day
+  });
+
   // ── Flexible plans ────────────────────────────────────────────────────────
   const flexSch = { id: 'fx', name: 'FLEX', is_flex: true, versions: [], days: [
     { id: 'd0', name: 'PUSH', items: [{ exId: 'e1' }] },
