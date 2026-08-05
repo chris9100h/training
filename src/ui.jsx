@@ -696,11 +696,17 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
 }
 
 // ─── Pill ───────────────────────────────────────────────────────────
+// Always 9px (the border-radius scale's own micro-badge threshold, see
+// CLAUDE.md), so the radius itself follows that scale's "interactive or
+// not" line: 4 only when this Pill owns its own tap handler (onClick in
+// ...rest), 2 otherwise. At 9px tall a 4px corner eats most of the edge
+// and reads as a pill instead of a badge, the same reasoning TierChip's
+// own radius-2 override already documents.
 function Pill({ children, gold = false, style = {}, ...rest }) {
   return (
     <span {...rest} style={{
       display: 'inline-flex', alignItems: 'center',
-      padding: '3px 8px', borderRadius: 4,
+      padding: '3px 8px', borderRadius: rest.onClick ? 4 : 2,
       fontSize: 9, letterSpacing: '0.14em',
       fontFamily: UI.fontUi, fontWeight: 600, textTransform: 'uppercase',
       background: gold ? UI.goldFaint : 'transparent',
@@ -1572,6 +1578,25 @@ function attachDragReorderAxis(axis, container, getCb, options) {
       const crossPos = axis === 'v' ? (state.lastX ?? state.startX) : (state.lastY ?? state.startY);
       const crossGrab = axis === 'v' ? state.offsetX : state.offsetY;
       const crossCenter = crossPos - crossGrab + (state.srcCrossSize || 0) / 2;
+      // Whether this is actually a multi-column layout (items sit at more
+      // than one distinct cross-axis start), not just a single-column list
+      // whose items all happen to share one. The "single-column lists never
+      // take the cross branch" comment below was aspirational, not actually
+      // true: for a true single column, crossStart+crossSize/2 is identical
+      // on every row, so ordinary pointer jitter left/right of the grab
+      // point during a purely vertical drag was enough to flip the OR below
+      // on whichever row the ghost currently overlapped, moving the drop
+      // target by one row on drift alone. Gating the whole cross-axis term
+      // on a genuine column difference fixes that without touching the
+      // multi-column case (Health's 2-col grid) this branch exists for.
+      let isMultiColumn = false;
+      let firstCrossStart = null;
+      for (let k = 0; k < list.length; k++) {
+        const r = list[k].getBoundingClientRect();
+        const crossStart = axis === 'v' ? r.left : r.top;
+        if (firstCrossStart == null) firstCrossStart = crossStart;
+        else if (Math.abs(crossStart - firstCrossStart) > 1) { isMultiColumn = true; break; }
+      }
       for (let k = 0; k < list.length; k++) {
         const r = list[k].getBoundingClientRect();
         const start = axis === 'v' ? r.top : r.left;
@@ -1579,11 +1604,11 @@ function attachDragReorderAxis(axis, container, getCb, options) {
         const crossStart = axis === 'v' ? r.left : r.top;
         const crossSize = axis === 'v' ? r.width : r.height;
         // Same row/column as the ghost? Then the cross axis decides, otherwise
-        // the main axis does. Single-column lists never take the cross branch,
-        // so their behavior is unchanged.
+        // the main axis does. Single-column lists never take the cross branch
+        // (isMultiColumn gates it), so their behavior is unchanged.
         const sameLine = Math.abs((start + size / 2) - cardCenter) < size / 2;
         const isAfter = sameLine
-          ? cardCenter < start + size / 2 || crossCenter < crossStart + crossSize / 2
+          ? cardCenter < start + size / 2 || (isMultiColumn && crossCenter < crossStart + crossSize / 2)
           : cardCenter < start + size / 2;
         if (isAfter) { insertIdx = k; line = start - 3; break; }
       }
