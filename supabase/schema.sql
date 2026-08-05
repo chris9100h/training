@@ -21,20 +21,31 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 
 -- ── Tables ────────────────────────────────────────────────────────────────────
 
+-- tier (Migration 0240): account tier, server-authored. Granted by
+-- grant_lifetime_if_qualified() when an account clears the founding-member bar
+-- (5 completed workouts AND 150 logged minutes) while seats remain. A client
+-- write to tier/tier_granted_at is reverted by zane_profiles_protect_tier,
+-- because the "own profile" policy is FOR ALL and would otherwise let anyone
+-- award themselves lifetime access.
+-- Signup approval (approved column, Migration 0074/0076) was removed in
+-- Migration 0241: registration is open and no longer gated.
 CREATE TABLE public.zane_profiles (
   id   uuid NOT NULL,
   name text NOT NULL,
-  approved boolean DEFAULT false  -- overridden below to signup_default_approved() once that fn exists
+  tier text NOT NULL DEFAULT 'free',
+  tier_granted_at timestamptz,
+  CONSTRAINT zane_profiles_tier_check CHECK (tier IN ('free', 'lifetime', 'premium'))
 );
 
--- Global app config (single row). Drives the zane_profiles.approved default.
+-- Global app config (single row).
 -- force_update_nonce (Migration 0131): set by admin_force_update() to push
 -- the "New version available" banner to every client without an sw.js bump.
+-- lifetime_seats_total (Migration 0240): size of the founding-member cohort,
+-- in config rather than in the trigger so it can be raised without a deploy.
 CREATE TABLE public.zane_app_config (
   id int PRIMARY KEY DEFAULT 1,
-  signup_requires_approval boolean NOT NULL DEFAULT true,
-  auto_approve_remaining int,
   force_update_nonce text,
+  lifetime_seats_total int NOT NULL DEFAULT 75,
   CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
@@ -90,6 +101,12 @@ CREATE TABLE public.zane_exercises (
   no_weight_reps boolean NOT NULL DEFAULT false,
   log_mode text,
   pull_bodyweight boolean NOT NULL DEFAULT false,
+  -- Migration 0243. Three-way successor to pull_bodyweight for bodyweight
+  -- exercises: null = type the weight, 'pull' = pre-fill the last logged
+  -- bodyweight, 'plus_load' = type only the added load (weighted pull-ups,
+  -- belted dips). pull_bodyweight is still written in lockstep so a client on
+  -- an older cached build keeps pre-filling.
+  bodyweight_mode text CHECK (bodyweight_mode IS NULL OR bodyweight_mode IN ('pull', 'plus_load')),
   youtube_url text,
   note_pinned boolean NOT NULL DEFAULT false,
   progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0)
@@ -133,7 +150,12 @@ CREATE TABLE public.zane_sessions (
   meso_recap jsonb,
   readiness text,
   signal_weight text,
-  cycle_pos integer
+  cycle_pos integer,
+  -- Server clock at first completion (Migration 0242). Written only by
+  -- zane_sessions_stamp_completion, immutable afterwards, never accepted from
+  -- the client: it is the only session timestamp a client cannot forge, and the
+  -- founding-member day-spread check depends on that.
+  completed_server_at timestamptz
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -169,6 +191,11 @@ CREATE TABLE public.zane_sets (
   warmup boolean NOT NULL DEFAULT false,
   technique text,
   drops jsonb,
+  -- Migration 0243. Load added on top of bodyweight for a plus_load exercise.
+  -- kg still holds the TOTAL, so e1RM/PR/volume/autoregulation are unchanged;
+  -- this is only what the user typed. Implied bodyweight = kg - added_kg, which
+  -- freezes it at logging time.
+  added_kg numeric,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -705,8 +732,8 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.get_pending_users()
- RETURNS TABLE(user_id uuid, name text, email text, created_at timestamp with time zone)
+CREATE OR REPLACE FUNCTION public.get_recent_signups(p_limit int DEFAULT 50)
+ RETURNS TABLE(user_id uuid, name text, email text, created_at timestamptz)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -717,56 +744,6 @@ BEGIN
   END IF;
   RETURN QUERY
     SELECT p.id, p.name, u.email::text, u.created_at
-    FROM zane_profiles p
-    JOIN auth.users u ON u.id = p.id
-    WHERE p.approved = false
-    ORDER BY u.created_at ASC;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.approve_user(p_user_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RAISE EXCEPTION 'Unauthorized';
-  END IF;
-  UPDATE zane_profiles SET approved = true WHERE id = p_user_id;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.decline_user(p_user_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RAISE EXCEPTION 'Unauthorized';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM zane_profiles WHERE id = p_user_id AND approved = false) THEN
-    RAISE EXCEPTION 'User not found or already approved';
-  END IF;
-  DELETE FROM zane_profiles WHERE id = p_user_id;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.get_recent_signups(p_limit int DEFAULT 50)
- RETURNS TABLE(user_id uuid, name text, email text, created_at timestamptz, approved boolean)
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RETURN;
-  END IF;
-  RETURN QUERY
-    SELECT p.id, p.name, u.email::text, u.created_at, p.approved
     FROM zane_profiles p
     JOIN auth.users u ON u.id = p.id
     ORDER BY u.created_at DESC
@@ -782,7 +759,7 @@ $function$;
 -- client-side on plan_count/created_at/sw_version instead of needing
 -- separate RPCs per filter.
 CREATE OR REPLACE FUNCTION public.get_all_users_admin()
- RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean, plan_count int, last_workout timestamptz)
+ RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, tier text, plan_count int, last_workout timestamptz)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -792,7 +769,7 @@ BEGIN
     RETURN;
   END IF;
   RETURN QUERY
-    SELECT p.id, p.name, u.email::text, us.sw_version, u.created_at, p.approved,
+    SELECT p.id, p.name, u.email::text, us.sw_version, u.created_at, p.tier,
            COALESCE(sc.plan_count, 0)::int AS plan_count, lw.last_workout
     FROM zane_profiles p
     JOIN auth.users u ON u.id = p.id
@@ -871,110 +848,6 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.signup_default_approved()
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-  SELECT NOT COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
-$function$;
-
--- Now that the helper exists, point the column default at it.
-ALTER TABLE public.zane_profiles ALTER COLUMN approved SET DEFAULT public.signup_default_approved();
-
-CREATE OR REPLACE FUNCTION public.get_signup_requires_approval()
- RETURNS boolean
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RAISE EXCEPTION 'Unauthorized';
-  END IF;
-  RETURN COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.set_signup_requires_approval(p_value boolean)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RAISE EXCEPTION 'Unauthorized';
-  END IF;
-  INSERT INTO zane_app_config (id, signup_requires_approval, auto_approve_remaining)
-  VALUES (1, p_value, NULL)
-  ON CONFLICT (id) DO UPDATE
-    SET signup_requires_approval = EXCLUDED.signup_requires_approval,
-        auto_approve_remaining = NULL;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.get_signup_config()
- RETURNS TABLE(requires_approval boolean, auto_approve_remaining int)
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RETURN;
-  END IF;
-  RETURN QUERY
-    SELECT c.signup_requires_approval, c.auto_approve_remaining
-    FROM zane_app_config c WHERE c.id = 1;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.set_auto_approve_budget(p_count int)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-DECLARE
-  v int := NULLIF(GREATEST(COALESCE(p_count, 0), 0), 0);
-BEGIN
-  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
-    RAISE EXCEPTION 'Unauthorized';
-  END IF;
-  INSERT INTO zane_app_config (id, signup_requires_approval, auto_approve_remaining)
-  VALUES (1, v IS NULL, v)
-  ON CONFLICT (id) DO UPDATE
-    SET signup_requires_approval = (v IS NULL),
-        auto_approve_remaining = v;
-END;
-$function$;
-
--- AFTER INSERT on zane_profiles: consume one unit of auto-approve budget per new
--- signup and re-lock registration once it's exhausted.
-CREATE OR REPLACE FUNCTION public.signup_consume_budget()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-DECLARE
-  cfg record;
-BEGIN
-  SELECT signup_requires_approval, auto_approve_remaining INTO cfg
-  FROM zane_app_config WHERE id = 1 FOR UPDATE;
-  IF cfg.signup_requires_approval = false AND cfg.auto_approve_remaining IS NOT NULL THEN
-    IF cfg.auto_approve_remaining <= 1 THEN
-      UPDATE zane_app_config SET signup_requires_approval = true, auto_approve_remaining = NULL WHERE id = 1;
-    ELSE
-      UPDATE zane_app_config SET auto_approve_remaining = auto_approve_remaining - 1 WHERE id = 1;
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$function$;
-
 CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
  RETURNS uuid
  LANGUAGE sql
@@ -983,6 +856,14 @@ CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
 AS $function$
   select id from auth.users where lower(email) = lower(p_email) limit 1
 $function$;
+-- Deliberately unreachable by any client role, see Migration 0128's note
+-- below: only invite_client calls this internally (SECURITY DEFINER, runs
+-- as owner). Live REVOKE, not just the comment migration 0125/0128 left
+-- here: without it a fresh project stood up from this snapshot is an
+-- ungated email->UUID oracle for anon (inherits EXECUTE through the
+-- implicit PUBLIC grant every CREATE FUNCTION makes) and, separately, for
+-- authenticated (the ALTER DEFAULT PRIVILEGES rule further below).
+REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.invite_client(p_email text)
  RETURNS text
@@ -1151,6 +1032,17 @@ begin
 end;
 $function$;
 
+-- updated_at is clamped to LEAST(client value, now()) before being stored or
+-- used as the WHERE guard's comparison basis (migration 0238): a client with
+-- a fast/skewed-forward clock can never claim a timestamp beyond the
+-- server's own now(), so it can no longer "always win" a future conflict
+-- against a device with a correct clock. A client value at or before now()
+-- passes through unchanged, preserving an offline-queued write's original
+-- edit time once it finally syncs.
+-- added_kg (plus_load belt/dip-belt load, Migration 0243) added to all three
+-- lists in Migration 0245: unreferenced jsonb keys are silently ignored, so
+-- every set synced through this RPC (i.e. every write after the first boot
+-- import) had it dropped to NULL until then.
 CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1158,7 +1050,7 @@ CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
 AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
-    set_idx, kg, reps, reps_l, reps_r, time_sec,
+    set_idx, kg, reps, reps_l, reps_r, time_sec, added_kg,
     done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
@@ -1172,12 +1064,13 @@ AS $function$
     (s->>'reps_l')::int,
     (s->>'reps_r')::int,
     (s->>'time_sec')::int,
+    (s->>'added_kg')::numeric,
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
     NULLIF(s->>'technique', ''),
     CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
-    (s->>'updated_at')::timestamptz
+    LEAST(COALESCE((s->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
     kg         = EXCLUDED.kg,
@@ -1185,6 +1078,7 @@ AS $function$
     reps_l     = EXCLUDED.reps_l,
     reps_r     = EXCLUDED.reps_r,
     time_sec   = EXCLUDED.time_sec,
+    added_kg   = EXCLUDED.added_kg,
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
@@ -1197,7 +1091,9 @@ $function$;
 -- Batch upsert for daily logs. Resolves conflicts on (user_id, date) — keeping
 -- the existing row's id — so two devices logging the same day don't collide on
 -- the UNIQUE(user_id, date) constraint, and only overwrites when the incoming
--- updated_at is newer (no stale clobber). Migration 0096.
+-- updated_at is newer (no stale clobber). Migration 0096. updated_at is
+-- clamped to LEAST(client value, now()) since migration 0238, same
+-- clock-skew guard as sync_sets_batch above.
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1227,7 +1123,7 @@ AS $function$
     (l->>'adherence')::numeric,
     CASE WHEN l->'targets_snap' IS NULL OR l->'targets_snap' = 'null'::jsonb THEN NULL ELSE l->'targets_snap' END,
     CASE WHEN l->'daily_coach_fields' IS NULL OR l->'daily_coach_fields' = 'null'::jsonb THEN NULL ELSE l->'daily_coach_fields' END,
-    COALESCE((l->>'updated_at')::timestamptz, now())
+    LEAST(COALESCE((l->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_logs) AS l
   ON CONFLICT (user_id, date) DO UPDATE SET
     weight             = EXCLUDED.weight,
@@ -1450,6 +1346,12 @@ $function$;
 
 -- ── Server-side history aggregation RPCs (migration 0059) ───────────────
 
+-- Excludes deload sessions from the MAX (migration 0239): every client-side
+-- "is this a PR" check (screens-lib.jsx isPR) deliberately excludes deload
+-- sessions from counting as a PR baseline, and store.exerciseBests (fed by
+-- this RPC) is used as a hard floor by SessionDetailScreen's isPR, so an
+-- inflated deload-session e1RM here could permanently block a genuine new
+-- all-time best from ever badging.
 CREATE OR REPLACE FUNCTION public.get_exercise_best_e1rm(p_user_id uuid DEFAULT NULL)
  RETURNS TABLE(ex_id text, best_e1rm double precision)
  LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
@@ -1468,6 +1370,7 @@ AS $function$
   WHERE e.user_id = (SELECT id FROM uid)
     AND e.ex_id IS NOT NULL
     AND s.ended IS NOT NULL
+    AND NOT s.is_deload
     AND ex.movement_type IS DISTINCT FROM 'assisted'
     AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
     AND COALESCE(
@@ -1599,11 +1502,6 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
 -- ── Trigger: consume auto-approve budget on each new profile ────────────────────
-
-DROP TRIGGER IF EXISTS zane_profiles_consume_budget ON public.zane_profiles;
-CREATE TRIGGER zane_profiles_consume_budget
-  AFTER INSERT ON public.zane_profiles
-  FOR EACH ROW EXECUTE FUNCTION signup_consume_budget();
 
 -- ── Trigger: coaching row immutability guard (Migration 0125) ───────────────────
 -- coach_id/client_id can never change; only the client may change status (the
@@ -1798,6 +1696,131 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+
+-- ── Session completion stamp (Migration 0242) ─────────────────────────────────
+CREATE OR REPLACE FUNCTION public.zane_sessions_stamp_completion()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.completed_server_at := CASE WHEN NEW.ended IS NOT NULL THEN now() ELSE NULL END;
+    RETURN NEW;
+  END IF;
+  IF OLD.completed_server_at IS NOT NULL THEN
+    NEW.completed_server_at := OLD.completed_server_at;
+  ELSIF NEW.ended IS NOT NULL THEN
+    NEW.completed_server_at := now();
+  ELSE
+    NEW.completed_server_at := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.zane_sessions_stamp_completion() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_sessions_stamp_completion ON public.zane_sessions;
+CREATE TRIGGER zane_sessions_stamp_completion
+  BEFORE INSERT OR UPDATE ON public.zane_sessions
+  FOR EACH ROW EXECUTE FUNCTION public.zane_sessions_stamp_completion();
+
+-- ── Founding-member tier (Migration 0240) ─────────────────────────────────────
+-- Grants tier = 'lifetime' once an account clears all three bars (Migration
+-- 0242 hardened this): 5 completed workouts, 150 minutes counting at most 120
+-- per session, and completions on 3 distinct SERVER days. duration_minutes and
+-- ended are client-supplied, so the first two alone were forgeable in one
+-- request; the day spread reads completed_server_at, which the client cannot
+-- write, and costs a forger three real calendar days.
+CREATE OR REPLACE FUNCTION public.grant_lifetime_if_qualified()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_tier      text;
+  v_workouts  int;
+  v_minutes   int;
+  v_days      int;
+  v_taken     int;
+  v_total     int;
+BEGIN
+  IF NEW.ended IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT tier INTO v_tier FROM zane_profiles WHERE id = NEW.user_id;
+  IF v_tier IS NULL OR v_tier <> 'free' THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL),
+         COALESCE(SUM(LEAST(COALESCE(duration_minutes, 0), 120))
+                  FILTER (WHERE ended IS NOT NULL), 0),
+         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL)
+    INTO v_workouts, v_minutes, v_days
+    FROM zane_sessions
+   WHERE user_id = NEW.user_id;
+
+  IF v_workouts < 5 OR v_minutes < 150 OR v_days < 3 THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('zane_lifetime_seats'));
+
+  SELECT COUNT(*) INTO v_taken FROM zane_profiles WHERE tier = 'lifetime';
+  SELECT lifetime_seats_total INTO v_total FROM zane_app_config WHERE id = 1;
+
+  IF v_taken >= COALESCE(v_total, 75) THEN
+    RETURN NEW;
+  END IF;
+
+  UPDATE zane_profiles
+     SET tier = 'lifetime',
+         tier_granted_at = now()
+   WHERE id = NEW.user_id
+     AND tier = 'free';
+
+  RETURN NEW;
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.grant_lifetime_if_qualified() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_sessions_grant_lifetime ON public.zane_sessions;
+CREATE TRIGGER zane_sessions_grant_lifetime
+  AFTER INSERT OR UPDATE OF ended ON public.zane_sessions
+  FOR EACH ROW EXECUTE FUNCTION public.grant_lifetime_if_qualified();
+
+-- zane_profiles' "own profile" policy is FOR ALL, so without this the account
+-- holder could PATCH their own tier to 'lifetime' straight against the REST API.
+-- Reverts silently rather than raising, so ordinary profile writes (name change,
+-- whole-row round-trips) still succeed.
+CREATE OR REPLACE FUNCTION public.zane_profiles_protect_tier()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF current_user NOT IN ('anon', 'authenticated') THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.tier IS DISTINCT FROM OLD.tier
+     OR NEW.tier_granted_at IS DISTINCT FROM OLD.tier_granted_at THEN
+    NEW.tier := OLD.tier;
+    NEW.tier_granted_at := OLD.tier_granted_at;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.zane_profiles_protect_tier() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_profiles_protect_tier ON public.zane_profiles;
+CREATE TRIGGER zane_profiles_protect_tier
+  BEFORE UPDATE ON public.zane_profiles
+  FOR EACH ROW EXECUTE FUNCTION public.zane_profiles_protect_tier();
 
 -- Migration 0125 grant changes:
 --   REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM anon, authenticated;
@@ -2095,7 +2118,9 @@ CREATE POLICY "Users manage own meso states"
 -- (COALESCEd on update so an older client that doesn't send it can't null it).
 -- rep_miss_counts added in migration 0165. affinity added in migration 0169.
 -- autoreg_state added in migration 0172 (nullable, COALESCE-preserved on update
--- so an older client that omits it can't wipe live nag state).
+-- so an older client that omits it can't wipe live nag state). updated_at is
+-- clamped to LEAST(client value, now()) since migration 0238, same
+-- clock-skew guard as sync_sets_batch above.
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -2127,7 +2152,7 @@ AS $function$
     NULLIF(m->'autoreg_state', 'null'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
-    COALESCE((m->>'updated_at')::timestamptz, now())
+    LEAST(COALESCE((m->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_states) AS m
   ON CONFLICT (id) DO UPDATE SET
     weeks                 = EXCLUDED.weeks,
@@ -3077,7 +3102,7 @@ GRANT EXECUTE ON FUNCTION public.set_user_vip_background(text, text) TO authenti
 -- Legacy onboarded-users admin lookup (only users who have ≥1 plan). Superseded
 -- by get_all_users_admin (covers every account) but kept for backward compat.
 CREATE OR REPLACE FUNCTION public.get_users_with_plans()
- RETURNS TABLE(user_id uuid, name text, email text, joined_at timestamp with time zone, approved boolean, plan_count integer)
+ RETURNS TABLE(user_id uuid, name text, email text, joined_at timestamp with time zone, plan_count integer)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -3087,12 +3112,12 @@ BEGIN
     RETURN;
   END IF;
   RETURN QUERY
-    SELECT p.id, p.name, u.email::text, u.created_at, p.approved,
+    SELECT p.id, p.name, u.email::text, u.created_at,
            COUNT(s.id)::int AS plan_count
     FROM zane_profiles p
     JOIN auth.users u ON u.id = p.id
     JOIN zane_schedules s ON s.user_id = p.id
-    GROUP BY p.id, p.name, u.email, u.created_at, p.approved
+    GROUP BY p.id, p.name, u.email, u.created_at
     ORDER BY u.created_at DESC;
 END;
 $function$;
@@ -3178,6 +3203,27 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_public_feature_map() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_public_feature_map() TO anon, authenticated;
+
+-- Founding-seat count for the login-free landing page (welcome.html). Returns
+-- three aggregates and nothing per-account. anon is granted execute by design;
+-- this is the second such function. The seat definition mirrors
+-- grant_lifetime_if_qualified() and must stay in step with it. Migration 0244.
+CREATE OR REPLACE FUNCTION public.get_founding_seats()
+ RETURNS TABLE (total int, taken int, remaining int)
+ LANGUAGE sql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT t.total,
+         s.taken,
+         GREATEST(t.total - s.taken, 0) AS remaining
+    FROM (SELECT COALESCE((SELECT lifetime_seats_total FROM zane_app_config WHERE id = 1), 75)::int AS total) t,
+         (SELECT COUNT(*)::int AS taken FROM zane_profiles WHERE tier = 'lifetime') s;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_founding_seats() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_founding_seats() TO anon, authenticated;
 
 -- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
 

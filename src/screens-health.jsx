@@ -1298,8 +1298,12 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             })}
           </div>
           {dayMode && date === todayISO && (() => {
-            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
-            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
+            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return LB.fmtISO(d); })();
+            // LB.fmtISO(new Date(...)), not a bare slice: statusModeSince is a
+            // UTC timestamp, slicing its first 10 chars gives the UTC date,
+            // which is a different calendar day than the local one for any
+            // non-UTC viewer around midnight.
+            const currentVal = store.statusModeSince ? LB.fmtISO(new Date(store.statusModeSince)) : todayISO;
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
@@ -2280,7 +2284,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Fat', (
         <>
           {seg(
-            [{ id: 'auto', label: 'Auto' }, { id: 'perKg', label: 'Per kg' }, { id: 'fixed', label: 'Fixed g' }],
+            [{ id: 'auto', label: 'Auto' }, { id: 'perKg', label: 'Per ' + UI.unit() }, { id: 'fixed', label: 'Fixed g' }],
             fatModeUI,
             v => setForm(f => ({ ...f, lowFat: v === 'perKg', fatFixed: v === 'fixed' })),
           )}
@@ -2627,6 +2631,32 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             </span>
           </div>
         ))}
+        {/* Same week-average blend as the Daily Targets box above (see
+            targetWeekAvgRow): trainingDays is always on file once the
+            estimator has produced lastAppliedTargets at all, both are set
+            together by the same apply. */}
+        {calc.lastAppliedTargets && calc.trainingDays != null && (() => {
+          const weekCal = LB.weeklyAverageCalories(calc.lastAppliedTargets.caloriesTraining, calc.lastAppliedTargets.caloriesRest, calc.trainingDays);
+          const weekMacros = LB.weeklyAverageMacros(
+            { protein: calc.lastAppliedTargets.proteinTraining, carbs: calc.lastAppliedTargets.carbsTraining, fat: calc.lastAppliedTargets.fatTraining },
+            { protein: calc.lastAppliedTargets.proteinRest, carbs: calc.lastAppliedTargets.carbsRest, fat: calc.lastAppliedTargets.fatRest },
+            calc.trainingDays,
+          );
+          return (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+              <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
+              <span className="num" style={{ fontSize: 16, color: UI.inkSoft, fontWeight: 400 }}>
+                {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ display: 'flex', gap: 9 }}>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {weekMacros.protein}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {weekMacros.carbs}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {weekMacros.fat}</span>
+              </span>
+            </div>
+          );
+        })()}
 
         {status === 'insufficient' && (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
@@ -3056,6 +3086,29 @@ function hlShiftDate(dateStr, deltaDays) {
   return LB.fmtISO(d);
 }
 
+// A zane_daily_logs row counts as "logged" only if it carries real content,
+// not merely by existing: a flex day-type-only override (just
+// targetsSnap.dayType) must not light up as logged, and neither should the
+// phantom row AiSummaryCard.generate() below can leave behind (a day with
+// only training/cardio logged, nothing in zane_daily_logs itself, still gets
+// a row here once an AI summary is generated for it, id/date/aiSummary only,
+// see its own comment). Module-level so both HealthDateStrip and
+// ExportSheet's "N days logged" count (L8, audit-2026-08: that counter used
+// to be a bare row-count, which a phantom AI-summary-only row inflated)
+// agree on the same definition instead of drifting.
+function hlHasLogContent(l) {
+  return !!l && (
+    l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
+    l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
+    (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
+    // A meal-of-choice marker is content in its own right. Without this,
+    // HealthDateStrip's setFlexDayType DELETES an otherwise-empty row when
+    // the day is set to Rest, silently unmarking it.
+    l.mealOfChoice ||
+    (l.coachFields && Object.keys(l.coachFields).length)
+  );
+}
+
 // ─── AI Daily Summary card ──────────────────────────────────────────────────
 // User-triggered (button, never automatic) once-a-day AI read on yesterday's
 // tracked data. readOnly (the coach view) renders no button at all: a
@@ -3276,18 +3329,10 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const jsDow = anchorDate.getDay();
   const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  // A day counts as "logged" (gold marker) only if it carries real content, a
-  // flex day-type-only override log (just targetsSnap.dayType) must not light up.
-  const hasLogContent = l => l && (
-    l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
-    l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
-    (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
-    // A meal-of-choice marker is content in its own right. Without this,
-    // setFlexDayType below DELETES an otherwise-empty row when the day is
-    // set to Rest, silently unmarking it.
-    l.mealOfChoice ||
-    (l.coachFields && Object.keys(l.coachFields).length)
-  );
+  // A day counts as "logged" (gold marker) only if it carries real content,
+  // not merely by row existence, see hlHasLogContent above (a flex day-type-
+  // only override log, just targetsSnap.dayType, must not light up either).
+  const hasLogContent = hlHasLogContent;
   const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
   // Navigation itself is unbounded forward (a flex plan's Training|Rest
   // override needs to reach future dates, same reasoning as the food
@@ -4001,7 +4046,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     setCoachingMacrosLoaded(false);
     LB.loadCoachingMacros(coachingId)
       .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
-      .catch(() => { if (!cancelled) setCoachingMacrosLoaded(true); });
+      // Left at false on failure, not flipped to true: the reconcilers below
+      // gate on this specifically to avoid scoring against the personal
+      // target while the real coaching target is still unknown. Marking a
+      // failed fetch "loaded" released them anyway, reintroducing that same
+      // race on every offline/network-error load; leaving it pending just
+      // means today's reconciliation waits for the next successful fetch
+      // (this effect reruns on every mount) instead of freezing a wrong
+      // score into a day's targets_snap.
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [coachingId]);
 
@@ -4298,6 +4351,36 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
     </span>
   );
+  // What the Training/Rest split below actually averages to across a real
+  // week, blended by how many of those 7 days are training days (same
+  // weeklyAverageCalories the estimator sheet already uses to answer this).
+  // Only meaningful next to the split itself, not macroTargetAvg's own
+  // historical-average row (1M/3M), which has no Training/Rest split to blend.
+  const targetWeekAvgRow = (() => {
+    const t = effectiveTargets || {};
+    const d = store.settings?.macroCalc?.trainingDays;
+    if (d == null || t.caloriesTraining == null || t.caloriesRest == null) return null;
+    const weekCal = LB.weeklyAverageCalories(t.caloriesTraining, t.caloriesRest, d);
+    const weekMacros = LB.weeklyAverageMacros(
+      { protein: t.proteinTraining, carbs: t.carbsTraining, fat: t.fatTraining },
+      { protein: t.proteinRest, carbs: t.carbsRest, fat: t.fatRest },
+      d,
+    );
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+        <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
+        <span className="num" style={{ fontSize: 16, color: UI.ink, fontWeight: 400 }}>
+          {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ display: 'flex', gap: 9 }}>
+          {chip('P', weekMacros.protein)}
+          {chip('C', weekMacros.carbs)}
+          {chip('F', weekMacros.fat)}
+        </span>
+      </div>
+    );
+  })();
   const targetLabel = macroTargetAvg
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
     : 'DAILY TARGETS';
@@ -4329,6 +4412,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
             {targetDayRow('Training', 'Training')}
             <div style={{ height: 0.5, background: UI.hair }} />
             {targetDayRow('Rest', 'Rest')}
+            {targetWeekAvgRow}
           </>
         )
       ) : (
@@ -5146,7 +5230,11 @@ function ExportSheet({ open, onClose, store, userId }) {
             </div>
           </div>
           {(() => {
-            const count = (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).length;
+            // Field content, not row existence (L8, audit-2026-08): a bare
+            // row count double-counted a day whose only zane_daily_logs row
+            // is the phantom one AiSummaryCard.generate() leaves behind for
+            // a training/cardio-only day (id/date/aiSummary, nothing else).
+            const count = logsInRange().filter(hlHasLogContent).length;
             return <div style={{ marginTop: 8, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{count} day{count !== 1 ? 's' : ''} logged in this range</div>;
           })()}
         </div>

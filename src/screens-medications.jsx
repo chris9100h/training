@@ -321,19 +321,9 @@ function mdHasPlan(med, medicationPlanItems) {
 // with intervalDays set but no startDate (shouldn't happen, saveSlotDraft
 // requires one, but a synced row from elsewhere could still lack it) is
 // simply never due rather than guessing an anchor.
-// Kept in sync with store.js's own self-contained copy, dsSlotAppliesOn
-// (used by the AI daily summary, which runs where this file isn't loaded).
-function mdSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
-  if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
-  if (slot.startDate && dateISO < slot.startDate) return false;
-  if (slot.endDate && dateISO > slot.endDate) return false;
-  if (slot.intervalDays > 0) {
-    if (!slot.startDate) return false;
-    const daysSince = Math.round((new Date(dateISO + 'T12:00:00') - new Date(slot.startDate + 'T12:00:00')) / 86400000);
-    return daysSince % slot.intervalDays === 0;
-  }
-  return (slot.weekdays || []).includes(wd);
-}
+// Lives in store.js as LB.dsSlotAppliesOn (used by the AI daily summary,
+// which runs where this file isn't loaded) and exported from there so this
+// file doesn't need its own hand-synced copy.
 // Human-readable recurrence label for a schedule slot: "Every Nd" in
 // interval mode, "Every day"/"Mon/Wed/Fri" in weekday mode. Shared by
 // renderMedListRow's aggregate summary and schedMed's own per-slot list, so
@@ -383,11 +373,31 @@ function mdAutoFillToday(store, setStore, todayISO) {
   (store.medicationScheduleSlots || []).forEach(slot => {
     const med = medsById.get(slot.medicationId);
     if (!med || existingSlotIds.has(slot.id)) return;
-    if (!mdSlotAppliesOn(slot, todayISO, wd, activePlanIds)) return;
+    if (!LB.dsSlotAppliesOn(slot, todayISO, wd, activePlanIds)) return;
     toAdd.push(mdMaterializeSlotEntry(med, slot, todayISO));
   });
   if (!toAdd.length) return;
   setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), ...toAdd] }));
+}
+// Removes today's still-pending (planned: true) materialized rows for
+// schedule slots that just stopped applying, because the plan they belong
+// to was paused/deleted or the slot itself was deleted. Without this, a row
+// mdAutoFillToday already wrote before the change stuck around: the hero
+// tally (scheduleSlotId-only, no plan-state check) kept counting it as
+// still due, and the medication-reminder cron (planned=eq.true, no
+// plan-state join either) kept pushing a reminder for a stopped
+// medication. Already-taken doses (planned: false, toggleTaken/
+// checkAllHour flip it one-way) are real history, never touched, and
+// nothing before today is either, mdAutoFillToday only ever materializes
+// today's date to begin with.
+function mdReconcilePlannedLogs(setStore, todayISO, invalidSlotIds) {
+  if (!invalidSlotIds || !invalidSlotIds.size) return;
+  setStore(s => ({
+    ...s,
+    medicationLogs: (s.medicationLogs || []).filter(l =>
+      !(l.date === todayISO && l.planned && l.scheduleSlotId && invalidSlotIds.has(l.scheduleSlotId))
+    ),
+  }));
 }
 
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock dip the
@@ -560,7 +570,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     scheduleSlots.forEach(slot => {
       const med = medsById.get(slot.medicationId);
       if (!med || existingSlotIds.has(slot.id)) return;
-      if (!mdSlotAppliesOn(slot, curDate, wd, activePlanIds)) return;
+      if (!LB.dsSlotAppliesOn(slot, curDate, wd, activePlanIds)) return;
       (map[slot.hour] = map[slot.hour] || []).push({
         id: `preview_${curDate}_${slot.id}`, medicationId: med.id, medicationName: med.name,
         time: `${String(slot.hour).padStart(2, '0')}:00`, doseQty: slot.doseQty, planned: true,
@@ -660,7 +670,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
     const dueSlot = scheduleSlots.find(slot =>
       slot.medicationId === med.id && slot.hour === hour && !existingSlotIds.has(slot.id) &&
-      mdSlotAppliesOn(slot, curDate, wd, activePlanIds));
+      LB.dsSlotAppliesOn(slot, curDate, wd, activePlanIds));
     const entry = dueSlot
       ? { ...mdMaterializeSlotEntry(med, dueSlot, curDate), doseQty: qty, planned: false }
       : { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
@@ -813,12 +823,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function renamePlan(id, name) {
     setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
   }
-  // Only an active plan's schedule slots fire (mdSlotAppliesOn); several
+  // Only an active plan's schedule slots fire (LB.dsSlotAppliesOn); several
   // plans can be active at once, no single active pointer (see the header
   // comment). A paused plan stays fully visible/editable, this never
   // touches its medications or their memberships/slots, purely a switch.
   function togglePlanActive(plan) {
+    const goingInactive = plan.active;
     setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === plan.id ? { ...p, active: !p.active, updatedAt: new Date().toISOString() } : p) }));
+    // Only pausing needs reconciliation: re-activating has nothing stray to
+    // remove, and the effect that calls mdAutoFillToday is keyed on
+    // store.medicationPlans, so it re-materializes today's slots on its own
+    // the moment this plan goes active again.
+    if (goingInactive) {
+      const slotIds = new Set((store.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId === plan.id).map(sl => sl.id));
+      mdReconcilePlannedLogs(setStore, today, slotIds);
+    }
   }
   async function deletePlan(plan) {
     // Only this plan's own membership rows and schedule slots go: a
@@ -827,12 +846,14 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // removeMedicationFromPlan (this is that same operation, just for
     // every medication currently in the plan at once).
     if (!await confirm(`Delete "${plan.name}"? Its medications stay in your Medications list (and any other plans they're in), just this plan's own schedule for them goes.`, { title: 'Delete plan', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    const slotIds = new Set((store.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId === plan.id).map(sl => sl.id));
     setStore(s => ({
       ...s,
       medicationPlans: (s.medicationPlans || []).filter(p => p.id !== plan.id),
       medicationPlanItems: (s.medicationPlanItems || []).filter(it => it.medicationPlanId !== plan.id),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId !== plan.id),
     }));
+    mdReconcilePlannedLogs(setStore, today, slotIds);
     setViewedPlanId(null);
   }
   function toggleTemplate(plan) {
@@ -950,11 +971,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   async function removeMedicationFromPlan(med, planId) {
     const planName = medicationPlans.find(p => p.id === planId)?.name || 'this plan';
     if (!await confirm(`Remove "${med.name}" from "${planName}"? Its schedule in this plan goes with it; the medication itself, any other plans it's in, and its log history all stay.`, { title: 'Remove from plan', ok: 'Remove', cancel: 'Cancel', danger: true })) return false;
+    const slotIds = new Set(scheduleSlots.filter(sl => sl.medicationId === med.id && sl.medicationPlanId === planId).map(sl => sl.id));
     setStore(s => ({
       ...s,
       medicationPlanItems: (s.medicationPlanItems || []).filter(it => !(it.medicationId === med.id && it.medicationPlanId === planId)),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => !(sl.medicationId === med.id && sl.medicationPlanId === planId)),
     }));
+    mdReconcilePlannedLogs(setStore, today, slotIds);
     return true;
   }
 
@@ -1046,12 +1069,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const isInterval = slotDraft.mode === 'interval';
     // Interval mode has nothing equivalent to "no weekdays picked" to guard
     // on, startDate is its own required field instead (it's the count-from
-    // anchor, not an optional phase bound here, see mdSlotAppliesOn).
+    // anchor, not an optional phase bound here, see LB.dsSlotAppliesOn).
     if (isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) return;
     const doseQty = mdNum(slotDraft.doseQtyStr);
     if (!(doseQty > 0)) return;
     // A reversed range (From after To) would otherwise save silently and
-    // just never fire: mdSlotAppliesOn rejects every date once startDate is
+    // just never fire: LB.dsSlotAppliesOn rejects every date once startDate is
     // after endDate, so the slot would sit there looking scheduled but dead.
     // Only meaningful once both ends are actually set, an open-ended range
     // (only one of the two) is fine as-is.
@@ -1066,7 +1089,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const endDate = slotDraft.endDate || null;
     // The two modes are mutually exclusive per slot: switching a slot from
     // one to the other on edit must clear the other mode's field rather than
-    // leave a stale value sitting there unused, mdSlotAppliesOn only ever
+    // leave a stale value sitting there unused, LB.dsSlotAppliesOn only ever
     // reads intervalDays first, but a stale weekdays/intervalDays value would
     // still be misleading to anyone inspecting the row directly.
     const weekdays = isInterval ? [] : slotDraft.weekdays;
@@ -1079,6 +1102,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           startDate, endDate, updatedAt: nowISO,
         }),
       }));
+      // Today's already-materialized row (if any) still reflects the slot's
+      // OLD shape (M6-Rest, audit-2026-08 verification): a weekday/hour/
+      // dose/interval/phase-date edit can leave it stale (wrong hour/dose
+      // shown) or outright wrong (no longer applies today at all), same
+      // disharmony class as the original M6 finding, just triggered by an
+      // edit instead of a pause/delete. Reconciling unconditionally is safe:
+      // the auto-fill effect below (already keyed on
+      // medicationScheduleSlots) re-materializes a fresh, correct row on
+      // its very next run if the edited slot is still due today.
+      mdReconcilePlannedLogs(setStore, today, new Set([slotDraft.id]));
     } else {
       const newSlot = {
         id: LB.uid(), medicationId: schedMed.id, medicationPlanId: schedMed.medicationPlanId,
@@ -1096,6 +1129,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   async function deleteSlot(slot) {
     if (!await confirm('Delete this dosing time?', { title: 'Delete time', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
     setStore(s => ({ ...s, medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.id !== slot.id) }));
+    mdReconcilePlannedLogs(setStore, today, new Set([slot.id]));
   }
   function toggleWeekday(wd) {
     setSlotDraft(d => {
@@ -1150,21 +1184,24 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // store.medicationLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
   // understates consumption, and so overstates stock, for a baseline set
   // further back than that (a bulk supply bought a few times a year). Lazily
-  // fetched in full from the DB whenever the Stock tab is actually open,
-  // rather than widening the boot window itself, which every screen would
-  // then pay for on every load. Reset to null on leaving the tab so the next
-  // visit always refetches current data, not a stale snapshot.
+  // fetched in full from the DB whenever the Timeline or Stock tab is
+  // actually open (both read effectiveStockById below, Timeline for its own
+  // Running Low banner), rather than widening the boot window itself, which
+  // every screen would then pay for on every load. Reset to null on leaving
+  // both tabs so the next visit always refetches current data, not a stale
+  // snapshot.
   const [stockBackfill, setStockBackfill] = useStateMd(null);
-  // Surfaced below near renderMedRow's own stock numbers: a silent,
-  // console-only failure here left stockBackfill null forever with no
-  // visible sign the numbers on screen are the understated boot-windowed
-  // ones, not the real backfilled totals. Reset at the top of every run, not
-  // just on the failure path, so a fresh attempt (e.g. reopening this tab)
-  // always clears a stale warning from an earlier try.
+  // Surfaced below near renderMedRow's own stock numbers (and the Timeline
+  // banner): a silent, console-only failure here left stockBackfill null
+  // forever with no visible sign the numbers on screen are the understated
+  // boot-windowed ones, not the real backfilled totals. Reset at the top of
+  // every run, not just on the failure path, so a fresh attempt (e.g.
+  // reopening one of the two tabs) always clears a stale warning from an
+  // earlier try.
   const [stockBackfillError, setStockBackfillError] = useStateMd(false);
   useEffectMd(() => {
     setStockBackfillError(false);
-    if (screenTab !== 'inventory') { setStockBackfill(null); return; }
+    if (screenTab !== 'inventory' && screenTab !== 'timeline') { setStockBackfill(null); return; }
     const oldestBaseline = activeMedications.reduce((min, m) => (m.stockSetAt && (!min || m.stockSetAt < min)) ? m.stockSetAt : min, null);
     if (!oldestBaseline) return;
     let cancelled = false;
@@ -1431,6 +1468,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {screenTab === 'timeline' && (
           <>
+            {/* Same staleness indicator as the Inventory tab's own (see
+                stockBackfillError's comment above): the banner right below
+                reads off the same backfilled numbers, a failed fetch here
+                means it's judging "running low" off the understated
+                boot-windowed log instead. */}
+            {stockBackfillError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <i className="fa-solid fa-triangle-exclamation" title="Stock estimate may be outdated. Retry by reopening this tab." style={{ fontSize: 10, color: UI.inkFaint }} />
+                <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Stock estimate may be outdated</span>
+              </div>
+            )}
             {/* Same dismissible warning as the Inventory tab's own (see
                 freshAllLowStock's comment above), surfaced here too since
                 Timeline is the tab people actually open day to day, not
@@ -2264,7 +2312,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
 // Not a route: a same-file screen toggled by MedicationsScreen's own local
 // state, exactly like ShoppingListScreen sits inside FoodScreen
 // (screens-food.jsx). Bucketing is a pure display-time lens over the
-// existing schedule slots (mdSlotAppliesOn): redefining a pillbox slot later
+// existing schedule slots (LB.dsSlotAppliesOn): redefining a pillbox slot later
 // can shift which compartment an already-packed dose displays under without
 // touching or losing the pack-check itself. "Other times" catches a dose
 // whose hour matches none of the user's slots, so nothing can silently
@@ -2305,7 +2353,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
       const wd = LB.isoWd(new Date(d + 'T12:00:00'));
       const buckets = new Map();
       medicationScheduleSlots.forEach(slot => {
-        if (!mdSlotAppliesOn(slot, d, wd, activePlanIds)) return;
+        if (!LB.dsSlotAppliesOn(slot, d, wd, activePlanIds)) return;
         const med = medsById.get(slot.medicationId);
         if (!med) return;
         const bucketId = mdPillboxBucketFor(slot.hour, pillboxSlots);

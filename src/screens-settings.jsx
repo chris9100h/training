@@ -609,7 +609,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -684,19 +684,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [activeSessions, setActiveSessions] = useStateSet([]);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
-  const [pendingUsers, setPendingUsers] = useStateSet([]);
-  const [approvingId, setApprovingId] = useStateSet(null);
-  const [decliningId, setDecliningId] = useStateSet(null);
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
-  const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
-  const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
   const [periodsSheet, setPeriodsSheet] = useStateSet(false);
   const [showAllPeriods, setShowAllPeriods] = useStateSet(false);
   const [confirmDeletePeriodId, setConfirmDeletePeriodId] = useStateSet(null);
-  const [budgetSheet, setBudgetSheet] = useStateSet(false);
-  const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [allUsers, setAllUsers] = useStateSet([]);
   const [allUsersSheet, setAllUsersSheet] = useStateSet(false);
   const [allUsersSearch, setAllUsersSearch] = useStateSet('');
@@ -862,8 +855,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview').then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
-    const loadPending = () => LB.supabase.rpc('get_pending_users').then(({ data }) => { if (mounted) setPendingUsers(data || []); }).catch(() => {});
-    loadSessions(); if (isAdmin) { loadGrants(); loadPending(); }
+    loadSessions(); if (isAdmin) { loadGrants(); }
     // 2s only while the sheet is actually open (that view has live timers); a
     // slow heartbeat otherwise, just to keep the badge count honest. This used
     // to hammer the RPC every 2 seconds for as long as the Settings screen was
@@ -922,7 +914,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           if (!mounted) return;
           setSupportActiveNotes(data || []);
           if (first) setSupportActiveLoading(false);
-          LB.supabase.from('zane_coaching_notes')
+          // Gated on the just-fetched rows actually containing an unread
+          // message from the other party: without this, every 12s tick fired
+          // an UPDATE that matched zero rows for as long as the sheet stayed
+          // open and idle.
+          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+          if (hasUnread) LB.supabase.from('zane_coaching_notes')
             .update({ read_at: new Date().toISOString() })
             .eq('coaching_id', supportActiveTicketId)
             .neq('author_id', userId)
@@ -966,29 +963,29 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           setSupportTicketNotes(data || []);
           if (first) setSupportTicketLoading(false);
           first = false;
+          // Gated on the just-fetched rows actually containing an unread
+          // message from the other party, same reasoning as the client-side
+          // poll above: without this, every 12s tick fired an UPDATE that
+          // matched zero rows for as long as the sheet stayed open and idle.
+          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+          if (!hasUnread) return;
+          LB.supabase.from('zane_coaching_notes')
+            .update({ read_at: new Date().toISOString() })
+            .eq('coaching_id', supportTicket.coachingId)
+            .neq('author_id', userId)
+            .is('read_at', null)
+            .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
         });
-      LB.supabase.from('zane_coaching_notes')
-        .update({ read_at: new Date().toISOString() })
-        .eq('coaching_id', supportTicket.coachingId)
-        .neq('author_id', userId)
-        .is('read_at', null)
-        .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
     };
     load();
     const poll = setInterval(load, 12000);
     return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 
-  // Admin-only: load all admin state on mount (signup config, support inbox).
+  // Admin-only: load all admin state on mount (support inbox).
   useEffectSet(() => {
     if (!isAdmin) return;
     let mounted = true;
-    LB.supabase.rpc('get_signup_config').then(({ data, error }) => {
-      if (!mounted || error) return;
-      const row = Array.isArray(data) ? data[0] : data;
-      setSignupApproval(row ? row.requires_approval !== false : true);
-      setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
-    }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
@@ -1073,51 +1070,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     return (Date.now() - new Date(u.created_at).getTime()) < NEW_SIGNUP_DAYS * 24 * 60 * 60 * 1000;
   };
 
-  const toggleSignupApproval = async () => {
-    const next = !signupApproval;
-    setSignupApproval(next);
-    setAutoApproveLeft(null); // manual toggle clears any batch budget
-    const { error } = await LB.supabase.rpc('set_signup_requires_approval', { p_value: next });
-    if (error) { setSignupApproval(!next); await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' }); }
-  };
-
-  const saveBudget = async () => {
-    const n = budgetDraft;
-    setBudgetSheet(false);
-    const prevApproval = signupApproval;
-    const prevLeft = autoApproveLeft;
-    setSignupApproval(n <= 0);            // n>0 → open for a batch; n<=0 → re-lock now
-    setAutoApproveLeft(n > 0 ? n : null);
-    const { error } = await LB.supabase.rpc('set_auto_approve_budget', { p_count: n });
-    if (error) {
-      setSignupApproval(prevApproval);
-      setAutoApproveLeft(prevLeft);
-      await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
-    }
-  };
-
-  const approveUser = async (uid) => {
-    setApprovingId(uid);
-    try {
-      const { error } = await LB.supabase.rpc('approve_user', { p_user_id: uid });
-      if (error) { await confirm(error.message || 'Could not approve this user.', { title: 'Approve failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== uid));
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const declineUser = async (uid) => {
-    setDecliningId(uid);
-    try {
-      const { error } = await LB.supabase.rpc('decline_user', { p_user_id: uid });
-      if (error) { await confirm(error.message || 'Could not decline this user.', { title: 'Decline failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== uid));
-    } finally {
-      setDecliningId(null);
-    }
-  };
-
   const addGrant = async () => {
     const email = newGrantEmail.trim().toLowerCase();
     if (!email.includes('@') || activeGrants.includes(email)) return;
@@ -1157,8 +1109,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setPendingCountdown(120);
     await LB.unsubscribeWebPush(userId).catch(() => {});
     setWebPushSub(null);
-    setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
-    setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+    setPushEnabled(false);
+    setWebPushVerified(false);
+    try { localStorage.setItem('logbook-push-enabled', 'false'); localStorage.removeItem('logbook-push-verified'); } catch (_) {}
     setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
   };
@@ -1176,7 +1129,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (!pushEnabled) {
         const sub = await LB.subscribeWebPush(userId);
         setWebPushSub(sub);
-        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setWebPushVerified(false);
+        try { localStorage.removeItem('logbook-push-verified'); } catch (_) {}
         setWebPushPending(true);
         setPendingCountdown(120);
         clearInterval(countdownIntervalRef.current);
@@ -1192,8 +1146,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       } else {
         await LB.unsubscribeWebPush(userId);
         setWebPushSub(null);
-        setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
-        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setPushEnabled(false);
+        setWebPushVerified(false);
+        try { localStorage.setItem('logbook-push-enabled', 'false'); localStorage.removeItem('logbook-push-verified'); } catch (_) {}
         setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
         setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
       }
@@ -1223,9 +1178,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     clearTimeout(pendingTimeoutRef.current);
     clearInterval(countdownIntervalRef.current);
     setPendingCountdown(120);
-    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+    setPushEnabled(true);
     setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
-    setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushVerified(true);
+    try { localStorage.setItem('logbook-push-enabled', 'true'); localStorage.setItem('logbook-push-verified', 'true'); } catch (_) {}
     setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
     clearTimeout(pushStatusTimer.current);
@@ -1308,6 +1264,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // fail without a single visible sign while step 2 stayed armed.
   // Returns true only when a file actually reached the user.
   const exportData = async (filename) => {
+    // A non-'synced' status means the store has edits the server doesn't
+    // have yet (flushSync only retries on its own 15s timer, app.jsx), and
+    // exportBackup refetches session entries/sets straight from the server,
+    // overwriting the store's own (unsynced) copies with whatever's already
+    // there (store.js:1008): exporting mid-failure would silently bake the
+    // OLDER, already-synced version into the backup instead of the latest
+    // edits, exactly the "Step 1" safety net the Restore flow's own copy
+    // tells the user to rely on before the risky, destructive Step 2.
+    if (syncStatus !== 'synced') {
+      const proceed = await confirm(
+        "You have changes that haven't finished syncing yet. A backup taken right now would save the older, already-synced version of that data instead of your latest edits. Wait a moment and try again, or export anyway?",
+        { title: 'Unsynced changes', ok: 'Export anyway', cancel: 'Wait' },
+      );
+      if (!proceed) return false;
+    }
     try {
       const backup = await LB.exportBackup(store, userId);
       const { blob, gz } = await LB.backupToBlob(backup);
@@ -1977,45 +1948,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <NavRow label="Data" onTap={() => setDataSheet(true)} />
         </Frame>
 
-        {/* ─── Admin: pending registrations ─── */}
-        {isAdmin && pendingUsers.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>Pending registrations</div>
-            <Frame style={{ padding: '0 16px' }}>
-              {pendingUsers.map((u, i) => (
-                <React.Fragment key={u.user_id}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</div>
-                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                    </div>
-                    <button onClick={() => approveUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
-                      padding: '6px 12px', borderRadius: 4,
-                      background: approvingId === u.user_id ? UI.goldFaint : 'rgba(var(--accent-rgb),0.12)',
-                      border: `1px solid rgba(var(--accent-rgb),0.3)`,
-                      color: UI.gold, fontFamily: UI.fontUi, fontSize: 10,
-                      letterSpacing: '0.1em', textTransform: 'uppercase',
-                      cursor: approvingId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
-                    }}>
-                      {approvingId === u.user_id ? '…' : 'Approve'}
-                    </button>
-                    <button onClick={() => declineUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
-                      padding: '6px 12px', borderRadius: 4,
-                      background: 'transparent',
-                      border: `1px solid rgba(var(--danger-rgb),0.25)`,
-                      color: 'rgba(var(--danger-rgb),0.7)', fontFamily: UI.fontUi, fontSize: 10,
-                      letterSpacing: '0.1em', textTransform: 'uppercase',
-                      cursor: decliningId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
-                    }}>
-                      {decliningId === u.user_id ? '…' : 'Decline'}
-                    </button>
-                  </div>
-                  {i < pendingUsers.length - 1 && <div className="knurl" />}
-                </React.Fragment>
-              ))}
-            </Frame>
-          </div>
-        )}
       </div>
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, backgroundImage: 'var(--bg-texture)' }}>
@@ -2076,7 +2008,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Active Users Sheet ══ */}
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
         {(() => {
-          const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+          // Guarded: this IIFE runs on every render of this screen regardless
+          // of whether the sheet is actually open (SettingsSheet stays
+          // mounted for its close animation), so a corrupt value under this
+          // key would otherwise throw on every single visit to Settings.
+          let dismissed = [];
+          try { dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]'); }
+          catch (_) { dismissed = []; }
           const hiddenCount = activeSessions.filter(s => s.is_finished && dismissed.includes(s.session_id)).length;
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
           const sortedSessions = [...visibleSessions].sort((a, b) =>
@@ -2578,13 +2516,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="micro" style={{ color: 'var(--accent)', marginBottom: 6 }}>{label}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <input type="date" value={p.startedAt.slice(0, 10)} max={p.endedAt ? p.endedAt.slice(0, 10) : todayStr}
+                          {/* LB.fmtISO(new Date(...)), not a bare slice: startedAt/endedAt
+                              are UTC timestamps, slicing the first 10 chars gives the UTC
+                              date, a different calendar day than local for a non-UTC viewer. */}
+                          <input type="date" value={LB.fmtISO(new Date(p.startedAt))} max={p.endedAt ? LB.fmtISO(new Date(p.endedAt)) : todayStr}
                             onChange={e => e.target.value && updatePeriod(p.id, { startedAt: LB.parseDate(e.target.value).toISOString() })}
                             style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
                           {isActive
                             ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
-                            : <input type="date" value={p.endedAt.slice(0, 10)} min={p.startedAt.slice(0, 10)} max={todayStr}
+                            : <input type="date" value={LB.fmtISO(new Date(p.endedAt))} min={LB.fmtISO(new Date(p.startedAt))} max={todayStr}
                                 onChange={e => e.target.value && updatePeriod(p.id, { endedAt: LB.parseDate(e.target.value).toISOString() })}
                                 style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           }
@@ -2808,7 +2749,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
               const active = (store.settings?.accentColor ?? 'copper') === key;
               return (
-                <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
+                <button key={key} onClick={() => { window.applyAccentColor(key); try { localStorage.setItem('logbook-accent-color', key); } catch (_) {} setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
                   title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
                   <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
                   {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
@@ -2848,12 +2789,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             How visible the logo (or your VIP background) is behind the Home screen.
           </div>
           <Row label="Week view in cycle mode" first>
-            <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
+            <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); try { localStorage.setItem('logbook-cycle-week-view', String(n)); } catch (_) {} setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
           </Row>
           <Row label="Theme">
             <div style={{ display: 'flex', gap: 4 }}>
               {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light'], ['paper', 'Paper']].map(([key, label]) => (
-                <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
+                <button key={key} onClick={() => { setDarkMode(key); try { localStorage.setItem('logbook-dark-mode', key); } catch (_) {} window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
                   padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
                   background: darkMode === key ? UI.goldFaint : UI.bgInset,
                   border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
@@ -2876,7 +2817,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <Toggle on={paperAccentEnabled} onToggle={() => {
                 const n = !paperAccentEnabled;
                 setPaperAccentEnabled(n);
-                localStorage.setItem('logbook-paper-accent-enabled', String(n));
+                try { localStorage.setItem('logbook-paper-accent-enabled', String(n)); } catch (_) {}
                 window.applyAccentColor(store.settings?.accentColor || 'gold');
               }} />
             </Row>
@@ -2897,7 +2838,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            <Btn kind="ghost" onClick={() => { setBackupOk(false); setImportSheet(true); }} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+            {/* backupOk is NOT reset here: it starts false and is only ever
+                set by exportData itself (true on success, false on failure),
+                so a backup already downloaded earlier this session still
+                counts, reopening this sheet shouldn't re-arm the "no backup
+                yet" warning under it for no reason. */}
+            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
@@ -3245,21 +3191,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Frame style={{ padding: '0 14px' }}>
-                <Row label="Registrations need approval" first>
-                  <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
-                </Row>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
-                  When on, new sign-ups wait for approval. When off, accounts activate immediately.
-                </div>
-                <Row label="Auto-approve batch">
-                  <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
-                    {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
-                  </button>
-                </Row>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
-                  Open registration for a batch, auto-approved until used up, then turns back on.
-                </div>
-                <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
+                <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
@@ -3392,18 +3324,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Auto-approve batch sheet (admin), rendered after adminSheet so it sits on top ══ */}
-      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <div>
-            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
-            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=" sign-ups" onChange={setBudgetDraft} />
-          </div>
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, "Registrations need approval" switches back on automatically. Set to 0 to re-lock now.
-          </div>
-          <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
-        </div>
-      </SettingsSheet>
 
       {/* ══ Support Center full-screen sheet (user) ══ */}
       <FullSheet
@@ -3875,7 +3795,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
-                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                            {u.tier && u.tier !== 'free' && (
+                              <span className="micro" style={{ flexShrink: 0, color: 'var(--accent)' }}>{u.tier === 'lifetime' ? 'LIFETIME' : 'PREMIUM'}</span>
+                            )}
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -4049,7 +3971,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
-              <button onClick={() => { setIosDisclaimerSeen(true); localStorage.setItem('logbook-push-ios-hint-seen', 'true'); }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
+              <button onClick={() => { setIosDisclaimerSeen(true); try { localStorage.setItem('logbook-push-ios-hint-seen', 'true'); } catch (_) {} }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
             </div>
           )}
           <Row label="This device" first>

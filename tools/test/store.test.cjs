@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Focused unit tests for the pure / near-pure logic in src/store.js.
-   No build step, no test framework — load store.js in a vm with a minimal
+   No build step, no test framework: load store.js in a vm with a minimal
    window/supabase stub and assert against window.LB. Run: node this file. */
 const fs = require('fs');
 const path = require('path');
@@ -100,7 +100,7 @@ async function testAsync(name, fn) {
     const next = { ...baseStore(), exercises: [{ id: 'e1', name: 'X', tags: [] }] };
     let threw = false;
     try { await LB.syncStore(prev, next, 'u1'); } catch (_) { threw = true; }
-    assert.ok(threw, 'expected syncStore to reject on a failed write — this is what makes flushSync retry');
+    assert.ok(threw, 'expected syncStore to reject on a failed write, this is what makes flushSync retry');
   });
 
   await testAsync('syncStore RESOLVES when writes succeed', async () => {
@@ -349,6 +349,108 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new', 'new session from another device must appear');
   });
 
+  // ── mergeSessions: unsynced offline edits on ended in-window sessions (audit H1) ──
+  // Both sides have entries (in-window session) and this device edited a set
+  // while offline: the edit is in cur but not in the persisted base. The old
+  // merge took the SERVER set fields (only technique/drops survived), so the
+  // edit was dropped at boot and then either silently lost (refresh-first) or
+  // reverted server-side by the post-merge flush (flush-first). The edit must
+  // survive the merge; the follow-up flush diffs it against the server-based
+  // sync base and pushes it.
+  const mkInWindow = (kg, extra = {}) => ({
+    id: 'w1', date: '2026-06-09', ended: '2026-06-09T12:00:00Z',
+    entries: [{ exId: 'e1', name: 'Row', sets: [{ kg, reps: 8, done: true, ...extra }] }],
+  });
+  test('mergeSessions keeps an unsynced offline set edit on an ended in-window session', () => {
+    const base = [mkInWindow(90)];
+    const cur = [mkInWindow(100)]; // offline edit: 90 → 100
+    const fresh = [mkInWindow(90)];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 100, 'the offline edit must survive the boot merge');
+  });
+  test('mergeSessions keeps an offline-added set (length differs from base)', () => {
+    const base = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 100, reps: 5, done: false }] }] }];
+    const fresh = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets.length, 2, 'offline-added set must survive the boot merge');
+  });
+  test('mergeSessions keeps an offline-added entry (entry count differs from base)', () => {
+    const base = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [
+      { exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] },
+      { exId: 'e2', sets: [{ kg: 40, reps: 12, done: false }] },
+    ] }];
+    const fresh = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries.length, 2, 'offline-added entry must survive the boot merge');
+  });
+  test('mergeSessions trusts the server when local entries match the base (remote edit wins)', () => {
+    const base = [mkInWindow(90)];
+    const cur = [mkInWindow(90)]; // no local change
+    const fresh = [mkInWindow(95)]; // edited on another device
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 95, 'server value must win when this device made no edit');
+  });
+  test('mergeSessions still rescues local technique/drops when entries match the base', () => {
+    // base and cur must both carry the technique/drops (cur matches base, no
+    // unsynced edit): giving it to cur alone made cur differ from base and
+    // this test silently exercised the wholesale-keep-cur branch (same as
+    // the very first test above) instead of the mergeEntrySets rescue branch
+    // its name and assertions claim to cover (H1 verification, 2026-08-05).
+    const base = [mkInWindow(90, { technique: 'drop', drops: [{ kg: 70, reps: 8 }] })];
+    const cur = [mkInWindow(90, { technique: 'drop', drops: [{ kg: 70, reps: 8 }] })];
+    const fresh = [mkInWindow(90)]; // server lost technique/drops in a flush race
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].technique, 'drop', 'unsynced technique must still be rescued');
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 90);
+  });
+  test('mergeSessions does NOT treat in-memory cardio fields as an unsynced edit', () => {
+    const base = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', isCardio: true, cardioDone: true, sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const fresh = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 92, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 92, 'no synced local edit → server wins');
+    assert.strictEqual(sessions[0].entries[0].isCardio, true, 'in-memory cardio flags still rescued by the entry merge');
+  });
+  test('mergeSessions propagates a remote set deletion when there is no local edit', () => {
+    const base = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 80, reps: 6, done: true }] }] }];
+    const cur = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 80, reps: 6, done: true }] }] }];
+    const fresh = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets.length, 1, 'remote deletion must not be resurrected');
+  });
+  // baseEntries === null (this device's persisted base never captured real
+  // entries for this session, e.g. it sat out-of-window until a date edit
+  // just moved it in, and the entries/sets sync failed in the same flush the
+  // date write itself went through on): "nothing to compare against" must
+  // not silently resolve to "trust the server", that reintroduced the exact
+  // H1 data loss through a narrower door (H1 verification, 2026-08-05).
+  test('mergeSessions keeps an unsynced offline edit when this session has no usable base (H1 gap)', () => {
+    const base = [{ id: 'w1', date: '2026-06-09', ended: 'x', entries: [] }]; // windowed/never-hydrated base
+    const cur = [mkInWindow(130)]; // offline edit, now in-window locally
+    const fresh = [mkInWindow(90)]; // server's stale pre-edit value
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 130, 'the offline edit must survive even with no usable base to compare against');
+  });
+
+  await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {
+    rpcLog.length = 0;
+    testFrom = () => builder({ data: null, error: null });
+    const base = { ...baseStore(), sessions: [mkInWindow(90)] };
+    const cur = { ...baseStore(), sessions: [mkInWindow(100)] }; // offline edit
+    const fresh = { ...baseStore(), sessions: [mkInWindow(90)] }; // server snapshot predates the edit
+    const { sessions } = LB.mergeSessions(fresh.sessions, cur.sessions, null, base.sessions, now);
+    // Follow-up flush: sync base is the fresh server state, target is the merged store.
+    const prev = { ...baseStore(), sessions: fresh.sessions };
+    const next = { ...baseStore(), sessions };
+    await LB.syncStore(prev, next, 'u1');
+    const call = rpcLog.find(c => c.name === 'sync_sets_batch');
+    assert.ok(call, 'sync_sets_batch must be called for the surviving edit');
+    assert.strictEqual(call.args.p_sets.length, 1, 'only the edited set is re-written, not the whole session');
+    assert.strictEqual(call.args.p_sets[0].kg, 100, 'the edited value is what gets pushed');
+  });
+
   // ── resolveInProgressId: boot-merge in-progress-session pointer ──────────
   // This is the exact bug scenario: base matches cur (this device made no
   // unsynced change), fresh has moved on (another device started a real
@@ -428,7 +530,7 @@ async function testAsync(name, fn) {
 
   test('detectCardioPRs only compares within the same activity type', () => {
     const prior = [cLog({ id: 'b', type: 'Cycling', dur: 120, dist: 40000, date: '2026-05-01' })];
-    // A 30-min / 5k run vs a long bike ride — no run history → null
+    // A 30-min / 5k run vs a long bike ride, no run history → null
     assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', type: 'Running', dur: 30, dist: 5000 }), prior), null);
   });
 
@@ -487,7 +589,7 @@ async function testAsync(name, fn) {
   });
 
   test('dayTargetFromMacros picks training vs rest, null when unset', () => {
-    // deepStrictEqual would trip on the vm realm's distinct Object.prototype —
+    // deepStrictEqual would trip on the vm realm's distinct Object.prototype:
     // compare by JSON instead (same as the rest of this suite avoids it).
     assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, true)), JSON.stringify({ protein: 200, carbs: 250, fat: 70, calories: 2430 }));
     assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, false)), JSON.stringify({ protein: 180, carbs: 150, fat: 60, calories: 1860 }));
@@ -507,7 +609,7 @@ async function testAsync(name, fn) {
     // calorie-weighting: small fat target (50g) has less impact than equal-weight would give
     // t2: P=150g(600kcal,24%), C=350g(1400kcal,57%), F=50g(450kcal,18%) → total=2450
     // 10g fat over (score=0.8): (1×600 + 1×1400 + 0.8×450)/2450 = 2360/2450 ≈ 0.9633 → 96
-    // equal-weight would give (1+1+0.8)/3 = 0.9333 → 93 — calorie-weighting is fairer
+    // equal-weight would give (1+1+0.8)/3 = 0.9333 → 93, calorie-weighting is fairer
     const t2 = { protein: 150, carbs: 350, fat: 50 };
     assert.strictEqual(LB.macroAdherence({ protein: 150, carbs: 350, fat: 60 }, t2), 96);
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: null, fat: 70 }, t), null);
@@ -820,6 +922,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.avgCalories, 2000);
   });
 
+  test('estimateAdaptiveTdee: today\'s own (still-partial) log never enters the calorie average', () => {
+    const days = [];
+    for (let d = 1; d <= 13; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    // Today so far: only 200kcal logged, the day isn't over yet. Averaging
+    // this in as if it were a complete day would drag avgCalories down to
+    // ~1871, a fake "you're eating less" that has nothing to do with reality.
+    days.push({ date: '2025-01-14', calories: 200, weight: 79 });
+    days[0].weight = 80;
+    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.avgCalories, 2000);
+    // Today's weight, unlike its calories, is a complete reading the moment
+    // it's logged and stays part of the trend: dropping it would throw away
+    // real signal, not avoid a partial one.
+    assert.strictEqual(r.weightChangeKg, -1);
+  });
+
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
     // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
     assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
@@ -845,6 +964,26 @@ async function testAsync(name, fn) {
     const cut = LB.macroTargetsFromGoal({ tdee: 3000, weightKg: 80, goal: 'cut', rateKgPerWeek: 0.5, trainingDays: 4 });
     const cutAvg = LB.weeklyAverageCalories(cut.caloriesTraining, cut.caloriesRest, 4);
     assert.ok(Math.abs((3000 - cutAvg) - 550) < 20, `averages ${cutAvg}, about 550 under maintenance`);
+  });
+
+  test('weeklyAverageMacros: same trainingDays-weighted blend as weeklyAverageCalories, per macro', () => {
+    const training = { protein: 240, carbs: 605, fat: 60 };
+    const rest = { protein: 240, carbs: 537, fat: 60 };
+    // 2 training + 5 rest over the week: protein/fat are identical on both
+    // sides so they pass through unchanged, only carbs actually blends.
+    const week2 = LB.weeklyAverageMacros(training, rest, 2);
+    assert.strictEqual(week2.protein, 240);
+    assert.strictEqual(week2.fat, 60);
+    assert.strictEqual(week2.carbs, Math.round((605 * 2 + 537 * 5) / 7));
+    // The extremes are just the one day type. JSON.stringify, not
+    // deepStrictEqual, see the cross-realm note on the insufficient-data
+    // test above: LB return values come out of loadStore()'s vm sandbox.
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, rest, 7)), JSON.stringify(training));
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, rest, 0)), JSON.stringify(rest));
+    // Missing macros read as zero instead of NaN, and a missing side object
+    // doesn't throw.
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(null, rest, 0)), JSON.stringify(rest));
+    assert.strictEqual(JSON.stringify(LB.weeklyAverageMacros(training, undefined, 7)), JSON.stringify(training));
   });
 
   test('rebalanceMacros: holds the calorie figure, others split proportionally', () => {
@@ -1134,7 +1273,7 @@ async function testAsync(name, fn) {
       // prior week
       { date: '2026-06-02', weight: 85.0 },
       { date: '2026-06-04', weight: 85.4 },
-      // today's log (outside the reported week) — weight_today reads from here
+      // today's log (outside the reported week), weight_today reads from here
       { date: today, weight: 96.6 },
     ];
     const p = LB.dailyLogsWeekPrefill(logs, '2026-06-08');
@@ -1146,6 +1285,30 @@ async function testAsync(name, fn) {
     assert.strictEqual(p.macro_adherence, 95);
     assert.strictEqual(p.count, 2);
     assert.strictEqual(LB.dailyLogsWeekPrefill([], '2026-06-08'), null);
+  });
+
+  test('dailyLogsWeekPrefill: excludes today from nutrition/adherence averages', () => {
+    // Today is still accumulating (dailyLogAdherence scores whatever's logged
+    // so far against the full day's target), so it must never be averaged in
+    // alongside genuinely finished days, that would drag calories_avg/
+    // macro_adherence toward "under target" on a week that wasn't. weekStart
+    // is placed 3 days before today so today always lands mid-week no matter
+    // which real weekday the test happens to run on.
+    const today = LB.todayISO();
+    const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+    const weekStart = shift(today, -3);
+    const logs = [
+      { date: weekStart, calories: 2000, protein: 180, carbs: 200, fat: 60, adherence: 100 },
+      { date: shift(weekStart, 1), calories: 2000, protein: 180, carbs: 200, fat: 60, adherence: 100 },
+      // Only breakfast logged so far today, a naive average would read this
+      // as a bad day instead of an unfinished one.
+      { date: today, calories: 400, protein: 30, carbs: 40, fat: 10, adherence: 20 },
+    ];
+    const p = LB.dailyLogsWeekPrefill(logs, weekStart);
+    assert.strictEqual(p.calories_avg, 2000);   // not (2000+2000+400)/3
+    assert.strictEqual(p.protein_avg, 180);
+    assert.strictEqual(p.macro_adherence, 100); // not (100+100+20)/3
+    assert.strictEqual(p.count, 3);             // today still counts as a logged day
   });
 
   // ── Flexible plans ────────────────────────────────────────────────────────
@@ -1207,7 +1370,7 @@ async function testAsync(name, fn) {
     const state = { sessions: [
       wpSession('2026-06-02', [wpSet(100, 5)]), // baseline before the week
       wpSession('2026-06-09', [wpSet(110, 5)]), // earlier in the reported week
-      wpSession('2026-06-11', [wpSet(112, 5)]), // later same week — must NOT compare to Jun 9
+      wpSession('2026-06-11', [wpSet(112, 5)]), // later same week, must NOT compare to Jun 9
     ] };
     // Both week sessions improve over the Jun 2 baseline → improved
     assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'improved');
@@ -1220,7 +1383,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.growthCounts.a_d1, 1);
   });
 
-  test('pickGrowthRecipient: no ceiling — a single exercise keeps winning no matter how many grants it already has', () => {
+  test('pickGrowthRecipient: no ceiling, a single exercise keeps winning no matter how many grants it already has', () => {
     const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 7 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
     assert.strictEqual(r.growthCounts.a_d1, 8);
@@ -1237,8 +1400,8 @@ async function testAsync(name, fn) {
     assert.strictEqual(r2.growthCounts.a_d1, 2);
   });
 
-  test('pickGrowthRecipient: no ceiling — fewest grants still wins even against a much larger gap', () => {
-    // b has 20 prior grants, a has 3 — no ceiling excludes b from eligibility
+  test('pickGrowthRecipient: no ceiling, fewest grants still wins even against a much larger gap', () => {
+    // b has 20 prior grants, a has 3, no ceiling excludes b from eligibility
     // anymore, but a still wins purely because it has fewer grants so far.
     const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 3, b_d1: 20 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
@@ -2324,7 +2487,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(seeded[0].reps, 13);
   });
   test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
-    // Only a Range item's own repsMax caps the nudge — the global default /
+    // Only a Range item's own repsMax caps the nudge, the global default /
     // a custom progressionOffset ceiling is just an internal trigger
     // threshold, not a user-drawn boundary, so it keeps climbing (matches
     // classic Smart Progression's long-standing behavior).
@@ -2349,7 +2512,7 @@ async function testAsync(name, fn) {
     const it = { sets: 1, reps: 8, progressionOffset: 2 };
     const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
     const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
-    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap — keeps climbing
+    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap, keeps climbing
   });
   test('buildSeedSets respects an explicit progressionOffset of 0 (off) even with the global setting on', () => {
     const it = { sets: 1, reps: 8, progressionOffset: 0 };
@@ -2467,7 +2630,7 @@ async function testAsync(name, fn) {
     assert.ok(numAfter > 1);
   });
 
-  test('realignCycleForToday: preserves history — a past date keeps its old rotation', () => {
+  test('realignCycleForToday: preserves history, a past date keeps its old rotation', () => {
     const days = Array.from({ length: 8 }, () => ({}));
     const sch = { id: 'p1', days };
     const today = '2026-07-05';
@@ -2493,7 +2656,7 @@ async function testAsync(name, fn) {
   });
   test('exerciseLogMode: log_mode takes precedence over legacy flag', () => {
     // a bodyweight weight-mode exercise still carries no_weight_reps=false, and
-    // a reps exercise carries no_weight_reps=true — but log_mode is authoritative
+    // a reps exercise carries no_weight_reps=true, but log_mode is authoritative
     assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight', no_weight_reps: true }), 'weight');
   });
   test('shouldPullBodyweight: only bodyweight + explicit opt-in', () => {
@@ -2674,7 +2837,7 @@ async function testAsync(name, fn) {
     const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3' });
     assert.strictEqual('mesocycle_autoregulate' in plain, false);
     // Harmless alongside a bounded meso too (mesoActive is an OR, mesocycle_weeks
-    // still wins for bounded-only logic) — confirms it isn't nested inside/gated
+    // still wins for bounded-only logic), confirms it isn't nested inside/gated
     // by the mesoWeeks block.
     const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesocycleAutoregulate: true });
     assert.strictEqual(both.mesocycle_weeks, 6);
@@ -3011,6 +3174,82 @@ async function testAsync(name, fn) {
     const r = LB.compute531CycleBumps(mkSch(), cyc, 0);
     assert.strictEqual(r.sq.bumped, true);
     assert.strictEqual(r.sq.newTm, 105);
+  });
+
+  test('prev531MainLiftSession: pairs a session only with the SAME week of the PREVIOUS cycle', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}],
+      program_data: { includeDeload: true, mainLifts: { dips: { tm: 100, kind: 'upper' } } } };
+    const store = { schedules: [sch], sessions: [] };
+    const mkSess = (i) => ({ id: 'dips_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p531',
+      entries: [{ exId: 'dips', sets: [] }] });
+    // dayCount 1, includeDeload true -> maxWeek 4: idx 0-3 = cycle0 weeks 1-4
+    // (4 = deload), idx 4-7 = cycle1 weeks 1-4.
+    store.sessions = Array.from({ length: 8 }, (_, i) => mkSess(i));
+
+    // The exact bug: cycle1 week1 (idx4) must pair with cycle0 week1 (idx0),
+    // never with the chronologically-closer, but heavier, cycle0 week3 (idx2)
+    // or the deload week4 (idx3) that actually ran right before it.
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[4], 'dips').id, 'dips_0');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[5], 'dips').id, 'dips_1');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[6], 'dips').id, 'dips_2');
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[7], 'dips').id, 'dips_3'); // deload vs deload
+
+    // Cycle 0 has no earlier cycle to pair with at all.
+    for (let i = 0; i < 4; i++) assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[i], 'dips'), null);
+
+    // Not a main lift on this plan (e.g. an assistance exercise sharing the
+    // same day): assistance keeps the normal "most recent session" behavior,
+    // so this must abstain rather than pair it up too.
+    assert.strictEqual(LB.prev531MainLiftSession(store, store.sessions[4], 'cable_fly'), null);
+
+    // A session not itself a counted 531 position (bonus, still in progress,
+    // or from a different plan entirely) has nothing to be positioned against.
+    const bonus = { id: 'bonus', scheduleId: 'p531', isBonus: true, entries: [{ exId: 'dips', sets: [] }] };
+    assert.strictEqual(LB.prev531MainLiftSession(store, bonus, 'dips'), null);
+    assert.strictEqual(LB.prev531MainLiftSession(store, { id: 'nope', scheduleId: 'other-plan' }, 'dips'), null);
+  });
+
+  test('prev531MainLiftSession: interleaved multi-lift plan still pairs by exId, not array position', () => {
+    // dayCount 2 (squat, bench), includeDeload false -> maxWeek 3. Logged in
+    // strict squat-then-bench order each week: idx 0-5 = cycle0 (sq/bp x3
+    // weeks), idx 6-7 = cycle1 week1's sq/bp.
+    const sch = { id: 'p2', program_type: '531', days: [{}, {}],
+      program_data: { includeDeload: false, mainLifts: { sq: { tm: 100, kind: 'squat' }, bp: { tm: 80, kind: 'bench' } } } };
+    const mk = (exId, i) => ({ id: exId + '_' + i, ended: '2026-03-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p2',
+      entries: [{ exId, sets: [] }] });
+    const store = { schedules: [sch], sessions: [
+      mk('sq', 0), mk('bp', 1), mk('sq', 2), mk('bp', 3), mk('sq', 4), mk('bp', 5), mk('sq', 6), mk('bp', 7),
+    ] };
+    const sqCycle1Week1 = store.sessions[6];
+    const bpCycle1Week1 = store.sessions[7];
+    assert.strictEqual(LB.prev531MainLiftSession(store, sqCycle1Week1, 'sq').id, 'sq_0');
+    assert.strictEqual(LB.prev531MainLiftSession(store, bpCycle1Week1, 'bp').id, 'bp_1');
+  });
+
+  test('prev531MainLiftSessionLive: the in-progress session pairs as if it had just been appended', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}],
+      program_data: { includeDeload: true, mainLifts: { dips: { tm: 100, kind: 'upper' } } } };
+    const mkSess = (i) => ({ id: 'dips_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p531',
+      entries: [{ exId: 'dips', sets: [] }] });
+    // 4 ended sessions = cycle0 weeks 1-4 (4 = deload). The live session
+    // (ended: null, still being logged) is the 5th, cycle1 week1, so it must
+    // pair with idx0 (cycle0 week1), exactly like prev531MainLiftSession
+    // would once this session itself finishes and becomes idx4.
+    const store = { schedules: [sch], sessions: Array.from({ length: 4 }, (_, i) => mkSess(i)) };
+    const live = { id: 'live', scheduleId: 'p531', dayId: 'd1', ended: null, entries: [{ exId: 'dips', sets: [] }] };
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, live, 'dips').id, 'dips_0');
+
+    // Still cycle 0 (only 2 ended sessions so far): no earlier cycle yet.
+    const store2 = { schedules: [sch], sessions: [mkSess(0), mkSess(1)] };
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store2, live, 'dips'), null);
+
+    // A bonus (or app-deload) live session never counts toward the rotation,
+    // so it has no real position to derive a pairing from either.
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, { ...live, isBonus: true }, 'dips'), null);
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, { ...live, isDeload: true }, 'dips'), null);
+
+    // Not a main lift: abstains, same as the ended-session version.
+    assert.strictEqual(LB.prev531MainLiftSessionLive(store, live, 'cable_fly'), null);
   });
 
   test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
@@ -4635,6 +4874,85 @@ async function testAsync(name, fn) {
     assert.strictEqual(res.ok, false);
   });
   testSession = null; // restore the default for any test appended after this block
+
+  // ── Bodyweight + added load ────────────────────────────────────────────────
+  // kg keeps the TOTAL so e1RM/PR/volume are untouched; addedKg is what the user
+  // typed. These guard the split staying consistent in both directions.
+  const bwPlusStore = {
+    exercises: [
+      { id: 'pu', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' },
+      { id: 'dip', equipment: 'bodyweight', bodyweight_mode: 'pull', log_mode: 'weight' },
+      { id: 'legacy', equipment: 'bodyweight', pull_bodyweight: true, log_mode: 'weight' },
+      { id: 'plain', equipment: 'bodyweight', log_mode: 'weight' },
+      { id: 'bar', equipment: 'dual_plates', log_mode: 'weight' },
+    ],
+    dailyLogs: [{ date: '2026-08-01', weight: 80 }],
+    settings: {},
+  };
+  test('bodyweightMode: reads the new column', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[0]), 'plus_load');
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[1]), 'pull');
+  });
+  test('bodyweightMode: falls back to the legacy boolean', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[2]), 'pull');
+  });
+  test('bodyweightMode: null for a plain bodyweight exercise and for non-bodyweight gear', () => {
+    assert.strictEqual(LB.bodyweightMode(bwPlusStore.exercises[3]), null);
+    assert.strictEqual(LB.bodyweightMode({ equipment: 'dual_plates', bodyweight_mode: 'plus_load' }), null);
+  });
+  test('shouldPullBodyweight: true for pull, false for plus_load', () => {
+    // plus_load must NOT pre-fill the field with bodyweight: the field holds the
+    // belt load, so pre-filling 80 there would log 160 total.
+    assert.strictEqual(LB.shouldPullBodyweight(bwPlusStore.exercises[1]), true);
+    assert.strictEqual(LB.shouldPullBodyweight(bwPlusStore.exercises[0]), false);
+  });
+  test('isBodyweightPlusLoad: only for the plus_load mode', () => {
+    assert.strictEqual(LB.isBodyweightPlusLoad(bwPlusStore.exercises[0]), true);
+    assert.strictEqual(LB.isBodyweightPlusLoad(bwPlusStore.exercises[1]), false);
+  });
+  test('setLoadLabel: belt load for a plus_load set, plain weight otherwise', () => {
+    assert.strictEqual(LB.setLoadLabel({ kg: 90, addedKg: 10 }), '+10');
+    assert.strictEqual(LB.setLoadLabel({ kg: 90 }), '90');
+    assert.strictEqual(LB.setLoadLabel({ kg: null }), null);
+    assert.strictEqual(LB.setLoadLabel(null), null);
+  });
+  test('setLoadLabel: a zero added load still reads as +0, not as the total', () => {
+    // Bodyweight-only set on a plus_load exercise: the belt was empty, and it
+    // must not suddenly render as "80".
+    assert.strictEqual(LB.setLoadLabel({ kg: 80, addedKg: 0 }), '+0');
+  });
+  test('splitBodyweightLoad: recovers the frozen bodyweight from the stored pair', () => {
+    const r = LB.splitBodyweightLoad({ kg: 90, addedKg: 10 });
+    assert.strictEqual(r.total, 90); assert.strictEqual(r.added, 10); assert.strictEqual(r.base, 80);
+  });
+  test('splitBodyweightLoad: a set with no addedKg is all bodyweight', () => {
+    const r = LB.splitBodyweightLoad({ kg: 82 });
+    assert.strictEqual(r.total, 82); assert.strictEqual(r.added, null); assert.strictEqual(r.base, 82);
+  });
+  test('buildSeedSets: plus_load repeats the belt load and rebuilds the total from today', () => {
+    // Last session: 78 kg bodyweight + 10 on the belt = 88 total.
+    // Today the user weighs 80, so the same belt load is 90 total.
+    const it = { sets: 1, exId: 'pu', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 88, addedKg: 10, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].addedKg, 10);
+    assert.strictEqual(seeded[0].kg, 90);
+  });
+  test('buildSeedSets: plus_load with no previous belt load seeds empty, not a bare bodyweight', () => {
+    const it = { sets: 1, exId: 'pu', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 80, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].addedKg, null);
+    assert.strictEqual(seeded[0].kg, null);
+  });
+  test('buildSeedSets: a normal exercise is untouched by the plus_load path', () => {
+    const it = { sets: 1, exId: 'bar', reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 8, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
+    assert.strictEqual(seeded[0].kg, 100);
+    assert.strictEqual(seeded[0].addedKg, undefined);
+  });
+
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

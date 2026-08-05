@@ -167,33 +167,6 @@ async function ensureFoodCached(pendingFoodOrItem) {
   }
   return true;
 }
-// Label-scanner provider: one per-device setting (localStorage key
-// logbook-label-scanner-provider) read by TWO components that can be mounted
-// at the same time (FoodScreen and the ingredient picker's search tab). Each
-// held its own useState seeded once at mount, so toggling in one left the
-// other on the old provider for the rest of the session. Route every read and
-// write through here and broadcast the change.
-function fdReadScannerProvider() {
-  try { return localStorage.getItem('logbook-label-scanner-provider') || 'grok'; }
-  catch (_) { return 'grok'; }
-}
-function fdWriteScannerProvider(v) {
-  try { localStorage.setItem('logbook-label-scanner-provider', v); } catch (_) {}
-  try { window.dispatchEvent(new CustomEvent('zane-scanner-provider', { detail: v })); } catch (_) {}
-}
-// Same idea as the label-scanner provider above, one per-device setting
-// (localStorage key logbook-meal-parser-provider) for "Describe a meal"'s own
-// two interchangeable backends. No broadcast needed here unlike the scanner:
-// this sheet only ever has the one mount point (FoodScreen), not a second one
-// like the ingredient picker's search tab, so a plain per-mount useState
-// seeded from this can't drift out of sync with itself.
-function fdReadMealParserProvider() {
-  try { return localStorage.getItem('logbook-meal-parser-provider') || 'claude'; }
-  catch (_) { return 'claude'; }
-}
-function fdWriteMealParserProvider(v) {
-  try { localStorage.setItem('logbook-meal-parser-provider', v); } catch (_) {}
-}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -364,6 +337,14 @@ const FD_SHOPPING_QTY_MAX_G = 100000;
 // chart target line reuse it rather than inventing a second definition of
 // "good" for the same metric.
 const FD_STATS_GOAL_ADHERENCE = 90;
+// How many days ahead (today included) Plan Mode auto-materializes the active
+// meal plan's matching slots into the log, so tomorrow's (and the rest of the
+// week's) planned entries are already there before the user ever navigates
+// to that date, not just today's. Same 7-day default as the shopping list's
+// own lookahead (FD_SHOPPING_DAYS_DEFAULT), not user-configurable (yet):
+// no existing setting to hang it off, and 7 matches how far the day-type
+// projection (isTrainingDayForDate) is meant to be trusted anyway.
+const FD_PLAN_LOOKAHEAD_DAYS = 7;
 function fdClampQtyG(n) {
   return n == null ? null : Math.min(FD_SHOPPING_QTY_MAX_G, n);
 }
@@ -697,23 +678,36 @@ function fdApplyShoppingPrefs(list, prefs, foodLogs, todayISO) {
 // ShoppingListScreen), just fed from this list instead of displayList.
 function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
   const foodLogs = foodLogsOverride || store.foodLogs;
+  const now = new Date();
   return (store.foodShoppingPrefs || [])
     .filter(p => p.stockBaselineG != null)
-    .map(p => ({
-      key: p.shoppingKey,
-      foodId: p.foodId,
-      foodName: p.foodName,
-      brand: p.brand || null,
-      displayName: p.nameOverride || p.foodName,
-      overridden: !!p.nameOverride,
-      excluded: !!p.excluded,
-      packageSizeG: p.packageSizeG ?? null,
-      lowStockThresholdG: p.lowStockThresholdG ?? null,
-      stockSetAt: p.stockSetAt,
-      effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
-      grams: 0,
-      fromProjection: false,
-    }))
+    .map(p => {
+      // Same permanentExcluded/tempExcludedUntil/excluded derivation as
+      // fdApplyShoppingPrefs above: Inventory rows feed the same
+      // renderShoppingRow -> openEdit sheet as the Shopping List tab, and
+      // openEdit prefills the Exclude picker from these fields. Without them
+      // here, opening an excluded or actively-snoozed item from the
+      // Inventory tab prefilled the picker as "not excluded", and Save wrote
+      // that back, silently clearing a real exclusion/snooze.
+      const tempExcludedUntil = (p.excludedUntil && new Date(p.excludedUntil) > now) ? p.excludedUntil : null;
+      return {
+        key: p.shoppingKey,
+        foodId: p.foodId,
+        foodName: p.foodName,
+        brand: p.brand || null,
+        displayName: p.nameOverride || p.foodName,
+        overridden: !!p.nameOverride,
+        excluded: !!p.excluded || !!tempExcludedUntil,
+        permanentExcluded: !!p.excluded,
+        tempExcludedUntil,
+        packageSizeG: p.packageSizeG ?? null,
+        lowStockThresholdG: p.lowStockThresholdG ?? null,
+        stockSetAt: p.stockSetAt,
+        effectiveStockG: fdEffectiveStockG(p, foodLogs, todayISO),
+        grams: 0,
+        fromProjection: false,
+      };
+    })
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 // Below the effective threshold: lowStockThresholdG (migration 0232) when
@@ -723,8 +717,11 @@ function fdBuildInventoryList(store, todayISO, foodLogsOverride) {
 // because "below one package" alone fires too late for a food that gets
 // eaten through faster than one package lasts, by the time it dips under
 // package_size_g there might be nothing left at all.
+function fdStockThreshold(item) {
+  return item.lowStockThresholdG ?? item.packageSizeG;
+}
 function fdIsLowStock(item) {
-  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
+  const threshold = fdStockThreshold(item);
   return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG < threshold;
 }
 // The logical complement of fdIsLowStock above, same threshold precondition:
@@ -735,8 +732,8 @@ function fdIsLowStock(item) {
 // silently hiding it from the buy list while it might genuinely be at zero
 // would be worse than just estimating demand for it like an untracked food.
 function fdIsWellStocked(item) {
-  const threshold = item.lowStockThresholdG ?? item.packageSizeG;
-  return threshold > 0 && item.effectiveStockG != null && !fdIsLowStock(item);
+  const threshold = fdStockThreshold(item);
+  return threshold > 0 && item.effectiveStockG != null && item.effectiveStockG >= threshold;
 }
 // Per-device (CLAUDE.md localStorage-keys list): which low-stock "dip" the
 // user has already seen the Running Low banner for, keyed by foodId ->
@@ -806,9 +803,18 @@ function fdExactShoppingQty(grams) {
 // case, so fdRoundShoppingQty, not fdExactShoppingQty). Exports use
 // `headline` only, "3 x 400g" reads as a normal shopping-list line same as
 // any plain amount.
+// Whole packages needed to cover `grams` (rounds UP, you can't buy half a
+// pack). Shared by fdFormatShoppingQty's headline and fdShoppingBuyQtyG
+// below, and by openBoughtPrompt's prefill (which needs the pack COUNT, not
+// just the gram total, to fill its "packs" input) so all three read the pack
+// count off one formula instead of openBoughtPrompt dividing a gram total
+// back out to recover it.
+function fdShoppingPacks(grams, packageSizeG) {
+  return Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+}
 function fdFormatShoppingQty(grams, packageSizeG) {
   if (!(packageSizeG > 0)) return { headline: fdRoundShoppingQty(grams), sub: null };
-  const packs = Math.max(1, Math.ceil((grams || 0) / packageSizeG));
+  const packs = fdShoppingPacks(grams, packageSizeG);
   return { headline: `${packs}× ${fdExactShoppingQty(packageSizeG)}`, sub: `~${fdRoundShoppingQty(grams)} needed` };
 }
 // The actual purchasable quantity in grams behind fdFormatShoppingQty's
@@ -819,13 +825,12 @@ function fdFormatShoppingQty(grams, packageSizeG) {
 // a silently different raw estimate, though the user can still edit it from
 // there before it actually hits inventory.
 function fdShoppingBuyQtyG(grams, packageSizeG) {
-  return packageSizeG > 0 ? Math.max(1, Math.ceil((grams || 0) / packageSizeG)) * packageSizeG : fdRoundShoppingQtyG(grams);
+  return packageSizeG > 0 ? fdShoppingPacks(grams, packageSizeG) * packageSizeG : fdRoundShoppingQtyG(grams);
 }
 // Per-device only (CLAUDE.md localStorage-keys list): a low-stakes personal
 // preference, not worth a synced setting/migration, self-heals to the
-// default on a fresh device. Unlike logbook-label-scanner-provider this has
-// exactly one simultaneous reader (ShoppingListScreen itself), so no
-// cross-component broadcast is needed.
+// default on a fresh device. Exactly one simultaneous reader
+// (ShoppingListScreen itself), so no cross-component broadcast is needed.
 function fdReadShoppingDays() {
   try { const v = parseInt(localStorage.getItem('logbook-shopping-list-days'), 10); return v > 0 ? v : FD_SHOPPING_DAYS_DEFAULT; }
   catch (_) { return FD_SHOPPING_DAYS_DEFAULT; }
@@ -971,11 +976,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // lets the Log-tab hero show progress against the real target instead of a
   // bare total when the user (or their coach) has one set.
   const [coachingMacros, setCoachingMacros] = useStateFd(null);
+  // Mirrors HealthScreen's own coachingMacrosLoaded (screens-health.jsx):
+  // without it, setMealOfChoice below could score and freeze a day's
+  // adherence against the personal target while the real coaching target is
+  // still in flight (or after a failed fetch), the same race f1e368e fixed
+  // for HealthScreen's reconcilers. Left false on failure, not flipped true,
+  // for the same reason as there: waiting for the next successful fetch
+  // (this effect reruns on every coachingId change) beats freezing a wrong
+  // score into a day's targets_snap.
+  const [coachingMacrosLoaded, setCoachingMacrosLoaded] = useStateFd(false);
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
   useEffectFd(() => {
-    if (!coachingId) { setCoachingMacros(null); return; }
+    if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
-    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    setCoachingMacrosLoaded(false);
+    LB.loadCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [coachingId]);
 
@@ -1021,38 +1038,61 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
   }, []);
 
-  // Plan Mode meal templates: on opening today, auto-materialize each matching
-  // template slot (by day-type: any / training / rest) as a planned entry at
-  // its fixed hour, unless the day already has one from that slot. Runs once
-  // per day, tracked CROSS-DEVICE by a synced marker row (store.foodTemplateDays,
-  // id `<userId>_<date>`), so deleting an auto-planned entry never makes it
-  // reappear on reopen, on any device. Only for TODAY: a backdated day is never
-  // auto-filled. The manual "Apply to today" button (FoodTemplateScreen) is the
-  // escape hatch to pull the fixums back after clearing the day on purpose.
+  // Plan Mode meal templates: auto-materialize each matching template slot
+  // (by day-type: any / training / rest) as a planned entry at its fixed
+  // hour, for today AND the next FD_PLAN_LOOKAHEAD_DAYS - 1 days, unless a
+  // given day already has one from that slot. Runs once per day, tracked
+  // CROSS-DEVICE by a synced marker row per date (store.foodTemplateDays, id
+  // `<userId>_<date>`), so deleting an auto-planned entry never makes it
+  // reappear on reopen, on any device, and a day already filled elsewhere
+  // isn't redone here. Independent of curDate (which date is currently being
+  // viewed): the whole point is that tomorrow's plan is already sitting in
+  // the log before the user ever navigates to it, not materialized on
+  // arrival. Backdated (past) days are never auto-filled. The manual "Apply
+  // to today" button (FoodTemplateScreen) is the escape hatch to pull the
+  // fixums back after clearing today's plan on purpose.
   useEffectFd(() => {
-    if (!planMode || curDate !== today) return;
-    // Only the ACTIVE meal plan's slots auto-fill the day.
+    if (!planMode) return;
+    // Only the ACTIVE meal plan's slots auto-fill days.
     const activePlanId = store.activeMealTemplateId;
     const slots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId);
     if (!activePlanId || !slots.length) return;
-    const markerId = `${userId}_${today}`;
-    if ((store.foodTemplateDays || []).some(d => d.id === markerId)) return;
-    const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
-    const toAdd = slots
-      .filter(s => fdSlotMatchesDate(s, store, today) && !existingSlotIds.has(s.id))
-      .map(s => fdMaterializeSlotEntry(s, today));
+    const markedDates = new Set((store.foodTemplateDays || []).map(d => d.id));
+    const existingByDate = new Map();
+    (store.foodLogs || []).forEach(l => {
+      if (!l.templateSlotId) return;
+      if (!existingByDate.has(l.date)) existingByDate.set(l.date, new Set());
+      existingByDate.get(l.date).add(l.templateSlotId);
+    });
+    // One entry per not-yet-marked date in the window, slots already resolved
+    // so the setStore updater below only has to re-check markers, not redo
+    // the filtering, on a double-run race.
+    const pending = [];
+    for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
+      const date = fdShiftDate(today, i);
+      const markerId = `${userId}_${date}`;
+      if (markedDates.has(markerId)) continue;
+      const existingSlotIds = existingByDate.get(date) || new Set();
+      const entries = slots
+        .filter(s => fdSlotMatchesDate(s, store, date) && !existingSlotIds.has(s.id))
+        .map(s => fdMaterializeSlotEntry(s, date));
+      pending.push({ markerId, date, entries });
+    }
+    if (!pending.length) return;
     setStore(s => {
-      // Re-check inside the updater against a double-run race (marker may have
-      // landed between read and commit).
-      if ((s.foodTemplateDays || []).some(d => d.id === markerId)) return s;
+      const already = new Set((s.foodTemplateDays || []).map(d => d.id));
+      const stillPending = pending.filter(p => !already.has(p.markerId));
+      if (!stillPending.length) return s;
+      const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
+      const newEntries = stillPending.flatMap(p => p.entries);
       return {
         ...s,
-        foodTemplateDays: [...(s.foodTemplateDays || []), { id: markerId, date: today }],
+        foodTemplateDays: [...(s.foodTemplateDays || []), ...newMarkers],
         // Planned entries never touch the daily log, so no patchDaily here.
-        foodLogs: toAdd.length ? [...toAdd, ...(s.foodLogs || [])] : (s.foodLogs || []),
+        foodLogs: newEntries.length ? [...newEntries, ...(s.foodLogs || [])] : (s.foodLogs || []),
       };
     });
-  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
+  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
@@ -1115,16 +1155,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // text search or did find something.
   const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
-  // Which AI reads the nutrition label photo: 'grok' (scan-label, the
-  // long-standing default) or 'claude' (scan-label-claude), same request/
-  // response contract either way. Per-device only, not a synced setting:
-  // this is a comparison toggle, not a user-facing preference.
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
 
   // "Describe a meal" sheet: free-text -> parse-meal edge function -> a
   // review list (mealItems) the user picks through before anything is
@@ -1135,11 +1165,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [mealDescription, setMealDescription] = useStateFd('');
   const [mealParsing, setMealParsing] = useStateFd(false);
   const [mealParseError, setMealParseError] = useStateFd(null);
-  // Which AI reads the free-text description: 'claude' (parse-meal, the
-  // long-standing default) or 'grok' (parse-meal-grok), same request/
-  // response contract either way. Per-device only, not a synced setting:
-  // this is a comparison toggle, not a user-facing preference.
-  const [mealParserProvider, setMealParserProvider] = useStateFd(fdReadMealParserProvider);
   const [mealItems, setMealItems] = useStateFd(null);
   // Optional photo attached alongside (or instead of) mealDescription: { base64,
   // mimeType }, same shape fdDownscaleImage returns, or null when none is
@@ -1294,15 +1319,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // is ever planned, so loggedEntries === dayEntries and every total below is
   // exactly what it was before.
   const planMode = !!store.settings?.planMode;
-  // Keep the user's UTC offset fresh while in Plan Mode: the meal-reminder cron
-  // places "now" on the local clock via tzOffsetMinutes, and a Plan Mode user
-  // may never open the Water tab (the other writer of this value). Only writes
-  // when it actually changed (travel / DST). Same one-liner as WaterScreen.
-  useEffectFd(() => {
-    if (!planMode) return;
-    const off = -new Date().getTimezoneOffset();
-    if (store.settings?.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
-  }, [planMode]); // eslint-disable-line
   // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
   // mode. Controls the recurring fixum slots that auto-fill each day's plan.
   const [templateOpen, setTemplateOpen] = useStateFd(false);
@@ -1764,6 +1780,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const mocHour = dayLog?.mealOfChoiceHour ?? mocDefaultHour;
   const categoryTotals = useMemoFd(() => mealCats.map(cat => {
     let calories = 0, protein = 0, carbs = 0, fat = 0;
+    // Kept fully separate from the logged totals above, never merged into
+    // them: still what a planned meal WOULD add once eaten, shown as its own
+    // small "+" line in the timeline's category card so planning ahead
+    // doesn't mean adding up dashed rows by hand, see fdCategoryCard below.
+    let plannedCalories = 0, plannedProtein = 0, plannedCarbs = 0, plannedFat = 0;
     // The totals count logged entries only (a planned meal isn't eaten yet),
     // but `count` counts every entry including planned ones: it gates the
     // "Repeat yesterday" offer, and a slot that already holds planned meals is
@@ -1772,11 +1793,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     for (let h = cat.startHour; h < cat.endHour; h++) {
       for (const e of (byHour[h] || [])) {
         count++;
-        if (e.planned) continue;
+        if (e.planned) {
+          plannedCalories += e.calories || 0; plannedProtein += e.protein || 0; plannedCarbs += e.carbs || 0; plannedFat += e.fat || 0;
+          continue;
+        }
         calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
       }
     }
-    return { ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
+    return {
+      ...cat, count, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat),
+      plannedCalories: Math.round(plannedCalories), plannedProtein: fdRound1(plannedProtein), plannedCarbs: fdRound1(plannedCarbs), plannedFat: fdRound1(plannedFat),
+    };
   }), [byHour, mealCats]);
 
   // settings.hideFoodCategories swaps the six meal-category groups for one
@@ -2146,15 +2173,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         { title: 'Remove the marker?', ok: 'Remove', cancel: 'Keep' });
       if (!ok) return;
     }
+    // Wait for the real coaching target instead of scoring (and freezing)
+    // against the personal one while it's still in flight, same race
+    // f1e368e fixed for HealthScreen's reconciler effects. A narrow window
+    // (a network round-trip right after this screen mounts), silently
+    // no-op rather than committing a wrong, permanently-frozen score.
+    if (coachingId && !coachingMacrosLoaded) return;
     const now = new Date().toISOString();
     setStore(s => {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
       const isTraining = LB.isTrainingDayForDate(s, curDate);
       const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      // A past day already scored keeps the target it was scored against
+      // (same dayTargetOverride contract dayTarget above and the
+      // HealthScreen food reconciler use): without this, toggling Meal of
+      // Choice on a backdated day replaced its frozen snapshot with
+      // TODAY's live target, rewriting history the moment a macro target
+      // changed after the fact.
+      const snap = curDate !== today ? existing?.targetsSnap : null;
+      const dayTargetOverride = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
       const { adherence, targetsSnap } = unscored
         ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
-        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining);
+        : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining, dayTargetOverride);
       const log = existing
         ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
@@ -2425,10 +2466,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Nutrition-label scan: the user photographs a Nährwerttabelle, we shrink it
-  // client-side and send it to the scan-label edge function (labelScannerProvider
-  // picks xAI Grok or Claude vision, see the Scan sheet's toggle below), then
-  // prefill the Custom Item form with what it read for the user to verify.
-  // A scanned label is a per-user custom item, never a shared zane_foods entry.
+  // client-side and send it to the scan-label edge function (Qwen vision,
+  // Grok as the server-side fallback), then prefill the Custom Item form with
+  // what it read for the user to verify. A scanned label is a per-user custom
+  // item, never a shared zane_foods entry.
   async function handleLabelFile(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = ''; // let the user re-pick the same photo after an error
@@ -2438,7 +2479,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -3012,7 +3053,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!text && !mealPhoto) return;
     setMealParsing(true);
     setMealParseError(null);
-    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto);
+    const res = await LB.parseMealText(text, mealPhoto);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
@@ -3049,7 +3090,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       name: i.foodName, quantityG: i.quantityG, protein: i.protein, carbs: i.carbs, fat: i.fat,
       fiber: i.fiber, sugar: i.sugar, satFat: i.satFat, sodiumMg: i.sodiumMg,
     }));
-    const res = await LB.parseMealText(text, mealParserProvider, mealPhoto, previousItems);
+    const res = await LB.parseMealText(text, mealPhoto, previousItems);
     setMealParsing(false);
     if (!res.ok) { setMealParseError(res.error); return; }
     if (!res.items.length) { setMealParseError('Could not find any food there. Try a clearer photo, more detail, or add it manually.'); return; }
@@ -4020,8 +4061,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           </button>
                         ) : (
                           <div style={{ textAlign: 'right' }}>
-                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                            <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                            <div className="num" style={{ fontSize: 14, color: UI.warn }}>
+                              {cat.calories}
+                              {cat.plannedCalories > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: UI.inkFaint }}> +{cat.plannedCalories}</span>}
+                              <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+                            </div>
+                            {/* Planned macros fold into the SAME line as a
+                                small "+N" per number, not a second line: the
+                                card's height must stay identical whether or
+                                not anything is planned, only this line's own
+                                width grows. */}
+                            <span style={fdEntryMeta}>
+                              <FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong
+                                plannedProtein={cat.plannedProtein} plannedCarbs={cat.plannedCarbs} plannedFat={cat.plannedFat} />
+                            </span>
                           </div>
                         )}
                       </div>
@@ -4623,7 +4676,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           mealItems, reviewed in the Sheet right below ── */}
       <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
-          Describe what you ate, attach a photo, or both. {mealParserProvider === 'grok' ? 'Grok' : 'Claude'} estimates each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
+          Describe what you ate, attach a photo, or both. We'll estimate each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
         {mealPhoto ? (
           <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
@@ -4648,14 +4701,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }}
           />
         </Field>
-        <div style={{ marginBottom: 12 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Estimator</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['claude', 'Claude'], ['grok', 'Grok']].map(([id, label]) => (
-              <button key={id} onClick={() => { setMealParserProvider(id); fdWriteMealParserProvider(id); }} style={fdSegBtn(mealParserProvider === id)}>{label}</button>
-            ))}
-          </div>
-        </div>
         {mealParseError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>{mealParseError}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
@@ -5044,14 +5089,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
         </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
-        </div>
       </Sheet>
 
       {/* Hidden picker: opens the native camera (capture) or gallery on tap,
@@ -5243,7 +5280,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
+      <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} onShare={openShareRecipe} recipe={recipeEditorRecipe} store={store} />
 
       {/* Rendered AFTER recipeLogPrompt's own Sheet above (both z-index 100,
           see CookingModeScreen's own comment on why not a literal 200): later
@@ -5396,6 +5433,12 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           id: LB.uid(),
           foodId: typeof i.foodId === 'string' ? i.foodId : null,
           foodName: String(i.foodName || 'Item'),
+          // Fresh revert anchor for the adopter's own copy, same reason
+          // addItems stamps it on a normal add: the sharer's own (possibly
+          // already renamed) foodName is all the adopter ever saw, so it's
+          // treated as this copy's original, not whatever the sharer's item
+          // was called before their own edits.
+          originalFoodName: String(i.foodName || 'Item'),
           brand: i.brand != null ? String(i.brand) : null,
           source: typeof i.source === 'string' ? i.source : null,
           quantityG: num(i.quantityG),
@@ -5438,8 +5481,14 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>
             {items.length} ingredient{items.length === 1 ? '' : 's'} · makes {recipe.portions || 1} portion{(recipe.portions || 1) === 1 ? '' : 's'}
           </div>
+          {/* Sender's own prep order (items as saved, drag-reordered in
+              RecipeEditorScreen), NOT fdSortIngredientsByQty: whoever this
+              is shared with is meant to cook from it, the order they added
+              ingredients in is the point, unlike the quantity-sorted
+              at-a-glance views elsewhere (timeline detail, meal-plan block
+              preview) that aren't about following along step by step. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {fdSortIngredientsByQty(items).map((i, idx) => (
+            {items.map((i, idx) => (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
@@ -5512,19 +5561,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   // and the filter has nothing to act on before there are results.
   const [pickerSource, setPickerSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
-  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
-  // quintet (same shared per-device localStorage key, see
-  // logbook-label-scanner-provider in CLAUDE.md).
+  // scanPickerOpen/scanOpen/labelScanning/labelError quartet.
   const [pickerScanPickerOpen, setPickerScanPickerOpen] = useStateFd(false);
   const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
-  const [pickerLabelScannerProvider, setPickerLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setPickerLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
   const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
@@ -5575,6 +5616,29 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     () => [...(store.foodTemplateSlots || [])].filter(s => s.mealPlanId === viewedPlanId).sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0))),
     [store.foodTemplateSlots, viewedPlanId],
   );
+
+  // A plan's real daily numbers depend on which slots apply on a given day
+  // (fdSlotMatchesDate), not just the raw slot list: "daily" slots count
+  // toward every day, "train"/"rest" slots only toward their own day type.
+  // split is false when every slot is 'any', the common case, so the detail
+  // view isn't cluttered with two identical hero cards.
+  const dayTotals = useMemoFd(() => {
+    const sum = list => list.reduce((acc, s) => ({
+      calories: acc.calories + (s.calories || 0),
+      protein: acc.protein + (s.protein || 0),
+      carbs: acc.carbs + (s.carbs || 0),
+      fat: acc.fat + (s.fat || 0),
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    const dailySlots = slots.filter(s => s.dayType === 'any' || !s.dayType);
+    const trainingSlots = slots.filter(s => s.dayType === 'training');
+    const restSlots = slots.filter(s => s.dayType === 'rest');
+    return {
+      split: trainingSlots.length > 0 || restSlots.length > 0,
+      daily: sum(dailySlots),
+      training: sum([...dailySlots, ...trainingSlots]),
+      rest: sum([...dailySlots, ...restSlots]),
+    };
+  }, [slots]);
 
   function createPlan(name) {
     const id = LB.uid();
@@ -5814,7 +5878,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setPickerLabelScanning(false); setPickerLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, pickerLabelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setPickerLabelScanning(false);
       if (!res.ok) { setPickerLabelError(res.error || 'Scan failed. Try again.'); return; }
       openAddFromLabel(res.label);
@@ -6111,6 +6175,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
               Recurring meals for this plan. The active plan auto-fills each day as planned entries, filtered by day type. Check them off as you eat.
             </div>
 
+            {slots.length > 0 && (
+              dayTotals.split ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <FdMacroHero compact label="Training day" calories={dayTotals.training.calories} protein={dayTotals.training.protein} carbs={dayTotals.training.carbs} fat={dayTotals.training.fat} />
+                  <FdMacroHero compact label="Rest day" calories={dayTotals.rest.calories} protein={dayTotals.rest.protein} carbs={dayTotals.rest.carbs} fat={dayTotals.rest.fat} />
+                </div>
+              ) : (
+                <FdMacroHero label="Daily total" calories={dayTotals.daily.calories} protein={dayTotals.daily.protein} carbs={dayTotals.daily.carbs} fat={dayTotals.daily.fat} />
+              )
+            )}
+
             {slots.length === 0 ? (
               <Btn onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} style={{ width: '100%' }}>
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
@@ -6262,14 +6337,6 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setPickerLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(pickerLabelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
         </div>
       </Sheet>
 
@@ -6531,7 +6598,17 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // moment fdIsWellStocked flips, same as everything else in this screen
   // that self-corrects off a derived value instead of a stored flag; it's
   // still visible the whole time via the Inventory tab regardless.
-  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && !fdIsWellStocked(i)), [displayList]);
+  // Declared here (used by includedList right below) rather than down with
+  // the rest of the bought-prompt state further down this function: an item
+  // just confirmed via confirmBoughtPrompt writes a stock baseline that can
+  // immediately flip fdIsWellStocked true, and without checking boughtSet
+  // here too, includedList's filter would drop that row out from under the
+  // checked "Bought" state in the very same render instead of showing it
+  // checked, making unmarkBought unreachable for any item with a package
+  // size/threshold (an item with neither stays visible and checked, the
+  // inconsistency this comment exists to prevent).
+  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
+  const includedList = useMemoFd(() => displayList.filter(i => !i.excluded && (!fdIsWellStocked(i) || boughtSet.has(i.key))), [displayList, boughtSet]);
   const excludedList = useMemoFd(() => displayList.filter(i => i.excluded), [displayList]);
   // The Inventory tab's own list, independent of `list`/`displayList` above:
   // every tracked food, not just this window's staples/projections (see
@@ -6611,22 +6688,22 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // the item never had this pref set at all.
   const [thresholdPacksDraft, setThresholdPacksDraft] = useStateFd('');
   const [thresholdGramsDraft, setThresholdGramsDraft] = useStateFd('');
-  // Exclude draft: null (not excluded), 'permanent', or an excludedUntil
-  // ISO string (temporary, until that timestamp). One control now covers
-  // both the old permanent excluded flag and the temporary snooze, they're
-  // mutually exclusive states of the same underlying choice. Pre-fills from
-  // the item like editDraft/pkgDraft do, using permanentExcluded/
-  // tempExcludedUntil (not the raw pref) so a stale, already-expired
-  // excludedUntil doesn't come back as if still active.
+  // Exclude draft: null (not excluded), 'permanent', a plain day count for a
+  // not-yet-saved snooze preset ({ days: 7|14|30 }), or an existing
+  // excludedUntil ISO string (an already-active snooze from a previous
+  // save). One control now covers both the old permanent excluded flag and
+  // the temporary snooze, they're mutually exclusive states of the same
+  // underlying choice. Pre-fills from the item like editDraft/pkgDraft do,
+  // using permanentExcluded/tempExcludedUntil (not the raw pref) so a
+  // stale, already-expired excludedUntil doesn't come back as if still
+  // active. A tapped preset stores the plain day count, not an ISO
+  // timestamp: fdSnoozeUntil(days) is only actually called at Save time (see
+  // saveEdit below), so a sheet left open for a while before saving doesn't
+  // stamp an earlier-than-intended expiry. An already-active snooze (the ISO
+  // string case) has no reliable matching preset once time has passed (its
+  // remaining days no longer line up with 7/14/30), so reopening the sheet
+  // never pre-highlights one, only actually tapping a preset does.
   const [excludeDraft, setExcludeDraft] = useStateFd(null);
-  // Which temporary preset (7/14/30) lights up, purely a this-visit
-  // interaction marker, separate from excludeDraft itself: an already-
-  // active snooze from a previous save has no reliable matching preset
-  // once time has passed (its remaining days no longer line up with
-  // 7/14/30), so reopening the sheet never pre-highlights one, only
-  // actually tapping a preset does. The Permanent segment needs no
-  // equivalent marker, excludeDraft === 'permanent' is unambiguous on its own.
-  const [excludeDraftDays, setExcludeDraftDays] = useStateFd(null);
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
@@ -6637,13 +6714,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     setThresholdPacksDraft(item.lowStockThresholdG != null && item.packageSizeG > 0 ? String(fdRound1(item.lowStockThresholdG / item.packageSizeG)) : '');
     setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? String(item.lowStockThresholdG) : '');
     setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
-    setExcludeDraftDays(null);
   }
   function closeEdit() {
     setEditItem(null); setEditDraft(''); setPkgDraft('');
     setStockDraft(''); setStockPacksDraft(''); setStockExtraDraft('');
     setThresholdPacksDraft(''); setThresholdGramsDraft('');
-    setExcludeDraft(null); setExcludeDraftDays(null);
+    setExcludeDraft(null);
   }
   // True if any field actually differs from what the sheet opened with.
   // editDraft/pkgDraft/thresholdPacksDraft/thresholdGramsDraft/excludeDraft
@@ -6687,13 +6763,36 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // screen but don't affect what gets saved.
     const thresholdPacksTyped = fdNum(thresholdPacksDraft);
     const thresholdGramsTyped = fdNum(thresholdGramsDraft);
-    const lowStockThresholdG = packageSizeG > 0
-      ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
-      : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null);
+    // A package size added or removed in THIS visit flips which of the two
+    // draft fields above is "live", but openEdit only ever prefilled the
+    // field matching the item's ORIGINAL mode (see its comment), so the
+    // newly-live field reads blank even when an existing threshold was never
+    // actually touched. Only in that exact case (mode switched AND the live
+    // field is still blank) fall back to carrying the stored gram value
+    // forward as-is (no unit conversion needed, it's always stored in
+    // grams); otherwise this is either the original mode (blank there
+    // legitimately means "clear it", same as an untouched nameOverride
+    // above) or the user typed a real value into the now-live field.
+    const openedWithPkg = editItem.packageSizeG > 0;
+    const modeSwitchedWithBlankLiveField = (openedWithPkg !== (packageSizeG > 0))
+      && (packageSizeG > 0 ? !thresholdPacksDraft.trim() : !thresholdGramsDraft.trim());
+    const lowStockThresholdG = modeSwitchedWithBlankLiveField
+      ? (editItem.lowStockThresholdG ?? null)
+      : (packageSizeG > 0
+          ? (thresholdPacksTyped != null ? fdClampQtyG(thresholdPacksTyped * packageSizeG) : null)
+          : (thresholdGramsTyped != null ? fdClampQtyG(thresholdGramsTyped) : null));
+    // fdSnoozeUntil(days) is only called HERE, at actual save time, not when
+    // the preset button was tapped: excludeDraft holds the plain day count
+    // for a not-yet-saved preset (see its declaration above), so a sheet
+    // left open for a while before saving still stamps the expiry from now,
+    // not from whenever the preset was tapped.
+    const excludedUntil = excludeDraft === 'permanent' ? null
+      : (excludeDraft && typeof excludeDraft === 'object') ? fdSnoozeUntil(excludeDraft.days)
+      : (excludeDraft || null);
     const patch = {
       nameOverride, packageSizeG, lowStockThresholdG, foodName: editItem.foodName, brand: editItem.brand ?? null,
       excluded: excludeDraft === 'permanent',
-      excludedUntil: excludeDraft === 'permanent' ? null : excludeDraft,
+      excludedUntil,
     };
     // A typed stock value sets a FRESH baseline as of right now: fdConsumedSince
     // only ever counts forward from stockSetAt, so re-stamping it here is what
@@ -6735,7 +6834,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // stock write in this screen. One-way: there's no recorded "amount just
   // added" to subtract back out, so unchecking only clears the local mark,
   // it does not undo the inventory write.
-  const [boughtSet, setBoughtSet] = useStateFd(() => new Set());
   const [boughtPrompt, setBoughtPrompt] = useStateFd(null); // { item, packsStr, gramsStr } | null
   useEffectFd(() => { if (!open) { setBoughtSet(new Set()); setBoughtPrompt(null); } }, [open]);
   function unmarkBought(item) {
@@ -6756,7 +6854,10 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     const suggestedG = fdShoppingBuyQtyG(item.grams, item.packageSizeG);
     setBoughtPrompt({
       item,
-      packsStr: hasPkg ? String(suggestedG / item.packageSizeG) : '',
+      // fdShoppingPacks directly, not suggestedG / item.packageSizeG: reads
+      // the same pack count the headline showed instead of dividing the
+      // gram total back out to recover it.
+      packsStr: hasPkg ? String(fdShoppingPacks(item.grams, item.packageSizeG)) : '',
       gramsStr: hasPkg ? '' : String(suggestedG),
     });
   }
@@ -7248,22 +7349,25 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 14, marginBottom: 14 }}>
           <Field label="Exclude" accent style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(7)); setExcludeDraftDays(7); }} style={fdSegBtn(excludeDraftDays === 7)}>1 week</button>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(14)); setExcludeDraftDays(14); }} style={fdSegBtn(excludeDraftDays === 14)}>2 weeks</button>
-              <button onClick={() => { setExcludeDraft(fdSnoozeUntil(30)); setExcludeDraftDays(30); }} style={fdSegBtn(excludeDraftDays === 30)}>1 month</button>
-              <button onClick={() => { setExcludeDraft('permanent'); setExcludeDraftDays(null); }} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
+              <button onClick={() => setExcludeDraft({ days: 7 })} style={fdSegBtn(excludeDraft?.days === 7)}>1 week</button>
+              <button onClick={() => setExcludeDraft({ days: 14 })} style={fdSegBtn(excludeDraft?.days === 14)}>2 weeks</button>
+              <button onClick={() => setExcludeDraft({ days: 30 })} style={fdSegBtn(excludeDraft?.days === 30)}>1 month</button>
+              <button onClick={() => setExcludeDraft('permanent')} style={fdSegBtn(excludeDraft === 'permanent')}>Permanent</button>
             </div>
           </Field>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span>
               {excludeDraft === 'permanent'
                 ? 'Off the shopping list until you pick something else here.'
+                // A not-yet-saved preset ({ days }) previews the date it WOULD
+                // expire on if saved right now, purely for display: the real
+                // expiry is only computed (and stamped) in saveEdit above.
                 : excludeDraft
-                  ? `Off the list until ${new Date(excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
+                  ? `Off the list until ${new Date(typeof excludeDraft === 'object' ? fdSnoozeUntil(excludeDraft.days) : excludeDraft).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}, then back on its own.`
                   : 'On the shopping list. Pick a duration above to skip it for a while.'}
             </span>
             {excludeDraft && (
-              <button onClick={() => { setExcludeDraft(null); setExcludeDraftDays(null); }} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
+              <button onClick={() => setExcludeDraft(null)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}>
                 Clear
               </button>
             )}
@@ -7330,7 +7434,7 @@ function FdIngredientBadge({ n, size = 20 }) {
   );
 }
 
-function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
+function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
   const [items, setItems] = useStateFd([]);
@@ -7339,6 +7443,23 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
+  // Display name only (items[i].foodName): renaming here never touches
+  // zane_foods or foodId, it's a per-recipe snapshot already, see the
+  // comment on the "Edit ingredient" Sheet below. Followers reading a
+  // shared recipe (RecipeShareSheet renders this same foodName verbatim)
+  // don't need to know the raw product name a search result came with.
+  //
+  // Unlike zane_food_shopping_prefs' nameOverride pattern, there is no
+  // separate stored override here, foodName itself IS the current name,
+  // renaming just overwrites it in place, so every other reader in this
+  // file (Cooking Mode, RecipeShareSheet, the logged-recipe snapshot) needs
+  // zero changes to pick up a rename. items[i].originalFoodName, stamped
+  // once when an ingredient is first added (addItems) or adopted from a
+  // share (adopt), is the ONLY place the true original survives, purely so
+  // clearing this field can restore it. Items saved before this shipped
+  // have no originalFoodName, every read below falls back to the item's
+  // current foodName, a no-op revert rather than a crash.
+  const [editName, setEditName] = useStateFd('');
   // Per-ingredient note (items[i].note, optional): the item being edited, or
   // null while closed. Carried through to Cooking Mode below, where it's the
   // whole point of being permanent (shown prominently on that ingredient's
@@ -7347,6 +7468,21 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [noteText, setNoteText] = useStateFd('');
   // Snapshot of the draft as it was opened, to detect unsaved edits on close.
   const initialSnap = useRefFd(null);
+  const [capturing, setCapturing] = useStateFd(false);
+  const captureRef = useRefFd(null);
+  // Screenshot background: same treatment as SessionCompareScreen/HomeScreen,
+  // VIPs get their custom home-screen image, everyone else the faint
+  // centered ZANE mark. Opacity bumped noticeably above those screens' own
+  // 0.04/0.14/0.16: the recipe card is mostly solid/translucent boxes
+  // (FdMacroHero, the ingredient rows), so far less open canvas ever shows
+  // the mark at all, it needs more contrast per pixel to read as intentional
+  // rather than invisible.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.24 : 0.16, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.28, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
 
   useEffectFd(() => {
     if (!open) return;
@@ -7356,7 +7492,17 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     // at all. Every item's id then read as undefined, so removeItem's
     // list.filter(i => i.id !== id) matched that same undefined on EVERY
     // item and wiped the whole recipe instead of the one being removed.
-    const it = (recipe?.items || []).map(i => i.id ? i : { ...i, id: LB.uid() });
+    //
+    // Same idea for originalFoodName (see the editName state comment
+    // further down): an item saved before that field existed has none, so
+    // it's backfilled here from whatever foodName currently is. That's the
+    // best available anchor, NOT the item's true original name if it was
+    // already renamed under the old code before originalFoodName existed,
+    // that earlier name is genuinely gone, there is nowhere it could have
+    // been kept. `|| i.foodName` only ever fires on a still-missing field,
+    // so a real originalFoodName from a previous backfill or a normal add
+    // is never clobbered on a later re-open.
+    const it = (recipe?.items || []).map(i => ({ ...i, id: i.id || LB.uid(), originalFoodName: i.originalFoodName || i.foodName }));
     const p = recipe?.portions || 1;
     const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
     setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
@@ -7388,8 +7534,10 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
 
   // FdIngredientPicker only ever hands back a finished, already-quantified
   // batch (its own "Add N ingredients" button), never a single item.
+  // originalFoodName is stamped here, once, so a later rename (see editName
+  // above) has something fixed to revert to.
   function addItems(newItems) {
-    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item }))]);
+    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.foodName }))]);
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
@@ -7413,8 +7561,8 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
       return next;
     });
   }
-  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
-  function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); }
+  function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); }
   function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
   function closeNoteItem() { setNoteItem(null); setNoteText(''); }
   function saveNote() {
@@ -7448,9 +7596,13 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   function saveEditItem() {
     const g = fdNum(editGrams);
     if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return;
+    // A cleared field reverts to the original name rather than blocking
+    // Save, same trimmed-empty-means-default rule as the shopping list's
+    // own name override (saveEdit above in ShoppingListScreen).
+    const finalName = editName.trim() || editItem.originalFoodName || editItem.foodName;
     const factor = g / editItem.quantityG;
     setItems(list => list.map(i => i.id !== editItem.id ? i : {
-      ...i, quantityG: Math.round(g),
+      ...i, quantityG: Math.round(g), foodName: finalName,
       calories: Math.round((i.calories || 0) * factor),
       protein: fdRound1((i.protein || 0) * factor),
       carbs: fdRound1((i.carbs || 0) * factor),
@@ -7480,12 +7632,30 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   }
   const canSave = !!(name.trim() && items.length);
 
+  // Same html2canvas flow as SessionDetailScreen/SessionCompareScreen's own
+  // takeScreenshot. The watermark here is a full-page centered background
+  // (HomeScreen-style), no corner avatar to dodge.
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${(name.trim() || 'recipe').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'recipe'}.png`,
+    setCapturing,
+  });
+
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={recipe ? 'Edit recipe' : 'New recipe'} onBack={requestClose}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
+            {items.length > 0 && (
+              <button onClick={takeScreenshot} disabled={capturing} aria-label="Screenshot" style={fdTopAddBtn}>
+                {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+              </button>
+            )}
+            {recipe?.id && (
+              <button onClick={() => onShare((store.foodRecipes || []).find(r => r.id === recipe.id) || recipe)} aria-label="Share recipe" style={fdTopAddBtn}>
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 14 }} />
+              </button>
+            )}
             {items.length > 0 && (
               <button onClick={() => setPickerOpen(true)} aria-label="Add ingredients" style={fdTopAddBtn}>
                 <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
@@ -7496,41 +7666,113 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             </button>
           </div>
         } />
-      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
+        display: 'flex', flexDirection: 'column', gap: 16, position: 'relative',
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
+      }}>
         {confirmEl}
-        <Field label="Name">
-          <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
-        </Field>
+
+        {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
+            for the export, same as SessionDetailScreen/SessionCompareScreen. */}
+        {capturing && _shotGridOn && <SvgGrid />}
+        {/* Screenshot background watermark, centered, faint, full document. */}
+        {capturing && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {capturing ? (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+            <div className="knurl" />
+          </div>
+        ) : (
+          <Field label="Name">
+            <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
+          </Field>
+        )}
 
         <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
-        <div>
-          <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
+        {capturing ? (
+          <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+        ) : (
+          <div>
+            <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Optional: unlocks logging this recipe by grams of the finished
             dish instead of only by portions, useful for batch cooking where
             weighing out a serving is more natural than a portion fraction
             (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
             Never auto-filled from the ingredient total below: cooking loses
-            or gains water weight, so the two numbers are rarely the same. */}
-        <Field label="Cooked weight (g), optional">
-          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
-            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
-          </div>
-        </Field>
+            or gains water weight, so the two numbers are rarely the same.
+            Editing chrome, not part of the shareable card: hidden in screenshot mode. */}
+        {!capturing && (
+          <Field label="Cooked weight (g), optional">
+            <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+              Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+            </div>
+          </Field>
+        )}
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
-            <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
-              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
-            </Btn>
+            !capturing && (
+              <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
+              </Btn>
+            )
+          ) : capturing ? (
+            // Plain read-only rows for the shareable card: no drag handle,
+            // no edit/note/delete affordances, nothing interactive to show.
+            // fdEntryRow's normal background is opaque UI.bgInset, translucent
+            // here (no backdrop-filter, that silently no-ops under html2canvas
+            // same as the CSS grid does) so the centered watermark bleeds
+            // through the cards instead of sitting hidden behind them.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((i, idx) => (
+                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <FdIngredientBadge n={idx + 1} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={fdEntryName}>{i.foodName}</div>
+                      <div style={fdEntryMeta}>
+                        {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                        <span style={fdMetaDivider} />
+                        <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                      </div>
+                    </div>
+                  </div>
+                  {/* Prep note, same inline style as RecipeShareSheet's own
+                      preview: a shared card is exactly the "someone else is
+                      cooking this" case that note exists for, whoever it's
+                      shared with gets the same prep guidance, not just a
+                      bare ingredient list. */}
+                  {i.note && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                      <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           ) : (
             // Array order is the deliberate prep order (the order to add
             // ingredients while cooking, see Cooking Mode below), so this list
@@ -7563,11 +7805,24 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             </ReorderList>
           )}
         </div>
+
+        </div>
       </div>
 
-      {/* ── Edit an already-added ingredient's amount, rescaling its macros
-          proportionally ── */}
-      <Sheet open={!!editItem} onClose={closeEditItem} title={editItem?.foodName || 'Ingredient'} titleColor="var(--accent)">
+      {/* ── Edit an already-added ingredient: rename it for display (this
+          recipe's own foodName snapshot only, never zane_foods or foodId,
+          see the editName state comment above) and/or resize its amount,
+          rescaling macros proportionally. A share link renders this same
+          foodName verbatim (RecipeShareSheet below), so a rename here is
+          also how a shared recipe stops showing raw database product
+          names. ── */}
+      <Sheet open={!!editItem} onClose={closeEditItem} title="Edit ingredient" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
+          Original: {editItem?.originalFoodName || editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
+        </div>
+        <Field label="Name" style={{ marginBottom: 16 }}>
+          <TextInput value={editName} onChange={setEditName} placeholder={editItem?.originalFoodName || editItem?.foodName} />
+        </Field>
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
           <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
@@ -8429,19 +8684,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // search has run (see the template picker for the same reasoning).
   const [pickSource, setPickSource] = useStateFd(null);
   // Scan entry points for the Search tab, mirroring FoodScreen's own
-  // scanPickerOpen/scanOpen/labelScanning/labelError/labelScannerProvider
-  // quintet (same shared per-device localStorage key, see
-  // logbook-label-scanner-provider in CLAUDE.md).
+  // scanPickerOpen/scanOpen/labelScanning/labelError quartet.
   const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
   const [scanOpen, setScanOpen] = useStateFd(false);
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
-  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(fdReadScannerProvider);
-  useEffectFd(() => {
-    const onChange = e => setLabelScannerProvider(e.detail);
-    window.addEventListener('zane-scanner-provider', onChange);
-    return () => window.removeEventListener('zane-scanner-provider', onChange);
-  }, []);
   const labelInputRef = useRefFd(null);
 
   useEffectFd(() => {
@@ -8487,7 +8734,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
+      const res = await LB.scanLabel(base64, mimeType);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -8946,14 +9193,6 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="micro" style={{ marginBottom: 6 }}>Label reader (nutrition label only)</div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
-              <button key={id} onClick={() => { setLabelScannerProvider(id); fdWriteScannerProvider(id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
-            ))}
-          </div>
         </div>
       </Sheet>
 
@@ -9492,15 +9731,25 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // hour rows, and FD_MACRO_COLORS's muted pastel tones lose enough contrast
 // against that darker backdrop to read as thin again even at 600, the same
 // reason that card's own label is 700 rather than the entry name's 600.
-function FdMacroBits({ protein, carbs, fat, strong }) {
+// plannedProtein/Carbs/Fat (optional): a small "+N" appended per macro
+// (Plan Mode's timeline category card), folded into this SAME line rather
+// than a second one, so showing a planned amount never changes a card's
+// height, only how much this one line says.
+function FdMacroBits({ protein, carbs, fat, strong, plannedProtein, plannedCarbs, plannedFat }) {
   const w = strong ? 700 : 600;
+  const bit = (val, planned, color, label) => (
+    <span className="num" style={{ fontWeight: w, color }}>
+      {label}{Math.round(val)}
+      {planned > 0 && <span style={{ fontWeight: 600, opacity: 0.65 }}>+{Math.round(planned)}</span>}
+    </span>
+  );
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      {bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P')}
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      {bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C')}
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
+      {bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F')}
     </span>
   );
 }
@@ -9568,18 +9817,18 @@ function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
 // dedicated component rather than reusing FdMacroGhosts here: that one is
 // also RecipeEditorScreen's own "Whole batch" card, and giving IT these
 // colors too was not asked for, out of scope.
-function FdMacroHero({ label, calories, protein, carbs, fat }) {
+function FdMacroHero({ label, calories, protein, carbs, fat, compact = false }) {
   return (
-    <BracketFrame gold style={{ padding: 22, textAlign: 'center' }}>
-      <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
-        <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
-        <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+    <BracketFrame gold style={{ padding: compact ? 14 : 22, textAlign: 'center' }}>
+      <div style={{ fontSize: compact ? 11 : 15, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontFamily: UI.fontUi, marginBottom: compact ? 4 : 6 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: compact ? 4 : 6 }}>
+        <span className="num" style={{ fontSize: compact ? 26 : 44, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+        <span style={{ fontSize: compact ? 11 : 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
       </div>
-      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 12 }}>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
+      <div style={{ display: 'flex', gap: compact ? 8 : 14, justifyContent: 'center', marginTop: compact ? 8 : 12, flexWrap: compact ? 'wrap' : 'nowrap' }}>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.protein }}>P {Math.round(protein || 0)}g</span>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.carbs }}>C {Math.round(carbs || 0)}g</span>
+        <span className="num" style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: FD_MACRO_COLORS.fat }}>F {Math.round(fat || 0)}g</span>
       </div>
     </BracketFrame>
   );

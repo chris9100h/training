@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Zane · The all-in-one fitness app</title>
+<meta name="description" content="Training, nutrition, health metrics and coaching in one log. Plans that adapt to how the last session actually felt, logging built for the gym floor, and it installs on your phone from the browser." />
+<meta name="theme-color" content="#141218" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<link rel="canonical" href="https://zane-wo.com/welcome.html" />
+
+<!-- Open Graph / Twitter. This is half the reason this page exists: the app at
+     "/" ships no share metadata, so every link anyone pastes into WhatsApp,
+     Instagram or Discord renders as a bare URL. Absolute URLs are required,
+     scrapers do not resolve relative ones.
+     og:image is icons/og-card.jpg, built from tools/og-card.html. Edit and
+     re-render that file rather than the image. 1200x630 is what the wide
+     card expects; square art gets cropped or demoted to a thumbnail. -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Zane" />
+<meta property="og:url" content="https://zane-wo.com/welcome.html" />
+<meta property="og:title" content="Zane · Train with Zane or remain the same" />
+<meta property="og:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<meta property="og:image" content="https://zane-wo.com/icons/og-card.jpg" />
+<meta property="og:image:alt" content="The Zane wordmark beside the app running on two phones" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Zane · Train with Zane or remain the same" />
+<meta name="twitter:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<meta name="twitter:image" content="https://zane-wo.com/icons/og-card.jpg" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    color-scheme: light dark;
+    /* default = app dark theme, same tokens as autoreg.html */
+    --bg:#141218; --panel:#1a1820; --raised:#252334; --inset:#2f2c3c; --hero:#1a1820;
+    --ink:#ece4d0; --ink-soft:rgba(236,228,208,0.66); --ink-faint:rgba(236,228,208,0.42);
+    --hair:rgba(236,228,208,0.10); --hair-strong:rgba(236,228,208,0.20);
+    --accent:#c9a961; --accent-light:#e5c97e; --accent-deep:#8b6f3d; --accent-rgb:201,169,97;
+    --ok:#8fb069; --danger:#c87469; --coach:#4aab97; --knurl:236,228,208; --shadow-phone:0 24px 60px rgba(0,0,0,0.45);
+    --f-display:"Big Shoulders Display","Arial Narrow",sans-serif;
+    --f-body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+    --maxw:1100px;
+    /* Aspect of the delivered screenshots. Frames follow the source so a
+       phone shot is not cropped at the sides; a taller image (the food log
+       share card) is anchored top and loses its tail instead. */
+    --shot-ratio:1320/2580;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#e8e1d4; --panel:#f2ede4; --raised:#eae3d6; --inset:#e2dacb; --hero:#f2ede4;
+      --ink:#1f1b16; --ink-soft:rgba(31,27,22,0.66); --ink-faint:rgba(31,27,22,0.45);
+      --hair:rgba(31,27,22,0.16); --hair-strong:rgba(31,27,22,0.32);
+      --accent:#9a7b34; --accent-light:#b8933f; --accent-deep:#6f581f; --accent-rgb:154,123,52;
+      --ok:#5f8038; --danger:#b0503f; --coach:#277a6a; --knurl:31,27,22; --shadow-phone:0 14px 36px rgba(31,27,22,0.14);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#141218; --panel:#1a1820; --raised:#252334; --inset:#2f2c3c; --hero:#1a1820;
+    --ink:#ece4d0; --ink-soft:rgba(236,228,208,0.66); --ink-faint:rgba(236,228,208,0.42);
+    --hair:rgba(236,228,208,0.10); --hair-strong:rgba(236,228,208,0.20);
+    --accent:#c9a961; --accent-light:#e5c97e; --accent-deep:#8b6f3d; --accent-rgb:201,169,97;
+    --ok:#8fb069; --danger:#c87469; --coach:#4aab97; --knurl:236,228,208; --shadow-phone:0 24px 60px rgba(0,0,0,0.45);
+  }
+  :root[data-theme="light"]{
+    --bg:#e8e1d4; --panel:#f2ede4; --raised:#eae3d6; --inset:#e2dacb; --hero:#f2ede4;
+    --ink:#1f1b16; --ink-soft:rgba(31,27,22,0.66); --ink-faint:rgba(31,27,22,0.45);
+    --hair:rgba(31,27,22,0.16); --hair-strong:rgba(31,27,22,0.32);
+    --accent:#9a7b34; --accent-light:#b8933f; --accent-deep:#6f581f; --accent-rgb:154,123,52;
+    --ok:#5f8038; --danger:#b0503f; --coach:#277a6a; --knurl:31,27,22; --shadow-phone:0 14px 36px rgba(31,27,22,0.14);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden;}
+  img{max-width:100%;display:block;}
+  a{color:inherit;}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;}
+  .knurl{background-image:repeating-linear-gradient(45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px),repeating-linear-gradient(-45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px);}
+  .micro{font-family:var(--f-mono);font-size:10px;letter-spacing:0.2em;text-transform:uppercase;font-weight:600;}
+  .num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;}
+  .rule{flex:1;height:1px;background:var(--hair);}
+
+  /* ---- top bar ---- */
+  .top{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);}
+  .top-inner{max-width:var(--maxw);margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:16px;}
+  .brand{display:flex;align-items:center;gap:9px;text-decoration:none;flex:none;}
+  .brand img{width:26px;height:26px;border-radius:6px;border:1px solid var(--hair-strong);}
+  .brand span{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:21px;letter-spacing:0.02em;line-height:1;}
+  .brand .k{color:var(--accent);}
+  .topnav{margin-left:auto;display:flex;align-items:center;gap:6px;}
+  .topnav a{font-family:var(--f-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);text-decoration:none;padding:8px 10px;border-radius:4px;}
+  .topnav a:hover{color:var(--ink);background:rgba(var(--knurl),0.06);}
+  @media(max-width:700px){
+    .topnav a.hide-s{display:none;}
+    /* Features + Pricing + Open app + the wordmark overflow 390px.
+       The icon alone still reads as the brand. */
+    .brand span{display:none;}
+    .topnav a{padding:8px 7px;font-size:10px;letter-spacing:0.06em;}
+    .top-inner{gap:8px;padding:10px 16px;}
+  }
+  .tt{appearance:none;cursor:pointer;border:1px solid var(--hair-strong);background:var(--panel);color:var(--ink-soft);width:36px;height:36px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+  .tt:hover{color:var(--ink);border-color:var(--accent);}
+  .tt svg{width:16px;height:16px;}
+
+  /* ---- buttons ---- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;font-size:16px;padding:13px 22px;border-radius:6px;text-decoration:none;border:1px solid var(--accent);background:var(--accent);color:var(--bg);cursor:pointer;transition:filter .15s ease,border-color .15s ease;}
+  .btn:hover{filter:brightness(1.08);}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--hair-strong);}
+  .btn.ghost:hover{border-color:var(--accent);color:var(--accent);}
+  .btn svg{width:16px;height:16px;}
+
+  /* ---- hero ---- */
+  .hero{position:relative;background:var(--hero);border-bottom:1px solid var(--hair);overflow:hidden;}
+  .hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(var(--accent-rgb),0.6),transparent);}
+  .hero-inner{max-width:var(--maxw);margin:0 auto;padding:56px 24px 44px;display:grid;grid-template-columns:1fr;gap:40px;align-items:center;}
+  @media(min-width:900px){.hero-inner{grid-template-columns:1.15fr 0.85fr;padding:72px 24px 56px;gap:48px;}}
+  .eyebrow{display:flex;align-items:center;gap:12px;color:var(--accent);margin-bottom:20px;}
+  .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px rgba(var(--accent-rgb),0.7);}
+  .wordmark{font-family:var(--f-display);font-weight:900;text-transform:uppercase;font-size:clamp(56px,13vw,128px);line-height:0.8;letter-spacing:0.01em;margin:0;}
+  .wordmark .k{color:var(--accent);}
+  .kicker{margin:18px 0 0;font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:0.03em;font-size:clamp(19px,3.4vw,28px);line-height:1.05;color:var(--ink);max-width:20ch;}
+  .lede{margin:16px 0 0;max-width:50ch;font-size:clamp(15px,2vw,17.5px);line-height:1.55;color:var(--ink-soft);}
+  .lede b{color:var(--ink);font-weight:600;}
+  .cta{margin-top:26px;display:flex;flex-wrap:wrap;gap:10px;}
+  .cta-note{margin:14px 0 0;font-family:var(--f-mono);font-size:11px;letter-spacing:0.04em;color:var(--ink-faint);}
+
+  /* ---- phone frame ---- */
+  .phone{position:relative;width:100%;max-width:290px;margin:0 auto;aspect-ratio:var(--shot-ratio);border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;box-shadow:var(--shadow-phone),0 0 0 1px rgba(var(--accent-rgb),0.12);}
+  .phone::before{content:"";position:absolute;top:9px;left:50%;transform:translateX(-50%);width:64px;height:5px;border-radius:999px;background:rgba(var(--knurl),0.22);z-index:3;}
+  .phone img{position:relative;z-index:2;width:100%;height:100%;object-fit:cover;object-position:top center;}
+  .phone .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px;color:var(--ink-faint);}
+  .phone .ph svg{width:34px;height:34px;color:var(--accent);opacity:0.6;}
+  .phone .ph .t{font-family:var(--f-mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;line-height:1.7;}
+
+  /* ---- plate (live catalog numbers) ---- */
+  .plate{margin-top:30px;display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--hair-strong);border-radius:8px;overflow:hidden;background:rgba(var(--knurl),0.02);}
+  .plate .cell{padding:14px 16px;border-right:1px solid var(--hair);}
+  .plate .cell:last-child{border-right:0;}
+  .plate .big{font-family:var(--f-display);font-weight:800;font-size:34px;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums;}
+  .plate .cap{margin-top:6px;color:var(--ink-faint);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;font-family:var(--f-mono);}
+  @media(max-width:620px){
+    .plate{grid-template-columns:repeat(2,1fr);}
+    .plate .cell:nth-child(2){border-right:0;}
+    .plate .cell:nth-child(1),.plate .cell:nth-child(2){border-bottom:1px solid var(--hair);}
+  }
+
+  /* ---- section scaffolding ---- */
+  /* The header is sticky, so an anchor jump would land the section title
+     underneath it. Offset the scroll target by a bit more than its height. */
+  section.band{padding:64px 0;border-bottom:1px solid var(--hair);scroll-margin-top:72px;}
+  section.band.tight{padding:48px 0;}
+  .sec-head{display:flex;align-items:center;gap:12px;color:var(--accent);margin-bottom:18px;}
+  .sec-head .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  h2.sec{font-family:var(--f-display);font-weight:800;text-transform:uppercase;letter-spacing:0.01em;font-size:clamp(28px,5vw,44px);line-height:0.98;margin:0;max-width:22ch;text-wrap:balance;}
+  .sec-lede{margin:14px 0 0;max-width:62ch;color:var(--ink-soft);font-size:15.5px;line-height:1.6;}
+  .sec-lede b{color:var(--ink);font-weight:600;}
+
+  /* ---- pillars ---- */
+  .pillars{margin-top:30px;display:grid;grid-template-columns:1fr;gap:12px;}
+  @media(min-width:700px){.pillars{grid-template-columns:1fr 1fr;}}
+  @media(min-width:980px){.pillars{grid-template-columns:repeat(4,1fr);}}
+  .pillar{position:relative;background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:20px 18px 18px;overflow:hidden;}
+  .pillar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);}
+  .pillar.c::before{background:var(--coach);}
+  .pillar .ico{width:38px;height:38px;border-radius:6px;display:grid;place-items:center;border:1px solid var(--hair-strong);background:rgba(var(--accent-rgb),0.08);color:var(--accent);margin-bottom:14px;}
+  .pillar.c .ico{background:color-mix(in srgb,var(--coach) 12%,transparent);color:var(--coach);}
+  .pillar .ico svg{width:20px;height:20px;}
+  .pillar h3{font-family:var(--f-display);font-weight:700;text-transform:uppercase;font-size:19px;line-height:1.05;margin:0 0 8px;}
+  .pillar p{margin:0;color:var(--ink-soft);font-size:13.5px;line-height:1.55;}
+
+  /* ---- split feature rows ---- */
+  .split{display:grid;grid-template-columns:1fr;gap:32px;align-items:center;}
+  @media(min-width:900px){
+    .split{grid-template-columns:1fr 1fr;gap:52px;}
+    .split.flip .split-media{order:-1;}
+  }
+  .bullets{list-style:none;margin:22px 0 0;padding:0;display:flex;flex-direction:column;gap:12px;}
+  .bullets li{position:relative;padding-left:24px;font-size:14.5px;line-height:1.55;color:var(--ink-soft);}
+  .bullets li b{color:var(--ink);font-weight:600;}
+  .bullets li::before{content:"";position:absolute;left:3px;top:7px;width:7px;height:7px;border-right:1.6px solid var(--accent);border-bottom:1.6px solid var(--accent);transform:rotate(-45deg);}
+  .inline-link{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(var(--accent-rgb),0.4);font-weight:500;}
+  .inline-link:hover{border-bottom-color:var(--accent);}
+
+  /* ---- a worked example, rendered as app-ish chrome ---- */
+  .demo{background:var(--panel);border:1px solid var(--hair);border-radius:8px;overflow:hidden;}
+  .demo-head{padding:12px 16px;border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:10px;background:rgba(var(--knurl),0.03);}
+  .demo-head .t{font-family:var(--f-display);font-weight:700;text-transform:uppercase;font-size:15px;letter-spacing:0.02em;}
+  .demo-head .tag{margin-left:auto;font-family:var(--f-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.4);border-radius:4px;padding:3px 7px;}
+  .demo-body{padding:6px 0;}
+  .drow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--hair);}
+  .drow:last-child{border-bottom:0;}
+  .drow .wk{font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);width:52px;flex:none;}
+  .drow .fb{font-size:13px;color:var(--ink-soft);flex:1;min-width:0;}
+  .drow .fb b{color:var(--ink);font-weight:600;}
+  .drow .out{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap;flex:none;}
+  .drow .out.up{color:var(--ok);}
+  .drow .out.down{color:var(--danger);}
+  .demo-foot{padding:12px 16px;border-top:1px solid var(--hair);background:rgba(var(--knurl),0.03);color:var(--ink-faint);font-size:12px;line-height:1.5;}
+
+  /* ---- screenshot gallery ---- */
+  .shots{margin-top:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;}
+  .shot{margin:0;}
+  /* Phone frames are 9/19.5, so four of them stacked in a single column on a
+     narrow screen builds a ~3000px tower of mostly-empty space. Below the
+     two-column breakpoint they become a snap-scrolling row instead, bled to
+     the screen edges, with the next card peeking to advertise the swipe. */
+  @media(max-width:700px){
+    .shots{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:62%;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:32px -24px 0;padding:0 24px 8px;}
+    .shots::-webkit-scrollbar{display:none;}
+    .shot{scroll-snap-align:center;}
+  }
+  .shot .frame{position:relative;aspect-ratio:var(--shot-ratio);border-radius:8px;border:1px solid var(--hair-strong);background:var(--panel);overflow:hidden;}
+  .shot .frame img{position:relative;z-index:2;width:100%;height:100%;object-fit:cover;object-position:top center;}
+  .shot .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;color:var(--ink-faint);}
+  .shot .ph svg{width:26px;height:26px;color:var(--accent);opacity:0.55;}
+  .shot .ph .t{font-family:var(--f-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;line-height:1.7;}
+  .shot figcaption{margin-top:10px;font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);text-align:center;}
+
+  /* ---- install ---- */
+  .install{margin-top:28px;display:grid;grid-template-columns:1fr;gap:12px;}
+  @media(min-width:760px){.install{grid-template-columns:1fr 1fr;}}
+  .plat{background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:20px 18px;}
+  .plat h3{display:flex;align-items:center;gap:9px;font-family:var(--f-display);font-weight:700;text-transform:uppercase;font-size:18px;margin:0 0 14px;}
+  .plat h3 svg{width:18px;height:18px;color:var(--accent);}
+  .plat ol{margin:0;padding:0;list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:11px;}
+  .plat ol li{counter-increment:s;position:relative;padding-left:30px;font-size:13.5px;line-height:1.55;color:var(--ink-soft);}
+  .plat ol li b{color:var(--ink);font-weight:600;}
+  .plat ol li::before{content:counter(s);position:absolute;left:0;top:0;width:20px;height:20px;border-radius:4px;border:1px solid var(--hair-strong);background:rgba(var(--accent-rgb),0.08);color:var(--accent);font-family:var(--f-mono);font-size:10px;font-weight:600;display:grid;place-items:center;}
+
+  /* ---- pricing ---- */
+  .price{display:grid;grid-template-columns:1fr;gap:24px;margin-top:30px;align-items:start;}
+  @media(min-width:860px){.price{grid-template-columns:0.85fr 1.15fr;gap:40px;}}
+  .price-panel{position:relative;background:var(--panel);border:1px solid var(--hair-strong);border-radius:8px;padding:28px 26px 26px;overflow:hidden;}
+  .price-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);}
+  .price-stamp{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.45);border-radius:4px;padding:5px 9px;}
+  .price-stamp .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(var(--accent-rgb),0.8);}
+  .price-tag{font-family:var(--f-display);font-weight:900;text-transform:uppercase;font-size:clamp(76px,13vw,116px);line-height:0.82;letter-spacing:0.01em;color:var(--accent);margin:18px 0 0;}
+  .price-sub{margin:14px 0 0;color:var(--ink-soft);font-size:14.5px;line-height:1.55;}
+  .price-sub b{color:var(--ink);font-weight:600;}
+  .price-meta{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair);display:flex;flex-wrap:wrap;gap:18px;}
+  .price-meta div{font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);}
+  .price-meta div b{display:block;margin-top:5px;font-size:15px;letter-spacing:0.02em;color:var(--ink);font-family:var(--f-display);font-weight:700;}
+
+  /* The founding offer is the one time-limited thing on the page, so it gets a
+     full accent border and a tinted fill rather than the coach block's single
+     left rail. It should read as the loudest thing in the section. */
+  .founding{position:relative;margin-top:22px;border:1px solid rgba(var(--accent-rgb),0.55);border-radius:8px;padding:30px 24px 26px;overflow:hidden;text-align:center;
+            background:linear-gradient(180deg,rgba(var(--accent-rgb),0.10),rgba(var(--accent-rgb),0.03));}
+  /* The head is centred and stacked: it gives the block a clear axis and lets
+     the headline run at full size. The prose below stays ranged left inside a
+     narrower centred column, because centred body copy has no fixed left edge
+     and the eye has to find the start of every line. */
+  .founding-head{display:flex;flex-direction:column;align-items:center;gap:13px;margin-bottom:18px;}
+  .founding-badge{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;color:var(--bg);background:var(--accent);border-radius:4px;padding:6px 11px;}
+  .founding h3{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(30px,5.2vw,46px);line-height:0.98;margin:0;text-wrap:balance;}
+  .founding h3 .k{color:var(--accent);}
+  /* Live seat count, read from the database on load. Starts hidden and only
+     unhides once a real number arrives: on the one time-limited claim on the
+     page, a stale or guessed number is worse than no number at all. */
+  /* Sits at the foot of the card, after the qualifying rule, as its closing
+     line. No separator of its own: the card already has one and a second would
+     read as a fourth section rather than a sign-off. */
+  .seatmeter{display:none;width:100%;max-width:330px;margin:26px auto 0;flex-direction:column;align-items:center;gap:9px;}
+  .seatmeter.on{display:flex;}
+  .seatmeter-n{display:flex;align-items:baseline;gap:9px;}
+  .seatmeter-n b{font-family:var(--f-display);font-weight:800;font-size:46px;line-height:0.82;color:var(--accent);}
+  .seatmeter-n i{font-style:normal;font-family:var(--f-mono);font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink-soft);}
+  .seatmeter-track{width:100%;height:7px;border-radius:2px;background:rgba(var(--knurl),0.09);border:1px solid var(--hair);overflow:hidden;}
+  .seatmeter-track i{display:block;height:100%;width:0;background:var(--accent);transition:width 1.1s cubic-bezier(.2,.7,.2,1);}
+  .seatmeter-sub{font-family:var(--f-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);}
+  /* Sold out: the gold is a reward colour, and there is nothing left to win. */
+  .seatmeter.full b{color:var(--ink-soft);}
+  .seatmeter.full .seatmeter-track i{background:var(--ink-faint);}
+  @media (prefers-reduced-motion:reduce){ .seatmeter-track i{transition:none;} }
+  .founding-body{max-width:64ch;margin:0 auto;text-align:left;}
+  .founding p{margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;}
+  .founding p b{color:var(--ink);font-weight:600;}
+  .founding .qual{margin:18px 0 0;padding-top:15px;border-top:1px solid rgba(var(--accent-rgb),0.28);}
+  .founding .qual .lbl{display:block;font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);margin-bottom:7px;}
+  .founding .qual .txt{margin:0;font-size:14px;line-height:1.55;color:var(--ink-soft);}
+  .founding .qual .txt b{color:var(--ink);font-weight:600;}
+
+  /* Coach seats sit apart from the personal pricing: different payer, different
+     rules, and it uses the coach accent the pillars already established. */
+  .seats{margin-top:22px;background:var(--panel);border:1px solid var(--hair);border-left:3px solid var(--coach);border-radius:8px;padding:22px 22px 20px;}
+  .seats h3{display:flex;align-items:center;gap:10px;font-family:var(--f-display);font-weight:700;text-transform:uppercase;font-size:21px;margin:0 0 12px;}
+  .seats h3 svg{width:19px;height:19px;color:var(--coach);flex:none;}
+  .seats p{margin:0 0 11px;color:var(--ink-soft);font-size:14.5px;line-height:1.6;}
+  .seats p:last-child{margin-bottom:0;}
+  .seats p b{color:var(--ink);font-weight:600;}
+
+  /* ---- access / closing CTA ---- */
+  .access{background:var(--panel);border:1px solid var(--hair-strong);border-radius:8px;padding:32px 26px;text-align:center;}
+  .access h2{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(26px,4.6vw,38px);line-height:1;margin:0;}
+  .access p{margin:14px auto 0;max-width:52ch;color:var(--ink-soft);font-size:15px;line-height:1.6;}
+  .access .cta{justify-content:center;}
+  .steps{margin:26px auto 0;max-width:780px;display:grid;grid-template-columns:1fr;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:8px;overflow:hidden;text-align:left;}
+  @media(min-width:700px){.steps{grid-template-columns:repeat(3,1fr);}}
+  .steps .st{background:var(--panel);padding:16px 16px 15px;}
+  .steps .st .n{font-family:var(--f-mono);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--accent);}
+  .steps .st .h{font-family:var(--f-display);font-weight:700;text-transform:uppercase;font-size:16px;margin-top:7px;line-height:1.05;}
+  .steps .st .d{margin-top:6px;color:var(--ink-faint);font-size:12.5px;line-height:1.5;}
+
+  /* ---- footer ---- */
+  footer{border-top:1px solid var(--hair);}
+  .foot{max-width:var(--maxw);margin:0 auto;padding:34px 24px 56px;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:flex-start;}
+  .foot .col{display:flex;flex-direction:column;gap:9px;}
+  .foot .col .h{font-family:var(--f-mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px;}
+  .foot a{color:var(--ink-soft);text-decoration:none;font-size:13.5px;}
+  .foot a:hover{color:var(--accent);}
+  .foot p{margin:0;color:var(--ink-faint);font-size:12.5px;max-width:44ch;line-height:1.6;}
+  .foot .stamp{font-family:var(--f-mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);}
+
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}*{transition:none !important;}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="top-inner">
+    <a class="brand" href="welcome.html">
+      <img src="icons/icon-192.png" alt="" />
+      <span>ZA<span class="k">N</span>E</span>
+    </a>
+    <nav class="topnav">
+      <a href="#what" class="hide-s">What it is</a>
+      <a href="features.html">Features</a>
+      <a href="autoreg.html" class="hide-s">Autoregulation</a>
+      <a href="#pricing">Pricing</a>
+      <a href="index.html">Open app</a>
+      <button class="tt" id="themeBtn" title="Toggle light / dark" aria-label="Toggle light or dark theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"></circle><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path></svg>
+      </button>
+    </nav>
+  </div>
+</div>
+
+<div class="hero knurl">
+  <div class="hero-inner">
+    <div>
+      <div class="eyebrow"><span class="dot"></span><span class="micro">The all-in-one fitness app</span><span class="rule"></span></div>
+      <h1 class="wordmark">ZA<span class="k">N</span>E</h1>
+      <p class="kicker">Train with Zane<br />or remain the same</p>
+      <p class="lede">Build the plan, log every set on the gym floor, and let the next session adjust to how the last one actually felt. Zane holds the whole picture in one place, <b>from the working set to the shopping list</b>, and syncs it across every device you own.</p>
+      <div class="cta">
+        <a class="btn" href="index.html">
+          Open the app
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn ghost" href="features.html">See every feature</a>
+      </div>
+      <p class="cta-note">Free, no card, nothing to cancel. Runs in your browser, installs to your home screen.</p>
+    </div>
+    <div class="split-media">
+      <div class="phone">
+        <img src="screenshots/home.jpg" alt="The Zane home dashboard on a phone" fetchpriority="high" onerror="this.remove()" />
+        <div class="ph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
+          <div class="t">Home<br />screenshot</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="wrap"><div class="plate knurl" id="plate"></div></div>
+  <div style="height:44px"></div>
+</div>
+
+<section class="band" id="what">
+  <div class="wrap">
+    <div class="sec-head"><span class="dot"></span><span class="micro">What it is</span><span class="rule"></span></div>
+    <h2 class="sec">Four jobs, one log</h2>
+    <p class="sec-lede">Most lifters run a plan in one app, a food diary in another, and a notes file for how it all actually felt. Zane is built on the idea that those are <b>the same dataset</b>, and that the interesting parts only show up when they sit next to each other.</p>
+
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg></div>
+        <h3>Plan</h3>
+        <p>Five ready-made splits, Wendler's 5/3/1 off your training max, or a guided setup that builds your own week. Fixed weekdays, a rotating cycle, or fully flexible.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M5.5 8.5v7M8 7v10M16 7v10M18.5 8.5v7"/></svg></div>
+        <h3>Log</h3>
+        <p>A lifting keypad built for chalky thumbs. Drop sets, myo-reps, lengthened partials and supersets you can link mid-workout, a plate calculator that knows which plates you own, and rest timers that reach you with the screen locked.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.6-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.4-7 10-7 10Z"/></svg></div>
+        <h3>Track</h3>
+        <p>Weight and steps in a daily log, with water and macros filling themselves in from their own trackers. Plus glucose, blood pressure, temperature, medications and cardio.</p>
+      </div>
+      <div class="pillar c">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a5 5 0 0 0 5 5h4l6 3v-6a4 4 0 0 0-4-4H3Z"/><path d="M8 8V5h4"/></svg></div>
+        <h3>Coach</h3>
+        <p>A coach writes plans, macro targets and protocols straight into your app, and can watch a session as it happens. What you logged, they read but never rewrite.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="pricing">
+  <div class="wrap">
+    <div class="sec-head"><span class="dot"></span><span class="micro">Pricing</span><span class="rule"></span></div>
+    <h2 class="sec">Free, and honest about why</h2>
+    <p class="sec-lede">Everything on this page is free right now. Not a trial with a timer running behind it, not a stripped-down tier with the good parts locked. <b>The whole app.</b></p>
+
+    <div class="price">
+      <div class="price-panel knurl">
+        <span class="price-stamp"><span class="dot"></span>Today</span>
+        <div class="price-tag">Free</div>
+        <p class="price-sub"><b id="priceCount">Every feature</b>, for everyone, with no card on file and nothing to cancel.</p>
+        <div class="price-meta">
+          <div>Trial length<b>None, it is just free</b></div>
+          <div>Card required<b>No</b></div>
+        </div>
+      </div>
+
+      <ul class="bullets">
+        <li><b>It costs me a database, not a company.</b> Zane runs on modest infrastructure and I am building it because I use it. While the bill stays small, carrying it myself is easier than charging for it.</li>
+        <li><b>If that changes, it covers the bill.</b> The goal of ever charging would be to pay for hosting and the database, not to turn this into a business. I would rather keep it small and honest than grow it into something that needs your money.</li>
+        <li><b>I genuinely do not know yet what would sit behind it.</b> No tier list, no feature held back in advance waiting to be locked. That decision deserves proper thought, and I would rather make it late than guess now.</li>
+        <li><b>It will not be another $15 a month.</b> Whatever it lands on, I am aiming under $5, and everything you have already logged stays yours and stays exportable either way.</li>
+      </ul>
+    </div>
+
+    <div class="founding knurl">
+      <div class="founding-head">
+        <span class="founding-badge">Founding offer</span>
+        <h3>The first <span class="k" id="seatTotalHead">75</span> never pay</h3>
+      </div>
+      <div class="founding-body">
+      <p>The first <span id="seatTotalBody">75</span> people to properly use Zane keep it free permanently. Not free until the pricing lands, not a discount on it: <b>lifetime premium, whatever premium turns out to mean.</b> Every paid feature that ever exists is already yours, and nothing about your account changes on the day the rest of the world starts paying.</p>
+      <p id="seatClaim">You do not sign up for it or enter a code. Train, and the seat is yours.</p>
+      <div class="qual">
+        <span class="lbl">What counts</span>
+        <p class="txt">Five completed workouts, on separate days, with real training behind them. <b>Actually using the app, not just creating an account</b>, because the point is to reward the people who help shape it while it is still being built.</p>
+      </div>
+      <div class="seatmeter" id="seatMeter">
+        <div class="seatmeter-n"><b id="seatN">0</b><i id="seatU">seats left</i></div>
+        <div class="seatmeter-track"><i id="seatBar"></i></div>
+        <div class="seatmeter-sub" id="seatSub"></div>
+      </div>
+      </div>
+    </div>
+
+    <div class="seats">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6"/><path d="M17 8.5h4.5M19.25 6.25v4.5"/></svg>
+        Coached? Your coach covers it
+      </h3>
+      <p>When Zane starts charging, coaches will buy client seats rather than every lifter paying separately. If you train with a coach inside the app, <b>your seat comes out of theirs</b>. Nothing is asked of you, and nothing changes about what you can do.</p>
+      <p>If the coaching relationship ends, the account stays yours either way. Take over the seat yourself, or drop back to the free side and keep training. <b>Your history does not move, and nothing gets locked behind you.</b></p>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="sec-head"><span class="dot"></span><span class="micro">The part nobody else does</span><span class="rule"></span></div>
+        <h2 class="sec">The plan reads the room</h2>
+        <p class="sec-lede">Zane asks how the muscle recovered, how the weight felt, and how big the pump was. Nothing to report? <b>One button answers all of it.</b> From that, your next session on that day gets its own set count and its own weight, landing on individual exercises and rotating fairly across the muscle group.</p>
+        <ul class="bullets">
+          <li><b>No manual math.</b> No spreadsheet, no percentage tables, no guessing whether to add a set.</li>
+          <li><b>Three modes.</b> Freeze your set counts and let feedback tune only the weight, run a fixed 4 to 8 week block with a weekly intensity ramp, or let both dials run open-ended.</li>
+          <li><b>It learns your ceiling.</b> When a muscle first shows the overreaching signature, Zane remembers the set count where it happened and times the next block against it. The block ends when your body says so, not when the calendar does.</li>
+          <li><b>A rough day cannot cost you.</b> Flag a session as rough and it softens the suggestion without touching your ceiling, and it does not count against you.</li>
+        </ul>
+        <p class="sec-lede" style="margin-top:20px"><a class="inline-link" href="autoreg.html">Read the full autoregulation guide</a></p>
+      </div>
+      <div class="split-media">
+        <div class="demo">
+          <div class="demo-head">
+            <span class="t">Chest</span>
+            <span class="tag">5-week block</span>
+          </div>
+          <div class="demo-body">
+            <div class="drow"><span class="wk">Week 1</span><span class="fb"><b>Never sore</b>, workload <b>not enough</b></span><span class="out up">+2 sets</span></div>
+            <div class="drow"><span class="wk">Week 2</span><span class="fb"><b>Healed just in time</b>, workload <b>not enough</b></span><span class="out up">+1 set</span></div>
+            <div class="drow"><span class="wk">Week 3</span><span class="fb">Workload <b>just right</b>, every gate green</span><span class="out">+2.5 kg</span></div>
+            <div class="drow"><span class="wk">Week 4</span><span class="fb"><b>Still sore</b>, workload <b>pushed my limits</b></span><span class="out down">-1 set</span></div>
+            <div class="drow"><span class="wk">Week 5</span><span class="fb">Final week of the block</span><span class="out">sets hold</span></div>
+          </div>
+          <div class="demo-foot">Illustrative. Set changes land on individual exercises, rotated across the muscle group, and every muscle is tracked separately.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="split flip">
+      <div>
+        <div class="sec-head"><span class="dot"></span><span class="micro">Health &amp; nutrition</span><span class="rule"></span></div>
+        <h2 class="sec">Everything around the barbell</h2>
+        <p class="sec-lede">Training is the easy half. The food tracker reads <b>barcodes and nutrition labels</b>, turns a typed description or a photo of your plate into an estimate you check before it lands, and remembers what you eat so logging it again is a tap and a confirm.</p>
+        <ul class="bullets">
+          <li><b>Meal planning that fills itself.</b> Set your recurring meals once and the next seven days arrive already planned out, hour by hour. Tick each one off as you eat it, or change it first. Nothing counts until you do.</li>
+          <li><b>A shopping list from real data.</b> Built from what you actually ate over the last two weeks and what you have planned, with stock tracking that flags whatever is running low.</li>
+          <li><b>Cook it, weigh it, log it.</b> A guided cooking mode where you tick off ingredients, swap them mid-recipe, and weigh the finished dish. A portion becomes a real number instead of a guess.</li>
+          <li><b>The clinical stuff too.</b> Glucose, blood pressure, body temperature, and a medication tracker with reminders and a weekly pillbox packing list.</li>
+          <li><b>A written read on yesterday.</b> One tap turns the day into a paragraph: weight and its trend, macros against target, what you ate, what you trained and how it compared to last time.</li>
+        </ul>
+      </div>
+      <div class="split-media">
+        <div class="phone">
+          <img src="screenshots/food.jpg" alt="The Zane food and macro tracker" loading="lazy" onerror="this.remove()" />
+          <div class="ph">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
+            <div class="t">Food tracker<br />screenshot</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="sec-head"><span class="dot"></span><span class="micro">Coaching</span><span class="rule"></span></div>
+        <h2 class="sec">Bring your coach inside</h2>
+        <p class="sec-lede">Coaching in Zane is not a chat window bolted onto a log. Your coach invites you by email, you accept inside the app, and from then on they work with <b>the real thing</b>: your plans, your targets, your history.</p>
+        <ul class="bullets">
+          <li><b>They write, you own.</b> Your coach builds plans, sets training-day and rest-day macro targets, and pushes meal and medication protocols into your app. What you actually logged, your sets, your weigh-ins, your check-in answers, they can read but never rewrite.</li>
+          <li><b>Check-ins every week.</b> Your coach builds the form field by field. It arrives already filled in with your week of weight, macros, steps and cardio, and both sides scroll back through every one.</li>
+          <li><b>An AI read on each check-in.</b> One tap turns a week of numbers into a coach-style paragraph on where the trend is heading. You and your coach see the same text.</li>
+          <li><b>Live spectating.</b> While you are mid-workout your coach can drop into the session and follow it set by set, refreshing as your sets land.</li>
+          <li><b>Or coach yourself.</b> The same dashboard, the same form builder, the same trend cards, pointed at your own data.</li>
+        </ul>
+      </div>
+      <div class="split-media">
+        <div class="phone">
+          <img src="screenshots/coaching.jpg" alt="The Zane coaching screen" loading="lazy" onerror="this.remove()" />
+          <div class="ph">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
+            <div class="t">Coaching<br />screenshot</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band tight">
+  <div class="wrap">
+    <div class="sec-head"><span class="dot"></span><span class="micro">On your phone</span><span class="rule"></span></div>
+    <h2 class="sec">Built for the gym floor</h2>
+    <p class="sec-lede">Thumb-sized keys and contrast tuned per theme, because a gym is not a desk. Four themes, ten accent colors, and your entire history exports to a single file you own.</p>
+    <ul class="bullets" style="max-width:66ch">
+      <li><b>Every set arrives pre-filled.</b> Not from your last session, from your best of the recent ones, so one bad day does not set the target. Earn the jump and you get told about it.</li>
+      <li><b>Sign in with your face.</b> Passkeys, Face ID, Touch ID or your device PIN. No password to type at the gym.</li>
+      <li><b>Rack the bar, pocket the phone.</b> The rest timer reaches you with the screen locked and the app closed, and so do reminders for training, water, meals, medication and messages from your coach.</li>
+      <li><b>Offline once installed.</b> A full workout logs with no signal and syncs itself the moment you are back. Only the first sign-in needs a connection.</li>
+    </ul>
+    <div class="shots">
+      <figure class="shot">
+        <div class="frame">
+          <img src="screenshots/train.jpg" alt="Logging a set during a workout" loading="lazy" onerror="this.remove()" />
+          <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">train.png</div></div>
+        </div>
+        <figcaption>Logging a set</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="frame">
+          <img src="screenshots/plan.jpg" alt="The training plan editor" loading="lazy" onerror="this.remove()" />
+          <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">plan.png</div></div>
+        </div>
+        <figcaption>Your week</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="frame">
+          <img src="screenshots/progress.jpg" alt="Progress charts and personal records" loading="lazy" onerror="this.remove()" />
+          <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">progress.png</div></div>
+        </div>
+        <figcaption>Progress and PRs</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="frame">
+          <img src="screenshots/health.jpg" alt="The daily health log" loading="lazy" onerror="this.remove()" />
+          <div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg><div class="t">health.png</div></div>
+        </div>
+        <figcaption>Daily log</figcaption>
+      </figure>
+    </div>
+
+    <div class="install">
+      <div class="plat">
+        <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11M8.5 6.5 12 3l3.5 3.5"/><path d="M5 13v6.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg> iPhone</h3>
+        <ol>
+          <li>Open <b>zane-wo.com</b> in Safari. Chrome and Firefox cannot install apps on iPhone.</li>
+          <li>Tap the <b>Share</b> button, the square with an arrow pointing up. Depending on your iOS version it sits in the bottom toolbar or in the address bar menu.</li>
+          <li>Scroll through the share sheet and pick <b>Add to Home Screen</b>. If you do not see it, keep scrolling.</li>
+          <li>Confirm the name and tap <b>Add</b> in the top right corner.</li>
+        </ol>
+      </div>
+      <div class="plat">
+        <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg> Android</h3>
+        <ol>
+          <li>Open <b>zane-wo.com</b> in Chrome.</li>
+          <li>Tap the <b>three-dot menu</b> in the top right corner.</li>
+          <li>Pick <b>Add to Home screen</b>. Some Chrome versions call it <b>Install app</b>.</li>
+          <li>A dialog appears with the Zane icon. Tap <b>Install</b>, and it opens like a native app from then on.</li>
+        </ol>
+      </div>
+    </div>
+    <p class="cta-note" style="margin-top:16px">On iPhone and iPad, push notifications only work once Zane is installed this way and switched on in Settings.</p>
+  </div>
+</section>
+
+<section class="band" id="access">
+  <div class="wrap">
+    <div class="access knurl">
+      <h2>Start training</h2>
+      <p>No app store, no download, no credit card. Zane runs in your browser and installs from there.</p>
+      <div class="steps">
+        <div class="st">
+          <div class="n">Step 01</div>
+          <div class="h">Create an account</div>
+          <div class="d">Nickname, email, a password, and your units: metric, imperial, or mixed if you lift in kilos but run in miles.</div>
+        </div>
+        <div class="st">
+          <div class="n">Step 02</div>
+          <div class="h">Pick how you train</div>
+          <div class="d">Start from a ready-made split, run 5/3/1, or build your own week in the guided setup. Not in the mood to plan? Log a freestyle session and sort it out later.</div>
+        </div>
+        <div class="st">
+          <div class="n">Step 03</div>
+          <div class="h">Put it on your home screen</div>
+          <div class="d">Four taps in your browser menu, and it opens like any other app on your phone.</div>
+        </div>
+      </div>
+      <div class="cta">
+        <a class="btn" href="index.html">
+          Create an account
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn ghost" href="features.html">Browse the features first</a>
+      </div>
+      <p class="cta-note" style="margin-top:16px">Already have an account? The same link signs you in.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot">
+    <div class="col">
+      <div class="h">Zane</div>
+      <a href="index.html">Open the app</a>
+      <a href="features.html">Feature overview</a>
+      <a href="autoreg.html">Autoregulation guide</a>
+    </div>
+    <div class="col">
+      <div class="h">On this page</div>
+      <a href="#what">What it is</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#access">Start training</a>
+    </div>
+    <p>Zane is an all-in-one fitness app: training, nutrition, health metrics and coaching in one log. It runs in your browser, installs to your home screen, and everything you track exports to a single file you own.</p>
+    <div class="stamp" id="stampFoot"></div>
+  </div>
+</footer>
+
+<!-- Cache-bust the bundled catalog. welcome.html lives outside the service
+     worker, so unlike the app it has no SW-cache-version that forces a refetch.
+     Bump ?v= in lockstep with the sw.js CACHE version whenever the catalog
+     changes, otherwise returning visitors keep serving a stale feature-map-db.js
+     from the browser cache even after a fresh deploy. tools/check-cache-version.cjs
+     gates this. The catalog is loaded purely so the hero counters below state a
+     real number instead of a marketing one that quietly goes stale. -->
+<script src="src/feature-map-db.js?v=2.703"></script>
+<script>
+(function(){
+  // ---- hero counters, straight from the bundled feature catalog ----
+  var FM = window.FEATURE_MAP || { version:'', categories:[], cards:[] };
+  var catIds = {}; (FM.categories||[]).forEach(function(c){ catIds[c.id] = 1; });
+  // Mirror features.html: a card only counts if it is visible AND lands in a
+  // category that actually renders. An orphan card is never shown to anyone.
+  var cards = (FM.cards||[]).filter(function(c){ return !c.hidden && catIds[c.cat]; });
+  var areas = (FM.categories||[]).filter(function(cat){
+    return cards.some(function(c){ return c.cat === cat.id; });
+  }).length;
+  var forLifters = cards.filter(function(c){ return c.role === 'user' || c.role === 'both'; }).length;
+
+  var forCoaches = cards.filter(function(c){ return c.role === 'coach' || c.role === 'both'; }).length;
+
+  // Exact counts, not rounded-down marketing numbers. They come straight from
+  // the catalog, so they stay true as the app grows and they match what
+  // features.html shows, which is one click away.
+  document.getElementById('plate').innerHTML = [
+    [cards.length, 'Features'],
+    [areas, 'Areas of the app'],
+    [forLifters, 'For lifters'],
+    [forCoaches, 'For coaches']
+  ].map(function(x){
+    return '<div class="cell"><div class="big num">' + x[0] + '</div><div class="cap">' + x[1] + '</div></div>';
+  }).join('');
+
+  var priceCount = document.getElementById('priceCount');
+  if (priceCount && cards.length) priceCount.textContent = 'All ' + cards.length + ' features';
+
+  if (FM.version) document.getElementById('stampFoot').textContent = 'Catalog ' + FM.version;
+
+  // ---- live founding seat count ----
+  // No login here and no Supabase client on this page, so this is the same raw
+  // REST call features.html makes for the published feature map, against a
+  // function that returns two aggregate numbers and nothing per-account.
+  //
+  // Every failure path is the same: the meter never unhides and the card reads
+  // exactly as it did before it existed. The seat total is written into the
+  // headline too, so raising the cap later cannot leave a stale 75 on the page.
+  var SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+  var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
+
+  fetch(SUPABASE_URL + '/rest/v1/rpc/get_founding_seats', {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+  .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+  .then(function(rows){
+    var d = Array.isArray(rows) ? rows[0] : rows;
+    if (!d) return;
+    var total = Number(d.total), taken = Number(d.taken), left = Number(d.remaining);
+    // A total of 0 would divide by zero on the bar and means the config row is
+    // broken anyway, so treat it like a failed call rather than rendering 0%.
+    if (!isFinite(total) || !isFinite(taken) || !isFinite(left) || total <= 0) return;
+
+    document.getElementById('seatTotalHead').textContent = total;
+    document.getElementById('seatTotalBody').textContent = total;
+
+    var meter = document.getElementById('seatMeter');
+    if (left > 0) {
+      document.getElementById('seatN').textContent = left;
+      document.getElementById('seatU').textContent = left === 1 ? 'seat left' : 'seats left';
+      document.getElementById('seatSub').textContent = taken + ' of ' + total + ' claimed';
+    } else {
+      // Sold out. "Train, and the seat is yours" would now be a promise the app
+      // cannot keep, so that one sentence goes with it.
+      meter.className = 'seatmeter full';
+      document.getElementById('seatN').textContent = total;
+      document.getElementById('seatU').textContent = 'seats claimed';
+      document.getElementById('seatSub').textContent = 'Founding offer closed';
+      document.getElementById('seatClaim').innerHTML =
+        'Every founding seat is taken. <b>Zane is still free to use in full</b>, and it stays that way until pricing actually lands.';
+    }
+    meter.classList.add('on');
+    // Paint at 0 first so the bar animates in from empty rather than appearing
+    // pre-filled; two frames, because the first one is the unhide itself.
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      document.getElementById('seatBar').style.width = Math.min(100, (taken / total) * 100) + '%';
+    }); });
+  })
+  .catch(function(){});
+
+  // ---- theme toggle (same behaviour as features.html / autoreg.html) ----
+  document.getElementById('themeBtn').addEventListener('click', function(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  // ---- screenshot slots ----
+  // Every <img> in a .phone / .shot frame removes itself if the file is not
+  // there yet (onerror in the markup), which uncovers the placeholder sitting
+  // behind it (the image is lifted above the placeholder with z-index, so a
+  // present image hides it). Dropping a file into screenshots/ is the whole job,
+  // no markup change needed. Guard against a cached 0-byte or broken decode
+  // too, which fires load rather than error in some browsers.
+  document.querySelectorAll('.phone img, .shot img').forEach(function(img){
+    if (img.complete && img.naturalWidth === 0) img.remove();
+  });
+})();
+</script>
+</body>
+</html>

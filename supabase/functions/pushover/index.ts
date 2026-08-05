@@ -31,6 +31,14 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
   const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  // Same trap as web-push/index.ts's own isNonceCurrent (M10, audit-2026-08):
+  // a non-2xx PostgREST reply still parses as JSON (an error object, not an
+  // array), so the .catch fallback below never fires and rows[0] would read
+  // undefined off that object, making this return false. Both call sites
+  // below read false as "the user aborted" and silently drop a legitimate
+  // delayed Pushover send that never asked to be cancelled. Fail OPEN (still
+  // current) instead, this copy was missed when web-push's was fixed.
+  if (!r.ok) { console.error(`[pushover] nonce check failed: ${r.status} ${await r.text().catch(() => '')}`); return true; }
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
 }
@@ -103,7 +111,22 @@ Deno.serve(async (req) => {
     }
   }
 
-  const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
+  // No hardcoded fallback: a live Pushover user key committed to a public
+  // repo is a real credential leak (fixed after an audit flagged it, see
+  // docs/audit.md H15 / docs/audit-2026-08.md M15; the exposed key itself
+  // still needs rotating on the Pushover dashboard, this only stops the
+  // committed literal from being used going forward). An internal
+  // (service-role) caller with no userKey and no PUSHOVER_USER env set has
+  // nowhere to actually deliver to, same "nothing to send to" outcome the
+  // app-caller branch above already returns for a missing key.
+  const user = userKey || Deno.env.get('PUSHOVER_USER') || '';
+  if (!cancel && !user) {
+    console.error('[pushover] no target user key available (missing userKey and PUSHOVER_USER env)');
+    return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   // First call only: register this nonce as the currently active one.
   // Relay hops skip this, the nonce is already stored from the initial call.

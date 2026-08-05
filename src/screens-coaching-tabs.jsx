@@ -1281,6 +1281,20 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
         const val = toResponse(field, form[field.key], distUnit);
         if (val != null) responses[field.key] = val;
       });
+      // Preserve answers to fields the coach has since removed from the
+      // schema: submitCheckin upserts the whole responses jsonb with no
+      // merge, and this form only ever knows about CURRENT schema fields
+      // (allFields), so without this an edit + resave would silently delete
+      // them from the DB even though CheckInCard still shows them (its own
+      // extraKeys block, "Submitted fields no longer in the schema, kept
+      // visible, never dropped"). Same schemaKeys/has() logic as that block.
+      if (existing?.responses) {
+        const schemaKeys = new Set(allFields.map(f => f.key));
+        Object.keys(existing.responses).forEach(k => {
+          const v = existing.responses[k];
+          if (!schemaKeys.has(k) && v != null && v !== '') responses[k] = v;
+        });
+      }
       await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, !!existing, sections);
       onSaved();
     } catch (e) { setError(e.message); }

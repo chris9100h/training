@@ -1908,7 +1908,7 @@ function TourVisualPwaIosSafari() {
             <span style={{ fontSize: 13, fontWeight: 900, color: 'var(--accent-ink)', fontFamily: UI.fontDisplay }}>Z</span>
           </div>
           <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>ZANE</span>
-          <span style={{ marginLeft: 'auto', fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, background: '#2c4a2c', padding: '2px 6px', borderRadius: 4 }}>Safari</span>
+          <span style={{ marginLeft: 'auto', fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, background: '#2c4a2c', padding: '2px 6px', borderRadius: 2 }}>Safari</span>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {['TRAIN', 'PLAN', 'HEALTH'].map(t => (
@@ -2028,7 +2028,7 @@ function TourVisualPwaAndroidChrome() {
         <div style={{ flex: 1, background: '#3c4043', borderRadius: 8, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#9aa0a6' }} />
           <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi, flex: 1 }}>zane-wo.com</span>
-          <span style={{ fontSize: 9, color: '#9aa0a6', fontFamily: UI.fontUi, background: '#1a3a5c', padding: '2px 6px', borderRadius: 4 }}>Chrome</span>
+          <span style={{ fontSize: 9, color: '#9aa0a6', fontFamily: UI.fontUi, background: '#1a3a5c', padding: '2px 6px', borderRadius: 2 }}>Chrome</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '3px' }}>
           {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: '#9aa0a6' }} />)}

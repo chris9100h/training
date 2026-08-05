@@ -553,7 +553,10 @@ function FeatureMapScreen({ store, go }) {
 }
 
 function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
-  const [open, setOpen] = useStateFM(false);
+  // The TL;DR card opens expanded by default (a stable, never-reused id): it
+  // is meant to read as the app's big-picture pitch the moment this screen
+  // loads, not hide behind a tap like every other single-feature card.
+  const [open, setOpen] = useStateFM(card.id === 'overview.tldr');
   const role = { ...(FM_ROLES[card.role] || FM_ROLES.user) };
   if (card.role === 'coach') role.color = fmCoachTint();
   const muted = card.hidden;
@@ -576,8 +579,8 @@ function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
       </div>
       {open && (
         <div style={{ padding: isAdmin ? '0 14px 14px 34px' : '0 14px 14px 16px' }}>
-          <span style={{ display: 'inline-block', fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 6px', borderRadius: 4, border: `1px solid ${role.color}`, color: role.color, background: `color-mix(in srgb, ${role.color} 12%, transparent)` }}>{role.label}</span>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 10 }}>{card.summary}</div>
+          <span style={{ display: 'inline-block', fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 6px', borderRadius: 2, border: `1px solid ${role.color}`, color: role.color, background: `color-mix(in srgb, ${role.color} 12%, transparent)` }}>{role.label}</span>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 10, whiteSpace: 'pre-wrap' }}>{card.summary}</div>
           {(card.actions || []).length > 0 && (
             <ul style={{ listStyle: 'none', margin: '11px 0 0', padding: '10px 0 0', borderTop: `1px dashed ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {card.actions.map((a, i) => (

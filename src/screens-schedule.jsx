@@ -122,7 +122,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
             // Behavior flags must survive the import: log_mode 'time' drives the
             // countdown UI, no_weight_reps/movement_type/pull_bodyweight drive
             // row layout and bodyweight prefill.
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -910,7 +910,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (existing) { idMap[ex.id] = existing.id; return; }
         const newId = LB.uid();
         idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
       });
       copy.id = LB.uid();
       copy.days = copy.days.map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
@@ -2653,11 +2653,27 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               return (
                 <button key={i} disabled={taken} onClick={() => {
                   setDraft(d => {
-                    // Keep the source day's id (carries its session history) unless
-                    // that id already exists in this plan, then use a fresh one.
-                    const collides = d.days.some(x => x.id === pendingImportDay.migrateId);
-                    const id = (pendingImportDay.migrateId && !collides) ? pendingImportDay.migrateId : LB.uid();
-                    return { ...d, days: [...d.days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
+                    // Keep the source day's id (carries its session history):
+                    // this is how a user relocates a day to a different
+                    // weekday (import it "with history" onto the new slot,
+                    // then remove the old one). schedule={null} on the
+                    // DayCopyPicker above means migrateId is set even when
+                    // the source is a day already in THIS plan, so at this
+                    // point the old slot (same id) is normally still sitting
+                    // right there in d.days, uninvolved-collision code used
+                    // to read that as "id taken" and hand out a fresh one
+                    // instead, orphaning the day from its own history: kept
+                    // exercises, but seeding (keyed on dayId) found nothing,
+                    // reported as "moved leg day, lost all reps/weights"
+                    // (support ticket 2026-08-05). Two days can never validly
+                    // share an id (React key collision, ambiguous session
+                    // dayId attribution), so completing the move drops that
+                    // old slot instead of giving up on the id: it only ever
+                    // collides with the source day itself in practice, a
+                    // genuinely foreign import's id doesn't exist here yet.
+                    const days = d.days.filter(x => x.id !== pendingImportDay.migrateId);
+                    const id = pendingImportDay.migrateId || LB.uid();
+                    return { ...d, days: [...days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
                   });
                   setPendingImportDay(null);
                 }} style={{

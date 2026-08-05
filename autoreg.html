@@ -166,6 +166,12 @@
   .foot{max-width:var(--maxw);margin:0 auto;padding:26px 20px 52px;display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:baseline;}
   .foot p{margin:0;color:var(--ink-faint);font-size:12.5px;max-width:64ch;line-height:1.6;}
   .foot .stamp{font-family:var(--f-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);}
+  /* Cross-links so a shared link to this page can reach the rest of the site. */
+  .foot .links{display:flex;flex-wrap:wrap;gap:16px;}
+  .foot .links a{color:var(--ink-soft);text-decoration:none;font-size:13px;}
+  .foot .links a:hover{color:var(--accent);}
+  a.homelink{color:inherit;text-decoration:none;}
+  a.homelink:hover{color:var(--accent);}
 
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}.modecard,.totop{transition:none;}}
 </style>
@@ -174,7 +180,7 @@
 
 <div class="hero knurl">
   <div class="hero-inner">
-    <div class="eyebrow"><span class="dot"></span><span class="micro">Field manual</span><span class="rule"></span><span class="micro">Zane</span></div>
+    <div class="eyebrow"><span class="dot"></span><span class="micro">Field manual</span><span class="rule"></span><a class="micro homelink" href="welcome.html" title="Back to the Zane home page">Zane</a></div>
     <h1 class="wordmark">AUTOREGU<span class="k">L</span>ATION</h1>
     <p class="tagline">How your plan adapts to <b>you</b>, one honest signal at a time. Zane tunes two dials, your <b>sets</b> and your <b>weight</b>, from the feedback you give after each session. Pick a plan mode below and this page reshapes to show exactly how that mode behaves.</p>
   </div>
@@ -200,6 +206,11 @@
 
 <footer><div class="foot">
   <p>Zane is a strength-training logbook and coaching platform. This page explains how its autoregulation and mesocycle engine adapts your training to your feedback. No account needed to read it.</p>
+  <div class="links">
+    <a href="welcome.html">Home</a>
+    <a href="features.html">Feature overview</a>
+    <a href="index.html">Open the app</a>
+  </div>
   <div class="stamp">Autoregulation engine</div>
 </div></footer>
 
@@ -213,6 +224,6 @@
      sw.js CACHE version whenever the guide changes, otherwise returning
      visitors keep serving a stale autoreg-guide-page.js from the browser
      cache even after a fresh deploy. -->
-<script src="src/autoreg-guide-page.js?v=2.692"></script>
+<script src="src/autoreg-guide-page.js?v=2.703"></script>
 </body>
 </html>

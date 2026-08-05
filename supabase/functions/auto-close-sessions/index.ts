@@ -80,6 +80,14 @@ Deno.serve(async (req) => {
       const settRes = await dbFetch(
         `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id`
       );
+      // Same non-2xx-reply hazard as sessRes above (an error OBJECT, not the
+      // malformed-body fallback): left unchecked, `sett` silently resolves to
+      // undefined and every field it feeds (timeoutMin, isTracked below)
+      // falls back to a default instead of this session being safely skipped.
+      if (!settRes.ok) {
+        console.error(`[auto-close] settings query failed for user ${sess.user_id}: ${settRes.status} ${await settRes.text().catch(() => '')}`);
+        continue;
+      }
       const [sett] = await settRes.json().catch(() => [null]);
       const timeoutMin: number = sett?.session_timeout_minutes ?? 90;
 
@@ -87,6 +95,16 @@ Deno.serve(async (req) => {
       const setsRes = await dbFetch(
         `zane_sets?session_id=eq.${sess.id}&select=updated_at&order=updated_at.desc&limit=1`
       );
+      // Critical guard: on a non-2xx reply the `.catch(() => [])` fallback
+      // never fires (the body parses fine as an error OBJECT), so `sets`
+      // would silently resolve to that object, `sets.length` reads
+      // undefined, hasSets becomes false, and a LIVE tracked session with
+      // real sets gets routed into the "butt start, delete everything
+      // silently" branch below, hard-deleting a workout that's still running.
+      if (!setsRes.ok) {
+        console.error(`[auto-close] sets query failed for session ${sess.id}: ${setsRes.status} ${await setsRes.text().catch(() => '')}`);
+        continue;
+      }
       const sets: { updated_at: string }[] = await setsRes.json().catch(() => []);
       const hasSets = sets.length > 0;
       // started_at is legitimately NULL until the last warmup set completes
@@ -132,11 +150,23 @@ Deno.serve(async (req) => {
         // multi-million-minute duration.
         const startedAt = sess.started_at ? new Date(sess.started_at) : null;
         const durationMinutes = startedAt ? Math.round((lastActivity.getTime() - startedAt.getTime()) / 60000) : null;
-        await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
+        const closeResp = await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
           method: 'PATCH',
           headers: { 'Prefer': 'return=minimal' },
           body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}) }),
         });
+        // Unlike the three read queries above, this write was never checked:
+        // a transient non-2xx here (still `ok`-checkable, dbFetch never
+        // throws on it) left the session open but the very next line cleared
+        // in_progress_session_id unconditionally anyway. The next tick then
+        // saw isTracked=false for a session that never actually closed and
+        // hard-deleted it as an "orphan", sets and all. Skip to the next
+        // session instead, session stays open and tracked, this same close
+        // is retried next tick.
+        if (!closeResp.ok) {
+          console.error(`[auto-close] close-PATCH failed for session ${sess.id}: ${closeResp.status} ${await closeResp.text().catch(() => '')}`);
+          continue;
+        }
         console.log(`[auto-close] closed session ${sess.id} (${durationMinutes ?? 'unknown'} min)`);
 
         // Write notification for next app start
@@ -170,14 +200,25 @@ Deno.serve(async (req) => {
         closed++;
       }
 
-      // Clear in_progress_session_id if it still points at this session
-      if (sett?.in_progress_session_id === sess.id) {
-        await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}`, {
-          method: 'PATCH',
-          headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ in_progress_session_id: null }),
-        });
-      }
+      // Clear in_progress_session_id, scoped to still pointing at this
+      // session AT THE MOMENT OF THE WRITE, not just when `sett` was fetched
+      // at the top of this loop iteration. Several awaits sit in between
+      // (the sets query, the close-PATCH, the notify write, the push send):
+      // another device starting a brand new session for this same user in
+      // that window would otherwise have its own fresh pointer nulled by
+      // this same PATCH (a plain JS `if` on the stale `sett` snapshot can't
+      // see that), and the next tick's isTracked/orphan check would then
+      // hard-delete that live session with all its sets, same data-loss
+      // class as the close-PATCH check above, just the other direction
+      // (H2-Rest, audit-2026-08 verification pass). Scoping the PATCH
+      // itself on in_progress_session_id=eq.<id> makes it an atomic
+      // conditional update: a race makes this a no-op instead of a wrong
+      // write.
+      await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}&in_progress_session_id=eq.${sess.id}`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ in_progress_session_id: null }),
+      });
     }
 
     console.log(`[auto-close] done, closed: ${closed}, deleted: ${deleted}`);

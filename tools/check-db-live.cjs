@@ -104,7 +104,11 @@ const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes', 'zane
 
 // Functions where anon EXECUTE is intentional (documented in docs/database.md,
 // "Grant-Fallen"). Every other function must have anon_exec === false.
-const EXPECTED_ANON_EXEC = new Set(['get_public_feature_map']);
+// Keyed on the full signature, not the bare name, so a future overload cannot
+// inherit the exception by sharing a name. Both entries feed the login-free
+// public pages: features.html reads the published feature map, welcome.html
+// reads the founding-seat count.
+const EXPECTED_ANON_EXEC = new Set(['get_public_feature_map()', 'get_founding_seats()']);
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -244,18 +248,19 @@ async function inventoryMode(invFile) {
     }
   }
 
-  // EXPECTED_ANON_EXEC keys on the bare function NAME, not the signature. That is
-  // safe only because get_public_feature_map is the single intended anon-exec
-  // function; if a future overload shares the name it would be blanket-allowed, so
-  // if more anon-exec functions ever appear, switch this to signature-scoped keys.
-  const allFnNames = new Set((inv.functions || []).map((fn) => fn.f));
+  // sig comes from oid::regprocedure, which drops the schema for anything on the
+  // search_path, so `public.` is stripped to match how EXPECTED_ANON_EXEC is
+  // written. Functions with no sig fall back to name() rather than being skipped.
+  const fnSig = (fn) => String(fn.sig || `${fn.f}()`).replace(/^public\./, '');
+  const allFnSigs = new Set((inv.functions || []).map(fnSig));
   const seenAnonExec = new Set();
   for (const fn of inv.functions || []) {
     if (fn.anon_exec) {
-      if (EXPECTED_ANON_EXEC.has(fn.f)) {
-        seenAnonExec.add(fn.f);
+      const sig = fnSig(fn);
+      if (EXPECTED_ANON_EXEC.has(sig)) {
+        seenAnonExec.add(sig);
       } else {
-        errors.push(`inventory: has_function_privilege('anon', '${fn.sig || fn.f}') = true (expected: false for every function)`);
+        errors.push(`inventory: has_function_privilege('anon', '${sig}') = true (expected: false for every function)`);
       }
     }
   }
@@ -264,10 +269,10 @@ async function inventoryMode(invFile) {
       // Separate "the grant went missing" from "the function itself is gone": the
       // second is an existence problem, not a Grant-Fallen regression, and the
       // fix is completely different.
-      if (!allFnNames.has(f)) {
-        errors.push(`inventory: expected anon-exec function ${f}() is absent from the live function inventory (dropped or renamed?)`);
+      if (!allFnSigs.has(f)) {
+        errors.push(`inventory: expected anon-exec function ${f} is absent from the live function inventory (dropped or renamed?)`);
       } else {
-        errors.push(`inventory: expected anon EXECUTE on ${f}() is missing (see docs/database.md, "Grant-Fallen")`);
+        errors.push(`inventory: expected anon EXECUTE on ${f} is missing (see docs/database.md, "Grant-Fallen")`);
       }
     }
   }

@@ -286,13 +286,6 @@ function WaterScreen({ store, setStore, go, userId }) {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
-  // Keep the user's UTC offset fresh so the reminder cron can place "now" on the
-  // local ramp. Only writes when it actually changed (travel / DST).
-  useEffectW(() => {
-    const off = -new Date().getTimezoneOffset();
-    if (settings.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
-  }, []); // eslint-disable-line
-
   const todayEntries = useMemoW(
     () => (store.waterLogs || []).filter(l => l.date === today),
     [store.waterLogs, today],
@@ -313,23 +306,34 @@ function WaterScreen({ store, setStore, go, userId }) {
 
   // Writes the entry AND the recomputed day total into the daily log in one
   // atomic store update (both sync through syncStore; flushSync retries both).
-  function patchDaily(s, dayEntries) {
+  // Takes the target date explicitly rather than closing over `today`: doAdd
+  // below needs a freshly-derived date, not the up-to-30s-stale state (L9,
+  // audit-2026-08), while deleteEntry keeps passing `today` since it only
+  // ever removes a row from the currently-displayed (already `today`-
+  // filtered) list.
+  function patchDaily(s, dayEntries, dateISO) {
     const sum = dayEntries.reduce((a, e) => a + (e.amountMl || 0), 0);
-    const existing = (s.dailyLogs || []).find(l => l.date === today);
+    const existing = (s.dailyLogs || []).find(l => l.date === dateISO);
     const now = new Date().toISOString();
     const waterMl = sum > 0 ? sum : null;
     const log = existing
       ? { ...existing, waterMl, updatedAt: now }
-      : { id: LB.uid(), date: today, weight: null, steps: null, calories: null, protein: null, carbs: null, fat: null, fiber: null, waterMl, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
-    return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== today)];
+      : { id: LB.uid(), date: dateISO, weight: null, steps: null, calories: null, protein: null, carbs: null, fat: null, fiber: null, waterMl, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+    return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateISO)];
   }
 
   async function doAdd(amountMl, name, category) {
-    const entry = { id: LB.uid(), date: today, time: LB.nowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
+    // Freshly derived, not the `today` state (only re-derived every 30s or on
+    // visibilitychange, see its own comment above): otherwise an add landing
+    // in that window right after local midnight stamps the entry, and folds
+    // its total into the daily log, on the day that just ended (L9,
+    // audit-2026-08).
+    const nowDate = wtDateStr(0);
+    const entry = { id: LB.uid(), date: nowDate, time: LB.nowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
     const prevTotal = total;
     setStore(s => {
       const nextLogs = [entry, ...(s.waterLogs || [])];
-      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === today)) };
+      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === nowDate), nowDate) };
     });
     // useConfirm() holds only one dialog at a time, so the goal-reached and
     // bottle-empty prompts (both possibly triggered by the same add) must be
@@ -372,7 +376,7 @@ function WaterScreen({ store, setStore, go, userId }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.waterLogs || []).filter(l => l.id !== entry.id);
-      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === today)) };
+      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === today), today) };
     });
   }
 
@@ -995,7 +999,13 @@ function WaterStatsBody({ store, goalMl }) {
     const withData = days.filter(d => d.value > 0);
     const goalDays = days.filter(d => d.value >= goalMl);
     const avg = withData.length ? Math.round(withData.reduce((a, d) => a + d.value, 0) / withData.length) : 0;
-    const rate = days.length ? Math.round((goalDays.length / days.length) * 100) : 0;
+    // Of days actually logged, not every calendar day in range: goalMl is
+    // always > 0 (270: `settings.waterGoalMl || 2000`), so a day with no log
+    // at all can never be in goalDays either way, dividing by days.length
+    // just made a day you forgot to open the app on count as a miss and
+    // dragged the rate down for reasons that have nothing to do with the
+    // goal itself.
+    const rate = withData.length ? Math.round((goalDays.length / withData.length) * 100) : 0;
     let best = 0, cur = 0;
     days.forEach(d => { if (d.value >= goalMl) { cur++; best = Math.max(best, cur); } else cur = 0; });
     const waterDrinksList = store.settings?.waterDrinks || [];

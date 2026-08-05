@@ -6,12 +6,24 @@
 // USDA / zane_foods entry for someone's own breakfast, so this never touches
 // that pipeline, it estimates directly.
 //
-// The photo, when given, uses the same base64 contract as scan-label/
-// scan-label-claude (client-side downscaled first). description and image
-// are both optional, but at least one is required. When both are given, the
-// prompt treats the text as authoritative for anything the photo alone
-// can't show, see SYSTEM_PROMPT. Vision runs through the same Anthropic
-// Messages API call as the text-only path, no separate request or model.
+// THREE BACKENDS, ONE FUNCTION. Claude, Grok and Qwen all run through this
+// endpoint behind one identical contract; Qwen is the one actually called,
+// for the cost, with Claude as the automatic fallback if Qwen itself is
+// unreachable, see PRIMARY_PROVIDER/FALLBACK_PROVIDER below and
+// callModelWithFallback in _shared/ai.ts. `provider` in the request body
+// still forces one exact backend with no fallback, but nothing in the app
+// sends it any more; it is a manual-testing hook, not a user-facing toggle.
+// The three used to be separate functions kept in step by a rule in
+// CLAUDE.md, which drifted, see the note at the top of _shared/ai.ts. The
+// prompt, the validation and the response shape now exist once, so they
+// cannot disagree.
+//
+// The photo, when given, uses the same base64 contract as scan-label
+// (client-side downscaled first). description and image are both optional,
+// but at least one is required. When both are given, the prompt treats the
+// text as authoritative for anything the photo alone can't show, see
+// SYSTEM_PROMPT. Vision runs through the same call as the text-only path, no
+// separate request or model.
 //
 // User-triggered only, one call per request. The returned items are staged
 // client-side exactly like a manually-typed Custom Item (never written to
@@ -26,75 +38,79 @@
 // to it, deriving it removes that failure mode entirely.
 //
 // One action: POST { description?: string, image?: <base64, no data:
-// prefix>, mimeType?: 'image/jpeg', previousItems?: [{ name, quantityG,
-// protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] } (description/image
-// both optional, at least one required, previousItems does not relax that
-// rule) -> { items: [{ name, quantityG, calories, protein, carbs, fat,
-// fiber, sugar, satFat, sodiumMg }] }
+// prefix>, mimeType?: 'image/jpeg', provider?: 'claude' | 'grok' | 'qwen',
+// previousItems?: [{ name, quantityG, protein, carbs, fat, fiber, sugar,
+// satFat, sodiumMg }] } (description/image both optional, at least one
+// required, previousItems does not relax that rule) -> { items: [{ name,
+// quantityG, calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] }
 //
 // previousItems is refine mode: the caller's own prior estimate from an
 // earlier call to this same endpoint, sent back alongside new or corrected
 // description/image so the model revises that estimate instead of starting
 // over. See SYSTEM_PROMPT and buildUserText.
 //
-// Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses).
+// Needs whichever secret the chosen provider uses (ANTHROPIC_API_KEY,
+// XAI_API_KEY, QWEN_API_KEY); the model ids and endpoints are configurable
+// per provider, see _shared/ai.ts.
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
+import {
+  callModel,
+  callModelWithFallback,
+  extractJson,
+  isProviderId,
+  num,
+  str,
+  stripEmDash,
+  type ModelImage,
+} from '../_shared/ai.ts';
 
 const DAILY_MEAL_PARSE_LIMIT = 60;
 const MAX_DESCRIPTION_CHARS = 2000;
-// Same bounds as scan-label: bounded JPEG from the client's fdDownscaleImage,
-// this is just a sanity ceiling against an unexpectedly huge upload.
+// Bounded JPEG from the client's fdDownscaleImage, this is just a sanity
+// ceiling against an unexpectedly huge upload.
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
+// A legitimate refine payload only ever echoes the model's own prior output
+// (bounded by that call's own max_tokens), so both bounds are generous.
+// Unlike description/image above, previousItems had no cap at all before
+// this: unbounded, it went straight into the prompt as JSON.stringify'd
+// text, at both the client's own quota cost and the provider's.
+const MAX_PREVIOUS_ITEMS = 50;
+const MAX_ITEM_NAME_CHARS = 200;
 
-// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
-// (isAdmin = store.user?.email === this): unlimited quota for testing.
-const ADMIN_EMAIL = 'office@btc-prime.biz';
+// A ceiling on what may be generated, not a reservation. Reasoning tokens
+// count against it, which is why it is not the 2000 this used to carry: a long
+// deliberation would have eaten the allowance and truncated the JSON object
+// itself, and a truncated object parses as zero items, surfacing as a bogus
+// "could not find any food" rather than as an error.
+const MAX_TOKENS = 8000;
 
-// Advisory per-user daily quota (same zane_api_usage/bump_api_usage as every
-// other AI edge function, migration 0207, new kind 'meal_parse'). Fails OPEN
-// on purpose: a broken quota mechanism must never be the reason someone
-// can't log their food.
-async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
-  try {
-    const base = Deno.env.get('SUPABASE_URL') ?? '';
-    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    if (!base || !key) return true;
-    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
-    });
-    if (!r.ok) return true;
-    return (await r.json()) !== false;
-  } catch (_) {
-    return true;
-  }
-}
+// How many tokens the model may spend deliberating before it has to start
+// writing the answer. The same number for every provider, so the toggle
+// compares models rather than how much rope each one was handed.
+//
+// Calibrated from measurement, not taste. On one meal photo with no
+// accompanying text: Grok at reasoning_effort 'low' spent 1224 reasoning
+// tokens, uncapped Qwen spent roughly 2950 on the identical picture, and the
+// visible JSON was about 150 tokens either way. Uncapped Qwen took 24.1s for
+// that, where the label scanner (no reasoning at all, same route, same image)
+// answered in 1.7s, so almost the entire wait was deliberation. 1200 is Grok's
+// own measured appetite, which makes it the honest number to hold the others
+// to.
+//
+// This bounds ONLY the thinking. When the budget runs out the model stops
+// deliberating and writes the answer, so unlike MAX_TOKENS it cannot truncate
+// the JSON object.
+const REASONING_BUDGET = 1200;
 
-async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!token) return null;
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
-    headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
-  }).catch(() => null);
-  if (!r?.ok) return null;
-  const user = await r.json().catch(() => null);
-  return user?.id ? { id: user.id, email: user.email ?? null } : null;
-}
+// Qwen runs first for the cost; Claude was the long-standing default before
+// Qwen existed and is what a Qwen failure falls back to, see
+// callModelWithFallback in _shared/ai.ts.
+const PRIMARY_PROVIDER = 'qwen';
+const FALLBACK_PROVIDER = 'claude';
+
+const LABELS = { tag: 'parse-meal', feature: 'Meal parsing', subject: 'meal estimator' };
 
 const SYSTEM_PROMPT = `You estimate nutrition for a home-logged meal from a photo of the food, a short often informal free-text description (may be a home-cooked dish, several components at once, and vague portions like "a thin slice" or "one roll"), or both together, the way an experienced dietitian doing a quick visual or verbal estimate would, not a database lookup. When the mandatory self-check below applies, show that arithmetic in plain text first; otherwise skip straight to the answer. Either way, end your response with exactly one JSON object, no markdown code fences around it, and no text of any kind after it.
 
@@ -118,59 +134,11 @@ Return exactly this JSON shape:
 }
 protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null for anything you genuinely cannot estimate, never invent a precise-looking number you don't believe. Never include a calories/kcal field, it is computed separately from the macros, not from you. Never use an em dash in a name; use a comma or a period instead. If neither the photo nor any text names an identifiable food or drink at all, return {"items": []}.`;
 
-// Pull the first balanced JSON object out of the model's text, tolerant of an
-// accidental ```json fence or a stray sentence around it. Same helper as
-// scan-label/scan-label-claude.
-function extractJson(text: string): Record<string, unknown> | null {
-  if (!text) return null;
-  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(cleaned.slice(start, end + 1));
-  } catch (_) {
-    return null;
-  }
-}
-
-function num(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v.replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-function str(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
-}
-
 // Same rule as search-foods' caloriesFromMacros: calories are always derived
 // from protein/carbs/fat (standard 4/4/9 kcal/g), never a separate number
 // trusted from the model.
 function caloriesFromMacros(p: number, c: number, f: number): number {
   return Math.round(p * 4 + c * 4 + f * 9);
-}
-
-// Best-effort short reason from an Anthropic error body, same as scan-label-claude.
-function errReason(raw: string): string {
-  try {
-    const j = JSON.parse(raw);
-    const m = j?.error?.message ?? j?.error ?? j?.message;
-    if (typeof m === 'string' && m.trim()) return m.trim().slice(0, 160);
-  } catch (_) { /* not JSON */ }
-  return raw.trim().slice(0, 160);
-}
-
-// Same backstop as ai-daily-summary/ai-checkin-opinion: CLAUDE.md's "no em
-// dashes" rule is enforced on committed source by tools/check-emdash.cjs,
-// which can't touch runtime LLM output, so a prompt instruction alone isn't
-// a guarantee, replace any that slip through. Matches by Unicode escape
-// (U+2014), not the literal character, so check-emdash.cjs's grep has
-// nothing to flag in this file.
-function stripEmDash(s: string): string {
-  return s.replace(/\u2014/g, ', ');
 }
 
 // The user-message text accompanying the request, shaped for whichever of
@@ -191,31 +159,31 @@ function buildUserText(description: string, hasImage: boolean, previousItems: un
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
-  const json = (body: unknown, status: number) =>
-    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  const pre = preflight(req);
+  if (pre) return pre;
 
   const caller = await resolveUser(req);
-  if (!caller) return json({ error: 'unauthorized' }, 401);
-  const userId = caller.id;
+  if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
   const isAdmin = caller.email === ADMIN_EMAIL;
 
   const body = await req.json().catch(() => ({}));
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
-  const image = typeof body?.image === 'string' ? body.image.trim() : '';
+  const rawImage = typeof body?.image === 'string' ? body.image.trim() : '';
   const mimeType = ALLOWED_MIME.has(body?.mimeType) ? body.mimeType : 'image/jpeg';
+  // Manual-testing override only, see the file header; the app never sends this.
+  const explicitProvider = isProviderId(body?.provider) ? body.provider : null;
   // Refine mode: the caller's own prior estimate from an earlier call to
   // this endpoint, sanitized the same defensive way as every other
   // numeric/string field in this file. Optional, never relaxes the
   // description/image requirement below.
   const rawPreviousItems = Array.isArray(body?.previousItems) ? body.previousItems : [];
+  if (rawPreviousItems.length > MAX_PREVIOUS_ITEMS) return jsonResponse({ error: 'Too many items to refine at once.' }, 413);
   const previousItems = rawPreviousItems
     .map((it: Record<string, unknown>) => {
       const name = str(it?.name);
       if (!name) return null;
       return {
-        name,
+        name: name.slice(0, MAX_ITEM_NAME_CHARS),
         quantityG: Math.max(0, num(it?.quantityG) ?? 100),
         protein: Math.max(0, num(it?.protein) ?? 0),
         carbs: Math.max(0, num(it?.carbs) ?? 0),
@@ -227,62 +195,30 @@ Deno.serve(async (req) => {
       };
     })
     .filter((it: unknown): it is NonNullable<typeof it> => it !== null);
-  if (!description && !image) return json({ error: 'missing description or image' }, 400);
-  if (description.length > MAX_DESCRIPTION_CHARS) return json({ error: 'Description too long. Try a shorter one.' }, 413);
-  if (image.length > MAX_IMAGE_CHARS) return json({ error: 'Image too large. Try again.' }, 413);
+  if (!description && !rawImage) return jsonResponse({ error: 'missing description or image' }, 400);
+  if (description.length > MAX_DESCRIPTION_CHARS) return jsonResponse({ error: 'Description too long. Try a shorter one.' }, 413);
+  if (rawImage.length > MAX_IMAGE_CHARS) return jsonResponse({ error: 'Image too large. Try again.' }, 413);
 
-  if (!isAdmin && !await withinQuota(userId, 'meal_parse', DAILY_MEAL_PARSE_LIMIT)) {
-    return json({ error: `That's ${DAILY_MEAL_PARSE_LIMIT} meal descriptions today, well past normal use. The limit resets tomorrow; add items manually until then.` }, 429);
+  if (!isAdmin && !await withinQuota(caller.id, 'meal_parse', DAILY_MEAL_PARSE_LIMIT)) {
+    return jsonResponse({ error: `That's ${DAILY_MEAL_PARSE_LIMIT} meal descriptions today, well past normal use. The limit resets tomorrow; add items manually until then.` }, 429);
   }
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  if (!apiKey) return json({ error: 'Meal parsing is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
-  const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
+  const image: ModelImage | null = rawImage ? { base64: rawImage, mimeType } : null;
+  const modelCall = {
+    system: SYSTEM_PROMPT,
+    userText: buildUserText(description, !!rawImage, previousItems),
+    image,
+    maxTokens: MAX_TOKENS,
+    reasoningBudget: REASONING_BUDGET,
+  };
+  const result = explicitProvider
+    ? await callModel(explicitProvider, modelCall, LABELS)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
+  if (!result.ok) return jsonResponse({ error: result.error }, result.status);
 
-  let resp: Response;
-  try {
-    resp = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        // Bumped from 1200: the mandatory self-check can now show visible
-        // arithmetic before the JSON for a multi-item meal, needs headroom
-        // so that reasoning can never truncate the JSON object itself.
-        max_tokens: 2000,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          // Text first, image second, same block order scan-label-claude
-          // already uses for its single-image prompt.
-          content: image
-            ? [{ type: 'text', text: buildUserText(description, true, previousItems) }, { type: 'image', source: { type: 'base64', media_type: mimeType, data: image } }]
-            : [{ type: 'text', text: buildUserText(description, false, previousItems) }],
-        }],
-      }),
-    });
-  } catch (e) {
-    console.error('[parse-meal] anthropic fetch error:', e);
-    return json({ error: 'Could not reach the meal estimator. Try again.' }, 502);
-  }
-
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    console.error('[parse-meal] anthropic error', resp.status, detail);
-    const reason = errReason(detail);
-    return json({ error: `Meal estimator failed (${resp.status})${reason ? ': ' + reason : ''}` }, 502);
-  }
-
-  const data = await resp.json().catch(() => null);
-  const content = data?.content;
-  const text = Array.isArray(content)
-    ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
-    : '';
-  const parsed = extractJson(text);
+  // The prompt's visible self-check arithmetic is deliberately brace-free, so
+  // extractJson's first `{` is the JSON object whether or not it ran.
+  const parsed = extractJson(result.text);
   const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
 
   const items = rawItems
@@ -306,8 +242,8 @@ Deno.serve(async (req) => {
     .filter((it: unknown): it is NonNullable<typeof it> => it !== null);
 
   if (!items.length) {
-    return json({ error: 'Could not find any food there. Try a clearer photo, more detail, or add it manually.' }, 422);
+    return jsonResponse({ error: 'Could not find any food there. Try a clearer photo, more detail, or add it manually.' }, 422);
   }
 
-  return json({ items }, 200);
+  return jsonResponse({ items }, 200);
 });

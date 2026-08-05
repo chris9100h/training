@@ -226,7 +226,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   <div className="display" style={{ fontSize: 21, margin: '4px 0 8px', color: on ? UI.gold : UI.ink, lineHeight: 1 }}>{meta.nm}</div>
                   <div style={{ fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.42 }}>{meta.d}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 11 }}>
-                    {meta.pills.map(p => <span key={p} style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.04em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px' }}>{p}</span>)}
+                    {meta.pills.map(p => <span key={p} style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.04em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 2, padding: '3px 6px' }}>{p}</span>)}
                   </div>
                 </button>
               );

@@ -139,7 +139,12 @@ function cpTodayTarget(plan, todayISO) {
   if (plan.mode === 'goal') {
     const ws = plan.generatedWeeks || [];
     if (!ws.length) return null;
-    const idx = Math.min(cpSessionIndex(plan.planStartDate, plan.days, todayISO), ws.length - 1);
+    // Past the last generated week, the plan is complete: no target, not a
+    // repeat of the final week forever (L11, audit-2026-08). Clamping here
+    // used to keep every training day "due" indefinitely once a goal plan
+    // was finished.
+    const idx = cpSessionIndex(plan.planStartDate, plan.days, todayISO);
+    if (idx >= ws.length) return null;
     const w = ws[idx];
     return { distanceM: w.distance_m ?? null, durationMinutes: w.duration_minutes ?? null, paceSecPerKm: w.pace_s_per_km ?? null };
   }
@@ -160,7 +165,14 @@ function cpNearestDateForKey(k, todayISO) {
 function cpTodayLog(plan, cardioLogs, todayISO) {
   const norm = (s) => (s || '').trim().toLowerCase();
   const planType = norm(plan.activityType);
-  return (cardioLogs || []).find(l => l.date === todayISO && norm(l.type) === planType) || null;
+  // zane_cardio_logs is only ordered by date server-side (store.js), so two
+  // same-day same-type logs (an easy extra walk plus the actual scheduled
+  // session, say) arrive in no defined order. .find() picking whichever
+  // lands first made this arbitrary and unstable across reloads/devices
+  // (L10, audit-2026-08); prefer the most recently logged one instead.
+  const matches = (cardioLogs || []).filter(l => l.date === todayISO && norm(l.type) === planType);
+  if (!matches.length) return null;
+  return matches.reduce((a, b) => (b.createdAt || '') > (a.createdAt || '') ? b : a);
 }
 
 // ─── CardioPlanDetailSheet ─────────────────────────────────────────────────

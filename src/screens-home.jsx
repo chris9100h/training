@@ -1064,7 +1064,13 @@ function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStar
     if (weekdayMode) {
       if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
       const wd = LB.isoWd(d);
-      trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      // The version active on dateKey, not whatever sch.days currently holds
+      // (L4, audit-2026-08): a plan edit since that day (weekdays moved
+      // around a version boundary) must not retroactively judge a past day
+      // by today's schedule. Same helper the cycle-mode branch below already
+      // uses for the same reason.
+      const vDays = LB.getPlanDaysForDate(sch, dateKey);
+      trainingDay = vDays.find(day => day.weekday === wd && day.items?.length > 0) || null;
     } else if (cycleStartDate) {
       const vDays = LB.getPlanDaysForDate(sch, dateKey);
       if (!vDays.length) continue;
@@ -1183,6 +1189,55 @@ function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart, busy
       )}
       <Btn onClick={onStart} disabled={list.length === 0 || busy} style={{ width: '100%' }}>{busy ? 'Starting…' : 'Start workout'}</Btn>
     </Sheet>
+  );
+}
+
+// Account tier badge under the wordmark. Server-authored: `tier` is granted by
+// a database trigger once an account clears the founding-member bar, and a
+// client write to it is reverted, so this only ever reflects the real state.
+//
+// Free is deliberately neutral rather than gold. Gold is the reward colour used
+// for the founding-member seat, and spending it on the default state would make
+// the distinction meaningless. There is no 'premium' entry: paid accounts do not
+// exist yet, so a chip for them would be inventing a state the app cannot reach.
+const TIER_CHIPS = {
+  lifetime: {
+    label: 'Lifetime Premium',
+    title: 'Founding member. Every paid feature, permanently, at no cost.',
+    color: UI.gold,
+    background: 'rgba(var(--accent-rgb),0.14)',
+  },
+  free: {
+    label: 'Free',
+    title: 'Free account. Everything in the app is currently free.',
+    color: UI.inkFaint,
+    background: 'rgba(var(--knurl-rgb),0.08)',
+  },
+};
+
+function TierChip({ tier }) {
+  const chip = TIER_CHIPS[tier] || TIER_CHIPS.free;
+  return (
+    <span
+      className="micro"
+      title={chip.title}
+      style={{
+        color: chip.color,
+        background: chip.background,
+        // 2 rather than the usual chip 4: at 10px tall a 4px corner eats most of
+        // the edge and reads as a pill, which fights the squared-off look
+        // everything else has. 1 would be sub-pixel on a 2x screen and vanish.
+        borderRadius: 2,
+        // No border and 1px of vertical padding: the chip costs 10px of height
+        // instead of 17, which is what keeps the header at its original size.
+        padding: '1px 6px',
+        fontSize: 8,
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {chip.label}
+    </span>
   );
 }
 
@@ -1831,7 +1886,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     let dismissed = false;
     try { dismissed = localStorage.getItem('logbook-sick-recover-prompt') === today; } catch (_) {}
     if (dismissed) return;
-    const trainedToday = (store.sessions || []).some(s => s.ended && s.ended.slice(0, 10) === today)
+    // s.date, not s.ended.slice(0, 10): s.ended is a UTC timestamp, slicing
+    // it gives the UTC date, which is a different calendar day than `today`
+    // (local) for any evening session outside UTC. s.date is already the
+    // session's own local date, same field the cardio check right below
+    // already uses correctly.
+    const trainedToday = (store.sessions || []).some(s => s.ended && s.date === today)
       || (store.cardioLogs || []).some(l => l.date === today);
     if (!trainedToday) return;
     sickPromptShown.current = true;
@@ -2786,6 +2846,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     );
   })() : null;
 
+  // getMesoState touches localStorage and mesoCurrentWeek filters
+  // store.sessions; memoized like screens-train.jsx's own mesoWeek (same
+  // comment there: "it recomputed on every 250ms tick for meso users"
+  // without a memo) so the bounded-meso and AUTO header badges below (only
+  // one of which renders per plan) don't redo that work on every HomeScreen
+  // render, e.g. every store sync, sheet toggle, or day-strip tap.
+  const mesoBadgeState = useMemo(
+    () => (sch && typeof getMesoState === 'function' ? getMesoState(sch.id, store.mesoStates) : null),
+    [sch?.id, store.mesoStates]);
+  const mesoBadgeWeek = useMemo(
+    () => (mesoBadgeState && typeof mesoCurrentWeek === 'function' ? mesoCurrentWeek(mesoBadgeState, store) : null),
+    [mesoBadgeState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods]);
+
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -2796,12 +2869,20 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           : defaultLogoStyle} />
       </div>
 
-      {/* No-plan fallback, rendered inline so all sheets below stay mounted */}
+      {/* No-plan fallback, rendered inline so all sheets below stay mounted.
+          This header has no wordmark for the tier chip to sit under, so the chip
+          rides alongside the date instead. TopBar renders a non-string `sub`
+          verbatim, so this needs no new prop on the shared component. */}
       {!sch && (
         <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <TopBar
             title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
-            sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
+            sub={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+                <TierChip tier={store.user?.tier} />
+              </span>
+            }
             right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>}
@@ -2825,22 +2906,29 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
-            {(() => {
-              const isProblem = storageFull || syncStatus === 'error';
-              const isSaving  = syncStatus === 'pending' && !storageFull;
-              const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
-              const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
-              return (
-                <i
-                  className="fa-solid fa-dumbbell"
-                  onClick={isProblem ? onRetrySync : undefined}
-                  title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
-                  style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
-                />
-              );
-            })()}
+          {/* Column, not a row: the tier chip sits under the wordmark. ZANE is 26
+              rather than its original 34 and the gap is 0 so the two-line block
+              still measures 36px, exactly what the date + greeting on the right
+              measures. The header keeps the height it had before the chip. */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+              {(() => {
+                const isProblem = storageFull || syncStatus === 'error';
+                const isSaving  = syncStatus === 'pending' && !storageFull;
+                const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
+                const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
+                return (
+                  <i
+                    className="fa-solid fa-dumbbell"
+                    onClick={isProblem ? onRetrySync : undefined}
+                    title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                    style={{ fontSize: 15, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+                  />
+                );
+              })()}
+            </div>
+            <TierChip tier={store.user?.tier} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{ textAlign: 'right', minWidth: 0 }}>
@@ -2933,25 +3021,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                     MESO · DELOAD
                   </span>
                 );
               }
-              const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+              const m = mesoBadgeState;
               const weeks = sch.mesocycle_weeks;
               // completions = how many blocks finished, so the block currently
               // running is number completions+1. Shown from Meso 2 on.
               const mesoNum = (m?.completions ?? 0) + 1;
               const mesoLabel = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
-              const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
+              const week = mesoBadgeWeek;
               if (week == null) {
                 // Pending, meso hasn't started yet; show start date if known
                 const startLabel = m?.startDate
                   ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                   : 'D1';
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                     {mesoLabel} · starts {startLabel}
                   </span>
                 );
@@ -2961,7 +3049,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
-                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                   {mesoLabel} {unit}{week}/{weeks}{rir != null ? ` · ${rir} RIR` : ''}
                 </span>
               );
@@ -2974,32 +3062,32 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   // meso is still pending its aligned start, then AUTO (or AUTO ·
                   // LOAD in load-only mode) once it's running. Mirrors the bounded
                   // meso badge's pending/active split, minus the week counter.
-                  const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+                  const m = mesoBadgeState;
                   // The cycle label above already reads the browsed cycle (e.g.
                   // CYCLE 9). Drop the AUTO badge for a period that ends before
                   // autoregulation's aligned start, so a pre-autoreg cycle no
                   // longer inherits the current AUTO / LOAD flag.
                   const autoStartTs = m?.startDate ? new Date(m.startDate + 'T12:00:00').getTime() : null;
                   if (autoStartTs != null && viewedPeriodEndTs != null && viewedPeriodEndTs < autoStartTs) return null;
-                  const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
+                  const week = mesoBadgeWeek;
                   if (week == null) {
                     const startLabel = m?.startDate
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                       : null;
                     return (
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
                         {startLabel ? `AUTO · starts ${startLabel}` : 'AUTO · pending'}
                       </span>
                     );
                   }
                   return (
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                       {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   );
                 })()}
                 {deloadHintActive && (
-                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`, borderRadius: 2, padding: '2px 8px' }}>
                     Deload ready
                   </span>
                 )}
@@ -3782,34 +3870,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   );
 }
 
-// ─── PENDING APPROVAL ────────────────────────────────────────────────────────
-function PendingApprovalScreen({ onSignOut }) {
-  return (
-    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
-      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
-        <span className="micro">ZANE TRAINING</span>
-      </div>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1, gap: 16 }}>
-        <img src="icons/zane-logo.png" style={{ width: '70%', maxWidth: 380, objectFit: 'contain', marginBottom: 8 }} />
-        <div className="display" style={{ fontSize: 22, color: UI.ink, fontWeight: 400, textAlign: 'center' }}>
-          Waiting for approval
-        </div>
-        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, maxWidth: 280 }}>
-          Your account has been created. The admin will review and approve your access shortly.
-        </div>
-        <button onClick={onSignOut} style={{
-          marginTop: 8, padding: '10px 20px', borderRadius: 4,
-          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
-          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
-        }}>
-          Sign out
-        </button>
-      </div>
-    </Screen>
-  );
-}
 
 // ─── UNIT PROMPT (existing users) ────────────────────────────────────────────
 function UnitPromptModal({ onDone }) {
@@ -3869,4 +3929,4 @@ function UnitPromptModal({ onDone }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet, UnitPromptModal });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, CardioQuickLogSheet, UnitPromptModal });

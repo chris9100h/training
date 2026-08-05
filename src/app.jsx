@@ -304,7 +304,7 @@ function ErrorScreen({ onRetry }) {
 
 function App() {
   const isPad = useIsPad();
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite' | 'pending'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
   // Detect invite/password-reset link before Supabase clears the hash
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
@@ -336,6 +336,7 @@ function App() {
   });
   const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
+  const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const intentionalSignOut        = useRefA(null);  // ms timestamp, set right before a user-initiated LB.signOut() call
@@ -426,7 +427,12 @@ function App() {
     const color = store?.settings?.accentColor;
     if (color) {
       window.applyAccentColor(color);
-      localStorage.setItem('logbook-accent-color', color);
+      // Guarded like every other localStorage write in this file: this one
+      // sits in an App-level effect, above the per-screen ErrorBoundary, so
+      // an unguarded quota/private-mode throw here (storageFull is already
+      // an anticipated state, see saveToLocal) would crash the whole app
+      // instead of just this effect's write.
+      try { localStorage.setItem('logbook-accent-color', color); } catch (_) {}
     }
   }, [store?.settings?.accentColor]);
 
@@ -434,9 +440,27 @@ function App() {
     const mode = store?.settings?.darkMode;
     if (mode) {
       window.applyDarkMode(mode);
-      localStorage.setItem('logbook-dark-mode', mode);
+      try { localStorage.setItem('logbook-dark-mode', mode); } catch (_) {}
     }
   }, [store?.settings?.darkMode]);
+
+  // Keeps settings.tzOffsetMinutes fresh for every reminder cron (medication,
+  // water, meal) that places "now" on the user's local clock. Used to be
+  // three separate per-screen writers (Water: only while that tab is open,
+  // Food: only in Plan Mode, Meds: only while that tab is open), so a user
+  // who never opened any of those three screens never got it written at all,
+  // which is exactly the population the medication reminder's server-side
+  // materialization (M8) was meant to help: it can now find a due dose
+  // without the Meds tab ever having been opened, but was still firing at
+  // the wrong local hour (UTC fallback) for that same user (M8-Rest,
+  // audit-2026-08 verification). App-level instead so it fires for every
+  // signed-in user regardless of navigation, once per boot like the SW
+  // version flush above; only writes when it actually changed (travel/DST).
+  useEffectA(() => {
+    if (!store) return;
+    const off = -new Date().getTimezoneOffset();
+    if (store.settings?.tzOffsetMinutes !== off) setStore(s => (s ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+  }, [!!store]);
 
   // Report the active SW cache version to Supabase (so an admin can spot a
   // user stuck on a stale cache without asking them to check Settings).
@@ -472,7 +496,16 @@ function App() {
       if (phaseRef.current !== 'ready' || !uid) return;
       LB.refreshHealthLogs(uid).then(fresh => {
         if (!fresh) return;
+        // Re-check after the await, not just before it started: a sign-out
+        // (or a different user signing in) while this fetch was in flight
+        // otherwise either crashes here on a null store (above the
+        // per-screen ErrorBoundary, white-screening the whole app) or merges
+        // this user's health/food/water/medication logs into a DIFFERENT
+        // signed-in user's store, exactly the cross-account contamination
+        // loadSeq guards against for loadData's own async path.
+        if (userIdRef.current !== uid) return;
         setStore(s => {
+          if (!s) return s;
           const serverDailyIds    = new Set(fresh.dailyLogs.map(l => l.id));
           const serverDailyDates  = new Set(fresh.dailyLogs.map(l => l.date));
           const serverCardioIds   = new Set(fresh.cardioLogs.map(l => l.id));
@@ -1168,7 +1201,6 @@ function App() {
               planDrafts,
             };
           }
-          if (!fresh.user.approved) { setPhase('pending'); return; }
           prevStore.current = merged;
           setStore(merged);
         })
@@ -1179,7 +1211,6 @@ function App() {
         const loaded = await LB.loadFromSupabase(uid);
         // Same guard as the cached path: this await can outlive the account.
         if (isStale()) return;
-        if (!loaded.user.approved) { setPhase('pending'); return; }
         // PASSWORD_RECOVERY event may have fired while we were fetching, don't override the reset screen
         if (recoveryInProgress.current) return;
         prevStore.current = loaded;
@@ -1209,7 +1240,7 @@ function App() {
       } else if (event === 'SIGNED_IN') {
         // Re-arm the onboarding check for the freshly signed-in user. The ref is
         // a one-shot guard that survives in-session account switches (logout →
-        // login without a page reload), so without this a new/approved user
+        // login without a page reload), so without this a newly registered user
         // logging in after a previous 'ready' session would never be prompted.
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
@@ -1369,32 +1400,6 @@ function App() {
     return () => document.removeEventListener('visibilitychange', recheck);
   }, [phase, userId, store?.settings?.unit]);
 
-  // While the account is pending approval, re-check on every foreground (and a
-  // light poll), same idea as the SW-update banner. A PWA resumes on the stale
-  // pending screen otherwise: the 30-min background reload above doesn't cover a
-  // quick approval, so the user would sit on "Waiting for approval" even after
-  // being approved. We poll the cheap `approved` flag and only escalate to a
-  // full loadData (→ ready → onboarding prompt) the moment it flips true.
-  useEffectA(() => {
-    if (phase !== 'pending' || !userId) return;
-    let cancelled = false;
-    let done = false;
-    const recheck = () => {
-      if (cancelled || done || document.visibilityState !== 'visible') return;
-      LB.supabase.from('zane_profiles').select('approved').eq('id', userId).maybeSingle()
-        .then(({ data }) => {
-          if (cancelled || done || !data?.approved) return;
-          done = true;
-          loadData(userId);
-        })
-        .catch(() => {});
-    };
-    const onVisible = () => { if (document.visibilityState === 'visible') recheck(); };
-    document.addEventListener('visibilitychange', onVisible);
-    const iv = setInterval(recheck, 15000);
-    recheck();
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); clearInterval(iv); };
-  }, [phase, userId]);
 
 
   // was removed, the local store is the single source of truth for a session.)
@@ -1506,10 +1511,49 @@ function App() {
     if (!store || !userId || phase !== 'ready') return;
     prevStore.current = store;
     pendingStore.current = store;
-    if (!LB.saveToLocal(store, userId)) setStorageFull(true);
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
+    // Debounced, not synchronous: LB.saveToLocal stringifies the ENTIRE
+    // store, and this effect runs on every store change (every set toggle,
+    // water log, note keystroke), which used to pay that cost synchronously
+    // every single time. pendingStore.current/userIdRef.current, not the
+    // captured store/userId, so whichever debounced call actually fires
+    // saves the latest value even if several store changes landed within
+    // the same window. Flushed immediately on pagehide/visibilitychange
+    // below, so the crash-safety guarantee is unchanged, just no longer
+    // synchronous on every keystroke.
+    if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
+    localSaveTimer.current = setTimeout(() => {
+      localSaveTimer.current = null;
+      // Re-checked at fire time, not just captured above: a sign-out within
+      // the debounce window clears userIdRef, and writing to a stale/absent
+      // id here would be a wasted write under the wrong key, not a real save.
+      if (pendingStore.current && userIdRef.current) {
+        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
+      }
+    }, 400);
   }, [store]);
+
+  // Flushes a pending debounced localStorage save (see the [store] effect
+  // above) immediately instead of losing up to 400ms of local edits to a
+  // background kill or tab close.
+  useEffectA(() => {
+    const flushLocalSave = () => {
+      if (!localSaveTimer.current) return;
+      clearTimeout(localSaveTimer.current);
+      localSaveTimer.current = null;
+      if (pendingStore.current && userIdRef.current) {
+        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
+      }
+    };
+    const onVisibilityHidden = () => { if (document.hidden) flushLocalSave(); };
+    window.addEventListener('pagehide', flushLocalSave);
+    document.addEventListener('visibilitychange', onVisibilityHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushLocalSave);
+      document.removeEventListener('visibilitychange', onVisibilityHidden);
+    };
+  }, []);
 
   // Check for SW updates on every screen navigation and whenever the app
   // comes back to the foreground (visibilitychange). Fetches sw.js directly
@@ -1687,7 +1731,6 @@ function App() {
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
-  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => { markIntentionalSignOut(); LB.signOut(); }} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);

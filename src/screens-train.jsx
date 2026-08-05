@@ -1060,6 +1060,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
+  // 5/3/1 main lift: the correct "last time" for both the regression/
+  // improvement flash and the plain "Last time" reference displays below is
+  // the SAME WEEK of the PREVIOUS CYCLE, not `last`'s usual "best of the last
+  // 3 sessions": a wave-scheduled lift's weight is a fixed Training-Max
+  // percentage per week (FTO_WAVES), not progressive session-to-session, so
+  // the chronologically closest session is very often a HEAVIER week from
+  // the previous cycle, reading as a false decline the moment a new, lighter
+  // cycle starts (see LB.prev531MainLiftSessionLive's own comment). Only
+  // overrides the comparison SETS these specific displays read, never `last`
+  // itself: the outlier check above and the progression-suggestion mirror
+  // already carry their own is531MainLift exemptions and must keep reading
+  // the plain `last` unchanged. Falls back to last?.entry?.sets untouched for
+  // everything else (assistance work, non-531 plans, cycle 0 with no earlier
+  // cycle to compare against yet).
+  const cyclePrevSession531 = useMemoT(
+    () => (entry ? LB.prev531MainLiftSessionLive(store, session, entry.exId) : null),
+    [store.sessions, store.schedules, session.scheduleId, session.isBonus, session.isDeload, entry?.exId]
+  );
+  const cyclePrevEntrySets531 = useMemoT(() => {
+    if (!cyclePrevSession531 || !entry) return null;
+    const en = (cyclePrevSession531.entries || []).find(e => e.exId === entry.exId);
+    return en?.sets || null;
+  }, [cyclePrevSession531, entry?.exId]);
+  const lastEntrySets = cyclePrevEntrySets531 || last?.entry?.sets || [];
 
   // Cross-day history for the tapped exercise name. The in-training "last time"
   // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
@@ -1129,6 +1153,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // undefined (const TDZ folded to var by the loader), which killed the time
   // branch and would ReferenceError if the transpile target ever kept const.
   const isAssistedEx = LB.isAssisted(exercise);
+
+  // ── Bodyweight + added load ────────────────────────────────────────────────
+  // For a plus_load exercise the number the user types is what is on the belt,
+  // not what moved. `kg` keeps holding the TOTAL so e1RM, PRs, volume and the
+  // meso gates read exactly what they always read; `addedKg` records the typed
+  // number so the field can show it again later. Everything routes through these
+  // two helpers: kbApply is the single write path (typing, backspace and the
+  // ± / stepper keys all call it), and dispWeight is the single read path.
+  const isPlusLoad = LB.isBodyweightPlusLoad(exercise);
+  const plusLoadBw = isPlusLoad ? (LB.latestBodyweight(store) ?? null) : null;
+  // Patch for a weight entry. `typed` is the added load in plus_load mode and
+  // the plain weight otherwise. Bodyweight is folded in at write time, which is
+  // what freezes it: a later weigh-in cannot rewrite this set.
+  const weightPatch = (typed) => {
+    if (!isPlusLoad) return { kg: typed };
+    if (typed == null) return { kg: null, addedKg: null };
+    const base = plusLoadBw ?? 0;
+    return { kg: Math.round((base + typed) * 100) / 100, addedKg: typed };
+  };
+  // What the input and the set rows should show for a set.
+  const dispWeight = (st) => (isPlusLoad ? (st?.addedKg ?? null) : (st?.kg ?? null));
+
   const prValOf = (st) => {
     // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
     // this session's side and the historical side must share one scale.
@@ -1615,7 +1661,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Match the current set to the same working-set position in the previous
     // session. Either session may carry a different number of warm-up sets, so
     // compare by working-set index (warm-ups excluded), never the raw index.
-    const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+    const prevWorkingSets = lastEntrySets.filter(s => !s.warmup);
     const prevWorkingSetFor = (idx) => {
       if (entry.sets[idx]?.warmup) return undefined;
       const wIdx = entry.sets.slice(0, idx + 1).filter(s => !s.warmup).length - 1;
@@ -1740,7 +1786,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const prevWS = lastEntrySets.filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const isNewBest = isNewBestSet(firstSet.kg, firstSet.reps);
@@ -2273,6 +2319,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     runPhase('ecc', ctx.currentTime);
   };
 
+  // Seal non-warmup sets that have values as done, guards against a sync
+  // race where kbApply (done:false) lands in Supabase after completeSet
+  // (done:true). Only seal exercises where at least one set is done; if no
+  // set was ever confirmed the exercise was skipped/not started. Shared by
+  // finish() below between the actual store write (sealed off the FRESH
+  // sess.entries, same "read fresh state" reasoning as everywhere else
+  // updateSession is used) and finishedSnapshot (sealed off the closure's
+  // own session.entries): both need the POST-seal entries, not the raw ones,
+  // for the autoreg block-recap/overreach detector to count the same sets
+  // that are about to be written as done.
+  const sealDoneSets = (entries) => entries.map(e => {
+    const hasDone = e.sets.some(st => st.done);
+    return {
+      ...e,
+      sets: e.sets.map(st => {
+        if (st.done || st.warmup || st.skipped) return st;
+        if (!hasDone) return { ...st, skipped: true };
+        const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+        return hasValue ? { ...st, done: true } : st;
+      }),
+    };
+  });
   const finish = (feel = null) => {
     cancelPushover();
     const sessionDate = session.date.slice(0, 10);
@@ -2282,22 +2350,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
-      // Seal non-warmup sets that have values as done, guards against a sync
-      // race where kbApply (done:false) lands in Supabase after completeSet
-      // (done:true). Only seal exercises where at least one set is done; if no
-      // set was ever confirmed the exercise was skipped/not started.
-      const entries = sess.entries.map(e => {
-        const hasDone = e.sets.some(st => st.done);
-        return {
-          ...e,
-          sets: e.sets.map(st => {
-            if (st.done || st.warmup || st.skipped) return st;
-            if (!hasDone) return { ...st, skipped: true };
-            const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
-            return hasValue ? { ...st, done: true } : st;
-          }),
-        };
-      });
+      const entries = sealDoneSets(sess.entries);
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
@@ -2400,9 +2453,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Autoreg v2 P2: snapshot THIS just-finished session (store.sessions won't
       // hold its ended/recap until the setState flushes) so both block-recap
       // framings, the block-end celebration and the mid-block decline, aggregate
-      // the FULL block including the session that just closed it out.
+      // the FULL block including the session that just closed it out. entries
+      // goes through sealDoneSets too, same as the actual store write above:
+      // without it, a value-bearing set left unticked at Finish counts as 0
+      // done sets here even though the write happening in parallel is about
+      // to seal it to done, so the block recap/overreach detector would
+      // silently undercount the session that just closed the block.
       const finishedSnapshot = {
         ...session,
+        entries: sealDoneSets(session.entries),
         ended: new Date().toISOString(),
         isDeload: store.statusMode === 'deload',
         signalWeight: deriveSignalWeight(),
@@ -2773,6 +2832,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [sessionId, exIdx]);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
+  // Local draft, same pattern as exNoteVal below: typing here no longer
+  // commits to the store (and so to localStorage/sync) on every keystroke,
+  // only the explicit Save (or closing the sheet, which commits whatever was
+  // typed so far, matching the old always-saves behavior) does.
+  const [sessionNoteVal, setSessionNoteVal] = useStateT('');
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
   const [exNoteVal, setExNoteVal] = useStateT('');
   const [exNotePinned, setExNotePinned] = useStateT(false);
@@ -4587,8 +4651,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // editing, clear the stale technique/drops so it doesn't carry
             // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
-              si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: num ?? null }
+              si === setIdx ? { ...st, ...weightPatch(num ?? null), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(num ?? null) }
               : st
             ),
           }),
@@ -5797,7 +5861,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // COMPLETE screen below looks it up by content instead of assuming index 0.
   const warmupEntry = session.entries.find(e => (e.sets || []).some(s => s.warmup)) || session.entries[0];
   // For warmup sets there's no meaningful "last session" comparison
-  const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const prevHeroSet = isCurrentWarmup ? null : lastEntrySets.filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
   const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
@@ -6627,7 +6691,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ textAlign: 'right' }}>
                   {prevHeroSet && prevHeroSet.kg ? (
                     <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
+                      LAST TIME <span style={{ color: UI.inkSoft }}>{isPlusLoad && prevHeroSet.addedKg != null ? `+${prevHeroSet.addedKg}` : prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                     </span>
                   ) : null}
                   {progressionTarget && (
@@ -6664,7 +6728,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {!isNoWeightReps && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <KgInput
-                    value={heroSet.kg}
+                    value={dispWeight(heroSet)}
                     done={false}
                     style={{
                       background: 'transparent', border: 'none', outline: 'none',
@@ -6682,14 +6746,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                         ...en,
                         sets: en.sets.map((st, si) =>
-                          si === bgSetIdx ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
+                          si === bgSetIdx ? { ...st, ...weightPatch(kg), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(kg) }
                           : st
                         ),
                       }),
                     }))}
                   />
-                  <div className="micro" style={{ marginTop: 2 }}>{UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS'}</div>
+                  {isPlusLoad ? (() => {
+                    // Spell out the arithmetic the user did not have to do. The
+                    // total is what counts for volume and records, so it should
+                    // be visible even though it is not what they typed.
+                    const typed = kbField?.setIdx === bgSetIdx && kbField?.field === 'kg' && kbRaw !== ''
+                      ? parseFloat(kbRaw.replace(',', '.')) : dispWeight(heroSet);
+                    const u = UI.unit();
+                    if (plusLoadBw == null) return <div className="micro" style={{ marginTop: 2, color: 'rgba(var(--danger-rgb),0.7)' }}>ADDED {u.toUpperCase()} · NO BODYWEIGHT LOGGED</div>;
+                    const tot = typed == null || isNaN(typed) ? null : Math.round((plusLoadBw + typed) * 100) / 100;
+                    return <div className="micro" style={{ marginTop: 2 }}>
+                      ADDED {u.toUpperCase()}{tot != null && <span style={{ color: UI.gold }}> · {String(tot).replace('.', ',')} {u} TOTAL</span>}
+                    </div>;
+                  })() : (
+                    <div className="micro" style={{ marginTop: 2 }}>{UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS'}</div>
+                  )}
                 </div>
                 <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 {isUnilateral ? (
@@ -6766,7 +6844,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>
               <div />
               <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{isPlusLoad ? '+' : ''}{UI.unit()}</span>
               {isUnilateral ? (
                 <>
                   <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
@@ -6786,7 +6864,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // Hide warmup rows once training has started, they're done and tapping them would re-trigger the overlay
               if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
-              const prevSet = isWarmupRow ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[i - warmupCount];
+              const prevSet = isWarmupRow ? null : lastEntrySets.filter(s => !s.warmup)[i - warmupCount];
               const isCurrent = i === currentSetIdx;
               const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
@@ -6899,13 +6977,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
                                 : isRepsOnly
                                   ? (prevSet && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps} reps` : '—')
-                                  : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                                  : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${isPlusLoad && prevSet.addedKg != null ? `+${prevSet.addedKg}` : prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                               }
                             </div>
                       )}
 
                       {!isIntensityActive && !isNoWeightReps && <KgInput
-                        value={s.kg}
+                        value={dispWeight(s)}
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
                         onActivate={() => activateKb(i, 'kg')}
@@ -6917,8 +6995,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                             ...en,
                             sets: en.sets.map((st, si) =>
-                              si === i ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
+                              si === i ? { ...st, ...weightPatch(kg), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, ...weightPatch(kg) }
                               : st
                             ),
                           }),
@@ -7337,7 +7415,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </button>
             )}
             <div style={{ flex: 1 }} />
-            <button onClick={() => entry.note ? setSessionNoteOpen(true) : setNotePicker(true)} style={{
+            <button onClick={() => { if (entry.note) { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); } else { setNotePicker(true); } }} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
               borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
@@ -7350,7 +7428,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
           {/* Session note display, tap to edit */}
           {entry.note ? (
-            <button onClick={() => setSessionNoteOpen(true)} style={{
+            <button onClick={() => { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); }} style={{
               marginTop: 10, width: '100%', textAlign: 'left',
               background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
               borderRadius: 6, padding: '10px 12px', cursor: 'pointer',
@@ -7563,7 +7641,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* note type picker */}
       <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
+          <button onClick={() => { setNotePicker(false); setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
             textShadow: 'none',
@@ -8216,10 +8294,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {supersetNewPickerOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSupersetNewPickerOpen(false)} onPick={doLinkNewExerciseSuperset} singleSelect />}
 
       {/* session note editor */}
-      <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session note">
+      <Sheet open={sessionNoteOpen} onClose={() => { setNote(sessionNoteVal); setSessionNoteOpen(false); }} title="Session note">
         <textarea
-          value={entry.note || ''}
-          onChange={e => setNote(e.target.value)}
+          value={sessionNoteVal}
+          onChange={e => setSessionNoteVal(e.target.value)}
           placeholder="e.g. Right knee was acting up, add more warm-up sets next time"
           rows={4}
           style={{
@@ -8229,7 +8307,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             resize: 'vertical', outline: 'none',
           }}
         />
-        <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
+        <Btn onClick={() => { setNote(sessionNoteVal); setSessionNoteOpen(false); }} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
       {/* exercise note editor */}

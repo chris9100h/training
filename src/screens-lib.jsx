@@ -797,6 +797,17 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   scrollParent.style.height = 'auto';
   scrollParent.style.minHeight = 'auto';
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // Custom webfonts (JetBrains Mono for .num, Big Shoulders Display for
+  // .display) can still be mid-swap the first time capturing mode mounts a
+  // batch of brand new text nodes (e.g. a recipe's whole ingredient list only
+  // exists once screenshot mode turns on): html2canvas paints whatever's on
+  // screen at call time, so any element caught before its font finished
+  // loading renders in fallback metrics, the exact same value sitting right
+  // next to another element in the correct font, at a different size/baseline.
+  // document.fonts.ready blocks until every font already requested by the
+  // page (including whatever the capturing re-render above just triggered)
+  // has finished loading.
+  if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
@@ -924,7 +935,7 @@ function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
-function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullBodyweight, onPullBodyweight, hasLoggedWeight }) {
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight }) {
   if (!loggingPickerVisible(equipment, movementType)) return null;
   const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
@@ -945,10 +956,12 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
           {hasLoggedWeight ? (
             <>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
-                <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
+                <Chip on={bwMode === 'pull'} onClick={() => onBwMode('pull')}>Use my bodyweight</Chip>
+                <Chip on={bwMode === 'plus_load'} onClick={() => onBwMode('plus_load')}>Bodyweight + load</Chip>
+                <Chip on={!bwMode} onClick={() => onBwMode(null)}>Enter manually</Chip>
               </div>
-              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab, tap Log there to record it.</div>}
+              {bwMode === 'pull' && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab, tap Log there to record it.</div>}
+              {bwMode === 'plus_load' && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>For weighted pull-ups, belted dips and the like: log just the load you add, and your bodyweight is added on top for volume and records.</div>}
             </>
           ) : (
             <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
@@ -1012,7 +1025,7 @@ const WIZARD_EQUIP_META = {
 function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
-  pullBodyweight, setPullBodyweight }) {
+  bwMode, setBwMode }) {
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -1105,8 +1118,10 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
           {hasLoggedWeight
-            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab, tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
-                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
+            ? [['pull', 'pull', 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab, tap Log there to record it'],
+               ['plus', 'plus_load', 'fa-plus', 'Bodyweight + load', 'Log just the load you add; your bodyweight is added on top'],
+               ['manual', null, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
+                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: bwMode === v, onClick: () => setBwMode(v) }))
             : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
         </div>
       )}
@@ -1174,7 +1189,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [category, setCategory] = useStateL(seed?.category ?? null);
   const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
   const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
-  const [pullBodyweight, setPullBodyweight] = useStateL(false);
+  const [bwMode, setBwMode] = useStateL(null); // null | 'pull' | 'plus_load'
   const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
@@ -1214,7 +1229,10 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null),
+      // Written in lockstep so a client still running an older cached build,
+      // which only knows the boolean, keeps pre-filling bodyweight.
+      pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -1238,7 +1256,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         equipment={equipment} onEquipment={wizardSetEquipment}
         movementType={movementType} setMovementType={setMovementType}
         logMode={logMode} pickLogMode={pickLogMode}
-        pullBodyweight={pullBodyweight} setPullBodyweight={setPullBodyweight}
+        bwMode={bwMode} setBwMode={setBwMode}
       />
     ) : (
     <Sheet open={true} onClose={requestClose} title={seed ? 'Review & add' : 'New exercise'}>
@@ -1292,7 +1310,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <LoggingModeSection
           equipment={equipment} movementType={movementType}
           logMode={logMode} onLogMode={pickLogMode}
-          pullBodyweight={pullBodyweight} onPullBodyweight={setPullBodyweight}
+          bwMode={bwMode} onBwMode={setBwMode}
           hasLoggedWeight={LB.latestBodyweight(store) != null}
         />
         <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
@@ -1349,7 +1367,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
   const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
-  const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
+  const [editBwMode, setEditBwMode] = useStateL(autoEdit ? LB.bodyweightMode(ex) : null);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
@@ -1375,14 +1393,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditBwMode(LB.bodyweightMode(ex)); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1446,10 +1464,15 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       .sort((a, b) => (Date.parse(b.session.ended) || 0) - (Date.parse(a.session.ended) || 0));
   }, [store.sessions, exId, serverRows]);
 
+  // LB.effReps, not a local re-derivation: a one-sided unilateral set (only
+  // one side logged) falls back to the logged side instead of counting the
+  // missing one as 0 reps, matching the in-session History sheet
+  // (screens-train.jsx) and bestE1rmForExercise so the same set doesn't get a
+  // different e1RM depending on which screen shows it.
   const e1rmForSet = (s) => {
     if (s.kg == null) return 0;
-    if (s.repsL != null || s.repsR != null) return LB.e1rm(s.kg, Math.min(s.repsL ?? 0, s.repsR ?? 0));
-    return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
+    const r = LB.effReps(s);
+    return (r != null && r > 0) ? LB.e1rm(s.kg, r) : 0;
   };
 
   // Time-based exercise: the chart/PR math tracks the best DURATION per session
@@ -1462,7 +1485,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const valForSet = (s) => {
     if (isTimeEx) return (!s.warmup && s.timeSec != null ? s.timeSec : 0);
     if (isAssistedEx) return (!s.warmup && s.kg != null ? s.kg : null);
-    return e1rmForSet(s);
+    return s.warmup ? 0 : e1rmForSet(s);
   };
 
   const points = history.map(h => {
@@ -1593,7 +1616,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <LoggingModeSection
               equipment={editEquipment} movementType={editMovementType}
               logMode={editLogMode} onLogMode={setEditLogMode}
-              pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
+              bwMode={editBwMode} onBwMode={setEditBwMode}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
             <Field label="Progression increment (optional)">
@@ -2638,11 +2661,11 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
-                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
-                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -3343,20 +3366,36 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // it beats the artificially-reduced deload weights. store.js already
   // excludes deload from lastSessionForExercise/recentSessionsForExercise;
   // this mirrors that exclusion for the same reason.
-  const prevEntryMap = {};
-  const prevOccSeen = {};
-  s.entries.forEach((e, idx) => {
-    // The Nth occurrence of an exercise in the day compares against the SAME Nth
-    // occurrence of past sessions (audit L3, matching the seed path). Keyed by
-    // entry index so a twice-in-a-day exercise's second slot reads its own prev
-    // instead of sharing the first slot's.
-    const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
-    const prev = store.sessions
-      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
-      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-      .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
-    prevEntryMap[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
-  });
+  // Iterates every entry of s against a filter+sort of ALL sessions per
+  // entry; memoized so it only recomputes when the session's own entries or
+  // the account's session history actually changes, not on every render
+  // (a keystroke in the template-name input below, a sheet/feel toggle, a
+  // background store sync unrelated to this data).
+  const prevEntryMap = useMemoL(() => {
+    const map = {};
+    const prevOccSeen = {};
+    s.entries.forEach((e, idx) => {
+      // The Nth occurrence of an exercise in the day compares against the SAME Nth
+      // occurrence of past sessions (audit L3, matching the seed path). Keyed by
+      // entry index so a twice-in-a-day exercise's second slot reads its own prev
+      // instead of sharing the first slot's.
+      const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
+      // A 5/3/1 main lift's weekly weight is a fixed Training-Max percentage
+      // (FTO_WAVES), not progressive session-to-session, so its "last time" is
+      // the same week of the PREVIOUS cycle, not whichever session of this day
+      // happened to run most recently (see prev531MainLiftSession's own
+      // comment: that's very often a heavier week from last cycle, reading as
+      // a false decline). Only the main lift itself: assistance work on a
+      // 5/3/1 day still compares against the plain most-recent session below.
+      const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
+      const prev = cyclePrev || store.sessions
+        .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
+        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
+        .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
+      map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
+    });
+    return map;
+  }, [store.sessions, store.schedules, s]);
 
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
@@ -3364,117 +3403,158 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);
 
-  const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
-  const prReps = (st, exId) => exIsUnilateral(exId)
-    ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
-    : (st.reps ?? 0);
-  const prRepsValid = (st, exId) => exIsUnilateral(exId)
-    ? (st.repsL != null && st.repsR != null)
-    : st.reps != null;
+  // The whole PR-detection block below scans store.sessions/store.exercises
+  // (prMap: all sessions x entries x sets; prValueOf: a store.exercises.find
+  // per set), so it's memoized to only recompute when the session history,
+  // exercise list, or this session itself changes, not on every render (a
+  // keystroke in the template-name input below, a sheet/feel toggle, a
+  // background store sync unrelated to any of this).
+  const { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR } = useMemoL(() => {
+    const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
+    const prReps = (st, exId) => exIsUnilateral(exId)
+      ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
+      : (st.reps ?? 0);
+    const prRepsValid = (st, exId) => exIsUnilateral(exId)
+      ? (st.repsL != null && st.repsR != null)
+      : st.reps != null;
 
-  // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
-  // loses to a prior 90kg×10, matches the PR logic used everywhere else
-  // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
-  // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
-  // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
-  // has no such cutoff) so a session's PR status reflects only what was known
-  // at the time it happened, not later sessions bleeding backward into it.
-  // Per-exercise "best" ranking value on a per-type scale: weighted → e1RM,
-  // assisted → least-negative load (kg is stored negative), reps-only → reps,
-  // time → seconds. The maps are keyed by exId, so every value for one exId
-  // shares a scale and comparisons stay valid.
-  const prValueOf = (st, exId) => {
-    if (!st.done) return null;
-    const exObj = store.exercises.find(x => x.id === exId);
-    if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
-    if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
-    if (st.kg == null) { const r = LB.effReps(st); return (r != null && r > 0) ? r : null; }
-    if (!prRepsValid(st, exId)) return null;
-    return LB.e1rm(st.kg, prReps(st, exId));
-  };
-  // Whether `s` is the account's most recent ended session, full stop, across
-  // every exercise (not just this session's own dayId): if so, isPR below can
-  // safely fall back to the server aggregate to fill a local windowing gap,
-  // since nothing chronologically later exists that could have set a PR the
-  // aggregate shouldn't yet know about relative to `s`, the exact "later
-  // session bleeding backward" risk the e1RM comment above (and
-  // bestE1rmForExercise's own doc comment in store.js) warns about for an
-  // arbitrary PAST session.
-  const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
-  // Strictly local, strictly from OTHER sessions before s, so this can never
-  // be self-referential to s's own sets. A windowed-out prior session (entries:
-  // [] with aggExercises > 0, see docs/internals.md's History-Windowing section)
-  // simply contributes nothing here, same as a session that genuinely never
-  // trained that exercise, isPR below tells the two cases apart per exercise
-  // via its own fallback rather than a blanket flag, see there.
-  const prMap = {};
-  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
-    sess.entries.forEach(e => e.sets.forEach(st => {
+    // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
+    // loses to a prior 90kg×10, matches the PR logic used everywhere else
+    // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
+    // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
+    // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
+    // has no such cutoff) so a session's PR status reflects only what was known
+    // at the time it happened, not later sessions bleeding backward into it.
+    // Per-exercise "best" ranking value on a per-type scale: weighted → e1RM,
+    // assisted → least-negative load (kg is stored negative), reps-only → reps,
+    // time → seconds. The maps are keyed by exId, so every value for one exId
+    // shares a scale and comparisons stay valid.
+    const prValueOf = (st, exId) => {
+      if (!st.done || st.warmup) return null;
+      const exObj = store.exercises.find(x => x.id === exId);
+      if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
+      if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
+      if (st.kg == null) { const r = LB.effReps(st); return (r != null && r > 0) ? r : null; }
+      if (!prRepsValid(st, exId)) return null;
+      return LB.e1rm(st.kg, prReps(st, exId));
+    };
+    // Whether `s` is the account's most recent ended session, full stop, across
+    // every exercise (not just this session's own dayId): if so, isPR below can
+    // safely fall back to the server aggregate to fill a local windowing gap,
+    // since nothing chronologically later exists that could have set a PR the
+    // aggregate shouldn't yet know about relative to `s`, the exact "later
+    // session bleeding backward" risk the e1RM comment above (and
+    // bestE1rmForExercise's own doc comment in store.js) warns about for an
+    // arbitrary PAST session.
+    const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
+    // Strictly local, strictly from OTHER sessions before s, so this can never
+    // be self-referential to s's own sets. A windowed-out prior session (entries:
+    // [] with aggExercises > 0, see docs/internals.md's History-Windowing section)
+    // simply contributes nothing here, same as a session that genuinely never
+    // trained that exercise, isPR below tells the two cases apart per exercise
+    // via its own fallback rather than a blanket flag, see there.
+    const prMap = {};
+    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
+      sess.entries.forEach(e => e.sets.forEach(st => {
+        const val = prValueOf(st, e.exId);
+        if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
+        prMap[e.exId] = val;
+      }));
+    });
+    const sessionBestMap = {};
+    // Real object reference to whichever set FIRST reached this exercise's
+    // session-best value, keyed by exId. Needed because two sets can tie
+    // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
+    // both share the exact same e1RM value, but only the one that actually
+    // achieved it first is the PR, a repeat of the same number right after
+    // isn't a second, brand new record. Without this, `val !== sessionBest`
+    // below can't tell the two sets apart at all, both compare equal to the
+    // shared session best and both got badged, a real bug that only became
+    // visible once the windowing fix above stopped hiding every PR star
+    // outright.
+    const sessionBestSetMap = {};
+    s.entries.forEach(e => e.sets.forEach(st => {
       const val = prValueOf(st, e.exId);
-      if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
-      prMap[e.exId] = val;
+      if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
+      sessionBestMap[e.exId] = val;
+      sessionBestSetMap[e.exId] = st;
     }));
-  });
-  const sessionBestMap = {};
-  // Real object reference to whichever set FIRST reached this exercise's
-  // session-best value, keyed by exId. Needed because two sets can tie
-  // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
-  // both share the exact same e1RM value, but only the one that actually
-  // achieved it first is the PR, a repeat of the same number right after
-  // isn't a second, brand new record. Without this, `val !== sessionBest`
-  // below can't tell the two sets apart at all, both compare equal to the
-  // shared session best and both got badged, a real bug that only became
-  // visible once the windowing fix above stopped hiding every PR star
-  // outright.
-  const sessionBestSetMap = {};
-  s.entries.forEach(e => e.sets.forEach(st => {
-    const val = prValueOf(st, e.exId);
-    if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
-    sessionBestMap[e.exId] = val;
-    sessionBestSetMap[e.exId] = st;
-  }));
-  const isPR = (st, exId) => {
-    const val = prValueOf(st, exId);
-    if (val == null) return false;
-    const sessionBest = sessionBestMap[exId];
-    if (sessionBest == null || val !== sessionBest) return false;
-    // Tie-break: only the specific set that FIRST reached the session best
-    // is credited, see sessionBestSetMap above. Reference equality is safe
-    // here, filteredSets/e.sets below are the same array (filtered, not
-    // cloned), so this is genuinely the same object, not a lookalike.
-    if (sessionBestSetMap[exId] !== st) return false;
-    const localBest = prMap[exId];
-    // Local history for this exercise exists (from OTHER sessions before s,
-    // never s itself), so it's the most precise source available and wins
-    // outright, no prior history for this exercise at all also lands here
-    // as localBest == null, matches the two other isPR implementations in
-    // this file, which both gate on pr > 0: a first-ever session with an
-    // exercise isn't a PR.
-    if (localBest != null) return val > localBest;
-    // No usable local history: either genuinely the first time this exercise
-    // was done, or its only prior occurrences sit in a windowed-out session.
-    // Both abstain the same way on a past session, a gap in this exercise's
-    // history must not block its own badge here, but also must not fabricate
-    // one, so only the account's latest session gets a second chance below.
-    if (!isLatestSession) return false;
-    const exObj = store.exercises.find(x => x.id === exId);
-    // exerciseBests (below) is e1RM-scale only, same type gate prValueOf
-    // itself uses for assisted/time-mode exercises.
-    if (LB.isAssisted(exObj) || LB.exerciseLogMode(exObj) === 'time') return false;
-    const serverBest = (store.exerciseBests || {})[exId];
-    if (serverBest == null) return false;
-    // >= rather than >: store.exerciseBests (the get_exercise_best_e1rm RPC
-    // result, see bestE1rmForExercise in store.js) is refetched fresh on every
-    // boot. Once s's own sets are saved server-side, the very next refresh
-    // (next app launch or training-screen mount) already includes s's own
-    // contribution, nothing excludes it after the fact, so a strict > would
-    // start comparing val against itself and always lose. An exact tie here
-    // is ambiguous between "s itself set this record" and "a genuine
-    // coincidental tie with old history", but the former is far more likely,
-    // and this app would rather badge that ambiguity than silently drop a
-    // real PR the moment the app gets killed and reopened.
-    return val >= serverBest;
-  };
+    const isPR = (st, exId) => {
+      const val = prValueOf(st, exId);
+      if (val == null) return false;
+      // Tie-break: only the specific set that FIRST reached the session best
+      // is credited, see sessionBestSetMap above. Reference equality is safe
+      // here, filteredSets/e.sets below are the same array (filtered, not
+      // cloned), so this is genuinely the same object, not a lookalike. This
+      // also subsumes a plain value-equality check against sessionBestMap:
+      // sessionBestSetMap[exId] is by construction the set whose prValueOf
+      // equals sessionBestMap[exId], so the reference check alone already
+      // implies val equals the session best.
+      if (sessionBestSetMap[exId] !== st) return false;
+      const localBest = prMap[exId];
+      const exObj = store.exercises.find(x => x.id === exId);
+      // exerciseBests (below) is e1RM-scale only: same type gate prValueOf
+      // itself uses for assisted/time-mode exercises, PLUS this specific set,
+      // since a reps-only set of an otherwise ordinary weighted exercise (kg
+      // left empty) also lands on the reps scale via prValueOf's own fallback,
+      // not e1RM, even though the exercise itself isn't assisted/time-mode.
+      const valIsE1rmScale = st.kg != null && !LB.isAssisted(exObj) && LB.exerciseLogMode(exObj) !== 'time';
+      const serverBest = valIsE1rmScale ? (store.exerciseBests || {})[exId] : null;
+      // Local history for this exercise exists (from OTHER sessions before s,
+      // never s itself), so it's the most precise source available and wins
+      // outright, no prior history for this exercise at all also lands here
+      // as localBest == null, matches the two other isPR implementations in
+      // this file, which both gate on pr > 0: a first-ever session with an
+      // exercise isn't a PR.
+      if (localBest != null) {
+        if (!(val > localBest)) return false;
+        // A higher all-time best sitting in a windowed-out (>70 day old)
+        // session still has to block the badge even when SOME in-window local
+        // history exists, same reasoning as the pure-fallback branch below
+        // (only the latest session can safely trust the live server aggregate
+        // as an upper bound). Without this, any exercise with even one
+        // in-window session, however far below the real all-time best, lost
+        // the server floor entirely.
+        // 0.01 tolerance: serverBest is computed by Postgres (numeric, cast to
+        // float) and val by JS (chained double ops), confirmed live to
+        // sometimes land one ULP apart for the exact same real-world kg/reps
+        // (e.g. 40kg x 11 nets 54.666666666666664 vs 54.66666666666667), a
+        // strict < falsely treated that as "a higher real best exists" and
+        // blocked a genuine, badge-worthy set.
+        if (isLatestSession && serverBest != null && val < serverBest - 0.01) return false;
+        return true;
+      }
+      // No usable local history: either genuinely the first time this exercise
+      // was done, or its only prior occurrences sit in a windowed-out session.
+      // Both abstain the same way on a past session, a gap in this exercise's
+      // history must not block its own badge here, but also must not fabricate
+      // one, so only the account's latest session gets a second chance below.
+      if (!isLatestSession) return false;
+      if (serverBest == null) return false;
+      // >= rather than >: store.exerciseBests (the get_exercise_best_e1rm RPC
+      // result, see bestE1rmForExercise in store.js) is refetched fresh on every
+      // boot. Once s's own sets are saved server-side, the very next refresh
+      // (next app launch or training-screen mount) already includes s's own
+      // contribution, nothing excludes it after the fact, so a strict > would
+      // start comparing val against itself and always lose. An exact tie here
+      // is ambiguous between "s itself set this record" and "a genuine
+      // coincidental tie with old history", but the former is far more likely,
+      // and this app would rather badge that ambiguity than silently drop a
+      // real PR the moment the app gets killed and reopened.
+      // Same 0.01 tolerance as above: val and serverBest come from two
+      // different arithmetic engines and can be a ULP apart for an intended
+      // exact tie.
+      return val >= serverBest - 0.01;
+    };
+    return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
+  }, [store.sessions, store.exercises, s]);
+
+  // How many exercises this session actually set a PR on, a counterpoint to
+  // volDelta below: total volume can land lower than last time even on a
+  // session that set new records (fewer sets, a lighter secondary exercise,
+  // ...), so leading with the count keeps that from reading as a step back.
+  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
+  const showVol = volDelta != null && !s.isDeload;
 
   const muscleGroups = [...new Set(
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
@@ -3513,8 +3593,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
-            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
-            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3588,8 +3668,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
-                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -3691,10 +3771,35 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
-        {/* Volume delta vs previous same-day session */}
-        {volDelta != null && !s.isDeload && (
-          <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
+        {/* PR count and volume delta, each its own pill, dumbbell/arrow on
+            both sides mirrored. Side by side, wrapping to its own line only
+            if the combined width doesn't fit (nowrap on each pill's own
+            content keeps a forced wrap from breaking a pill internally,
+            mid-icon). Volume pill only lights up gold when the delta is
+            actually an improvement, same as the plain-text version before
+            it, a lower-volume session doesn't get a falsely celebratory look. */}
+        {(prCount > 0 || showVol) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: -8 }}>
+            {prCount > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: UI.gold, background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 2, padding: '3px 9px', whiteSpace: 'nowrap' }}>
+                <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
+                {prCount} PR{prCount > 1 ? 'S' : ''}
+                <i className="fa-solid fa-dumbbell" style={{ fontSize: 9 }} />
+              </span>
+            )}
+            {showVol && (
+              <span className="num" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap',
+                color: volDelta >= 0 ? UI.gold : UI.inkFaint,
+                background: volDelta >= 0 ? UI.goldFaint : UI.bgInset,
+                border: `var(--hair-width) solid ${volDelta >= 0 ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '3px 9px',
+              }}>
+                <span>{volDelta >= 0 ? '↑' : '↓'}</span>
+                {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} vs last {s.dayName}
+                <span>{volDelta >= 0 ? '↑' : '↓'}</span>
+              </span>
+            )}
           </div>
         )}
 
@@ -4306,7 +4411,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                               <IntensityBadge label="PARTIALS" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                                {LB.setLoadLabel(st) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                               {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
@@ -4328,7 +4433,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                               <IntensityBadge label="STRETCH" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                                {LB.setLoadLabel(st) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               <StretchChipLib tr={tr} />
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
@@ -4401,7 +4506,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         }}>
                           {st.timeSec != null ? LB.fmtDuration(st.timeSec) : isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                            {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
                         </span>
                       );
@@ -5150,11 +5255,11 @@ function fmtCompareSet(st) {
   const strTxt = stretchText(tr);
   const strSfx = strTxt ? ` +stretch ${strTxt}` : '';
   if (tr.kind === 'weighted_stretch') {
-    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    const main = `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${st.reps ?? '—'}`;
     return `${main}${strSfx}`;
   }
   if (tr.kind === 'lengthened_partial') {
-    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    const main = `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${st.reps ?? '—'}`;
     return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
   }
   if (tr.kind) {
@@ -5165,7 +5270,7 @@ function fmtCompareSet(st) {
   // Checkbox / no-numeric completed set: show a tick, not a meaningless row of placeholder dashes.
   if (st.done && st.kg == null && st.reps == null && st.repsL == null && st.repsR == null) return '✓';
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
-  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+  return `${LB.setLoadLabel(st) != null ? LB.setLoadLabel(st) + UI.unit() : '—'} × ${repsStr}`;
 }
 
 const isTechniqueSet = (st) => !!st && !!st.technique;
@@ -5196,7 +5301,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
           {tr.partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
           {tr.partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>}
@@ -5214,7 +5319,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
-            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
           <StretchChipLib tr={tr} />
         </div>
@@ -5741,8 +5846,9 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
 
   if (session && sessionId) {
     const dismiss = () => {
-      const list = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
-      if (!list.includes(sessionId)) { list.push(sessionId); localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); }
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]'); } catch (_) { list = []; }
+      if (!list.includes(sessionId)) { list.push(sessionId); try { localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); } catch (_) {} }
       go(back || { name: 'settings' });
     };
     return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;
@@ -6448,7 +6554,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                       {st.timeSec != null ? (
                         LB.fmtDuration(st.timeSec)
                       ) : (tr.kind === 'lengthened_partial' || tr.kind === 'weighted_stretch') ? (
-                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
+                        <>{LB.setLoadLabel(st) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
                       ) : tr.kind ? (
                         tr.rounds.map((d, di) => (
                           <React.Fragment key={di}>
@@ -6458,7 +6564,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                           </React.Fragment>
                         ))
                       ) : (
-                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
+                        <>{LB.setLoadLabel(st) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
                       )}
                       {tr.partials > 0 && <span style={{ color: UI.inkFaint }}> +{tr.partials}</span>}
                       {stretchText(tr) && <span style={{ color: UI.inkFaint }}> +stretch {stretchText(tr)}</span>}

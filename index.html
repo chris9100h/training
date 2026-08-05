@@ -5,6 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content" />
 <meta name="theme-color" content="#07060a" />
 <title>Zane</title>
+<meta name="description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<!-- Share metadata. Without these a link to the app renders as a bare URL in
+     WhatsApp, Instagram, Discord and every other chat app, which is how it sat
+     for a long time. Absolute URLs are required, scrapers do not resolve
+     relative ones. The image is built from tools/og-card.html; edit that
+     rather than the JPEG. Crawlers fetch this file from the server directly
+     and never touch the service worker, so these take effect on deploy
+     without a cache bump. -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Zane" />
+<meta property="og:url" content="https://zane-wo.com/" />
+<meta property="og:title" content="Zane · Train with Zane or remain the same" />
+<meta property="og:description" content="The all-in-one fitness app: training, nutrition, health metrics and coaching in one log. Runs in your browser, installs to your home screen." />
+<meta property="og:image" content="https://zane-wo.com/icons/og-card.jpg" />
+<meta property="og:image:alt" content="The Zane wordmark beside the app running on two phones" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Zane · Train with Zane or remain the same" />
+<meta name="twitter:description" content="The all-in-one fitness app: training, nutrition, health metrics and coaching in one log. Runs in your browser, installs to your home screen." />
+<meta name="twitter:image" content="https://zane-wo.com/icons/og-card.jpg" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
@@ -76,6 +95,16 @@
        the ruled lines to stay readable; a surface that already has its own
        background doesn't need it and would just look muddy. */
     --text-lift: none;
+    /* Same value as --text-lift, but the "off" state is a zero-effect shadow
+       instead of the bare keyword 'none'. text-shadow's grammar allows 'none'
+       OR a comma-separated shadow list, never 'none' as one item inside a
+       list, so anywhere --text-lift needs to combine with another shadow in
+       the same declaration (perfectWeekPulse below is the only such case),
+       reference this instead: 'none, 0 0 14px …' is invalid CSS and drops
+       the whole declaration, silently killing the animation on every theme
+       but paper (L2, audit-2026-08). Every other (single-value) use of
+       --text-lift is unaffected and should keep using --text-lift directly. */
+    --text-lift-safe: 0 0 0 rgba(0,0,0,0);
     /* Same idea as --text-lift, but for the .knurl divider bar (box-shadow,
        not text-shadow, since it is a flat gradient strip, not text). */
     --knurl-lift: none;
@@ -351,7 +380,7 @@
      avoid looking like a slide-in from one side. */
   @keyframes tabPopIn { from { opacity: 0; transform: translateX(-50%) scale(0.35); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
   @keyframes rowFlash { 0% { box-shadow: inset 0 0 0 9999px rgba(143,176,105,0.20); } 100% { box-shadow: inset 0 0 0 9999px rgba(143,176,105,0); } }
-  @keyframes perfectWeekPulse { 0%, 100% { text-shadow: var(--text-lift), 0 0 0px rgba(var(--accent-rgb),0); } 50% { text-shadow: var(--text-lift), 0 0 14px rgba(var(--accent-rgb),0.9); } }
+  @keyframes perfectWeekPulse { 0%, 100% { text-shadow: var(--text-lift-safe), 0 0 0px rgba(var(--accent-rgb),0); } 50% { text-shadow: var(--text-lift-safe), 0 0 14px rgba(var(--accent-rgb),0.9); } }
   @keyframes tourRingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb),0.5); } 60% { box-shadow: 0 0 0 8px rgba(var(--accent-rgb),0); } }
   /* Bigger/brighter ring than tourRingPulse, needs to read clearly on a tiny
      26px checkbox, so the subtler tour version isn't enough here. */
@@ -964,6 +993,7 @@ window.applyDarkMode = function(key) {
   var gridEnabled = _gridPref === '1' ? true : _gridPref === '0' ? false : key === 'paper';
   window.__gridEnabled = gridEnabled;
   s.setProperty('--text-lift', gridEnabled ? _textLiftFor(m.bgRaised) : 'none');
+  s.setProperty('--text-lift-safe', gridEnabled ? _textLiftFor(m.bgRaised) : '0 0 0 rgba(0,0,0,0)');
   s.setProperty('--knurl-lift', gridEnabled ? _boxLiftFor(m.bgRaised) : 'none');
   s.setProperty('--chart-text-lift-opacity', gridEnabled ? 0.95 : 0);
   s.setProperty('--chart-text-lift-color', m.bgRaised);

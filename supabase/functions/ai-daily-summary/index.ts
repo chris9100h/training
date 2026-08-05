@@ -4,96 +4,62 @@
 // is still null, and this function re-checks that same gate server-side (a
 // client-only gate is trivially bypassed by calling this endpoint directly).
 //
-// Unlike scan-label-claude, this is plain text in, plain text out, no vision,
+// Unlike the label scanner, this is plain text in, plain text out, no vision,
 // no strict JSON: a model instructed to "keep it casual" can and does malform
 // JSON, so the contract here is a simple two-part text format instead (see
 // SYSTEM_PROMPT). All the day's numbers/trends, including the training
 // section's totals and its comparison to the last session of the same
 // dayId, are assembled CLIENT-SIDE (LB.buildDailySummaryPayload,
-// already-loaded store data, no extra fetch) and handed to Claude
-// pre-computed: Claude phrases them, it does not recompute or eyeball a
-// trend itself, so a wrong read of "trending down" vs "trending up" is not
-// a failure mode this function has to worry about. The training payload
+// already-loaded store data, no extra fetch) and handed to the model
+// pre-computed: it phrases them, it does not recompute or eyeball a trend
+// itself, so a wrong read of "trending down" vs "trending up" is not a
+// failure mode this function has to worry about. The training payload
 // deliberately carries at most two pre-picked "highlight" exercises
 // (LB.dsExerciseHighlights) rather than a full per-exercise breakdown: an
 // earlier version handed over the complete set-by-set list on the theory
-// that two short lists are easy reading, but in practice Claude walked
+// that two short lists are easy reading, but in practice the model walked
 // through every exercise in turn no matter how firmly SYSTEM_PROMPT told it
 // not to. Capping the data itself is what actually holds.
+//
+// Qwen writes the summary, for the cost; Claude is the automatic fallback if
+// Qwen itself is unreachable, same PRIMARY_PROVIDER/FALLBACK_PROVIDER +
+// callModelWithFallback pattern as scan-label/parse-meal, see
+// supabase/functions/_shared/ai.ts. No reasoning either way (reasoningBudget:
+// null): the numbers are already computed, the job is phrasing and a casual
+// judgment call, not arithmetic to double-check.
 //
 // One action: POST { date, weight, weightTrend, goal, steps, calories,
 // protein, carbs, fat, targets, adherence, waterMl, foodItems, medsDue,
 // medsTaken, medsTakenNames, glucose, bloodPressure, bodyTemp, note,
 // training, cardio }
 // (exact shape: LB.buildDailySummaryPayload in src/store.js)
-// -> { headline: string|null, body: string, generatedAt: string }
+// -> { summary: string, generatedAt: string } (summary is headline + blank
+// line + body concatenated, see the client-side splitHeadlineBody split)
 //
-// Needs the secret ANTHROPIC_API_KEY (same one scan-label-claude uses), and
-// SUPABASE_SERVICE_ROLE_KEY (for the pre-read/write against zane_daily_logs,
-// which bypasses RLS: see the comment above upsertSummary for why that's
-// needed here specifically, not just convenient).
+// Needs whichever secret the active provider uses (ANTHROPIC_API_KEY,
+// QWEN_API_KEY, see _shared/ai.ts), and SUPABASE_SERVICE_ROLE_KEY (for the
+// pre-read/write against zane_daily_logs, which bypasses RLS: see the
+// comment above upsertSummary for why that's needed here specifically, not
+// just convenient).
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
-
-// Same admin identity as admin-send-email/screens-settings.jsx/screens-featuremap.jsx
-// (isAdmin = store.user?.email === this). The admin gets unlimited quota AND can
-// re-generate past the once-a-day gate below, so testing a prompt change never
-// needs a manual DB reset.
-const ADMIN_EMAIL = 'office@btc-prime.biz';
+import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
+import { callModel, callModelWithFallback, isProviderId, stripEmDash } from '../_shared/ai.ts';
 
 const DAILY_SUMMARY_LIMIT = 5;
 
-// Advisory per-user daily quota (same zane_api_usage/bump_api_usage as
-// scan-label-claude, migration 0207, new kind 'daily_summary'). Fails OPEN on
-// purpose, same reasoning as there: a broken quota mechanism must never be
-// the reason someone can't get their summary. The REAL once-a-day gate is
-// ai_summary_generated_at below; this is only a backstop against a retry
-// storm or multi-tab spam before a first successful generation.
-async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
-  try {
-    const base = Deno.env.get('SUPABASE_URL') ?? '';
-    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    if (!base || !key) return true;
-    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
-    });
-    if (!r.ok) return true;
-    return (await r.json()) !== false;
-  } catch (_) {
-    return true;
-  }
-}
+// Qwen runs first for the cost; Claude was the long-standing default before
+// Qwen existed and is what a Qwen failure falls back to, see
+// callModelWithFallback in _shared/ai.ts.
+const PRIMARY_PROVIDER = 'qwen';
+const FALLBACK_PROVIDER = 'claude';
 
-async function resolveUser(req: Request): Promise<{ id: string; email: string | null } | null> {
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!token) return null;
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
-    headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
-  }).catch(() => null);
-  if (!r?.ok) return null;
-  const user = await r.json().catch(() => null);
-  return user?.id ? { id: user.id, email: user.email ?? null } : null;
-}
+const LABELS = { tag: 'ai-daily-summary', feature: 'AI summaries', subject: 'summary writer' };
 
 const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
 
-If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression.
+If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression. A modest difference in total volume or load versus the last time this same session was done, in either direction, and the same for any single highlighted movement, is normal on its own and not something to comment on: heavier weight for fewer reps lowers total volume even on a session that was genuinely harder and better, lighter weight for more reps raises it, neither means anything by itself. Only bring up a volume or load comparison at all when the difference is large AND paired with another concrete signal that something is actually off, such as a reported bad feel or working sets themselves dropping sharply; otherwise leave it out of your response entirely rather than reassuring the user about a number that was never a problem.
 
-The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
+The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. Never use it to explain a volume or load difference either: phrasing like "that's normal given the scheduling gap" invents a causal link between two facts you were given completely separately, the day count and the load number are unrelated, do not connect them. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
 
 You are told the user's current goal, cutting, gaining, or maintaining, or that no goal was specified. Judge the weight trend's direction ONLY against that: for a cut, a decrease is the desired direction and an increase is what's worth flagging; for a gain, the reverse, an increase is desired and a decrease is worth flagging; for maintain, staying flat IS the goal, so it is a material move in EITHER direction that's worth a mention, not a decrease specifically. Never default to treating a falling number as inherently good progress, that reflex is only correct for a subset of users and is actively wrong, even a little insulting, for someone deliberately gaining. If no goal was given, report the weight trend as a plain fact only (the number and its direction), never characterize it as good, bad, on track, or the right or wrong direction, you were not given enough to make that call.
 
@@ -291,17 +257,6 @@ function payloadIsEmpty(p: Record<string, any>): boolean {
     && !(Array.isArray(p.cardio) && p.cardio.length);
 }
 
-// CLAUDE.md's house rule ("no em dashes, ever") is enforced on committed
-// source by tools/check-emdash.cjs, which can't touch runtime LLM output. A
-// prompt instruction alone is not a guarantee with any LLM, so replace any
-// that slip through as a deterministic backstop. Matches by Unicode escape
-// (U+2014), not the literal character, so check-emdash.cjs's grep (whose
-// only exception is a lone placeholder glyph, not one inside a regex) has
-// nothing to flag in this file.
-function stripEmDash(s: string): string {
-  return s.replace(/\u2014/g, ', ');
-}
-
 // Best-effort rollback for a claim that didn't pan out (Anthropic failed, or
 // the content write after it failed): resets the gate back to NULL so the
 // user can simply retry, exactly as if this request had never claimed it.
@@ -329,19 +284,17 @@ async function releaseClaim(base: string, serviceKey: string, rowId: string): Pr
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
-  const json = (body: unknown, status: number) =>
-    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  const pre = preflight(req);
+  if (pre) return pre;
 
   const caller = await resolveUser(req);
-  if (!caller) return json({ error: 'unauthorized' }, 401);
+  if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
   const userId = caller.id;
   const isAdmin = caller.email === ADMIN_EMAIL;
 
   const payload = await req.json().catch(() => ({}));
   const date = typeof payload?.date === 'string' ? payload.date : '';
-  if (!date) return json({ error: 'missing date' }, 400);
+  if (!date) return jsonResponse({ error: 'missing date' }, 400);
   // Loose sanity bound, not a strict "must be exactly yesterday" check: exact
   // "yesterday" is inherently client-timezone-dependent, the server can't
   // know the user's local timezone precisely. This is only a backstop
@@ -351,12 +304,12 @@ Deno.serve(async (req) => {
   // makes daysBetween return NaN, which isNaN() below also rejects.
   const todayUTC = new Date().toISOString().slice(0, 10);
   const dayDiff = daysBetween(date, todayUTC);
-  if (isNaN(dayDiff) || Math.abs(dayDiff) > 3) return json({ error: 'invalid date' }, 400);
-  if (payloadIsEmpty(payload)) return json({ error: 'Nothing logged that day, nothing to summarize.' }, 400);
+  if (isNaN(dayDiff) || Math.abs(dayDiff) > 3) return jsonResponse({ error: 'invalid date' }, 400);
+  if (payloadIsEmpty(payload)) return jsonResponse({ error: 'Nothing logged that day, nothing to summarize.' }, 400);
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  if (!base || !serviceKey) return json({ error: 'Not set up yet (missing SUPABASE_SERVICE_ROLE_KEY).' }, 503);
+  if (!base || !serviceKey) return jsonResponse({ error: 'Not set up yet (missing SUPABASE_SERVICE_ROLE_KEY).' }, 503);
 
   // Pre-read: (a) a fast-path reject for the obvious already-generated case,
   // (b) hands back the row's existing id, if any, so the atomic claim below
@@ -376,24 +329,23 @@ Deno.serve(async (req) => {
       if (Array.isArray(rows) && rows[0]) {
         existingId = rows[0].id ?? null;
         if (rows[0].ai_summary_generated_at && !isAdmin) {
-          return json({ error: 'Already generated for that day.' }, 409);
+          return jsonResponse({ error: 'Already generated for that day.' }, 409);
         }
       }
     }
   } catch (e) {
     console.error('[ai-daily-summary] pre-read error:', e);
-    return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+    return jsonResponse({ error: 'Could not check today\'s summary status. Try again.' }, 502);
   }
 
   if (!isAdmin && !await withinQuota(userId, 'daily_summary', DAILY_SUMMARY_LIMIT)) {
-    return json({ error: `That's ${DAILY_SUMMARY_LIMIT} summary attempts today, well past normal use. The limit resets tomorrow.` }, 429);
+    return jsonResponse({ error: `That's ${DAILY_SUMMARY_LIMIT} summary attempts today, well past normal use. The limit resets tomorrow.` }, 429);
   }
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  if (!apiKey) return json({ error: 'AI summaries are not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
-  const model = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim() || DEFAULT_MODEL;
+  // Manual-testing override only, see the file header; the app never sends this.
+  const explicitProvider = isProviderId(payload?.provider) ? payload.provider : null;
 
-  // Atomic claim, performed right before the (slow, paid) Anthropic call:
+  // Atomic claim, performed right before the (slow, paid) model call:
   // the pre-read above only rejects the OBVIOUS already-done case, two
   // concurrent requests can both sail through it before either writes, both
   // then paying for a full Anthropic call. This is the real gate. A
@@ -428,18 +380,18 @@ Deno.serve(async (req) => {
       );
     } catch (e) {
       console.error('[ai-daily-summary] claim fetch error:', e);
-      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check today\'s summary status. Try again.' }, 502);
     }
     if (!claimResp.ok) {
       console.error('[ai-daily-summary] claim error', claimResp.status, await claimResp.text().catch(() => ''));
-      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check today\'s summary status. Try again.' }, 502);
     }
     const claimedRows = await claimResp.json().catch(() => []);
     if (!Array.isArray(claimedRows) || !claimedRows.length) {
       // Someone else's request already flipped ai_summary_generated_at
       // between our pre-read and this UPDATE: same outcome as the
       // already-generated case above.
-      return json({ error: 'Already generated for that day.' }, 409);
+      return jsonResponse({ error: 'Already generated for that day.' }, 409);
     }
     rowId = existingId;
     claimed = true;
@@ -459,56 +411,37 @@ Deno.serve(async (req) => {
       });
     } catch (e) {
       console.error('[ai-daily-summary] claim insert error:', e);
-      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check today\'s summary status. Try again.' }, 502);
     }
     if (!insertResp.ok) {
       // A concurrent request won the race and inserted this user_id+date row
       // first (the UNIQUE constraint rejects our duplicate insert): same
       // outcome as the already-generated case above.
-      if (insertResp.status === 409) return json({ error: 'Already generated for that day.' }, 409);
+      if (insertResp.status === 409) return jsonResponse({ error: 'Already generated for that day.' }, 409);
       console.error('[ai-daily-summary] claim insert error', insertResp.status, await insertResp.text().catch(() => ''));
-      return json({ error: 'Could not check today\'s summary status. Try again.' }, 502);
+      return jsonResponse({ error: 'Could not check today\'s summary status. Try again.' }, 502);
     }
     claimed = true;
   }
 
-  let resp: Response;
-  try {
-    resp = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 500,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(payload) }] }],
-      }),
-    });
-  } catch (e) {
-    console.error('[ai-daily-summary] anthropic fetch error:', e);
+  const modelCall = {
+    system: SYSTEM_PROMPT,
+    userText: buildUserPrompt(payload),
+    maxTokens: 500,
+    reasoningBudget: null,
+  };
+  const result = explicitProvider
+    ? await callModel(explicitProvider, modelCall, LABELS)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
+  if (!result.ok) {
     if (claimed) await releaseClaim(base, serviceKey, rowId);
-    return json({ error: 'Could not reach the summary writer. Try again.' }, 502);
+    return jsonResponse({ error: result.error }, result.status);
   }
 
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    console.error('[ai-daily-summary] anthropic error', resp.status, detail);
-    if (claimed) await releaseClaim(base, serviceKey, rowId);
-    return json({ error: `Summary writer failed (${resp.status}). Try again.` }, 502);
-  }
-
-  const data = await resp.json().catch(() => null);
-  const content = data?.content;
-  const text = Array.isArray(content)
-    ? content.map((p: { type?: string; text?: string }) => (p?.type === 'text' ? p.text ?? '' : '')).join('')
-    : '';
+  const text = result.text;
   if (!text.trim()) {
     if (claimed) await releaseClaim(base, serviceKey, rowId);
-    return json({ error: 'Got an empty response. Try again.' }, 422);
+    return jsonResponse({ error: 'Got an empty response. Try again.' }, 422);
   }
 
   // Store the full text as-is (headline + blank line + body): the client
@@ -541,13 +474,13 @@ Deno.serve(async (req) => {
       const detail = await r.text().catch(() => '');
       console.error('[ai-daily-summary] upsert error', r.status, detail);
       if (claimed) await releaseClaim(base, serviceKey, rowId);
-      return json({ error: 'Generated the summary but could not save it. Try again.' }, 502);
+      return jsonResponse({ error: 'Generated the summary but could not save it. Try again.' }, 502);
     }
   } catch (e) {
     console.error('[ai-daily-summary] upsert fetch error:', e);
     if (claimed) await releaseClaim(base, serviceKey, rowId);
-    return json({ error: 'Generated the summary but could not save it. Try again.' }, 502);
+    return jsonResponse({ error: 'Generated the summary but could not save it. Try again.' }, 502);
   }
 
-  return json({ summary, generatedAt }, 200);
+  return jsonResponse({ summary, generatedAt }, 200);
 });

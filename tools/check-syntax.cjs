@@ -68,7 +68,7 @@ for (const rel of [...plainSources, ...jsxSources]) {
     src = fs.readFileSync(file, 'utf8');
   } catch (e) {
     failed = true;
-    console.error(`FAIL ${rel} — listed in index.html but missing on disk`);
+    console.error(`FAIL ${rel}: listed in index.html but missing on disk`);
     continue;
   }
   try {
@@ -80,7 +80,7 @@ for (const rel of [...plainSources, ...jsxSources]) {
         if (node.type === 'FunctionDeclaration' && node.id?.name) {
           const name = node.id.name;
           // Babel injects synthetic helpers (_extends, _objectSpread, ...) for
-          // JSX spread props etc. — these never appear as `function NAME` in the
+          // JSX spread props etc. These never appear as `function NAME` in the
           // hand-authored source, only in the transformed output, and are
           // legitimately duplicated verbatim across files. Skip them; we only
           // care about collisions between actually-authored declarations.
@@ -115,7 +115,7 @@ for (const [name, entries] of functionDecls) {
   if (new Set(entries.map(e => e.body)).size < 2) continue;
   failed = true;
   console.error(`FAIL duplicate top-level function '${name}' with DIFFERING bodies in: ${entries.map(e => e.file).join(', ')}`);
-  console.error('     Classic scripts share one global scope — whichever file loads last silently');
+  console.error('     Classic scripts share one global scope: whichever file loads last silently');
   console.error('     overwrites the others for every unqualified (non-LB.-prefixed) call site.');
 }
 
@@ -127,7 +127,7 @@ for (const [name, files] of varDecls) {
   // exact same value.
   failed = true;
   console.error(`FAIL duplicate top-level const/let '${name}' declared in: ${uniqueFiles.join(', ')}`);
-  console.error('     Classic scripts share one global scope — the file that loads second throws');
+  console.error('     Classic scripts share one global scope: the file that loads second throws');
   console.error('     "Identifier has already been declared", which silently kills every other');
   console.error('     declaration in that file too, not just this name. Declare it in exactly one');
   console.error('     file and reference it as a plain global (or via window.LB) from the rest.');

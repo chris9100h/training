@@ -22,6 +22,31 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.697',
+    date: '2026-08-04',
+    title: 'Badges, and where this is going \ud83c\udfc5',
+    items: [
+      "\ud83c\udfc5 There's a badge under the wordmark now: your home screen shows whether you're on Free or Lifetime Premium, right below ZANE. That's the whole feature, and it's the groundwork for the point below.",
+      "\ud83c\udf96\ufe0f Lifetime Premium goes to the first 75 people who genuinely use Zane. No code, no signup, nothing to claim: just train, and it lands on your account by itself. 21 of you already have it as of today, which means you were here early and stuck around. Thank you, genuinely. 54 seats are still open.",
+      { text: "Nothing is behind a paywall today, and nothing is about to be. Paid plans will happen eventually, that's the honest version, but it is not close and nothing is being held back in the meantime. When it does arrive it's there to cover the server bill rather than build a business, and the aim is under $5 a month. Those 75 accounts never pay it, and everything you have logged stays yours and stays exportable either way.", emphasis: true },
+      "\ud83d\udeaa The app is open to everyone now. Registration has been open for a while already, but with a limited number of seats behind the scenes. That cap is gone entirely, no server-side limit left: send the link to whoever you like.",
+    ],
+  },
+  {
+    id: 'v2.695',
+    date: '2026-08-04',
+    title: 'Recipes, camera-ready 📸',
+    items: [
+      "📸 Screenshot mode for recipes: the recipe editor gets a camera button now, just like session and plan sharing. Turn any recipe into a clean, watermarked image with every ingredient, its macros, and your prep notes, ready to save or send.",
+      "📅 Meal plans that think a week ahead: your active meal plan now fills in the next 7 days automatically, not just today, so tomorrow's meals are already sitting there when you get to them. Every meal plan's detail screen also shows a quick macro summary up top now, no more adding it up by hand.",
+      "🍽️ See what's still planned, not just what's logged: each meal category in your daily timeline (Breakfast, Lunch, ...) now shows the macros still coming from planned-but-not-yet-eaten items, folded right into the same line as what you've already logged.",
+      "🔁 5/3/1 comparisons that respect the program: starting a new cycle no longer flags your main lift as a step backward just because week 1's lighter weight looks smaller than last cycle's heavier week 3. It now compares against the same week of the cycle before, exactly how 5/3/1 is supposed to progress.",
+      "🏅 PR badges you can trust, plus a running count: session detail now shows how many PRs you hit right next to your volume change. The badges themselves got more accurate too: warmup sets can no longer steal the spot from your actual best set, a tiny rounding mismatch between the app and the server can no longer hide a badge after you reopen the app, and a deload session can no longer block a genuine new record from ever showing again.",
+      "🎯 Sharper calorie estimates: your adaptive maintenance number no longer gets thrown off by today's still-incomplete food log, and the Targets and Algorithm Estimate cards both show a week-average row now alongside today's numbers.",
+      "✨ Smaller stuff: fixed a font-mismatch glitch that could show up in screenshot exports, plus a handful of quieter reliability fixes around multi-device sync and the shopping list.",
+    ],
+  },
+  {
     id: 'v2.692',
     date: '2026-08-02',
     title: 'Describe a meal, now with eyes 📸',

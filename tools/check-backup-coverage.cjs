@@ -7,7 +7,7 @@
 //
 // Source of truth: supabase/schema.sql (already reconciled with the migrations by
 // check-db-docs.cjs and with the live DB by check-db-live.cjs). Parsed with the
-// shared helper in tools/lib/sql-schema.cjs — one parser, no second truth.
+// shared helper in tools/lib/sql-schema.cjs: one parser, no second truth.
 //
 // Three checks:
 //   IMPORT  : actually runs importFromBackup() in a vm sandbox with a recording
@@ -76,14 +76,21 @@ const EXCLUDED = {
 // Columns that legitimately never round-trip.
 const GLOBAL_ALLOW = new Set(['user_id', 'created_at', 'updated_at', 'next_reminder_at']);
 const PER_TABLE_ALLOW = {
-  zane_sessions: new Set(['entries']),         // legacy JSONB, never written (relational is source of truth)
+  // completed_server_at: server-stamped and client-unwritable by design (it is
+  // what makes the founding-member day spread forgery-resistant). Restoring it
+  // from a user-editable backup file would hand that back.
+  zane_sessions: new Set(['entries', 'completed_server_at']),  // entries: legacy JSONB, never written (relational is source of truth)
   // sw_version: internal client marker. auto_close_notify / manual_calories: not
   // part of the store model (never loaded/synced), so nothing to round-trip; add
   // them to loadFromSupabase + the store if they ever become real settings.
   // tz_offset_minutes: environment-derived, auto-set by the client on load.
   // water_last_push_at: server-written throttle for the water reminder cron.
   zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at']),
-  zane_profiles: new Set(['approved']),        // admin-controlled, not user-restorable
+  // tier / tier_granted_at: server-authored, granted by grant_lifetime_if_qualified()
+  // and reverted on any client write by zane_profiles_protect_tier. Deliberately
+  // NOT restorable: a backup file is user-editable, so importing it would be a
+  // free "set tier = lifetime" for anyone willing to edit one line of JSON.
+  zane_profiles: new Set(['tier', 'tier_granted_at']),
 };
 const allowed = (table, col) =>
   GLOBAL_ALLOW.has(col) || (PER_TABLE_ALLOW[table] && PER_TABLE_ALLOW[table].has(col));
@@ -135,7 +142,7 @@ function captureImportedColumns() {
   const LB = sandbox.window.LB;
 
   // A minimal but structurally complete backup: one row per table so every
-  // per-table upsert runs. Values are irrelevant — the mapped upserts include
+  // per-table upsert runs. Values are irrelevant: the mapped upserts include
   // each column (defaulting to null), so the recorded keys are the full set.
   const backup = {
     user: { name: 'x' },
