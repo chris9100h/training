@@ -393,7 +393,12 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions[0].entries[0].sets[0].kg, 95, 'server value must win when this device made no edit');
   });
   test('mergeSessions still rescues local technique/drops when entries match the base', () => {
-    const base = [mkInWindow(90)];
+    // base and cur must both carry the technique/drops (cur matches base, no
+    // unsynced edit): giving it to cur alone made cur differ from base and
+    // this test silently exercised the wholesale-keep-cur branch (same as
+    // the very first test above) instead of the mergeEntrySets rescue branch
+    // its name and assertions claim to cover (H1 verification, 2026-08-05).
+    const base = [mkInWindow(90, { technique: 'drop', drops: [{ kg: 70, reps: 8 }] })];
     const cur = [mkInWindow(90, { technique: 'drop', drops: [{ kg: 70, reps: 8 }] })];
     const fresh = [mkInWindow(90)]; // server lost technique/drops in a flush race
     const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
@@ -414,6 +419,19 @@ async function testAsync(name, fn) {
     const fresh = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
     const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
     assert.strictEqual(sessions[0].entries[0].sets.length, 1, 'remote deletion must not be resurrected');
+  });
+  // baseEntries === null (this device's persisted base never captured real
+  // entries for this session, e.g. it sat out-of-window until a date edit
+  // just moved it in, and the entries/sets sync failed in the same flush the
+  // date write itself went through on): "nothing to compare against" must
+  // not silently resolve to "trust the server", that reintroduced the exact
+  // H1 data loss through a narrower door (H1 verification, 2026-08-05).
+  test('mergeSessions keeps an unsynced offline edit when this session has no usable base (H1 gap)', () => {
+    const base = [{ id: 'w1', date: '2026-06-09', ended: 'x', entries: [] }]; // windowed/never-hydrated base
+    const cur = [mkInWindow(130)]; // offline edit, now in-window locally
+    const fresh = [mkInWindow(90)]; // server's stale pre-edit value
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 130, 'the offline edit must survive even with no usable base to compare against');
   });
 
   await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {

@@ -4601,7 +4601,16 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     // as mergeCollectionById below.
     const baseMem = baseById?.get(s.id);
     const baseEntries = (baseMem?.entries || []).length ? baseMem.entries : null;
-    const cachedDiffersFromBase = !!(baseEntries && entrySetsDifferFromBase(mem.entries, baseEntries));
+    // No usable base (this device's last confirmed-synced snapshot never
+    // captured real entries for this session, e.g. it sat out-of-window
+    // until a date edit just moved it in, and the entries/sets sync failed
+    // in the same flush the date write itself went through on) must resolve
+    // the same direction as "the cache genuinely differs", not "matches":
+    // there is nothing to compare against, so silently trusting the server
+    // here is exactly how H1 lost unsynced edits in the first place, just
+    // through a narrower door (audit H1 verification, 2026-08-05). Same
+    // bias as keepCachedEntries above, when in doubt, don't drop local data.
+    const cachedDiffersFromBase = baseEntries ? entrySetsDifferFromBase(mem.entries, baseEntries) : true;
     const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
       ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
     return {
