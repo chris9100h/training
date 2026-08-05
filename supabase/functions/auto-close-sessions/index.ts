@@ -200,14 +200,25 @@ Deno.serve(async (req) => {
         closed++;
       }
 
-      // Clear in_progress_session_id if it still points at this session
-      if (sett?.in_progress_session_id === sess.id) {
-        await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}`, {
-          method: 'PATCH',
-          headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ in_progress_session_id: null }),
-        });
-      }
+      // Clear in_progress_session_id, scoped to still pointing at this
+      // session AT THE MOMENT OF THE WRITE, not just when `sett` was fetched
+      // at the top of this loop iteration. Several awaits sit in between
+      // (the sets query, the close-PATCH, the notify write, the push send):
+      // another device starting a brand new session for this same user in
+      // that window would otherwise have its own fresh pointer nulled by
+      // this same PATCH (a plain JS `if` on the stale `sett` snapshot can't
+      // see that), and the next tick's isTracked/orphan check would then
+      // hard-delete that live session with all its sets, same data-loss
+      // class as the close-PATCH check above, just the other direction
+      // (H2-Rest, audit-2026-08 verification pass). Scoping the PATCH
+      // itself on in_progress_session_id=eq.<id> makes it an atomic
+      // conditional update: a race makes this a no-op instead of a wrong
+      // write.
+      await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}&in_progress_session_id=eq.${sess.id}`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ in_progress_session_id: null }),
+      });
     }
 
     console.log(`[auto-close] done, closed: ${closed}, deleted: ${deleted}`);

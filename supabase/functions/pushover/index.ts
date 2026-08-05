@@ -31,6 +31,14 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
   const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  // Same trap as web-push/index.ts's own isNonceCurrent (M10, audit-2026-08):
+  // a non-2xx PostgREST reply still parses as JSON (an error object, not an
+  // array), so the .catch fallback below never fires and rows[0] would read
+  // undefined off that object, making this return false. Both call sites
+  // below read false as "the user aborted" and silently drop a legitimate
+  // delayed Pushover send that never asked to be cancelled. Fail OPEN (still
+  // current) instead, this copy was missed when web-push's was fixed.
+  if (!r.ok) { console.error(`[pushover] nonce check failed: ${r.status} ${await r.text().catch(() => '')}`); return true; }
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
 }
