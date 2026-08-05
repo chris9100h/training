@@ -806,8 +806,21 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   // next to another element in the correct font, at a different size/baseline.
   // document.fonts.ready blocks until every font already requested by the
   // page (including whatever the capturing re-render above just triggered)
-  // has finished loading.
+  // has finished loading. Resolving there is not the same as the browser
+  // having already REFLOWED with the new font metrics, an extra frame is
+  // needed to guarantee that before anything below measures the page:
+  // confirmed live (repro script, forced a post-measurement size change) that
+  // node.scrollHeight read even one frame too early locks html2canvas's
+  // height/windowHeight to a stale, too-tall value, real content ends up
+  // shorter than the canvas, showing as dead space at the bottom and, since
+  // the crop's default y also comes from a pre-reflow rect, a clipped-off
+  // top too (support report, recipe screenshot, 2026-08-05). The avatar-load
+  // branch below already added a single RAF for this same reason, but only
+  // on first capture and only when the avatar wasn't already cached/complete,
+  // every other path (including scrollHeight itself, read further down) had
+  // no such guarantee.
   if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
