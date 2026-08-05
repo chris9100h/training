@@ -244,6 +244,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
 function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack, setStore }) {
   const [notes, setNotes] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
+  const [loadErr, setLoadErr] = useStateC(false);
   const [body, setBody] = useStateC('');
   const [sending, setSending] = useStateC(false);
   const [imageFile, setImageFile] = useStateC(null);
@@ -272,10 +273,16 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     attachImageFile(item.getAsFile());
   };
 
+  // A failed reload right after send() (L14, audit-2026-08) must not blank
+  // out notes that loaded fine a moment ago, addCoachingNote already
+  // persisted the new message server-side either way, so this only shows a
+  // small stale-view hint (below, near the composer) instead of an error
+  // state replacing the message list.
   const reload = () => {
     setLoading(true);
     LB.loadCoachingNotes(coachingId, thread.id)
-      .then(data => setNotes([...data].reverse()))
+      .then(data => { setNotes([...data].reverse()); setLoadErr(false); })
+      .catch(e => { console.error('coaching notes reload failed:', e); setLoadErr(true); })
       .finally(() => setLoading(false));
   };
 
@@ -289,6 +296,11 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   useEffectC(() => {
     reload();
     if (threadUnreadIds.length) {
+      // markCoachingNotesRead throws on a failed write (unwrap, see
+      // CLAUDE.md), so a rejection here correctly leaves the local badge
+      // alone, the DB row genuinely is still unread. Just log it: L13
+      // (audit-2026-08) flagged the missing path, silently swallowing the
+      // error either way.
       LB.markCoachingNotesRead(threadUnreadIds).then(() => {
         if (setStore) setStore(s => ({
           ...s,
@@ -297,7 +309,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             unreadNotes: (s.coaching?.unreadNotes || []).filter(n => !threadUnreadIds.includes(n.id)),
           },
         }));
-      });
+      }).catch(e => console.error('markCoachingNotesRead failed:', e));
     }
   }, [coachingId, thread.id, threadUnreadKey]);
 
@@ -357,6 +369,12 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         <div ref={bottomRef} />
       </div>
       <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent' }}>
+        {loadErr && (
+          <div style={{ padding: '6px 16px 0', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: 10, color: UI.inkFaint }} />
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Couldn't refresh, messages above may be out of date</span>
+          </div>
+        )}
         {imagePreview && (
           <div style={{ padding: '10px 16px 0', display: 'flex' }}>
             <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -395,6 +413,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canDelete }) {
   const [threads, setThreads] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
+  const [loadErr, setLoadErr] = useStateC(false);
   const [selected, setSelected] = useStateC(null);
   const [creating, setCreating] = useStateC(false);
   const [newName, setNewName] = useStateC('');
@@ -403,6 +422,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
 
   const reload = () => {
     setLoading(true);
+    setLoadErr(false);
     LB.loadCoachingThreads(coachingId).then(loaded => {
       setThreads(loaded);
       if (setStore && (unreadNotes || []).length) {
@@ -426,7 +446,8 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           LB.markCoachingNotesRead(orphanedIds).catch(() => {});
         }
       }
-    }).finally(() => setLoading(false));
+    }).catch(e => { console.error('coaching threads reload failed:', e); setLoadErr(true); })
+      .finally(() => setLoading(false));
   };
 
   useEffectC(() => { reload(); }, [coachingId]);
@@ -477,6 +498,11 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        ) : loadErr ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
+            <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load threads.</div>
+            <button onClick={reload} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+          </div>
         ) : threads.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No threads yet.</div>
         ) : threads.map(t => {
