@@ -3391,7 +3391,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       textShadow: 'none',
                     }}>
                       <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'var(--accent-ink)', opacity: 0.55 }} />
-                      <span style={{ color: 'var(--accent-ink)', opacity: 0.75, letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
+                      {/* Full opacity on the label: the 0.75 translucency pushed
+                          accent-ink below readable contrast (theme audit 2026-08). */}
+                      <span style={{ color: 'var(--accent-ink)', opacity: 1, letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
                         {isFlex && !isViewingToday ? 'CATCH UP' : (isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION')}
                       </span>
                     </button>
@@ -3477,7 +3479,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
                     <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
                     {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{LB.mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
-                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
+                    <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
                     <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>

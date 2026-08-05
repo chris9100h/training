@@ -356,7 +356,7 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: isLightCanvasActive() ? '#0369a1' : '#4a9fe0', other: UI.inkSoft };
   const CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
   const unitLabel = glucoseUnitLabel(unit);
   const fedY = yOf(refFed).toFixed(1);
@@ -376,7 +376,7 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
         fill={`rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.16 : 0.07})`} />
       {/* fed upper reference line */}
-      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke={isLightCanvasActive() ? '#0369a1' : '#4a9fe0'} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -3057,7 +3057,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
-              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
+              <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
             </div>
           ))}
         </div>
@@ -3528,7 +3528,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
-  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: isLightCanvasActive() ? '#0369a1' : '#4a9fe0', other: UI.inkSoft };
 
   return (
     <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
@@ -3836,7 +3836,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                   {todayEntries.map(n => (
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
+                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>{n.time}</div>
                         {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.name}</div>}
                       </div>
                       <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
@@ -3848,7 +3848,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
           </>
         )
       ) : (
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color={isLightCanvasActive() ? '#0369a1' : '#4a9fe0'} colorSoft={isLightCanvasActive() ? 'rgba(3,105,161,0.35)' : 'rgba(74,159,224,0.35)'} />
       )}
     </HealthChartCard>
   );

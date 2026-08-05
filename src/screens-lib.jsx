@@ -3964,7 +3964,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         </div>
                       ))}
                       {fbRaw && !fbEditable && (
-                        <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, margin: '8px 2px 2px', lineHeight: 1.4 }}>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '8px 2px 2px', lineHeight: 1.4 }}>
                           Feedback locked. A newer session on this plan has already advanced autoregulation.
                         </div>
                       )}
@@ -3993,7 +3993,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                               <span style={{ fontFamily: UI.fontUi, fontSize: 13.5, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
                               {item.weightDelta < 0 && (
-                                <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                                <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>Reps missed, easing load</span>
                               )}
                             </div>
                           </div>

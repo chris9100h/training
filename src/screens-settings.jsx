@@ -2302,7 +2302,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
                 <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</span>
                 {i === 0 ? (
-                  <span className="num" style={{ fontSize: 13, color: UI.inkGhost }}>00:00</span>
+                  <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>00:00</span>
                 ) : (
                   <>
                     <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= mealCats[i - 1].startHour + 1}
@@ -2785,7 +2785,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${watermarkOpacityPct}%, var(--range-track) ${watermarkOpacityPct}%)` }} />
             <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 32, textAlign: 'right' }}>{watermarkOpacityPct}%</span>
           </div>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginBottom: 14, lineHeight: 1.4 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, marginBottom: 14, lineHeight: 1.4 }}>
             How visible the logo (or your VIP background) is behind the Home screen.
           </div>
           <Row label="Week view in cycle mode" first>

@@ -1586,7 +1586,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                       <MdHourTick />
                       <div style={{ ...mdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
                         <div style={mdHourLabelCol}>
-                          <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                          <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkFaint) }}>{String(h).padStart(2, '0')}</span>
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {filled ? es.map(entry => (

@@ -648,7 +648,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                       background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)',
                       borderRadius: 4, padding: '2px 6px',
                     };
-                    const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+                    const amrapLabelStyle = { fontSize: 8, color: UI.inkFaint, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
                     return (
                       <React.Fragment key={i}>
                         {ss.start && <SupersetHeader size={ss.size} />}
@@ -656,7 +656,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{e.name}</div>
                           {tgtStr && (
-                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
+                            <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
                           )}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
@@ -690,13 +690,13 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                         </div>
                         {lastSets.length > 0 && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-                            <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
+                            <span className="micro" style={{ color: UI.inkFaint }}>PREV</span>
                             {lastSets.map((s, j) => (
-                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
+                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkFaint, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
                                 {fmtSetChip(s)}
                               </span>
                             ))}
-                            <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
+                            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
                           </div>
                         )}
                       </div>
@@ -737,7 +737,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                             {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg != null ? `${s.kg}${unit}` : '—'} × {s.reps ?? s.repsL ?? '—'}</>}
                           </span>
                         )) : (
-                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time, no weight data yet</span>
+                          <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>First time, no weight data yet</span>
                         )}
                       </div>
                     </div>
@@ -769,7 +769,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                 </div>
                 <div style={{ width: 52, flexShrink: 0, textAlign: 'right' }}>
                   {w.planned === 0 ? (
-                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>no plan</span>
+                    <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>no plan</span>
                   ) : (
                     <span className="num" style={{ fontSize: 12, color: w.pct >= 80 ? 'var(--success-text)' : w.pct >= 50 ? UI.gold : 'rgba(var(--danger-rgb),0.8)' }}>
                       {w.done}/{w.planned}
@@ -869,7 +869,7 @@ function AdherenceChart({ weeks }) {
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill={color} />}
             {w.pct > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
-            <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
+            <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkFaint, fontFamily: UI.fontUi }}>{labelText}</text>
           </g>
         );
       })}
@@ -992,7 +992,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
         ))}
         {labelIdxs.map(i => (
-          <text filter="url(#chart-text-lift)" key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+          <text filter="url(#chart-text-lift)" key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkFaint, fontFamily: UI.fontUi }}>{points[i].label}</text>
         ))}
       </svg>
       {listGroups.slice(0, showCount).map((g, i, arr) => (
@@ -1065,7 +1065,7 @@ function SessionsWeekChart({ sessions, planStartDate }) {
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
             {w.count > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
-            {labelIdxs.has(i) && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+            {labelIdxs.has(i) && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkFaint, fontFamily: UI.fontUi }}>{w.label}</text>}
           </g>
         );
       })}
@@ -1756,7 +1756,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               background: 'rgba(var(--accent-rgb),0.12)', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.35)',
               borderRadius: 4, padding: '2px 6px',
             };
-            const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+            const amrapLabelStyle = { fontSize: 8, color: UI.inkFaint, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
             return (
               <React.Fragment key={i}>
                 {ss.start && <SupersetHeader size={ss.size} />}
@@ -1769,7 +1769,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                       {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                     {tgtStr && (
-                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
                     )}
                   </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
@@ -1803,13 +1803,13 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 </div>
                 {lastSets.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-                    <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
+                    <span className="micro" style={{ color: UI.inkFaint }}>PREV</span>
                     {lastSets.map((s, j) => (
-                      <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
+                      <span key={j} className="num" style={{ fontSize: 11, color: UI.inkFaint, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
                         {fmtSetChip(s)}
                       </span>
                     ))}
-                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
+                    <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
                   </div>
                 )}
                 </div>

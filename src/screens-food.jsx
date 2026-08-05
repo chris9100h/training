@@ -4101,7 +4101,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                             <FdHourTick />
                             <div style={{ ...fdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
                               <div data-reorder-ignore="true" style={fdHourLabelCol}>
-                                <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                                <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkFaint) }}>{String(h).padStart(2, '0')}</span>
                               </div>
                               {/* alignSelf: stretch (this column, and the empty-hour
                                   placeholder's flex: 1 below) makes the data-reorder-item
@@ -6197,7 +6197,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
                         <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
-                        <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
+                        <div className="num" style={{ fontSize: 9, color: UI.inkFaint }}>:00</div>
                       </div>
                       <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
                         <span style={fdEntryName}>
@@ -9389,7 +9389,7 @@ function FdProjectionLine({ macros, goalCalories, adherence }) {
           property of the full projection, not of one column. */}
       {adherence != null && (
         <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
-          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
+          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkFaint }}> / {goalCalories} kcal</span>{' · '}</>}
           <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
         </div>
       )}
@@ -9799,7 +9799,7 @@ function FdExtrasRow({ sugar, satFat, sodiumMg, style }) {
 function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
   const cell = (letter, v) => (
     <span className="num" style={{ fontSize: size, fontWeight: 600, color: UI.inkSoft }}>
-      <span style={{ color: UI.inkGhost, fontSize: 10 }}>{letter}</span> {Math.round(v || 0)}g
+      <span style={{ color: UI.inkFaint, fontSize: 10 }}>{letter}</span> {Math.round(v || 0)}g
     </span>
   );
   return (
