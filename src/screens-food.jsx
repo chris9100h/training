@@ -7689,7 +7689,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             to read as a rule rather than as a cropped edge, and it ends on an
             ingredient row that already carries its own padding, so the image
             should stop just past it instead of on another block of empty. */}
-        <div ref={captureRef} style={{ padding: '38px 28px 20px', width: 480, margin: '0 auto', position: 'relative' }}>
+        <div ref={captureRef} style={{ padding: '32px 28px 20px', width: 480, margin: '0 auto', position: 'relative' }}>
           {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
               for the export, same as SessionDetailScreen/SessionCompareScreen. */}
           {_shotGridOn && <SvgGrid />}
