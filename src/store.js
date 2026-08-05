@@ -1845,6 +1845,18 @@ function diffCollectionById(prevList, nextList) {
   return { upsert, removed };
 }
 
+// Normalize set fields for comparison, guards against null vs undefined and missing
+// keys when comparing sets from an old (pre-migration) store format with new format.
+// Shared by the sync diff (_syncEntryRelational: only sets whose norm differs get
+// re-written) and the boot merge's unsynced-edit test (entrySetsDifferFromBase,
+// audit H1), so both always agree on what counts as a set change.
+function normSet(s) {
+  return [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
+          s.timeSec ?? null, s.addedKg ?? null,
+          s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
+          s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
+}
+
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
 // prevSessions: pass prev store sessions to skip unchanged sets; pass null to write all.
 async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
@@ -1857,13 +1869,6 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   // (boot merge, fetchSessionEntries, the coach spectator view).
   const entryIdsToDelete = [];
   const setIdsToDelete = [];
-
-  // Normalize set fields for comparison, guards against null vs undefined and missing
-  // keys when comparing sets from an old (pre-migration) store format with new format.
-  const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
-                        s.timeSec ?? null, s.addedKg ?? null,
-                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
-                        s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
   for (const s of sessions) {
     const entries = s.entries || [];
@@ -4529,8 +4534,36 @@ function resolveInProgressId(cur, fresh, base) {
   return (!base || cur.inProgress !== base.inProgress) ? cur.inProgress : fresh.inProgress;
 }
 
+// Entry/set-level unsynced-edit test for the boot merge (audit H1): the exact
+// same fields the sync diff uploads (normSet below plus the entry columns
+// written by _syncEntryRelational), so "differs from the persisted base" means
+// exactly "the follow-up flush will push this". In-memory-only cardio fields
+// (isCardio, cardioDone, cardioData, never stored in the DB) deliberately do
+// not count as an edit. Matches by position (entry index, set index), entries
+// and sets have no id in the store model.
+const ENTRY_SYNC_FIELDS = ['exId', 'name', 'plannedSets', 'plannedReps', 'plannedRepsPerSet', 'plannedRepsMax', 'plannedProgressionOffset', 'plannedTechniques', 'note', 'supersetGroup'];
+function entrySetsDifferFromBase(cachedEntries, baseEntries) {
+  if (baseEntries.length !== cachedEntries.length) return true;
+  for (let ei = 0; ei < cachedEntries.length; ei++) {
+    const ce = cachedEntries[ei];
+    const be = baseEntries[ei];
+    if (!be) return true;
+    for (const k of ENTRY_SYNC_FIELDS) {
+      if ((ce[k] ?? null) !== (be[k] ?? null)) return true;
+    }
+    const cs = ce.sets || [];
+    const bs = be.sets || [];
+    if (cs.length !== bs.length) return true;
+    for (let si = 0; si < cs.length; si++) {
+      if (normSet(cs[si]) !== normSet(bs[si])) return true;
+    }
+  }
+  return false;
+}
+
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
+  const baseById = baseSessions ? new Map(baseSessions.map(s => [s.id, s])) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
   // cur. Exclude them from fresh so the merge doesn't resurrect them while the
   // syncStore deletion is still propagating to the server.
@@ -4556,10 +4589,21 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     const hasServerEntries = (s.entries || []).length > 0;
     const hasCachedEntries = (mem.entries || []).length > 0;
     const keepCachedEntries = !isActive && !hasServerEntries && hasCachedEntries;
-    // If both sides have entries, merge at the set level so technique/drops from
-    // local (not yet flushed to the server) aren't silently wiped.
+    // If both sides have entries, the server normally wins at the set level,
+    // with technique/drops rescued from local (not yet flushed to the server).
+    // BUT an unsynced offline edit of a synced entry/set field (this device
+    // changed it since the last confirmed-synced base) must keep the cached
+    // entries: the old merge dropped such edits at boot, and the follow-up
+    // flush then either diffed empty (refresh-first ordering → silent loss) or
+    // pushed the pre-edit values back over the server (flush-first ordering →
+    // server-side revert) (audit H1). Keeping them makes the post-merge flush
+    // diff exactly the edited fields and upload them, same unsynced-edit test
+    // as mergeCollectionById below.
+    const baseMem = baseById?.get(s.id);
+    const baseEntries = (baseMem?.entries || []).length ? baseMem.entries : null;
+    const cachedDiffersFromBase = !!(baseEntries && entrySetsDifferFromBase(mem.entries, baseEntries));
     const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
-      ? mergeEntrySets(s.entries, mem.entries) : null;
+      ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
     return {
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,

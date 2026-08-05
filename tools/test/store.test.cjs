@@ -349,6 +349,90 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new', 'new session from another device must appear');
   });
 
+  // ── mergeSessions: unsynced offline edits on ended in-window sessions (audit H1) ──
+  // Both sides have entries (in-window session) and this device edited a set
+  // while offline: the edit is in cur but not in the persisted base. The old
+  // merge took the SERVER set fields (only technique/drops survived), so the
+  // edit was dropped at boot and then either silently lost (refresh-first) or
+  // reverted server-side by the post-merge flush (flush-first). The edit must
+  // survive the merge; the follow-up flush diffs it against the server-based
+  // sync base and pushes it.
+  const mkInWindow = (kg, extra = {}) => ({
+    id: 'w1', date: '2026-06-09', ended: '2026-06-09T12:00:00Z',
+    entries: [{ exId: 'e1', name: 'Row', sets: [{ kg, reps: 8, done: true, ...extra }] }],
+  });
+  test('mergeSessions keeps an unsynced offline set edit on an ended in-window session', () => {
+    const base = [mkInWindow(90)];
+    const cur = [mkInWindow(100)]; // offline edit: 90 → 100
+    const fresh = [mkInWindow(90)];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 100, 'the offline edit must survive the boot merge');
+  });
+  test('mergeSessions keeps an offline-added set (length differs from base)', () => {
+    const base = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 100, reps: 5, done: false }] }] }];
+    const fresh = [{ id: 'w2', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets.length, 2, 'offline-added set must survive the boot merge');
+  });
+  test('mergeSessions keeps an offline-added entry (entry count differs from base)', () => {
+    const base = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [
+      { exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] },
+      { exId: 'e2', sets: [{ kg: 40, reps: 12, done: false }] },
+    ] }];
+    const fresh = [{ id: 'w3', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries.length, 2, 'offline-added entry must survive the boot merge');
+  });
+  test('mergeSessions trusts the server when local entries match the base (remote edit wins)', () => {
+    const base = [mkInWindow(90)];
+    const cur = [mkInWindow(90)]; // no local change
+    const fresh = [mkInWindow(95)]; // edited on another device
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 95, 'server value must win when this device made no edit');
+  });
+  test('mergeSessions still rescues local technique/drops when entries match the base', () => {
+    const base = [mkInWindow(90)];
+    const cur = [mkInWindow(90, { technique: 'drop', drops: [{ kg: 70, reps: 8 }] })];
+    const fresh = [mkInWindow(90)]; // server lost technique/drops in a flush race
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].technique, 'drop', 'unsynced technique must still be rescued');
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 90);
+  });
+  test('mergeSessions does NOT treat in-memory cardio fields as an unsynced edit', () => {
+    const base = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const cur = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', isCardio: true, cardioDone: true, sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const fresh = [{ id: 'w4', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 92, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 92, 'no synced local edit → server wins');
+    assert.strictEqual(sessions[0].entries[0].isCardio, true, 'in-memory cardio flags still rescued by the entry merge');
+  });
+  test('mergeSessions propagates a remote set deletion when there is no local edit', () => {
+    const base = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 80, reps: 6, done: true }] }] }];
+    const cur = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }, { kg: 80, reps: 6, done: true }] }] }];
+    const fresh = [{ id: 'w5', date: '2026-06-09', ended: 'x', entries: [{ exId: 'e1', sets: [{ kg: 90, reps: 8, done: true }] }] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets.length, 1, 'remote deletion must not be resurrected');
+  });
+
+  await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {
+    rpcLog.length = 0;
+    testFrom = () => builder({ data: null, error: null });
+    const base = { ...baseStore(), sessions: [mkInWindow(90)] };
+    const cur = { ...baseStore(), sessions: [mkInWindow(100)] }; // offline edit
+    const fresh = { ...baseStore(), sessions: [mkInWindow(90)] }; // server snapshot predates the edit
+    const { sessions } = LB.mergeSessions(fresh.sessions, cur.sessions, null, base.sessions, now);
+    // Follow-up flush: sync base is the fresh server state, target is the merged store.
+    const prev = { ...baseStore(), sessions: fresh.sessions };
+    const next = { ...baseStore(), sessions };
+    await LB.syncStore(prev, next, 'u1');
+    const call = rpcLog.find(c => c.name === 'sync_sets_batch');
+    assert.ok(call, 'sync_sets_batch must be called for the surviving edit');
+    assert.strictEqual(call.args.p_sets.length, 1, 'only the edited set is re-written, not the whole session');
+    assert.strictEqual(call.args.p_sets[0].kg, 100, 'the edited value is what gets pushed');
+  });
+
   // ── resolveInProgressId: boot-merge in-progress-session pointer ──────────
   // This is the exact bug scenario: base matches cur (this device made no
   // unsynced change), fresh has moved on (another device started a real
