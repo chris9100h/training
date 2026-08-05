@@ -6628,10 +6628,11 @@ async function refreshHealthLogs(userId) {
 }
 
 // ── AI Daily Summary (ai-daily-summary Edge Function) ───────────────────────
-// Self-contained copy of screens-medications.jsx's mdSlotAppliesOn: that file
-// isn't loaded by store.test.cjs's sandbox, and this needs to run there too.
-// Keep both in sync on every change to this logic (migration 0237's
-// interval_days mode included).
+// Single source for "does this schedule slot fire on this date" (migration
+// 0237's interval_days mode included). Lives here rather than in
+// screens-medications.jsx because store.test.cjs's sandbox doesn't load that
+// file; exported as LB.dsSlotAppliesOn so the Medications screens call this
+// same function instead of keeping a hand-synced copy.
 function dsSlotAppliesOn(slot, dateISO, wd, activePlanIds) {
   if (!slot.medicationPlanId || !activePlanIds.has(slot.medicationPlanId)) return false;
   if (slot.startDate && dateISO < slot.startDate) return false;
