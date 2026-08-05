@@ -856,6 +856,14 @@ CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
 AS $function$
   select id from auth.users where lower(email) = lower(p_email) limit 1
 $function$;
+-- Deliberately unreachable by any client role, see Migration 0128's note
+-- below: only invite_client calls this internally (SECURITY DEFINER, runs
+-- as owner). Live REVOKE, not just the comment migration 0125/0128 left
+-- here: without it a fresh project stood up from this snapshot is an
+-- ungated email->UUID oracle for anon (inherits EXECUTE through the
+-- implicit PUBLIC grant every CREATE FUNCTION makes) and, separately, for
+-- authenticated (the ALTER DEFAULT PRIVILEGES rule further below).
+REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.invite_client(p_email text)
  RETURNS text
@@ -1031,6 +1039,10 @@ $function$;
 -- against a device with a correct clock. A client value at or before now()
 -- passes through unchanged, preserving an offline-queued write's original
 -- edit time once it finally syncs.
+-- added_kg (plus_load belt/dip-belt load, Migration 0243) added to all three
+-- lists in Migration 0245: unreferenced jsonb keys are silently ignored, so
+-- every set synced through this RPC (i.e. every write after the first boot
+-- import) had it dropped to NULL until then.
 CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1038,7 +1050,7 @@ CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
 AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
-    set_idx, kg, reps, reps_l, reps_r, time_sec,
+    set_idx, kg, reps, reps_l, reps_r, time_sec, added_kg,
     done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
@@ -1052,6 +1064,7 @@ AS $function$
     (s->>'reps_l')::int,
     (s->>'reps_r')::int,
     (s->>'time_sec')::int,
+    (s->>'added_kg')::numeric,
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
@@ -1065,6 +1078,7 @@ AS $function$
     reps_l     = EXCLUDED.reps_l,
     reps_r     = EXCLUDED.reps_r,
     time_sec   = EXCLUDED.time_sec,
+    added_kg   = EXCLUDED.added_kg,
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
@@ -1109,7 +1123,7 @@ AS $function$
     (l->>'adherence')::numeric,
     CASE WHEN l->'targets_snap' IS NULL OR l->'targets_snap' = 'null'::jsonb THEN NULL ELSE l->'targets_snap' END,
     CASE WHEN l->'daily_coach_fields' IS NULL OR l->'daily_coach_fields' = 'null'::jsonb THEN NULL ELSE l->'daily_coach_fields' END,
-    COALESCE((l->>'updated_at')::timestamptz, now())
+    LEAST(COALESCE((l->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_logs) AS l
   ON CONFLICT (user_id, date) DO UPDATE SET
     weight             = EXCLUDED.weight,
