@@ -286,13 +286,6 @@ function WaterScreen({ store, setStore, go, userId }) {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
-  // Keep the user's UTC offset fresh so the reminder cron can place "now" on the
-  // local ramp. Only writes when it actually changed (travel / DST).
-  useEffectW(() => {
-    const off = -new Date().getTimezoneOffset();
-    if (settings.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
-  }, []); // eslint-disable-line
-
   const todayEntries = useMemoW(
     () => (store.waterLogs || []).filter(l => l.date === today),
     [store.waterLogs, today],

@@ -505,17 +505,6 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
   const coachClients = useMemoMd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active').sort((a, b) => (a.clientName || '').localeCompare(b.clientName || '')), [store.coaching]);
 
-  // Keep the user's UTC offset fresh so the medication-reminder cron can place
-  // "now" on the local clock. Mirrors WaterScreen's own writer (screens-water.jsx):
-  // that one only runs when the Water tab is open, and FoodScreen's only runs in
-  // Plan Mode, so a Meds-only user (independent per-tab switches since migration
-  // 0222) previously never had tzOffsetMinutes written at all, leaving the
-  // reminder cron's `?? 0` UTC fallback in place indefinitely.
-  useEffectMd(() => {
-    const off = -new Date().getTimezoneOffset();
-    if (store.settings?.tzOffsetMinutes !== off) setStore(s => ({ ...s, settings: { ...s.settings, tzOffsetMinutes: off } }));
-  }, []); // eslint-disable-line
-
   // Auto-fill today's due doses. medicationLogs is deliberately NOT a
   // dependency: it is, unavoidably, since mdAutoFillToday only skips a slot
   // that already has a log row. If it were listed here, deleting an

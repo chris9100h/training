@@ -444,6 +444,24 @@ function App() {
     }
   }, [store?.settings?.darkMode]);
 
+  // Keeps settings.tzOffsetMinutes fresh for every reminder cron (medication,
+  // water, meal) that places "now" on the user's local clock. Used to be
+  // three separate per-screen writers (Water: only while that tab is open,
+  // Food: only in Plan Mode, Meds: only while that tab is open), so a user
+  // who never opened any of those three screens never got it written at all,
+  // which is exactly the population the medication reminder's server-side
+  // materialization (M8) was meant to help: it can now find a due dose
+  // without the Meds tab ever having been opened, but was still firing at
+  // the wrong local hour (UTC fallback) for that same user (M8-Rest,
+  // audit-2026-08 verification). App-level instead so it fires for every
+  // signed-in user regardless of navigation, once per boot like the SW
+  // version flush above; only writes when it actually changed (travel/DST).
+  useEffectA(() => {
+    if (!store) return;
+    const off = -new Date().getTimezoneOffset();
+    if (store.settings?.tzOffsetMinutes !== off) setStore(s => (s ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+  }, [!!store]);
+
   // Report the active SW cache version to Supabase (so an admin can spot a
   // user stuck on a stale cache without asking them to check Settings).
   // Re-checked at boot, on every foreground and right when the cache
