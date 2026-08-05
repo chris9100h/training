@@ -5490,8 +5490,14 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>
             {items.length} ingredient{items.length === 1 ? '' : 's'} · makes {recipe.portions || 1} portion{(recipe.portions || 1) === 1 ? '' : 's'}
           </div>
+          {/* Sender's own prep order (items as saved, drag-reordered in
+              RecipeEditorScreen), NOT fdSortIngredientsByQty: whoever this
+              is shared with is meant to cook from it, the order they added
+              ingredients in is the point, unlike the quantity-sorted
+              at-a-glance views elsewhere (timeline detail, meal-plan block
+              preview) that aren't about following along step by step. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {fdSortIngredientsByQty(items).map((i, idx) => (
+            {items.map((i, idx) => (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
