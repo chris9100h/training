@@ -88,7 +88,14 @@ const schemaFns = new Set();
   while ((m = fnRe.exec(schema))) schemaFns.add(m[1].toLowerCase());
 }
 
-const doc = read('docs/database.md');
+// Normalized once here rather than patched into each regex below: on a
+// Windows working tree with core.autocrlf=true (the Git default there), a
+// committed-as-LF file like this one checks out as CRLF, so every bare `\n`
+// boundary below (both this split and the nested ones on line 96) silently
+// stops matching and docSections comes back empty, 48 false "has no
+// section" failures on an otherwise-correct doc (M14, audit-2026-08). CI
+// itself checks out LF (ubuntu) and was never affected.
+const doc = read('docs/database.md').replace(/\r\n/g, '\n');
 const docSections = new Map();
 {
   const parts = doc.split(/\n### `(zane_\w+)`\n/);
