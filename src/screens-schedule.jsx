@@ -2653,11 +2653,27 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               return (
                 <button key={i} disabled={taken} onClick={() => {
                   setDraft(d => {
-                    // Keep the source day's id (carries its session history) unless
-                    // that id already exists in this plan, then use a fresh one.
-                    const collides = d.days.some(x => x.id === pendingImportDay.migrateId);
-                    const id = (pendingImportDay.migrateId && !collides) ? pendingImportDay.migrateId : LB.uid();
-                    return { ...d, days: [...d.days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
+                    // Keep the source day's id (carries its session history):
+                    // this is how a user relocates a day to a different
+                    // weekday (import it "with history" onto the new slot,
+                    // then remove the old one). schedule={null} on the
+                    // DayCopyPicker above means migrateId is set even when
+                    // the source is a day already in THIS plan, so at this
+                    // point the old slot (same id) is normally still sitting
+                    // right there in d.days, uninvolved-collision code used
+                    // to read that as "id taken" and hand out a fresh one
+                    // instead, orphaning the day from its own history: kept
+                    // exercises, but seeding (keyed on dayId) found nothing,
+                    // reported as "moved leg day, lost all reps/weights"
+                    // (support ticket 2026-08-05). Two days can never validly
+                    // share an id (React key collision, ambiguous session
+                    // dayId attribution), so completing the move drops that
+                    // old slot instead of giving up on the id: it only ever
+                    // collides with the source day itself in practice, a
+                    // genuinely foreign import's id doesn't exist here yet.
+                    const days = d.days.filter(x => x.id !== pendingImportDay.migrateId);
+                    const id = pendingImportDay.migrateId || LB.uid();
+                    return { ...d, days: [...days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
                   });
                   setPendingImportDay(null);
                 }} style={{
