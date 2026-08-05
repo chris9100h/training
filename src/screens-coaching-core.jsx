@@ -322,13 +322,28 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     if (!body.trim() && !imageFile) return;
     setSending(true);
     const imgFile = imageFile;
+    const sentBody = body.trim();
     try {
       let attachments = null;
       if (imgFile) {
         const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
-      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId, thread.id, attachments);
+      const id = await LB.addCoachingNote(coachingId, 'general', null, null, sentBody, userId, thread.id, attachments);
+      // Optimistic append (L14-Rest, audit-2026-08 verification): the write
+      // above already succeeded, addCoachingNote persisted it server-side,
+      // but reload() below is a separate fetch that can still fail on its
+      // own (a network blip right after send). Without this, that failure
+      // left the message the user just sent invisible until the next
+      // successful reload even though it was never actually lost. Same
+      // shape loadCoachingNotes returns, so a later successful reload's full
+      // server list just supersedes this local copy (same id, no dupe).
+      setNotes(prev => [...prev, {
+        id, coachingId, authorId: userId, threadId: thread.id,
+        type: 'general', entityId: null, entityName: null,
+        body: sentBody, createdAt: new Date().toISOString(), readAt: null,
+        attachments,
+      }]);
       setBody('');
       setImageFile(null);
       setImagePreview(null);
