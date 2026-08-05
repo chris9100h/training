@@ -904,6 +904,20 @@ function shotSplitWordsForMeasurement(root) {
   });
 }
 
+// html2canvas clones the document into a fresh iframe, where every CSS
+// animation and transition starts over from zero: the app's sheet screens open
+// on `animation: sheet-up`, a translateY, so an ancestor of the capture can be
+// mid-flight while the crop rect, then every box, then every text run are
+// measured one after another. Freeze the lot before anything is measured. The
+// base (un-animated) state is also the finished state for every animation the
+// app opens a surface with, so this changes nothing about how the card looks.
+function shotFreezeAnimations(doc) {
+  if (!doc || !doc.createElement) return;
+  const style = doc.createElement('style');
+  style.textContent = '*,*::before,*::after{animation:none !important;transition:none !important;}';
+  (doc.head || doc.documentElement).appendChild(style);
+}
+
 // Every poster hangs in a `position: fixed` overlay (and often inside a
 // fixed full-screen Screen on top of that), which is the other half of the
 // vertical-offset story: a fixed box does not move with a scroll, html2canvas
@@ -1116,6 +1130,7 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
       // here would reject the whole export, so neither is allowed to escape.
       onclone: async (clonedDoc, clonedNode) => {
         try {
+          shotFreezeAnimations(clonedDoc);
           await shotFontsUsable(clonedDoc, SHOT_FONTS);
           shotUnpinFixedAncestors(clonedNode);
           shotSplitWordsForMeasurement(clonedNode);

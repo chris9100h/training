@@ -7788,11 +7788,28 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
           non-null, so a tree gated on `capturing` would still be unmounted at
           that exact check. That dedicated container is also what
           captureNodeAsPng expects, since it expands captureRef's own
-          parentElement around the capture. */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
-        <RecipePoster captureRef={captureRef} name={name} items={items} portions={portions} totals={totals} netCarbs={netCarbs}
-          logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
-      </div>
+          parentElement around the capture.
+
+          Portalled to <body> rather than left in this screen, which is the one
+          thing the working posters had and this one did not. Session detail,
+          plan, food log and water all export from a plain tab Screen. The two
+          that came out wrong, this one and the Shopping List, are the two that
+          live in a full-screen sheet: `position: fixed` plus
+          `animation: sheet-up`, i.e. a translateY on an ancestor, which is
+          exactly the axis every reported artifact was on. html2canvas clones
+          the document into a fresh iframe where that animation starts over
+          from zero, and it measures the crop, then every box, then every text
+          run against an ancestor that is still moving. Out here the poster's
+          ancestry is just <body>, so there is nothing above it to move,
+          transform or scroll. It inherits nothing from the sheet either, which
+          is fine: RecipePoster sets its own font, colour and background. */}
+      {ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+          <RecipePoster captureRef={captureRef} name={name} items={items} portions={portions} totals={totals} netCarbs={netCarbs}
+            logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
+        </div>,
+        document.body
+      )}
 
       <div style={{
         padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
