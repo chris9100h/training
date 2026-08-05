@@ -6421,6 +6421,14 @@ async function clearStatusMode(userId, store, setStore) {
   // If the period started today, closedAt (yesterday) < startedAt → delete it
   // instead of writing an invalid record.
   const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+  // Snapshot for rollback, same reasoning as handleSetStatus's own rollback
+  // (screens-home.jsx): setStore below applies optimistically before the
+  // write, a swallowed error otherwise leaves the UI showing a status change
+  // that never persisted. statusPeriods is never covered by syncStore's diff
+  // (only the statusMode/statusModeSince scalars on the settings row are),
+  // so this direct write is the ONLY chance the period change ever reaches
+  // the server, a transient failure here has no retry path without rollback.
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
   setStore(s => ({
     ...s, statusMode: null, statusModeSince: null,
     statusPeriods: shouldDelete
@@ -6430,7 +6438,11 @@ async function clearStatusMode(userId, store, setStore) {
   try {
     if (shouldDelete) await unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null));
     else await closeStatusPeriod(userId, closedAt);
-  } catch (e) { console.error('clearStatusMode: status period write failed', e); }
+  } catch (e) {
+    console.error('clearStatusMode: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not update your status. Please try again.');
+  }
 }
 
 // ─── DELOAD ─────────────────────────────────────────────────────────────────
@@ -6486,13 +6498,23 @@ function deloadDaysRemaining(store, now = new Date()) {
 async function startDeload(userId, store, setStore, sinceISO = null) {
   const startedAt = sinceISO || new Date().toISOString();
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  // Same rollback reasoning as clearStatusMode above: statusPeriods has no
+  // syncStore/retry path of its own, this write is the only chance it ever
+  // reaches the server, so a failure must undo the optimistic update instead
+  // of leaving the UI claiming a deload that was never actually saved.
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
   setStore(s => ({
     ...s, statusMode: 'deload', statusModeSince: startedAt,
     statusPeriods: [{ id: '_pending', mode: 'deload', startedAt, endedAt: null },
       ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: startedAt })],
   }));
   try { await openStatusPeriod(userId, 'deload', startedAt); }
-  catch (e) { console.error('startDeload: status period write failed', e); }
+  catch (e) {
+    console.error('startDeload: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not start deload. Please try again.');
+    return;
+  }
   if (coachingId) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
@@ -6506,12 +6528,19 @@ async function endDeload(userId, store, setStore) {
   if (store.statusMode !== 'deload') return;
   const endedAt = new Date().toISOString();
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  // Same rollback reasoning as clearStatusMode/startDeload above.
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
   setStore(s => ({
     ...s, statusMode: null, statusModeSince: null,
     statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: endedAt } : p),
   }));
   try { await closeStatusPeriod(userId, endedAt); }
-  catch (e) { console.error('endDeload: status period write failed', e); }
+  catch (e) {
+    console.error('endDeload: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not end deload. Please try again.');
+    return;
+  }
   if (coachingId) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
