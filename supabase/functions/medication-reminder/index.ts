@@ -16,6 +16,17 @@
 // after local midnight, so it is measured against "now + a full day" and
 // fires in the first tick(s) of the next local day rather than never.
 //
+// Before checking what's due, materializeDueDoses fills in any due schedule
+// slot that has no zane_medication_logs row yet for today/yesterday. The
+// client only ever materializes today's doses itself when the Meds tab is
+// mounted (mdAutoFillToday, screens-medications.jsx): a user who never opens
+// the app that day would otherwise have no PLANNED row for this function to
+// find "due" in the first place, so the reminder they turned on would
+// silently never fire (audit-2026-08 M8). Uses the same deterministic id
+// (`md_<date>_<slotId>`) and upsert-by-id semantics as the client's own
+// sync, so whichever side materializes a given dose first, the other's later
+// write just merges into that same row instead of duplicating it.
+//
 // Scheduled via pg_cron (migration 0219_medication_reminder_cron.sql), POST
 // with an empty body, same pattern as the meal/training/water reminders.
 
@@ -61,6 +72,91 @@ interface Row {
   tz_offset_minutes: number | null;
 }
 
+interface Slot {
+  id: string;
+  medication_id: string;
+  medication_plan_id: string | null;
+  weekdays: number[] | null;
+  hour: number;
+  dose_qty: number | null;
+  interval_days: number | null;
+  start_date: string | null;
+  end_date: string | null;
+}
+
+// ISO weekday (0 = Monday) for a YYYY-MM-DD date, noon-anchored to stay clear
+// of any DST/rollover edge, same idiom as store.js's dsShiftDate.
+function isoWd(dateISO: string): number {
+  return (new Date(dateISO + 'T12:00:00').getDay() + 6) % 7;
+}
+
+// Hand-synced copy of store.js's dsSlotAppliesOn (that file isn't loadable
+// here, it's a browser global-namespace script, not an importable module).
+// Keep the two in lockstep on any schedule-matching change.
+function slotAppliesOn(slot: Slot, dateISO: string, wd: number, activePlanIds: Set<string>): boolean {
+  if (!slot.medication_plan_id || !activePlanIds.has(slot.medication_plan_id)) return false;
+  if (slot.start_date && dateISO < slot.start_date) return false;
+  if (slot.end_date && dateISO > slot.end_date) return false;
+  if (slot.interval_days && slot.interval_days > 0) {
+    if (!slot.start_date) return false;
+    const daysSince = Math.round((new Date(dateISO + 'T12:00:00').getTime() - new Date(slot.start_date + 'T12:00:00').getTime()) / 86400000);
+    return daysSince % slot.interval_days === 0;
+  }
+  return (slot.weekdays || []).includes(wd);
+}
+
+// Materializes any due-but-missing PLANNED dose for the given user across
+// dateISOs (today + yesterday, mirroring sendReminders' own lookback), the
+// server-side equivalent of the client's mdAutoFillToday. Without this, a
+// user who doesn't open the Meds tab that day has no row here for
+// sendReminders to ever find "due" below. A failed lookup query bails
+// silently (same fail-closed-on-read posture as the rest of this file): a
+// stray missing reminder for one tick is a much smaller failure than
+// materializing off a partial/wrong picture of what's active.
+async function materializeDueDoses(userId: string, dateISOs: string[]) {
+  const [plansRes, slotsRes, medsRes, logsRes] = await Promise.all([
+    dbFetch(`zane_medication_plans?user_id=eq.${userId}&active=eq.true&select=id`),
+    dbFetch(`zane_medication_schedule_slots?user_id=eq.${userId}&select=id,medication_id,medication_plan_id,weekdays,hour,dose_qty,interval_days,start_date,end_date`),
+    dbFetch(`zane_medications?user_id=eq.${userId}&archived=eq.false&select=id,name`),
+    dbFetch(`zane_medication_logs?user_id=eq.${userId}&date=in.(${dateISOs.join(',')})&schedule_slot_id=not.is.null&select=date,schedule_slot_id`),
+  ]);
+  if (!plansRes.ok || !slotsRes.ok || !medsRes.ok || !logsRes.ok) {
+    console.error(`[medication-reminder] materialize lookup failed for ${userId}`);
+    return;
+  }
+  const activePlanIds = new Set<string>((await plansRes.json().catch(() => [])).map((p: { id: string }) => p.id));
+  const slots: Slot[] = await slotsRes.json().catch(() => []);
+  const meds = new Map<string, { id: string; name: string }>(
+    (await medsRes.json().catch(() => [])).map((m: { id: string; name: string }) => [m.id, m])
+  );
+  const existing = new Set<string>(
+    (await logsRes.json().catch(() => [])).map((l: { date: string; schedule_slot_id: string }) => `${l.date}_${l.schedule_slot_id}`)
+  );
+
+  // deno-lint-ignore no-explicit-any
+  const toInsert: any[] = [];
+  for (const dateISO of dateISOs) {
+    const wd = isoWd(dateISO);
+    for (const slot of slots) {
+      const med = meds.get(slot.medication_id);
+      if (!med || existing.has(`${dateISO}_${slot.id}`)) continue;
+      if (!slotAppliesOn(slot, dateISO, wd, activePlanIds)) continue;
+      toInsert.push({
+        id: `md_${dateISO}_${slot.id}`, user_id: userId, medication_id: med.id, medication_name: med.name,
+        date: dateISO, time: `${String(slot.hour).padStart(2, '0')}:00`, dose_qty: slot.dose_qty,
+        planned: true, schedule_slot_id: slot.id,
+      });
+    }
+  }
+  if (!toInsert.length) return;
+  const insRes = await dbFetch('zane_medication_logs', {
+    method: 'POST',
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(toInsert),
+  });
+  if (!insRes.ok) console.error(`[medication-reminder] materialize insert failed for ${userId}: ${insRes.status} ${await insRes.text().catch(() => '')}`);
+}
+
 async function sendReminders() {
   // Only Medications users who opted into dose reminders and have push on.
   // Gating on meds_enabled here means turning the whole feature off silently
@@ -89,6 +185,10 @@ async function sendReminders() {
     const yesterday = new Date(shifted.getTime() - DAY_MS).toISOString().slice(0, 10);
     const localMsSinceMidnight =
       (shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds()) * 1000;
+
+    // Fill in whatever the client hasn't materialized itself yet (see
+    // materializeDueDoses above) before asking what's still due below.
+    await materializeDueDoses(row.user_id, [yesterday, localDate]);
 
     // Still-planned (unlogged) entries for today and yesterday. A failed
     // fetch must not be read as "nothing planned", so skip this user rather
