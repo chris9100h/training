@@ -5442,6 +5442,12 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           id: LB.uid(),
           foodId: typeof i.foodId === 'string' ? i.foodId : null,
           foodName: String(i.foodName || 'Item'),
+          // Fresh revert anchor for the adopter's own copy, same reason
+          // addItems stamps it on a normal add: the sharer's own (possibly
+          // already renamed) foodName is all the adopter ever saw, so it's
+          // treated as this copy's original, not whatever the sharer's item
+          // was called before their own edits.
+          originalFoodName: String(i.foodName || 'Item'),
           brand: i.brand != null ? String(i.brand) : null,
           source: typeof i.source === 'string' ? i.source : null,
           quantityG: num(i.quantityG),
@@ -7445,6 +7451,17 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // comment on the "Edit ingredient" Sheet below. Followers reading a
   // shared recipe (RecipeShareSheet renders this same foodName verbatim)
   // don't need to know the raw product name a search result came with.
+  //
+  // Unlike zane_food_shopping_prefs' nameOverride pattern, there is no
+  // separate stored override here, foodName itself IS the current name,
+  // renaming just overwrites it in place, so every other reader in this
+  // file (Cooking Mode, RecipeShareSheet, the logged-recipe snapshot) needs
+  // zero changes to pick up a rename. items[i].originalFoodName, stamped
+  // once when an ingredient is first added (addItems) or adopted from a
+  // share (adopt), is the ONLY place the true original survives, purely so
+  // clearing this field can restore it. Items saved before this shipped
+  // have no originalFoodName, every read below falls back to the item's
+  // current foodName, a no-op revert rather than a crash.
   const [editName, setEditName] = useStateFd('');
   // Per-ingredient note (items[i].note, optional): the item being edited, or
   // null while closed. Carried through to Cooking Mode below, where it's the
@@ -7510,8 +7527,10 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
 
   // FdIngredientPicker only ever hands back a finished, already-quantified
   // batch (its own "Add N ingredients" button), never a single item.
+  // originalFoodName is stamped here, once, so a later rename (see editName
+  // above) has something fixed to revert to.
   function addItems(newItems) {
-    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item }))]);
+    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.foodName }))]);
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
@@ -7569,11 +7588,14 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // fewer intermediate step.
   function saveEditItem() {
     const g = fdNum(editGrams);
-    const trimmedName = editName.trim();
-    if (!editItem || !(g > 0) || !(editItem.quantityG > 0) || !trimmedName) return;
+    if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return;
+    // A cleared field reverts to the original name rather than blocking
+    // Save, same trimmed-empty-means-default rule as the shopping list's
+    // own name override (saveEdit above in ShoppingListScreen).
+    const finalName = editName.trim() || editItem.originalFoodName || editItem.foodName;
     const factor = g / editItem.quantityG;
     setItems(list => list.map(i => i.id !== editItem.id ? i : {
-      ...i, quantityG: Math.round(g), foodName: trimmedName,
+      ...i, quantityG: Math.round(g), foodName: finalName,
       calories: Math.round((i.calories || 0) * factor),
       protein: fdRound1((i.protein || 0) * factor),
       carbs: fdRound1((i.carbs || 0) * factor),
@@ -7788,8 +7810,11 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
           also how a shared recipe stops showing raw database product
           names. ── */}
       <Sheet open={!!editItem} onClose={closeEditItem} title="Edit ingredient" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: '16px' }}>
+          Original: {editItem?.originalFoodName || editItem?.foodName}{editItem?.brand ? ` · ${editItem.brand}` : ''}
+        </div>
         <Field label="Name" style={{ marginBottom: 16 }}>
-          <TextInput value={editName} onChange={setEditName} placeholder={editItem?.foodName} />
+          <TextInput value={editName} onChange={setEditName} placeholder={editItem?.originalFoodName || editItem?.foodName} />
         </Field>
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
           <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
@@ -7803,7 +7828,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
           </button>
           <Btn kind="ghost" onClick={closeEditItem} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0) || !editName.trim()} style={{ flex: 2 }}>Save</Btn>
+          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
