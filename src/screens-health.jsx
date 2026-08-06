@@ -4722,7 +4722,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       : null,
     // Data-gated like glucose/BP/temp: no card until any day has any measurement.
     bodyMeasurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <HealthChartCard title="Body Measurements" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+      <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
         headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
         {/* Metric switcher: ONE dropdown chip (too many metrics for a
             segmented row). Shows the active metric plus a chevron that flips
@@ -5112,7 +5112,7 @@ function HealthClientLogs({ clientStore }) {
       : null,
     // Data-gated mirror of the athlete card (see HealthScreen's cardEls).
     bodyMeasurements: logs.some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <HealthChartCard title="Body Measurements" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+      <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
         headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
         <div style={{ position: 'relative', marginBottom: 8 }}>
           <button data-reorder-ignore="true" onClick={() => setBmMenuOpen(v => !v)} aria-expanded={bmMenuOpen} aria-label="Choose measurement"
