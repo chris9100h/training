@@ -744,7 +744,13 @@ function Toggle({ on, onToggle, disabled = false }) {
 // above its own parent's opaque z-9998 wizard, or beating an ordinary Sheet
 // from underneath a still-open admin Sheet. Not a general-purpose knob:
 // only reach for it when there's a concrete overlay this Sheet must clear.
-function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
+// panelRef (optional): forwarded onto the actual panel div (not the
+// full-screen backdrop), so a caller can measure/clone it. Only reason this
+// exists: the Food Tracker's "genie" flourish (screens-food.jsx) clones
+// whichever of its Log it/Plan it sheets is currently open and flies that
+// clone into the docked staged-picks bar when it stages an entry, so it
+// needs a real handle on the panel node itself.
+function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   // Every sheet opens with the keyboard down, full stop: a field left
@@ -852,7 +858,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
         {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
-        <div onClick={e => e.stopPropagation()} style={{
+        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',

@@ -1127,72 +1127,76 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the last expand state.
   const [pickedExpanded, setPickedExpanded] = useStateFd(false);
   useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
-  // The docked staged-picks bar itself (stagedPanel below): the only reason
-  // this needs a ref is flyToStagedBar, right below, measuring where to send
-  // its little "genie" flourish.
+  // The docked staged-picks bar itself (stagedPanel below): one of the two
+  // refs flyToStagedBar (right below) needs to send its "genie" flourish.
   const stagedBarRef = useRefFd(null);
-  // Where flyToStagedBar's ghost should start from: the row the user tapped
-  // to get here (a search result, a Recent/Favorites/Recipes row in Quick
-  // Add), captured by captureFlightOrigin at tap time, BEFORE the quantity/
-  // recipe-portions sheet opens and covers it. Not the sheet's own Log it/
-  // Plan it button: that first version started the ghost there, which sits
-  // right next to the docked bar it's flying into, so the "flight" was too
-  // short to reliably register as motion at all, and (since every sheet
-  // opens from the same spot near the bottom of the screen regardless of
-  // which tab/row led there) looked like it silently only worked sometimes.
-  // Starting from the row itself, further up the screen and different for
-  // every tap, makes the distance real and the effect legible regardless of
-  // origin. null once nothing has been captured yet (falls back to whatever
-  // element flyToStagedBar itself was called with, see below).
-  const stagedFlightOriginRef = useRefFd(null);
-  function captureFlightOrigin(el) {
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (r.width && r.height) stagedFlightOriginRef.current = r;
-  }
-  // Tapping Log it/Plan it stages an entry and closes the sheet with no
-  // further feedback otherwise, which reads as the item just vanishing
-  // rather than landing anywhere. This sends a small ghost flying down into
-  // the docked staged bar and shrinking into it, so the motion itself says
-  // "this went into your batch down there."
+  // The OTHER ref flyToStagedBar needs: whichever Log it/Plan it/Add sheet is
+  // currently open (the quantity sheet, the recipe portions sheet, Custom
+  // item, or the Describe-a-meal review list). All four hand this same ref
+  // to their Sheet's panelRef prop (ui.jsx), so exactly one of them is ever
+  // populated at a time, matching this whole screen's "one sheet open at a
+  // time" convention. Read at the moment a staging button is tapped, so it
+  // always reflects whichever sheet that button actually lives in.
+  const flyingSheetPanelRef = useRefFd(null);
+  // Tapping Log it/Plan it/Add stages an entry and closes the sheet with no
+  // further feedback otherwise, which reads as the batch just vanishing
+  // rather than landing anywhere. This clones the WHOLE currently-open sheet
+  // and flies the clone down into the docked staged bar, shrinking into a
+  // pill and fading as it goes, while the real sheet closes instantly
+  // underneath it, so the motion itself says "this sheet's contents just
+  // went into your batch down there."
   //
-  // Deliberately outside React: a portalled, pointer-events:none DOM node
+  // An earlier version flew a small ghost dot instead, starting from
+  // whatever seemed like a sensible per-flow anchor: first the tapped
+  // button, then (once that read as barely visible, sitting right next to
+  // the target already) the tapped list row instead. Both still needed a
+  // fresh, bespoke "where did this pick actually come from" answer for every
+  // entry point (search, Quick Add's three tabs, Custom item, an AI-parsed
+  // batch, a scanned barcode or label), and were easy to get wrong or miss
+  // one path entirely (recipes under Quick Add did, at first). The sheet
+  // itself needs no such answer: it's always in the same, unambiguous place
+  // regardless of what opened it, so cloning IT sidesteps the question
+  // completely and automatically covers every path that stages through one
+  // of these four sheets, including future ones.
+  //
+  // Deliberately outside React: a portalled, pointer-events:none clone
   // animated with a plain CSS transition (this app's existing animation
   // idiom throughout, see index.html's @keyframes; nothing here uses the Web
   // Animations API). Purely decorative and fire-and-forget, never blocks or
-  // delays the real confirmLogFood/confirmRecipeLog call it's layered on top
-  // of, and if anything about it fails to measure cleanly it just quietly
-  // no-ops instead of animating into empty space.
+  // delays the real confirmLogFood/confirmRecipeLog/etc. call it's layered
+  // on top of, and if anything about it fails to measure cleanly it just
+  // quietly no-ops instead of animating into empty space.
   //
-  // fallbackEl: only used if captureFlightOrigin was never called for this
-  // pick (defensive, every wired entry point calls it), so this still shows
-  // SOMETHING rather than nothing on a path that turns out to be missing it.
-  //
-  // Two nested rAFs before measuring the bar: staged (the state that decides
-  // whether the bar is even mounted) only reflects this tap once React
-  // re-renders, which for the very first pick of a session is the difference
+  // The clone itself is captured FIRST, synchronously, while the real sheet
+  // is still open and correctly laid out (cloneNode(true) carries over its
+  // real background/border/shadow/padding/content as-is, nothing to declare
+  // here). Only the bar-measuring and the actual animation wait on the two
+  // nested rAFs below: `staged` (whether the bar is even mounted) only
+  // reflects this tap once React re-renders and the real sheet has actually
+  // closed, which for the very first pick of a session is the difference
   // between the bar existing at all yet or not. rAF fires after the browser
   // has processed the pending paint for a synchronous state update made
   // earlier in the same tick, so by the second one the bar's real position
   // (or freshly-updated totals) are there to measure.
-  function flyToStagedBar(fallbackEl) {
-    const from = stagedFlightOriginRef.current || (fallbackEl && fallbackEl.getBoundingClientRect());
-    stagedFlightOriginRef.current = null; // consumed: never leaks into a later, unrelated pick
-    if (!from || !from.width || !from.height) return;
+  function flyToStagedBar() {
+    const panel = flyingSheetPanelRef.current;
+    if (!panel) return;
+    const from = panel.getBoundingClientRect();
+    if (!from.width || !from.height) return;
+    const clone = panel.cloneNode(true);
+    clone.className = 'fd-genie-sheet-clone';
+    clone.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;`;
+    document.body.appendChild(clone);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const bar = stagedBarRef.current;
-      if (!bar) return;
+      if (!bar) { clone.remove(); return; }
       const to = bar.getBoundingClientRect();
-      const ghost = document.createElement('div');
-      ghost.className = 'fd-genie-ghost';
-      ghost.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;`;
-      document.body.appendChild(ghost);
       const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
       const dy = (to.top + Math.min(24, to.height / 2)) - (from.top + from.height / 2);
       requestAnimationFrame(() => {
-        ghost.style.transform = `translate(${dx}px, ${dy}px) scale(0.05)`;
-        ghost.style.opacity = '0';
-        ghost.style.borderRadius = '999px';
+        clone.style.transform = `translate(${dx}px, ${dy}px) scale(0.05)`;
+        clone.style.opacity = '0';
+        clone.style.borderRadius = '999px';
       });
       // Longer than the CSS transition's own longest end point (opacity:
       // 0.35s eased in at a 0.28s delay off a transform that itself only
@@ -1201,7 +1205,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // just eyeballed screenshots) that opacity is still ticking down at
       // 650ms, imperceptibly (<0.03) but not actually done, so this leaves a
       // buffer instead of cutting the fade a hair short.
-      setTimeout(() => ghost.remove(), 750);
+      setTimeout(() => clone.remove(), 750);
     }));
   }
   // Which timeline entries (by id) currently show their expanded ingredient
@@ -2645,8 +2649,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // authoritative cache write still happens server-side at log time (see
   // confirmLogFood -> LB.cacheFood), so a food that isn't cached yet
   // (r.cached false) is cached only once it's actually eaten.
-  function pickResult(r, sourceEl) {
-    captureFlightOrigin(sourceEl);
+  function pickResult(r) {
     setPendingFood({ ...r, fromCache: !!r.cached });
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
     setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
@@ -2695,8 +2698,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // can only ever reach this via Recent (never favorited, no star button
   // on the recipe portion sheet), and need their own portion picker
   // instead of the plain rescale path everything else below takes.
-  function reAddFromRecent(l, sourceEl) {
-    captureFlightOrigin(sourceEl);
+  function reAddFromRecent(l) {
     if (l.source === 'recipe') {
       // foodName may carry a "(chosen/total portions)" suffix (see
       // confirmRecipeLog) when the whole batch wasn't logged; strip it to
@@ -3350,13 +3352,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Opens the portions prompt (see recipeLogPrompt's Sheet further down): a
   // recipe still needs its portions chosen before it has a fixed quantity to
   // stage, same reason a DB food needs its quantity sheet first.
-  function addRecipeToLog(recipe, sourceEl) {
+  function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
-    // sourceEl only passed from a direct row tap (Quick Add's own Recipes
-    // tab); the call from reAddFromRecent's recipe branch above already
-    // captured its own row a moment earlier, so this must not overwrite that
-    // with nothing.
-    if (sourceEl) captureFlightOrigin(sourceEl);
     setRecipeLogPrompt({ recipe, mode: 'portions', chosenPortions: 1, totalPortions: recipe.portions || 1, gramsStr: '' });
   }
   // Reopens an already-logged recipe entry's own portions prompt, so bumping
@@ -4424,7 +4421,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       // (it still confirms the product exists) but is inert.
                       const noData = r.kcalPer100g == null;
                       return (
-                        <button key={`${r.source}:${r.sourceId}`} onClick={e => pickResult(r, e.currentTarget)} disabled={noData}
+                        <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={noData}
                           style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
                           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -4486,7 +4483,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {recentFoods.map(l => (
-                    <button key={l.id} onClick={e => reAddFromRecent(l, e.currentTarget)} style={fdResultRow}>
+                    <button key={l.id} onClick={() => reAddFromRecent(l)} style={fdResultRow}>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                           {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -4513,7 +4510,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {favoritesFiltered.map(f => (
                     <div key={f.id} style={fdQuickRowWrap}>
-                      <button onClick={e => reAddFromRecent(f, e.currentTarget)} style={fdQuickRowInner}>
+                      <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -4555,7 +4552,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       const kcal = fdRecipeItemsCalories(items, !!store.settings?.netCarbs);
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
-                          <button onClick={e => addRecipeToLog(r, e.currentTarget)} style={fdQuickRowInner}>
+                          <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
                               <div style={fdEntryMeta}>
@@ -4591,7 +4588,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           underneath at the default tier, this sheet must render above it,
           same "bump the one that must sit on top" rule as every other
           Sheet-over-Sheet case in this file. */}
-      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)" zIndex={editingMealItemId ? 200 : 100}>
+      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)" zIndex={editingMealItemId ? 200 : 100} panelRef={flyingSheetPanelRef}>
         {pendingFood && (
           <>
             {editingMealItemId && (
@@ -4681,15 +4678,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
                 {/* Always a fresh pick here (never editingEntry, the branch condition
                     guarantees it), so this always stages: the genie flourish always fires. */}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmLogFood(true); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => { flyToStagedBar(); confirmLogFood(true); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => { flyToStagedBar(); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
                 {/* "Add" (fresh pick, stages) fires the flourish; "Save" (editingEntry,
                     an in-place update, never touches staged) does not. */}
-                <Btn onClick={e => { if (!editingEntry) flyToStagedBar(e.currentTarget); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
+                <Btn onClick={() => { if (!editingEntry) flyToStagedBar(); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
               </div>
             )}
           </>
@@ -4697,7 +4694,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)">
+      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -4749,13 +4746,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => submitCustomItem(true)} disabled={!customValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => { flyToStagedBar(); submitCustomItem(true); }} disabled={!customValid} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => { flyToStagedBar(); submitCustomItem(false); }} disabled={!customValid} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
+            <Btn onClick={() => { flyToStagedBar(); submitCustomItem(false); }} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
           </div>
         )}
       </Sheet>
@@ -4806,7 +4803,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           adjust it (opens the quantity sheet above at zIndex 200), trash to
           drop it outright, Plan it/Log it stages every remaining row at
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
-      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
+      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           Tap an item to adjust its amount or numbers, remove anything that doesn't belong, or refine the whole estimate with a note.
         </div>
@@ -4846,13 +4843,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {planMode ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => commitMealItems(true)} disabled={!mealItemsValid || mealParsing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-            {!curDateIsFuture && <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 1.5 }}>Log it</Btn>}
+            <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => { flyToStagedBar(); commitMealItems(true); }} disabled={!mealItemsValid || mealParsing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+            {!curDateIsFuture && <Btn onClick={() => { flyToStagedBar(); commitMealItems(false); }} disabled={!mealItemsValid || mealParsing} style={{ flex: 1.5 }}>Log it</Btn>}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={requestCloseMealReview} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={() => commitMealItems(false)} disabled={!mealItemsValid || mealParsing} style={{ flex: 2 }}>
+            <Btn onClick={() => { flyToStagedBar(); commitMealItems(false); }} disabled={!mealItemsValid || mealParsing} style={{ flex: 2 }}>
               Add {mealItems?.length || 0} item{(mealItems?.length || 0) === 1 ? '' : 's'}
             </Btn>
           </div>
@@ -5196,7 +5193,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           comment for why a literal higher zIndex is unsafe here). Do not
           move this Sheet below CookingModeScreen's render call, or reorder
           either one, without re-reading that comment first. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
+      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)" panelRef={flyingSheetPanelRef}
         titleRight={recipeLogPrompt && (
           // Always share the LIVE recipe. When this sheet is opened from an
           // already-logged entry (openEditRecipeEntry) the prompt holds a
@@ -5289,11 +5286,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </button>
                 {planMode ? (
                   <div style={{ display: 'flex', gap: 8, flex: 1 }}>
-                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
-                    {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => { flyToStagedBar(); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                    {!curDateIsFuture && <Btn onClick={() => { flyToStagedBar(); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
                   </div>
                 ) : (
-                  <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>
+                  <Btn onClick={() => { flyToStagedBar(); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>
                     Add {recipeLogPrompt.recipe.name} · {qtyLabel}
                   </Btn>
                 )}
@@ -5308,8 +5305,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => { flyToStagedBar(); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={() => { flyToStagedBar(); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
               </div>
             </>)}
           </>
