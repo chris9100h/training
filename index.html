@@ -455,14 +455,20 @@
     40%  { transform: scale(1.09); }
     100% { transform: scale(1); }
   }
+  /* The count pops away and back in: scaled up while fading out, hidden
+     through the bounce's rebound, then back at rest as the box settles.
+     The old plain scale-up (1.35x) ballooned the label over the chevron
+     next to it during the squash, hence the fade to invisible while it's
+     enlarged. */
   @keyframes fdCountPop {
-    0%   { transform: scale(1); }
-    40%  { transform: scale(1.35); }
-    100% { transform: scale(1); }
+    0%   { transform: scale(1); opacity: 1; }
+    25%  { transform: scale(1.3); opacity: 0; }
+    70%  { transform: scale(1); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
   }
   .fd-bar-land { animation: fdBarLand 0.42s ease-out 0.36s both; }
   .fd-btn-absorb { display: inline-flex; animation: fdBtnAbsorb 0.26s ease-out 0.36s both; }
-  .fd-count-pop { display: inline-block; animation: fdCountPop 0.3s ease-out 0.36s both; }
+  .fd-count-pop { display: inline-block; animation: fdCountPop 0.42s ease-out 0.36s both; }
   @media (prefers-reduced-motion: reduce) {
     .fd-chip, .fd-bar-land, .fd-btn-absorb, .fd-count-pop { animation: none !important; }
   }
