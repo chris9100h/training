@@ -1457,25 +1457,6 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         </div>
       </CatSection>
 
-      {/* Body measurements in their own section so the daily BODY row stays
-          lean; the section starts collapsed until the first measurement is
-          entered (everUsed below), invisible for users who never take them. */}
-      <CatSection label="MEASUREMENTS" collapsed={collapsedCats.has('measurements')} onToggle={() => toggleCat('measurements')}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {numField('waistCm', 'Waist', 'cm')}
-          {numField('hipsCm', 'Hips', 'cm')}
-          {numField('chestCm', 'Chest', 'cm')}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          {numField('armCm', 'Arms', 'cm')}
-          {numField('thighCm', 'Thighs', 'cm')}
-          {numField('calfCm', 'Calves', 'cm')}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          {numField('bodyFatPct', 'Body Fat', '%')}
-        </div>
-      </CatSection>
-
       <CatSection label="NUTRITION" collapsed={collapsedCats.has('nutrition')} onToggle={() => toggleCat('nutrition')} extra={
         <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
@@ -1570,6 +1551,26 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+      </CatSection>
+
+      {/* Body measurements in their own section, grouped with the other
+          measurement sections (glucose/BP/temp) below; starts collapsed until
+          the first measurement is entered (everUsed below), invisible for
+          users who never take them. */}
+      <CatSection label="MEASUREMENTS" collapsed={collapsedCats.has('measurements')} onToggle={() => toggleCat('measurements')}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {numField('waistCm', 'Waist', 'cm')}
+          {numField('hipsCm', 'Hips', 'cm')}
+          {numField('chestCm', 'Chest', 'cm')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          {numField('armCm', 'Arms', 'cm')}
+          {numField('thighCm', 'Thighs', 'cm')}
+          {numField('calfCm', 'Calves', 'cm')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          {numField('bodyFatPct', 'Body Fat', '%')}
+        </div>
       </CatSection>
 
       <CatSection label="GLUCOSE" collapsed={collapsedCats.has('glucose')} onToggle={() => toggleCat('glucose')} extra={
