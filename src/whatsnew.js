@@ -22,6 +22,20 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.707',
+    date: '2026-08-06',
+    title: 'One very busy day: measurements, fasting, and food that lands 🚀',
+    items: [
+      "🍽️ Your picks now land with a thud: log an item and a little pill flies into the \"Add N items\" bar at the bottom, which bounces as it lands. No more wondering where your logged food went, and the bar asks before you leave the screen with picks still in it.",
+      "📏 Body measurements, seven ways: waist, hips, chest, arms, thighs, calves and body fat live in the Daily Log now, and a Body Stats card charts whichever one you like, smoothed trend included, plus a BMI readout once your height is set.",
+      "⚖️ A weight trend that tells you where you're actually going: the Weight chart draws a smoothed line over your raw weigh-ins, with a 10-day best tile and a friendly plateau warning when you haven't hit a new best in a while.",
+      "🥗 Edit a logged recipe's ingredients: adjust one ingredient's amount, add or remove items, right from the three-dot menu on any recipe entry. The recipe itself stays untouched.",
+      "💊 Missed a dose? You'll hear about it again: reminders nudge a second time two hours later, and any still-due dose can be snoozed for an hour (or un-snoozed) right on its timeline row.",
+      "⏰ A daily nudge to log your weight: pick a time, get reminded once per day, only when today's weight is still missing.",
+      "⭐ Intermittent fasting, timer included: choose a rhythm from 16:8 to OMAD, or a multi-day fast up to whatever hours you like, start it after your last meal and watch the countdown. Today's eating window is tinted right on your timeline.",
+    ],
+  },
+  {
     id: 'v2.704',
     date: '2026-08-05',
     title: 'No new features, just a lot fixed 🔧',
