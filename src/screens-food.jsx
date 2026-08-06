@@ -1435,6 +1435,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
   const [entryMenu, setEntryMenu] = useStateFd(null);
+  // "Edit ingredients": the entry whose per-ingredient editor sheet is open
+  // (null = closed). Edits the entry's own frozen recipeItems snapshot in
+  // place and recomputes the entry's totals; never touches the source
+  // recipe (matching the snapshot-copy contract of confirmRecipeLog).
+  const [ingredientEditorEntry, setIngredientEditorEntry] = useStateFd(null);
+  // Working copy of that snapshot while the sheet is open. recipeItems rows
+  // have no id, so each gets a local `_k` key (stable React key + per-row
+  // edit target), stripped again on save. Rows are flat primitives, so a
+  // shallow per-row spread is already a deep copy.
+  const [ingredientItems, setIngredientItems] = useStateFd([]);
+  // Row currently in the grams sheet (null = closed), same shape as
+  // RecipeEditorScreen's editItem/editGrams pair.
+  const [ingrEditItem, setIngrEditItem] = useStateFd(null);
+  const [ingrEditGrams, setIngrEditGrams] = useStateFd('');
+  const [ingredientPickerOpen, setIngredientPickerOpen] = useStateFd(false);
   // "Split into multiple meals": an hour that stacks several items really
   // eaten at different times (a meal-prep batch), redistributed across N
   // times without retyping every item's amount. splitHour is the hour being
@@ -3452,6 +3467,140 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       gramsStr: gramsMode ? String(entry.loggedCookedGrams) : '',
     });
   }
+
+  // ── "Edit ingredients": per-row editor for a recipe entry's own frozen
+  // snapshot (entry.recipeItems). Mirrors RecipeEditorScreen's item math
+  // (saveEditItem/editItemPreview) and its picker path, but writes back
+  // into the ENTRY (same id/date/time, totals recomputed), never the
+  // recipe. ──
+  const ingredientBaseName = useMemoFd(() => {
+    const n = ingredientEditorEntry?.foodName || '';
+    // Strips the confirmRecipeLog suffixes "(2/4)" and "(300g)"/"(75.5g)".
+    // Required for correctness, not cosmetics: openEditRecipeEntry
+    // re-derives the portion fraction from this suffix, and after an
+    // ingredient edit the snapshot IS the batch, so rescaling against the
+    // pre-edit fraction would double (or halve) the edited values on the
+    // next "Edit amount".
+    return n.replace(/\s+\([\d.]+\/\d+\)$/, '').replace(/\s+\([\d.]+g\)$/, '') || n;
+  }, [ingredientEditorEntry]);
+
+  // Live totals for the sheet header, same expressions saveIngredientEditor
+  // commits below, so the number on screen is exactly what gets saved.
+  const ingredientTotals = useMemoFd(() => {
+    const items = ingredientItems;
+    const netCarbs = !!store.settings?.netCarbs;
+    const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+    return {
+      calories: Math.round(fdRecipeItemsCalories(items, netCarbs)),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      grams: Math.round(sum('quantityG')),
+    };
+  }, [ingredientItems, store.settings?.netCarbs]);
+
+  // Seeds the working copy synchronously in the same commit as the sheet
+  // opening (React 18 batches): a useEffect backfill would paint the sheet
+  // empty for a frame (the "all removed" empty state + disabled Save),
+  // which reads as a glitch on every open.
+  function openIngredientEditor(entry) {
+    setIngredientEditorEntry(entry);
+    setIngredientItems((entry.recipeItems || []).map(ri => ({ ...ri, _k: LB.uid() })));
+    setIngrEditItem(null); setIngrEditGrams('');
+    setIngredientPickerOpen(false);
+  }
+  function closeIngredientEditor() {
+    setIngredientEditorEntry(null);
+    setIngrEditItem(null); setIngrEditGrams('');
+    setIngredientPickerOpen(false);
+  }
+
+  // Live preview as grams are typed: byte-identical logic to
+  // RecipeEditorScreen's editItemPreview, grams-only (foodName never
+  // changes here).
+  const ingrEditPreview = useMemoFd(() => {
+    const g = fdNum(ingrEditGrams);
+    if (!ingrEditItem || !(g > 0) || !(ingrEditItem.quantityG > 0)) return null;
+    const factor = g / ingrEditItem.quantityG;
+    return {
+      calories: Math.round((ingrEditItem.calories || 0) * factor),
+      protein: fdRound1((ingrEditItem.protein || 0) * factor),
+      carbs: fdRound1((ingrEditItem.carbs || 0) * factor),
+      fat: fdRound1((ingrEditItem.fat || 0) * factor),
+      sugar: ingrEditItem.sugar != null ? fdRound1(ingrEditItem.sugar * factor) : null,
+      satFat: ingrEditItem.satFat != null ? fdRound1(ingrEditItem.satFat * factor) : null,
+      sodiumMg: ingrEditItem.sodiumMg != null ? Math.round(ingrEditItem.sodiumMg * factor) : null,
+    };
+  }, [ingrEditItem, ingrEditGrams]);
+
+  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); }
+  function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); }
+  function saveIngrEdit() {
+    const g = fdNum(ingrEditGrams);
+    if (!ingrEditItem || !(g > 0)) return;
+    // Same factor math as saveEditItem when the row has a positive amount;
+    // a legacy block-merge row can carry quantityG: null (applyBlockRecipe),
+    // for those set the grams outright with no rescale (factor 1) rather
+    // than blocking the edit.
+    const old = ingrEditItem.quantityG || 0;
+    const factor = old > 0 ? g / old : 1;
+    setIngredientItems(list => list.map(i => i._k !== ingrEditItem._k ? i : {
+      ...i, quantityG: Math.round(g),
+      calories: Math.round((i.calories || 0) * factor),
+      protein: fdRound1((i.protein || 0) * factor),
+      carbs: fdRound1((i.carbs || 0) * factor),
+      fat: fdRound1((i.fat || 0) * factor),
+      fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
+    }));
+    closeIngrEdit();
+  }
+
+  // Same confirm the recipe editor uses for row removal (requestRemoveItem):
+  // this rewrites historical data, one level of safety.
+  async function requestRemoveIngredient(item) {
+    if (!await confirm(`${item.foodName} · ${item.quantityG || 0}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    setIngredientItems(list => list.filter(i => i._k !== item._k));
+  }
+  // Picker hands back finished, already-quantified rows (commitStaged); `_k`
+  // is stamped here, stripped together with `source` on save (entry
+  // recipeItems rows never carry source, unlike recipe.items).
+  function addIngredientsToEntry(newItems) {
+    setIngredientItems(list => [...list, ...newItems.map(item => ({ ...item, _k: LB.uid() }))]);
+  }
+
+  function saveIngredientEditor() {
+    const entry = ingredientEditorEntry;
+    if (!entry || !ingredientItems.length) return;
+    const netCarbs = !!store.settings?.netCarbs;
+    const sum = k => ingredientItems.reduce((a, i) => a + (i[k] || 0), 0);
+    // Explicit delete instead of `({ _k, source, ...rest })` rest-destructuring:
+    // Babel standalone's per-file `_excluded` arrays collide on one shared
+    // global (see the Btn comment in ui.jsx), and a leaked `_k` would
+    // persist into the recipe_items jsonb.
+    const recipeItems = ingredientItems.map(i => { const c = { ...i }; delete c._k; delete c.source; return c; });
+    const updated = {
+      // ...entry keeps id, date, time, createdAt, planned, recipeId,
+      // loggedTotalPortions, loggedCookedGrams, loggedCookedWeightG,
+      // templateSlotId, splitBatch, loggedUnit, foodId, brand, source
+      ...entry,
+      foodName: ingredientBaseName || entry.foodName,
+      quantityG: Math.round(sum('quantityG')),
+      calories: Math.round(fdRecipeItemsCalories(ingredientItems, netCarbs)),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      fiber: ingredientItems.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
+      sugar: ingredientItems.some(i => i.sugar != null) ? fdRound1(sum('sugar')) : null,
+      satFat: ingredientItems.some(i => i.satFat != null) ? fdRound1(sum('satFat')) : null,
+      sodiumMg: ingredientItems.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg')) : null,
+      recipeItems,
+    };
+    setStore(s => {
+      const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? updated : l);
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+    });
+    closeIngredientEditor();
+  }
+
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
   // tapped), so the Stepper's live number always matches what gets logged.
@@ -5451,6 +5600,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <i className={`fa-solid fa-chevron-${meExpanded ? 'up' : 'down'}`} style={{ marginRight: 8 }} /> {meExpanded ? 'Hide ingredients' : 'Show ingredients'}
                 </Btn>
               )}
+              {meHasItems && (
+                <Btn kind="ghost" onClick={() => act(() => openIngredientEditor(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-sliders" style={{ marginRight: 8 }} /> Edit ingredients
+                </Btn>
+              )}
               {meCanPortions ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
                   <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit amount
@@ -5467,6 +5621,76 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           );
         })()}
       </Sheet>
+
+      {/* Per-ingredient editor for a recipe entry's own snapshot ("Edit
+          ingredients", see openIngredientEditor): grams per row (macros
+          rescale), add via the shared picker, remove rows, Save writes the
+          entry in place. The picker and the row-grams sheet are sibling
+          Sheets (the documented overlay convention): the grams sheet gets
+          zIndex 200 to sit above this one (same tier the picker's own
+          quantity step uses), the picker is zIndex 100 but rendered later
+          in document order. The confirm dialog (useConfirm, portaled to
+          body) always clears the z-100 editor sheet; row removal only ever
+          fires from the list, never from the z-200 grams sheet, so the
+          confirm can never be covered. */}
+      <Sheet open={!!ingredientEditorEntry} onClose={closeIngredientEditor} title="Edit ingredients" titleColor="var(--accent)">
+        <div style={{ marginBottom: 12 }}>
+          <FdMacroHero label="Totals" calories={ingredientTotals.calories} protein={ingredientTotals.protein} carbs={ingredientTotals.carbs} fat={ingredientTotals.fat} compact />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, textAlign: 'center' }}>
+            {ingredientTotals.grams}g raw · {ingredientItems.length} ingredient{ingredientItems.length === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '42vh', overflowY: 'auto', marginBottom: 12 }}>
+          {ingredientItems.length === 0 ? (
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 0' }}>
+              All ingredients removed. Cancel to keep the entry unchanged.
+            </div>
+          ) : fdSortIngredientsByQty(ingredientItems).map(item => (
+            <div key={item._k} style={fdEntryRow}>
+              <button onClick={() => openIngrEdit(item)} style={fdDraftMain}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  {item.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{item.foodName}</span>
+                </div>
+                <span style={fdEntryMeta}>
+                  {item.quantityG || 0}g · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
+                  <span style={fdMetaDivider} />
+                  <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
+                </span>
+              </button>
+              <button onClick={() => requestRemoveIngredient(item)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <Btn onClick={() => setIngredientPickerOpen(true)} style={{ width: '100%', marginBottom: 12 }}>
+          <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredient
+        </Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeIngredientEditor} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveIngredientEditor} disabled={!ingredientItems.length} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      {/* Row grams sheet: mirrors RecipeEditorScreen's edit sheet minus the
+          rename field and trash button (removal lives on the list rows
+          only, so the z-100 confirm portal is never covered by z-200). */}
+      <Sheet open={!!ingrEditItem} onClose={closeIngrEdit} title={ingrEditItem?.foodName || 'Amount'} titleColor="var(--accent)" zIndex={200}>
+        <Field label="Amount (g)" style={{ marginBottom: 16 }}>
+          <input value={ingrEditGrams} onChange={e => setIngrEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+        </Field>
+        {ingrEditPreview && (
+          <FdMacroPreview calories={ingrEditPreview.calories} protein={ingrEditPreview.protein} carbs={ingrEditPreview.carbs} fat={ingrEditPreview.fat}
+            sugar={ingrEditPreview.sugar} satFat={ingrEditPreview.satFat} sodiumMg={ingrEditPreview.sodiumMg} />
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeIngrEdit} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveIngrEdit} disabled={!(fdNum(ingrEditGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      <FdIngredientPicker open={ingredientPickerOpen} onClose={() => setIngredientPickerOpen(false)} onAdd={addIngredientsToEntry} store={store} />
     </Screen>
     {/* Transient toast for the last applied split OR block-recipe combine
         (see splitUndo/undoSplit), rendered the same "fixed footer sibling of
