@@ -406,6 +406,26 @@
   }
   .low-stock-glow { animation: lowStockGlow 2.5s ease-in-out infinite; }
 
+  /* Food Tracker: tapping Log it/Plan it flies a ghost of the tapped button
+     down into the docked staged-picks bar (flyToStagedBar, screens-food.jsx),
+     shrinking and fading as it goes, the same "genie" pop-scale vocabulary as
+     tabPopIn above just running outward instead of in. left/top/width/height
+     and the translate/scale destination are set inline per call (they depend
+     on where the tapped button and the bar actually are), everything else
+     (the starting look, and the transition itself) lives here. transform and
+     opacity/border-radius get their own separate transitions on purpose: a
+     brisk ease-in throw for the position/scale (the "whoosh" itself) against
+     a plain, slightly delayed fade so the ghost is still fully opaque while
+     it's the size of the real button and only actually fades once it's
+     already shrinking, rather than the two racing each other. */
+  .fd-genie-ghost {
+    position: fixed; z-index: 600; pointer-events: none; opacity: 0.92;
+    background: var(--accent); border-radius: 6px; transform-origin: center center;
+    transition: transform 0.5s cubic-bezier(0.55,0.06,0.68,0.19),
+                opacity 0.35s ease 0.28s,
+                border-radius 0.35s ease;
+  }
+
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
      RIR dips below 0 (hot orange inner, red outer, same palette as the ember
      watermark) so a "hell cycle" reads at a glance. */

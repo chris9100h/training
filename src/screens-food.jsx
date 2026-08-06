@@ -1127,6 +1127,60 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the last expand state.
   const [pickedExpanded, setPickedExpanded] = useStateFd(false);
   useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
+  // The docked staged-picks bar itself (stagedPanel below): the only reason
+  // this needs a ref is flyToStagedBar, right below, measuring where to send
+  // its little "genie" flourish.
+  const stagedBarRef = useRefFd(null);
+  // Tapping Log it/Plan it stages an entry and closes the sheet with no
+  // further feedback otherwise, which reads as the item just vanishing
+  // rather than landing anywhere. This sends a small ghost of the tapped
+  // button flying down into the docked staged bar and shrinking into it, so
+  // the motion itself says "this went into your batch down there."
+  //
+  // Deliberately outside React: a portalled, pointer-events:none DOM node
+  // animated with a plain CSS transition (this app's existing animation
+  // idiom throughout, see index.html's @keyframes; nothing here uses the Web
+  // Animations API). Purely decorative and fire-and-forget, never blocks or
+  // delays the real confirmLogFood call it's layered on top of, and if
+  // anything about it fails to measure cleanly it just quietly no-ops
+  // instead of animating into empty space.
+  //
+  // Two nested rAFs before measuring the bar: staged (the state that decides
+  // whether the bar is even mounted) only reflects this tap once React
+  // re-renders, which for the very first pick of a session is the difference
+  // between the bar existing at all yet or not. rAF fires after the browser
+  // has processed the pending paint for a synchronous state update made
+  // earlier in the same tick, so by the second one the bar's real position
+  // (or freshly-updated totals) are there to measure.
+  function flyToStagedBar(sourceEl) {
+    if (!sourceEl) return;
+    const from = sourceEl.getBoundingClientRect();
+    if (!from.width || !from.height) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const bar = stagedBarRef.current;
+      if (!bar) return;
+      const to = bar.getBoundingClientRect();
+      const ghost = document.createElement('div');
+      ghost.className = 'fd-genie-ghost';
+      ghost.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;`;
+      document.body.appendChild(ghost);
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + Math.min(24, to.height / 2)) - (from.top + from.height / 2);
+      requestAnimationFrame(() => {
+        ghost.style.transform = `translate(${dx}px, ${dy}px) scale(0.05)`;
+        ghost.style.opacity = '0';
+        ghost.style.borderRadius = '999px';
+      });
+      // Longer than the CSS transition's own longest end point (opacity:
+      // 0.35s eased in at a 0.28s delay off a transform that itself only
+      // starts after the rAF above, ~630ms worst case) rather than matched
+      // to it exactly: measured directly (getComputedStyle sampling, not
+      // just eyeballed screenshots) that opacity is still ticking down at
+      // 650ms, imperceptibly (<0.03) but not actually done, so this leaves a
+      // buffer instead of cutting the fade a hair short.
+      setTimeout(() => ghost.remove(), 750);
+    }));
+  }
   // Which timeline entries (by id) currently show their expanded ingredient
   // list, for a source:'recipe' entry's chevron. Per-device UI state only,
   // not persisted.
@@ -3642,7 +3696,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
     // glow uses), since this bar sits on the normal theme-reactive Screen
     // background and should mute along with everything else on Paper.
-    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+    <div ref={stagedBarRef} className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
           {staged.map(e => (
@@ -4595,13 +4649,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ) : planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
+                {/* Always a fresh pick here (never editingEntry, the branch condition
+                    guarantees it), so this always stages: the genie flourish always fires. */}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmLogFood(true); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
+                {/* "Add" (fresh pick, stages) fires the flourish; "Save" (editingEntry,
+                    an in-place update, never touches staged) does not. */}
+                <Btn onClick={e => { if (!editingEntry) flyToStagedBar(e.currentTarget); confirmLogFood(false); }} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
               </div>
             )}
           </>
