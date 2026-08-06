@@ -1140,11 +1140,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const flyingSheetPanelRef = useRefFd(null);
   // Tapping Log it/Plan it/Add stages an entry and closes the sheet with no
   // further feedback otherwise, which reads as the batch just vanishing
-  // rather than landing anywhere. This clones the WHOLE currently-open sheet
-  // and flies the clone down into the docked staged bar, shrinking into a
-  // pill and fading as it goes, while the real sheet closes instantly
-  // underneath it, so the motion itself says "this sheet's contents just
-  // went into your batch down there."
+  // rather than landing anywhere. This clones the WHOLE currently-open sheet,
+  // fades the clone to a solid accent-colored card first (the "this is
+  // confirmed" beat), THEN flies it down into the docked staged bar,
+  // shrinking into a pill and fading out as it goes, while the real sheet
+  // closes instantly underneath it. Two readable beats instead of one: "this
+  // just got confirmed" then "and it went into your batch down there."
   //
   // An earlier version flew a small ghost dot instead, starting from
   // whatever seemed like a sensible per-flow anchor: first the tapped
@@ -1170,43 +1171,79 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // The clone itself is captured FIRST, synchronously, while the real sheet
   // is still open and correctly laid out (cloneNode(true) carries over its
   // real background/border/shadow/padding/content as-is, nothing to declare
-  // here). Only the bar-measuring and the actual animation wait on the two
-  // nested rAFs below: `staged` (whether the bar is even mounted) only
-  // reflects this tap once React re-renders and the real sheet has actually
-  // closed, which for the very first pick of a session is the difference
-  // between the bar existing at all yet or not. rAF fires after the browser
-  // has processed the pending paint for a synchronous state update made
-  // earlier in the same tick, so by the second one the bar's real position
-  // (or freshly-updated totals) are there to measure.
+  // here). The accent-fade overlay (fdGenieAccentFade) rides along as an
+  // extra child covering the clone, painted last so it sits on top of
+  // everything already in there.
+  //
+  // Only the bar-measuring and the fold itself wait on the two nested rAFs
+  // further down: `staged` (whether the bar is even mounted) only reflects
+  // this tap once React re-renders and the real sheet has actually closed,
+  // which for the very first pick of a session is the difference between the
+  // bar existing at all yet or not. rAF fires after the browser has
+  // processed the pending paint for a synchronous state update made earlier
+  // in the same tick, so by the second one the bar's real position (or
+  // freshly-updated totals) are there to measure. The color fade itself
+  // doesn't need the bar at all, so it starts on its own, single rAF ahead of
+  // that: setting a fresh opacity:0 element straight to 1 in the very same
+  // frame it was inserted would just skip the transition (no prior committed
+  // frame to transition FROM), same reason the fold itself waits a frame
+  // before setting its own end state.
   function flyToStagedBar() {
     const panel = flyingSheetPanelRef.current;
     if (!panel) return;
     const from = panel.getBoundingClientRect();
     if (!from.width || !from.height) return;
     const clone = panel.cloneNode(true);
+    // clone.className replaces the class (fine: the real panel's own class,
+    // if it even had one, isn't what makes it look like the panel, its
+    // INLINE style is, see below), but clone.style is a live
+    // CSSStyleDeclaration cloneNode(true) already populated from the real
+    // panel's own inline style (background, border, border-radius,
+    // box-shadow, padding, the works). Setting these four individually,
+    // NOT via clone.style.cssText = '...', is load-bearing: cssText replaces
+    // the ENTIRE style attribute rather than adding to it, which silently
+    // wiped out everything cloneNode(true) had just carried over, so the
+    // clone rendered as a plain, sharp-cornered, background-less box instead
+    // of an actual copy of the sheet (caught by outlining the clone in a
+    // throwaway repro harness and finding its computed border-radius/
+    // background flatly absent, not by eye: the resulting shape is still a
+    // perfectly ordinary rectangle either way, nothing about the bug LOOKS
+    // alarming in a screenshot, it just quietly loses the sheet's real look).
+    clone.style.left = from.left + 'px';
+    clone.style.top = from.top + 'px';
+    clone.style.width = from.width + 'px';
+    clone.style.height = from.height + 'px';
     clone.className = 'fd-genie-sheet-clone';
-    clone.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;`;
+    const accentFade = document.createElement('div');
+    accentFade.className = 'fd-genie-accent-fade';
+    clone.appendChild(accentFade);
     document.body.appendChild(clone);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const bar = stagedBarRef.current;
-      if (!bar) { clone.remove(); return; }
-      const to = bar.getBoundingClientRect();
-      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
-      const dy = (to.top + Math.min(24, to.height / 2)) - (from.top + from.height / 2);
-      requestAnimationFrame(() => {
-        clone.style.transform = `translate(${dx}px, ${dy}px) scale(0.05)`;
-        clone.style.opacity = '0';
-        clone.style.borderRadius = '999px';
-      });
-      // Longer than the CSS transition's own longest end point (opacity:
-      // 0.35s eased in at a 0.28s delay off a transform that itself only
-      // starts after the rAF above, ~630ms worst case) rather than matched
-      // to it exactly: measured directly (getComputedStyle sampling, not
-      // just eyeballed screenshots) that opacity is still ticking down at
-      // 650ms, imperceptibly (<0.03) but not actually done, so this leaves a
-      // buffer instead of cutting the fade a hair short.
-      setTimeout(() => clone.remove(), 750);
-    }));
+    requestAnimationFrame(() => { accentFade.style.opacity = '1'; });
+    // Fold starts only once the accent fade has actually finished (sequential
+    // beats, not overlapping): fd-genie-accent-fade's own opacity transition
+    // is 0.3s, plus a small buffer for the rAF above and normal jitter.
+    setTimeout(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const bar = stagedBarRef.current;
+        if (!bar) { clone.remove(); return; }
+        const to = bar.getBoundingClientRect();
+        const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+        const dy = (to.top + Math.min(24, to.height / 2)) - (from.top + from.height / 2);
+        requestAnimationFrame(() => {
+          clone.style.transform = `translate(${dx}px, ${dy}px) scale(0.05)`;
+          clone.style.opacity = '0';
+          clone.style.borderRadius = '999px';
+        });
+        // Longer than the CSS transition's own longest end point (opacity:
+        // 0.35s eased in at a 0.28s delay off a transform that itself only
+        // starts after the rAF above, ~630ms worst case) rather than matched
+        // to it exactly: measured directly (getComputedStyle sampling, not
+        // just eyeballed screenshots) that opacity is still ticking down at
+        // 650ms, imperceptibly (<0.03) but not actually done, so this leaves
+        // a buffer instead of cutting the fade a hair short.
+        setTimeout(() => clone.remove(), 750);
+      }));
+    }, 350);
   }
   // Which timeline entries (by id) currently show their expanded ingredient
   // list, for a source:'recipe' entry's chevron. Per-device UI state only,
