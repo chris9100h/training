@@ -1131,19 +1131,42 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // this needs a ref is flyToStagedBar, right below, measuring where to send
   // its little "genie" flourish.
   const stagedBarRef = useRefFd(null);
+  // Where flyToStagedBar's ghost should start from: the row the user tapped
+  // to get here (a search result, a Recent/Favorites/Recipes row in Quick
+  // Add), captured by captureFlightOrigin at tap time, BEFORE the quantity/
+  // recipe-portions sheet opens and covers it. Not the sheet's own Log it/
+  // Plan it button: that first version started the ghost there, which sits
+  // right next to the docked bar it's flying into, so the "flight" was too
+  // short to reliably register as motion at all, and (since every sheet
+  // opens from the same spot near the bottom of the screen regardless of
+  // which tab/row led there) looked like it silently only worked sometimes.
+  // Starting from the row itself, further up the screen and different for
+  // every tap, makes the distance real and the effect legible regardless of
+  // origin. null once nothing has been captured yet (falls back to whatever
+  // element flyToStagedBar itself was called with, see below).
+  const stagedFlightOriginRef = useRefFd(null);
+  function captureFlightOrigin(el) {
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width && r.height) stagedFlightOriginRef.current = r;
+  }
   // Tapping Log it/Plan it stages an entry and closes the sheet with no
   // further feedback otherwise, which reads as the item just vanishing
-  // rather than landing anywhere. This sends a small ghost of the tapped
-  // button flying down into the docked staged bar and shrinking into it, so
-  // the motion itself says "this went into your batch down there."
+  // rather than landing anywhere. This sends a small ghost flying down into
+  // the docked staged bar and shrinking into it, so the motion itself says
+  // "this went into your batch down there."
   //
   // Deliberately outside React: a portalled, pointer-events:none DOM node
   // animated with a plain CSS transition (this app's existing animation
   // idiom throughout, see index.html's @keyframes; nothing here uses the Web
   // Animations API). Purely decorative and fire-and-forget, never blocks or
-  // delays the real confirmLogFood call it's layered on top of, and if
-  // anything about it fails to measure cleanly it just quietly no-ops
-  // instead of animating into empty space.
+  // delays the real confirmLogFood/confirmRecipeLog call it's layered on top
+  // of, and if anything about it fails to measure cleanly it just quietly
+  // no-ops instead of animating into empty space.
+  //
+  // fallbackEl: only used if captureFlightOrigin was never called for this
+  // pick (defensive, every wired entry point calls it), so this still shows
+  // SOMETHING rather than nothing on a path that turns out to be missing it.
   //
   // Two nested rAFs before measuring the bar: staged (the state that decides
   // whether the bar is even mounted) only reflects this tap once React
@@ -1152,10 +1175,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // has processed the pending paint for a synchronous state update made
   // earlier in the same tick, so by the second one the bar's real position
   // (or freshly-updated totals) are there to measure.
-  function flyToStagedBar(sourceEl) {
-    if (!sourceEl) return;
-    const from = sourceEl.getBoundingClientRect();
-    if (!from.width || !from.height) return;
+  function flyToStagedBar(fallbackEl) {
+    const from = stagedFlightOriginRef.current || (fallbackEl && fallbackEl.getBoundingClientRect());
+    stagedFlightOriginRef.current = null; // consumed: never leaks into a later, unrelated pick
+    if (!from || !from.width || !from.height) return;
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const bar = stagedBarRef.current;
       if (!bar) return;
@@ -2622,7 +2645,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // authoritative cache write still happens server-side at log time (see
   // confirmLogFood -> LB.cacheFood), so a food that isn't cached yet
   // (r.cached false) is cached only once it's actually eaten.
-  function pickResult(r) {
+  function pickResult(r, sourceEl) {
+    captureFlightOrigin(sourceEl);
     setPendingFood({ ...r, fromCache: !!r.cached });
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
     setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
@@ -2671,7 +2695,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // can only ever reach this via Recent (never favorited, no star button
   // on the recipe portion sheet), and need their own portion picker
   // instead of the plain rescale path everything else below takes.
-  function reAddFromRecent(l) {
+  function reAddFromRecent(l, sourceEl) {
+    captureFlightOrigin(sourceEl);
     if (l.source === 'recipe') {
       // foodName may carry a "(chosen/total portions)" suffix (see
       // confirmRecipeLog) when the whole batch wasn't logged; strip it to
@@ -3325,8 +3350,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Opens the portions prompt (see recipeLogPrompt's Sheet further down): a
   // recipe still needs its portions chosen before it has a fixed quantity to
   // stage, same reason a DB food needs its quantity sheet first.
-  function addRecipeToLog(recipe) {
+  function addRecipeToLog(recipe, sourceEl) {
     if (!(recipe.items || []).length) return;
+    // sourceEl only passed from a direct row tap (Quick Add's own Recipes
+    // tab); the call from reAddFromRecent's recipe branch above already
+    // captured its own row a moment earlier, so this must not overwrite that
+    // with nothing.
+    if (sourceEl) captureFlightOrigin(sourceEl);
     setRecipeLogPrompt({ recipe, mode: 'portions', chosenPortions: 1, totalPortions: recipe.portions || 1, gramsStr: '' });
   }
   // Reopens an already-logged recipe entry's own portions prompt, so bumping
@@ -4394,7 +4424,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       // (it still confirms the product exists) but is inert.
                       const noData = r.kcalPer100g == null;
                       return (
-                        <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={noData}
+                        <button key={`${r.source}:${r.sourceId}`} onClick={e => pickResult(r, e.currentTarget)} disabled={noData}
                           style={{ ...fdResultRow, ...(noData ? { cursor: 'default', opacity: 0.55 } : null) }}>
                           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -4456,7 +4486,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {recentFoods.map(l => (
-                    <button key={l.id} onClick={() => reAddFromRecent(l)} style={fdResultRow}>
+                    <button key={l.id} onClick={e => reAddFromRecent(l, e.currentTarget)} style={fdResultRow}>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                           {l.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -4483,7 +4513,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {favoritesFiltered.map(f => (
                     <div key={f.id} style={fdQuickRowWrap}>
-                      <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
+                      <button onClick={e => reAddFromRecent(f, e.currentTarget)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             {f.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -4525,7 +4555,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       const kcal = fdRecipeItemsCalories(items, !!store.settings?.netCarbs);
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
-                          <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
+                          <button onClick={e => addRecipeToLog(r, e.currentTarget)} style={fdQuickRowInner}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
                               <div style={fdEntryMeta}>
@@ -5259,11 +5289,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </button>
                 {planMode ? (
                   <div style={{ display: 'flex', gap: 8, flex: 1 }}>
-                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
-                    {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                    <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                    {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
                   </div>
                 ) : (
-                  <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>
+                  <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>
                     Add {recipeLogPrompt.recipe.name} · {qtyLabel}
                   </Btn>
                 )}
@@ -5278,8 +5308,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(true); }} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                {!curDateIsFuture && <Btn onClick={e => { flyToStagedBar(e.currentTarget); confirmRecipeLog(false); }} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
               </div>
             </>)}
           </>
