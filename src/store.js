@@ -674,6 +674,11 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.dailyLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date,
         weight: convKg(l.weight ?? null), steps: l.steps ?? null,
+        // Body measurements are cm/%, unit-independent: deliberately NOT
+        // through convKg (only weight is unit-converted on restore).
+        waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
+        arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
+        body_fat_pct: l.bodyFatPct ?? null,
         calories: l.calories ?? null, protein: l.protein ?? null,
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
@@ -1213,7 +1218,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1518,6 +1523,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     dailyLogs: (dailyLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+      armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+      bodyFatPct: l.body_fat_pct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
@@ -2399,6 +2407,9 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.rpc('sync_daily_logs_batch', { p_logs: upsert.map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
+      arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
+      body_fat_pct: l.bodyFatPct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
@@ -6636,7 +6647,7 @@ async function refreshHealthLogs(userId) {
   // background window was invisible until a full reload.
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
          medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -6656,6 +6667,9 @@ async function refreshHealthLogs(userId) {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+      armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+      bodyFatPct: l.body_fat_pct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,

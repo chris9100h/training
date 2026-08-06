@@ -218,6 +218,13 @@ CREATE TABLE public.zane_daily_logs (
   user_id      uuid        NOT NULL,
   date         text        NOT NULL,
   weight       numeric,
+  waist_cm     numeric,
+  hips_cm      numeric,
+  chest_cm     numeric,
+  arm_cm       numeric,
+  thigh_cm     numeric,
+  calf_cm      numeric,
+  body_fat_pct numeric,
   steps        integer,
   calories     integer,
   protein      integer,
@@ -1103,7 +1110,9 @@ CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  SET search_path TO 'public'
 AS $function$
   INSERT INTO zane_daily_logs (
-    id, user_id, date, weight, steps, calories, protein, carbs, fat, fiber,
+    id, user_id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm,
+    calf_cm, body_fat_pct, steps,
+    calories, protein, carbs, fat, fiber,
     water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour,
     adherence, targets_snap, daily_coach_fields, updated_at
   )
@@ -1112,6 +1121,13 @@ AS $function$
     auth.uid(),
     l->>'date',
     (l->>'weight')::numeric,
+    (l->>'waist_cm')::numeric,
+    (l->>'hips_cm')::numeric,
+    (l->>'chest_cm')::numeric,
+    (l->>'arm_cm')::numeric,
+    (l->>'thigh_cm')::numeric,
+    (l->>'calf_cm')::numeric,
+    (l->>'body_fat_pct')::numeric,
     (l->>'steps')::int,
     (l->>'calories')::int,
     (l->>'protein')::int,
@@ -1130,6 +1146,13 @@ AS $function$
   FROM jsonb_array_elements(p_logs) AS l
   ON CONFLICT (user_id, date) DO UPDATE SET
     weight             = EXCLUDED.weight,
+    waist_cm           = EXCLUDED.waist_cm,
+    hips_cm            = EXCLUDED.hips_cm,
+    chest_cm           = EXCLUDED.chest_cm,
+    arm_cm             = EXCLUDED.arm_cm,
+    thigh_cm           = EXCLUDED.thigh_cm,
+    calf_cm            = EXCLUDED.calf_cm,
+    body_fat_pct       = EXCLUDED.body_fat_pct,
     steps              = EXCLUDED.steps,
     calories           = EXCLUDED.calories,
     protein            = EXCLUDED.protein,

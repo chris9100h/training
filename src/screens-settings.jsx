@@ -31,6 +31,7 @@ const HEALTH_CARD_TOGGLES = [
   { id: 'glucose', label: 'Glucose' },
   { id: 'bloodPressure', label: 'Blood pressure' },
   { id: 'bodyTemp', label: 'Body temperature' },
+  { id: 'bodyMeasurements', label: 'Body measurements' },
 ];
 
 // Boxed input look shared by the settings sheets' plain text/password/email/
