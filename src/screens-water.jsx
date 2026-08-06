@@ -2,7 +2,9 @@
    Wasser Tracker app into Zane. Per-entry logging (quick water amounts, a
    configurable coffee preset, user-defined drinks, custom entries), a live
    activity ring, an expected-vs-actual day chart, a derived win streak, an
-   optional bottle counter, and a stats sheet with drag-to-inspect bars.
+   optional bottle counter, a stats sheet with drag-to-inspect bars, and a
+   day-nav (same idiom as the Food Tracker's, unbounded both ways) to view
+   and backlog a day other than today.
 
    Water is stored canonically in ml (store.waterLogs, table zane_water_logs).
    On every mutation the day's summed ml is written back into the daily log's
@@ -60,6 +62,14 @@ function wtHexToRgba(hex, alpha) {
 function wtDateStr(offset = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
+  return LB.fmtISO(d);
+}
+// Shifts an arbitrary date string, unlike wtDateStr above (always relative to
+// right now). Same helper Food keeps under this exact name (fdShiftDate,
+// screens-food.jsx) for its own day-nav.
+function wtShiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
   return LB.fmtISO(d);
 }
 function wtHhmmToDecimal(t) {
@@ -169,7 +179,14 @@ function WaterRing({ percent, size = 128 }) {
 }
 
 // ─── Expected vs actual, over the day ───────────────────────────────
-function WaterDayChart({ entries, goalMl, startTime, endTime }) {
+// `date`: the day being charted, only used to label the hover tooltip
+// correctly once this can show a day other than today. `live`: whether
+// `date` is actually today, gating the "now" marker, the extra hover point
+// anchored to it, and the pacing math behind both. Neither makes sense for a
+// past, already-finished day (there is no "now" on that day's own timeline),
+// and wall-clock hours belong to whatever day it actually is right now, not
+// necessarily the day being charted.
+function WaterDayChart({ entries, goalMl, startTime, endTime, date, live }) {
   let startH = Math.floor(wtHhmmToDecimal(startTime));
   let endH = Math.ceil(wtHhmmToDecimal(endTime));
   // An overnight/reversed window (startH >= endH) has no valid ramp: the tick
@@ -197,34 +214,37 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const expLine = ticks.map(h => `${xOf(h).toFixed(1)},${yOf(expectedAt(h)).toFixed(1)}`).join(' ');
   const actLine = actual.map(p => `${xOf(p.h).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
-  const now = new Date();
-  const nowDec = Math.max(startH, Math.min(endH, now.getHours() + now.getMinutes() / 60));
   const gridVals = [0, 0.5, 1].map(f => goalMl * f);
   // Drag-to-inspect points, one per hourly tick (the chart's native
-  // granularity), plus the exact "now" instant below so the dashed now-line
-  // itself is a reachable target too (it rarely sits on a whole hour).
-  // Anchored to the actual line (matches markerColor below), Target sits
-  // alongside it as a second row so both series read at a glance.
+  // granularity), plus (while live) the exact "now" instant below so the
+  // dashed now-line itself is a reachable target too (it rarely sits on a
+  // whole hour). Anchored to the actual line (matches markerColor below),
+  // Target sits alongside it as a second row so both series read at a glance.
   // No hint text: hideHint suppresses ChartHover's own "Drag to inspect"
   // label, which is redundant on a screen this small.
   const hoverPoints = actual.map(p => ({
-    x: xOf(p.h), y: yOf(p.v), date: wtDateStr(0), sub: `${String(p.h).padStart(2, '0')}:00`,
+    x: xOf(p.h), y: yOf(p.v), date, sub: `${String(p.h).padStart(2, '0')}:00`,
     rows: [
       { label: 'Target', value: `${wtAmt(expectedAt(p.h))} ${wtUnit()}`, color: UI.gold },
       { label: 'Actual', value: `${wtAmt(p.v)} ${wtUnit()}`, color: WT_BLUE },
     ],
   }));
-  // Same clamped threshold the dashed line uses, so this point sits exactly
-  // on it: real logged total up to right now, not an interpolated guess.
-  const actualAtNow = sorted.reduce((a, e) => a + (wtHhmmToDecimal(e.time) <= nowDec ? e.amountMl : 0), 0);
-  hoverPoints.push({
-    x: xOf(nowDec), y: yOf(actualAtNow), date: wtDateStr(0),
-    sub: `Now · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
-    rows: [
-      { label: 'Target', value: `${wtAmt(expectedAt(nowDec))} ${wtUnit()}`, color: UI.gold },
-      { label: 'Actual', value: `${wtAmt(actualAtNow)} ${wtUnit()}`, color: WT_BLUE },
-    ],
-  });
+  let nowDec = null;
+  if (live) {
+    const now = new Date();
+    nowDec = Math.max(startH, Math.min(endH, now.getHours() + now.getMinutes() / 60));
+    // Same clamped threshold the dashed line uses, so this point sits exactly
+    // on it: real logged total up to right now, not an interpolated guess.
+    const actualAtNow = sorted.reduce((a, e) => a + (wtHhmmToDecimal(e.time) <= nowDec ? e.amountMl : 0), 0);
+    hoverPoints.push({
+      x: xOf(nowDec), y: yOf(actualAtNow), date,
+      sub: `Now · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+      rows: [
+        { label: 'Target', value: `${wtAmt(expectedAt(nowDec))} ${wtUnit()}`, color: UI.gold },
+        { label: 'Actual', value: `${wtAmt(actualAtNow)} ${wtUnit()}`, color: WT_BLUE },
+      ],
+    });
+  }
 
   return (
     <ChartHover W={W} H={H} points={hoverPoints} markerColor={WT_BLUE} hideHint>
@@ -239,7 +259,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
       {ticks.filter((_, i) => i % Math.ceil(span / 6) === 0).map((h, i) => (
         <text filter="url(#chart-text-lift)" key={i} x={xOf(h).toFixed(1)} y={H - 6} textAnchor="middle" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{String(h).padStart(2, '0')}</text>
       ))}
-      <line x1={xOf(nowDec).toFixed(1)} y1={padTop} x2={xOf(nowDec).toFixed(1)} y2={base} stroke={UI.inkFaint} strokeWidth="1" strokeDasharray="2 3" />
+      {live && <line x1={xOf(nowDec).toFixed(1)} y1={padTop} x2={xOf(nowDec).toFixed(1)} y2={base} stroke={UI.inkFaint} strokeWidth="1" strokeDasharray="2 3" />}
       <polyline points={expLine} fill="none" stroke={UI.gold} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.8" />
       <polygon points={`${xOf(startH).toFixed(1)},${base} ${actLine} ${xOf(actual[actual.length - 1].h).toFixed(1)},${base}`} fill={WT_BLUE_FAINT} />
       <polyline points={actLine} fill="none" stroke={WT_BLUE} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
@@ -286,16 +306,39 @@ function WaterScreen({ store, setStore, go, userId }) {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
-  const todayEntries = useMemoW(
-    () => (store.waterLogs || []).filter(l => l.date === today),
-    [store.waterLogs, today],
+  // Day nav: same idiom as the Food Tracker's own date switcher
+  // (screens-food.jsx), unbounded both ways. `today` above stays the
+  // always-current date: the streak, the expected-vs-actual pacing, and the
+  // celebration/bottle prompts all stay anchored to it, none of them make
+  // sense for a day other than the one actually happening right now. `curDate`
+  // is only "which day is currently displayed", defaults to `today` and is
+  // otherwise fully independent of it, so viewing (or backlogging) another day
+  // never has to fight the 30s/visibilitychange correction above.
+  const [curDate, setCurDate] = useStateW(() => wtDateStr(0));
+  const shiftDay = (delta) => setCurDate(d => wtShiftDate(d, delta));
+  const isToday = curDate === today;
+  const dayLabel = curDate === today ? 'Today' : curDate === wtShiftDate(today, -1) ? 'Yesterday' : curDate === wtShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+
+  const dayEntries = useMemoW(
+    () => (store.waterLogs || []).filter(l => l.date === curDate),
+    [store.waterLogs, curDate],
   );
-  const total = useMemoW(() => todayEntries.reduce((a, e) => a + (e.amountMl || 0), 0), [todayEntries]);
+  const total = useMemoW(() => dayEntries.reduce((a, e) => a + (e.amountMl || 0), 0), [dayEntries]);
   const percent = Math.min(Math.round((total / goalMl) * 100), 100);
+  // Always the real current streak, regardless of which day is displayed:
+  // wtStreak walks backward from the true `today` inside itself (see its own
+  // definition), not from curDate. That's the point of backlogging in the
+  // first place, fixing a missed past day should be reflected here
+  // immediately, whether or not that past day is what's currently on screen.
   const streak = useMemoW(() => wtStreak(store.dailyLogs, goalMl), [store.dailyLogs, goalMl]);
 
   const bottlesToday = (settings.waterBottlesDate === today) ? (settings.waterBottlesToday || 0) : 0;
-  const plainToday = useMemoW(() => todayEntries.filter(e => !e.category).reduce((a, e) => a + e.amountMl, 0), [todayEntries]);
+  // Only ever consumed under an `isToday` gate below (the bottle card's
+  // visibility, and doAdd's early return): the bottle counter
+  // (settings.waterBottlesDate/-Today) is explicit today-only state, there is
+  // no historical per-day bottle count to reconcile a past day's total
+  // against, so this is meaningless for any other curDate.
+  const plainToday = useMemoW(() => dayEntries.filter(e => !e.category).reduce((a, e) => a + e.amountMl, 0), [dayEntries]);
   const pendingBottle = bottleEnabled ? Math.max(0, plainToday - bottlesToday * bottleMl) : 0;
 
   const expected = wtExpectedMl(goalMl, startTime, endTime);
@@ -306,13 +349,13 @@ function WaterScreen({ store, setStore, go, userId }) {
 
   // Writes the entry AND the recomputed day total into the daily log in one
   // atomic store update (both sync through syncStore; flushSync retries both).
-  // Takes the target date explicitly rather than closing over `today`: doAdd
-  // below needs a freshly-derived date, not the up-to-30s-stale state (L9,
-  // audit-2026-08), while deleteEntry keeps passing `today` since it only
-  // ever removes a row from the currently-displayed (already `today`-
-  // filtered) list.
-  function patchDaily(s, dayEntries, dateISO) {
-    const sum = dayEntries.reduce((a, e) => a + (e.amountMl || 0), 0);
+  // Takes the target date explicitly: doAdd below needs either a
+  // freshly-derived "right now" (not the up-to-30s-stale `today` state, L9,
+  // audit-2026-08) or curDate if backlogging, and deleteEntry passes the
+  // deleted entry's own date, so a past day's delete recomputes that day's
+  // total rather than whatever's currently on screen.
+  function patchDaily(s, entriesForDay, dateISO) {
+    const sum = entriesForDay.reduce((a, e) => a + (e.amountMl || 0), 0);
     const existing = (s.dailyLogs || []).find(l => l.date === dateISO);
     const now = new Date().toISOString();
     const waterMl = sum > 0 ? sum : null;
@@ -323,18 +366,26 @@ function WaterScreen({ store, setStore, go, userId }) {
   }
 
   async function doAdd(amountMl, name, category) {
-    // Freshly derived, not the `today` state (only re-derived every 30s or on
-    // visibilitychange, see its own comment above): otherwise an add landing
-    // in that window right after local midnight stamps the entry, and folds
-    // its total into the daily log, on the day that just ended (L9,
-    // audit-2026-08).
-    const nowDate = wtDateStr(0);
-    const entry = { id: LB.uid(), date: nowDate, time: LB.nowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
+    // Freshly derived when logging to TODAY, not the `today` state (only
+    // re-derived every 30s or on visibilitychange, see its own comment
+    // above): otherwise an add landing in that window right after local
+    // midnight stamps the entry, and folds its total into the daily log, on
+    // the day that just ended (L9, audit-2026-08). A deliberately backdated
+    // add (curDate navigated away from today) isn't subject to that race, it
+    // always targets curDate as-is, that's the whole point of the day nav.
+    const entryDate = isToday ? wtDateStr(0) : curDate;
+    const entry = { id: LB.uid(), date: entryDate, time: LB.nowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
     const prevTotal = total;
     setStore(s => {
       const nextLogs = [entry, ...(s.waterLogs || [])];
-      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === nowDate), nowDate) };
+      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === entryDate), entryDate) };
     });
+    // Celebration and bottle-crossing prompts are real-time, "you just did
+    // this" moments: only fire for an add to TODAY. Backlogging a missed
+    // drink into a past day isn't something to celebrate as if it just
+    // happened, and the bottle counter has no historical per-day state to
+    // update against a backdated add (see plainToday/bottlesToday above).
+    if (!isToday) return;
     // useConfirm() holds only one dialog at a time, so the goal-reached and
     // bottle-empty prompts (both possibly triggered by the same add) must be
     // sequenced, not fired independently: awaiting the goal dialog here
@@ -376,20 +427,22 @@ function WaterScreen({ store, setStore, go, userId }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.waterLogs || []).filter(l => l.id !== entry.id);
-      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === today), today) };
+      // entry.date rather than curDate/today: a delete always recomputes the
+      // day the deleted row actually belonged to, whichever day that is.
+      return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === entry.date), entry.date) };
     });
   }
 
   // Screenshot mode: hides everything interactive (quick-add tiles, the
-  // drinks grid, delete buttons) so the capture is just today's hero, day
-  // chart, breakdown and entry list, the parts worth sharing. Reuses the
-  // shared captureNodeAsPng flow (screens-lib.jsx, same one the plan poster
-  // and session share use) instead of a bespoke copy, so a failed capture
-  // (html2canvas unavailable, encode failure) surfaces a real error instead
-  // of silently no-op'ing.
+  // drinks grid, delete buttons) so the capture is just the viewed day's
+  // hero, day chart, breakdown and entry list, the parts worth sharing.
+  // Reuses the shared captureNodeAsPng flow (screens-lib.jsx, same one the
+  // plan poster and session share use) instead of a bespoke copy, so a
+  // failed capture (html2canvas unavailable, encode failure) surfaces a real
+  // error instead of silently no-op'ing.
   async function takeScreenshot() {
     if (!captureRef.current) return;
-    const res = await captureNodeAsPng(captureRef.current, { filename: `water-${today}.png`, setCapturing });
+    const res = await captureNodeAsPng(captureRef.current, { filename: `water-${curDate}.png`, setCapturing });
     if (!res?.ok) {
       await confirm(res?.reason === 'unavailable'
         ? 'Could not build the image. Check your connection and try again.'
@@ -420,10 +473,10 @@ function WaterScreen({ store, setStore, go, userId }) {
   };
 
   const breakdown = useMemoW(() => {
-    const custom = todayEntries.filter(e => e.category === 'custom').reduce((sum, e) => sum + e.amountMl, 0);
-    const { grouped, milk } = wtGroupOtherDrinks(todayEntries, coffeeSizes.map(s => s.label), drinks);
+    const custom = dayEntries.filter(e => e.category === 'custom').reduce((sum, e) => sum + e.amountMl, 0);
+    const { grouped, milk } = wtGroupOtherDrinks(dayEntries, coffeeSizes.map(s => s.label), drinks);
     return { grouped, milk, custom };
-  }, [todayEntries, coffeeSizes, drinks]);
+  }, [dayEntries, coffeeSizes, drinks]);
 
   return (
     <Screen>
@@ -452,6 +505,37 @@ function WaterScreen({ store, setStore, go, userId }) {
             which paint above a z-index:0 absolute sibling regardless of DOM
             order, so the grid needs to sit behind that baseline instead. */}
         {capturing && window.__gridEnabled && <SvgGrid style={{ zIndex: -1 }} />}
+
+        {/* Day nav: same idiom as the Food Tracker's own date switcher
+            (screens-food.jsx), unbounded both ways. Calendar button jumps
+            straight to a date instead of stepping one day at a time (icon
+            button + an overlaid invisible date input, a native picker needs a
+            real <input type="date"> under the tap to open on iOS). Hidden
+            while capturing: a shared screenshot is this day's stats, not a
+            day-picker. */}
+        {!capturing && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <button onClick={() => shiftDay(-1)} aria-label="Previous day" style={wtNavBtn}>
+              <i className="fa-solid fa-chevron-left" style={{ fontSize: 12 }} />
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{dayLabel}</div>
+              <div style={{ position: 'relative', width: 26, height: 26, flexShrink: 0 }}>
+                <button aria-label="Jump to date" style={wtCalBtn}>
+                  <i className="fa-solid fa-calendar-day" style={{ fontSize: 12 }} />
+                </button>
+                <input type="date" value={curDate}
+                  onChange={e => e.target.value && setCurDate(e.target.value)}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                />
+              </div>
+            </div>
+            <button onClick={() => shiftDay(1)} aria-label="Next day" style={wtNavBtn}>
+              <i className="fa-solid fa-chevron-right" style={{ fontSize: 12 }} />
+            </button>
+          </div>
+        )}
+
         {/* Hero. Ring first (left), stats second (right): matches the Food
             Log's own hero (FdHeroContent, screens-food.jsx), which this one
             had drifted from by putting the ring on the right instead. No
@@ -461,7 +545,7 @@ function WaterScreen({ store, setStore, go, userId }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             <WaterRing percent={percent} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="micro" style={{ color: UI.inkFaint }}>Today</div>
+              <div className="micro" style={{ color: UI.inkFaint }}>{dayLabel}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
                 <span className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{wtAmt(total)}</span>
                 <span style={{ fontSize: 16, color: UI.inkFaint, fontFamily: UI.fontUi }}>{wtUnit()}</span>
@@ -477,7 +561,10 @@ function WaterScreen({ store, setStore, go, userId }) {
           </div>
         </BracketFrame>
 
-        {behind ? (
+        {/* Pacing nudge: wall-clock "how far along should I be by now"
+            math, only meaningful while the day it's pacing is still in
+            progress. */}
+        {isToday && (behind ? (
           <Frame accent style={{ display: 'flex', alignItems: 'center', gap: 12, borderColor: WT_BLUE_SOFT, background: WT_BLUE_FAINT }}>
             <i className="fa-solid fa-droplet" style={{ fontSize: 20, color: WT_BLUE }} />
             <div>
@@ -487,7 +574,7 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Frame>
         ) : total < goalMl ? (
           <div style={{ textAlign: 'center', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>On track. Keep sipping.</div>
-        ) : null}
+        ) : null)}
 
         {/* Quick amounts (interactive, hidden while capturing) */}
         {!capturing && (
@@ -506,8 +593,11 @@ function WaterScreen({ store, setStore, go, userId }) {
         )}
 
         {/* Current bottle (hidden while capturing: nobody sharing a screenshot
-            wants their exact bottle fill state broadcast) */}
-        {!capturing && bottleEnabled && pendingBottle > 0 && (
+            wants their exact bottle fill state broadcast). isToday-gated:
+            the bottle counter is explicit today-only state, its math
+            (plainToday/bottlesToday) is meaningless once curDate is a
+            different day, see the comments on those two above. */}
+        {!capturing && isToday && bottleEnabled && pendingBottle > 0 && (
           <Card style={{ padding: '12px 14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -563,15 +653,18 @@ function WaterScreen({ store, setStore, go, userId }) {
         {/* Day chart */}
         <Card style={{ padding: 14 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Target vs actual</div>
-          <WaterDayChart entries={todayEntries} goalMl={goalMl} startTime={startTime} endTime={endTime} />
+          <WaterDayChart entries={dayEntries} goalMl={goalMl} startTime={startTime} endTime={endTime} date={curDate} live={isToday} />
         </Card>
 
         {/* Breakdown (hidden while capturing: a shared screenshot is meant to
-            show the day's progress, not a full drink-by-drink inventory) */}
-        {!capturing && (Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || bottlesToday > 0) && (
+            show the day's progress, not a full drink-by-drink inventory).
+            The Bottles row is isToday-gated same as the card above: bottlesToday
+            is always TODAY's count regardless of curDate, so it would otherwise
+            bleed a live count into a past day's breakdown. */}
+        {!capturing && (Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || (isToday && bottlesToday > 0)) && (
           <Card style={{ padding: 14 }}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks today</div>
-            {bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks</div>
+            {isToday && bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
             {Object.entries(breakdown.grouped).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
               <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} color={g.color} />
             ))}
@@ -580,16 +673,16 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Card>
         )}
 
-        {/* Today's log (hidden while capturing: a shared screenshot is the
+        {/* Entry log (hidden while capturing: a shared screenshot is the
             day's totals, not a timestamped log of every single drink) */}
         {!capturing && (
         <div>
-          <Bezel style={{ marginBottom: 10 }}>Today's entries ({todayEntries.length})</Bezel>
-          {todayEntries.length === 0 ? (
-            <div style={{ textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi }}>Nothing logged yet today</div>
+          <Bezel style={{ marginBottom: 10 }}>Entries ({dayEntries.length})</Bezel>
+          {dayEntries.length === 0 ? (
+            <div style={{ textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi }}>Nothing logged for this day</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[...todayEntries].sort((a, b) => wtEntryTs(b) - wtEntryTs(a)).map(e => (
+              {[...dayEntries].sort((a, b) => wtEntryTs(b) - wtEntryTs(a)).map(e => (
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                     <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
@@ -1075,6 +1168,20 @@ const wtIconBtn = {
   width: 34, height: 34, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
   background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  WebkitTapHighlightColor: 'transparent',
+};
+// Day-nav chevron + calendar-jump buttons, same shapes as Food's own
+// fdNavBtn(false)/fdIconBtn(26) (screens-food.jsx).
+const wtNavBtn = {
+  width: 32, height: 32, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+  background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  WebkitTapHighlightColor: 'transparent',
+};
+const wtCalBtn = {
+  flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
+  background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
   WebkitTapHighlightColor: 'transparent',
 };
 const wtTile = {

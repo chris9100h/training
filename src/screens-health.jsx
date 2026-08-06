@@ -762,16 +762,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const storeRef = useRefH(store);
   storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  // The water tracker owns TODAY's total once it has any entry for today: it
-  // recomputes and overwrites water_ml on its own every time a drink is
-  // logged, so a manual edit here would silently vanish on the next one. Only
-  // today can still be overwritten this way (the tracker has no UI to add or
-  // edit an entry for a past day), so a past day's water field never locks
-  // even if it happens to have old tracker entries. Locked until the user
-  // explicitly opts to override for this session (see requestWaterUnlock
-  // below); a day with no tracker entries stays plain.
+  // The water tracker owns a day's total once it has any entry for that day:
+  // it recomputes and overwrites water_ml on its own every time a drink is
+  // logged there, so a manual edit here would silently vanish on the next
+  // one. The tracker can now backlog any day (its own day-nav,
+  // screens-water.jsx), not just today, so this locks per-date rather than
+  // only for today. store.waterLogs loads in full at boot (no history
+  // window, unlike store.foodLogs below), so a plain per-date check here is
+  // already the true state, no lazy-fetch needed to verify an older date.
+  // Locked until the user explicitly opts to override for this session (see
+  // requestWaterUnlock below); a day with no tracker entries stays plain.
   const waterHasTrackerEntries = useMemoH(
-    () => date === LB.todayISO() && (store.waterLogs || []).some(l => l.date === date),
+    () => (store.waterLogs || []).some(l => l.date === date),
     [store.waterLogs, date],
   );
   const [waterUnlocked, setWaterUnlocked] = useStateH(false);
