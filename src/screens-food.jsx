@@ -1184,24 +1184,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const from = panel.getBoundingClientRect();
     if (!from.width || !from.height) return;
     const clone = panel.cloneNode(true);
-    // clone.style is a live CSSStyleDeclaration cloneNode(true) already
-    // populated from the real panel's own inline style (background, border,
-    // border-radius, box-shadow, padding, the works). Setting these four
-    // individually, NOT via clone.style.cssText = '...', is load-bearing:
-    // cssText replaces the ENTIRE style attribute rather than adding to it,
-    // which silently wipes out everything cloneNode(true) had just carried
-    // over, so the clone renders as a plain, sharp-cornered, background-less
-    // box instead of an actual copy of the sheet (caught by outlining the
-    // clone in a throwaway repro harness and finding its computed
-    // border-radius/background flatly absent, not by eye: the resulting
-    // shape is still a perfectly ordinary rectangle either way, nothing
-    // about the bug LOOKS alarming in a screenshot, it just quietly loses
-    // the sheet's real look).
-    clone.style.left = from.left + 'px';
-    clone.style.top = from.top + 'px';
-    clone.style.width = from.width + 'px';
-    clone.style.height = from.height + 'px';
     clone.className = 'fd-genie-sheet-clone';
+    clone.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;`;
     document.body.appendChild(clone);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const bar = stagedBarRef.current;
