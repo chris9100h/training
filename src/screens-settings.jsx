@@ -631,6 +631,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [waterGoalSheet, setWaterGoalSheet] = useStateSet(false);
   const [waterBottleSheet, setWaterBottleSheet] = useStateSet(false);
   const [waterRemindersSheet, setWaterRemindersSheet] = useStateSet(false);
+  const [dailyLogReminderSheet, setDailyLogReminderSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
@@ -785,6 +786,8 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [emailMsg, setEmailMsg] = useStateSet(null);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
+  const [dailyLogReminderEnabled, setDailyLogReminderEnabled] = useStateSet(() => store.settings?.dailyLogReminderEnabled ?? false);
+  const [dailyLogReminderTime, setDailyLogReminderTime] = useStateSet(() => store.settings?.dailyLogReminderTime ?? '19:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   // Paper mutes the chosen accent to grey by default (applyAccentColor,
@@ -1257,6 +1260,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } }));
   };
   const updateReminderTime = (val) => { setReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } })); };
+  const toggleDailyLogReminder = () => {
+    const next = !dailyLogReminderEnabled;
+    if (next && !pushEnabled) {
+      // Push not active, open push sheet instead of enabling reminder
+      setDailyLogReminderSheet(false);
+      setPushSheet(true);
+      return;
+    }
+    setDailyLogReminderEnabled(next);
+    setStore(s => ({ ...s, settings: { ...s.settings, dailyLogReminderEnabled: next } }));
+  };
+  const updateDailyLogReminderTime = (val) => { setDailyLogReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, dailyLogReminderTime: val } })); };
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
   // exportBackup throws on a partial fetch on purpose (an incomplete backup
   // silently wipes the missing rows on the next restore). That throw used to
@@ -2161,11 +2176,35 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
               <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
               <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+              <NavRow label="Daily log reminder" onTap={() => { setHealthSubSheet(false); setDailyLogReminderSheet(true); }} />
             </div>
           )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSubSheet(false)}>Done</Btn>
           </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Daily log reminder (drill-in off Health, mirror of the
+          training reminder sheet: toggle gated on push_enabled, time input,
+          one nudge per local day when today's weight is still unlogged). ══ */}
+      <SettingsSheet open={dailyLogReminderSheet} onClose={() => { setDailyLogReminderSheet(false); setHealthSubSheet(true); }} title="Daily log reminder">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <Row label="Enabled" first>
+            <Toggle on={dailyLogReminderEnabled} onToggle={() => { toggleDailyLogReminder(); if (dailyLogReminderEnabled) setDailyLogReminderSheet(false); }} />
+          </Row>
+          {dailyLogReminderEnabled && (
+            <Row label="Notify at">
+              <input type="time" value={dailyLogReminderTime} onChange={e => updateDailyLogReminderTime(e.target.value)}
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+            </Row>
+          )}
+          {dailyLogReminderEnabled && (
+            <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>
+              One nudge per day when today's weight is still unlogged.
+            </div>
+          )}
+          <Btn onClick={() => setDailyLogReminderSheet(false)}>Done</Btn>
         </div>
       </SettingsSheet>
 

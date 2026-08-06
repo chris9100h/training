@@ -501,6 +501,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     meal_reminder_enabled: sett.mealReminderEnabled ?? false,
     meds_enabled: sett.medsEnabled ?? false,
     medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
+    daily_log_reminder_enabled: sett.dailyLogReminderEnabled ?? false,
+    daily_log_reminder_time: sett.dailyLogReminderTime ?? '19:00',
     pillbox_slots: sett.pillboxSlots ?? null,
   };
 
@@ -1728,6 +1730,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
         medsEnabled: sett.meds_enabled ?? false,
         medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
+        dailyLogReminderEnabled: sett.daily_log_reminder_enabled ?? false,
+        dailyLogReminderTime: sett.daily_log_reminder_time ?? '19:00',
         pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
       },
     nextReminderAt: sett.next_reminder_at ?? null,
@@ -2493,6 +2497,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
     prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
+    prev.settings?.dailyLogReminderEnabled  !== next.settings?.dailyLogReminderEnabled  ||
+    prev.settings?.dailyLogReminderTime     !== next.settings?.dailyLogReminderTime     ||
     JSON.stringify(prev.settings?.pillboxSlots) !== JSON.stringify(next.settings?.pillboxSlots) ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
@@ -2526,6 +2532,8 @@ async function syncStore(prev, next, userId) {
       meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       meds_enabled: next.settings?.medsEnabled ?? false,
       medication_reminder_enabled: next.settings?.medicationReminderEnabled ?? false,
+      daily_log_reminder_enabled: next.settings?.dailyLogReminderEnabled ?? false,
+      daily_log_reminder_time: next.settings?.dailyLogReminderTime ?? '19:00',
       pillbox_slots: next.settings?.pillboxSlots ?? null,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
