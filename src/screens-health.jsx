@@ -656,16 +656,18 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   );
 }
 
-// Compact Trend / 10d best stat tiles plus the plateau pill, shared by the
-// athlete and coach weight cards (each passes its own display unit and the
-// goal-aware trend object from healthWeightTrend). Returns nothing when the
-// helper returned null (fewer than 3 weigh-ins). With no known direction
-// (goal maintain/null) only the Trend tile renders; the app never guesses a
-// best direction. Mirrors the FdStatsBody statCard idiom but smaller to fit
-// the 2-col grid; the row wraps (flex-basis 96) so the tiles stack
-// full-width on narrow cards instead of ellipsing the value.
+// Trend / 10d best stat tiles plus the plateau pill, shared by the athlete
+// and coach weight cards (each passes its own display unit and the
+// goal-aware trend object from healthWeightTrend). Expanded chart only: the
+// grid-squeezed cards skip the tiles (ChartCompactContext), the expand
+// sheet renders them. Returns nothing when the helper returned null (fewer
+// than 3 weigh-ins). With no known direction (goal maintain/null) only the
+// Trend tile renders; the app never guesses a best direction. Mirrors the
+// FdStatsBody statCard idiom; the row wraps (flex-basis 96) so the tiles
+// stack full-width on narrow cards instead of ellipsing the value.
 function WeightTrendChips({ trend, unit }) {
   if (!trend) return null;
+  if (React.useContext(ChartCompactContext)) return null;
   const w = v => `${Math.round(v * 10) / 10}${unit}`;
   const tileLabel = { fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi };
   const tileVal = { fontSize: 14, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
