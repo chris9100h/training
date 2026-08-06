@@ -91,14 +91,15 @@ function healthWeightTrend(pts, goal) {
     value: sorted.slice(Math.max(0, i - 6), i + 1).reduce((s, q) => s + q.value, 0) / Math.min(7, i + 1),
   }));
   const directional = goal === 'gain' ? 1 : goal === 'cut' ? -1 : 0;
-  // Strict comparison keeps the earliest date on ties (when the best was
-  // first hit).
+  // Better = (candidate - best) * directional > 0: gain ranks the HIGHEST
+  // weight as best, cut the LOWEST. Strict comparison keeps the earliest
+  // date on ties (when the best was first hit).
   let best = sorted[0];
-  for (const p of sorted) { if ((p.value - best.value) * directional < 0) best = p; }
+  for (const p of sorted) { if ((p.value - best.value) * directional > 0) best = p; }
   const last = sorted[sorted.length - 1];
   const tenStart = healthShiftISO(last.date, -9);
   const inTen = sorted.filter(p => p.date >= tenStart);
-  const best10 = inTen.length ? inTen.reduce((b, p) => ((p.value - b.value) * directional < 0 ? p : b), inTen[0]) : best;
+  const best10 = inTen.length ? inTen.reduce((b, p) => ((p.value - b.value) * directional > 0 ? p : b), inTen[0]) : best;
   return {
     trendPoints,
     trend: trendPoints[trendPoints.length - 1].value,
