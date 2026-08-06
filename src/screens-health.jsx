@@ -635,7 +635,9 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   const hoverPoints = pts.map(p => {
     const rows = [{ value: format(p.value) }];
     const tv = trendByDate.get(p.date);
-    if (tv != null) rows.push({ label: 'Trend', value: format(tv) });
+    // Trend values are computed means and carry float noise (99.9999...),
+    // round to 1 decimal like every other weight display.
+    if (tv != null) rows.push({ label: 'Trend', value: format(Math.round(tv * 10) / 10) });
     return { x: xOf(p.date), y: yOf(p.value), date: p.date, rows };
   });
 
