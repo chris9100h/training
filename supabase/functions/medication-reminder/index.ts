@@ -230,7 +230,13 @@ async function sendReminders() {
       if (count >= 2) return false;
       if (count === 0) return true;
       const sentAt = e.reminder_sent_at ? new Date(e.reminder_sent_at).getTime() : 0;
-      return now - sentAt >= NUDGE_MS;
+      const snoozeUntil = e.snoozed_until ? new Date(e.snoozed_until).getTime() : 0;
+      // A snoozed row fires on the first tick at/after its snooze expiry
+      // (the user chose that moment: the expiry is a real nudge time, not a
+      // hint to wait for one), regardless of the 2h gap. A never-snoozed row
+      // keeps the 2h rule between first and second nudge.
+      const nextAt = snoozeUntil > sentAt ? snoozeUntil : sentAt + NUDGE_MS;
+      return now >= nextAt;
     });
     if (!due.length) continue;
 

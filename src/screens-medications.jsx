@@ -637,7 +637,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => {
       if (l.id !== entry.id) return l;
       const snoozed = l.snoozedUntil && new Date(l.snoozedUntil).getTime() > Date.now();
-      return { ...l, snoozedUntil: snoozed ? null : new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+      if (snoozed) return { ...l, snoozedUntil: null };
+      // ~1h, rounded UP to the next full hour: the cron ticks hourly, so the
+      // expiry must land on a tick for it to be a real nudge moment (an
+      // 11:45 expiry would make the user wait for a time when nothing ever
+      // fires; 12:00 is when the server actually nudges).
+      const expiry = new Date(Math.ceil((Date.now() + 60 * 60 * 1000) / 3600000) * 3600000);
+      return { ...l, snoozedUntil: expiry.toISOString() };
     }) }));
   }
   // Bulk "mark as taken" for a whole hour row: several doses at the same
