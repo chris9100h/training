@@ -1102,10 +1102,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // protocol itself is the synced setting (store.settings.fastingProtocol).
   const [fastingState, setFastingState] = useStateFd(fdReadFastingState);
   const fastingProtocol = useMemoFd(
-    () => LB.FD_FASTING_PRESETS.find(p => p.id === store.settings?.fastingProtocol) || null,
+    () => fdResolveFastingProtocol(store.settings?.fastingProtocol),
     [store.settings?.fastingProtocol]
   );
-  const setFastingProtocol = id => setStore(s => ({ ...s, settings: { ...s.settings, fastingProtocol: id } }));
+  // Custom fast hours: from the stored id ('custom:96') or the 48h default.
+  const customFastHours = useMemoFd(() => {
+    const s = store.settings?.fastingProtocol;
+    if (typeof s === 'string' && s.startsWith('custom:')) {
+      const h = parseInt(s.slice(7), 10);
+      if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
+    }
+    return 48;
+  }, [store.settings?.fastingProtocol]);
+  const setFastingProtocol = id => {
+    const val = id === 'custom' ? `custom:${customFastHours}` : id;
+    setStore(s => ({ ...s, settings: { ...s.settings, fastingProtocol: val } }));
+  };
   const startFast = () => {
     const next = { fastStartedAt: new Date().toISOString(), eatStartedAt: null };
     fdWriteFastingState(next);
@@ -8451,6 +8463,21 @@ function fdHHMM(ms) {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+// Resolves the stored fasting_protocol setting into a preset object. The
+// custom long fast keeps its hours in the id itself ('custom:96'), so the
+// base 'custom' preset is just the 48h default until the user sets hours.
+function fdResolveFastingProtocol(setting) {
+  if (!setting) return null;
+  const base = LB.FD_FASTING_PRESETS.find(p => p.id === setting);
+  if (base) return base;
+  if (typeof setting === 'string' && setting.startsWith('custom:')) {
+    const h = parseInt(setting.slice(7), 10);
+    if (Number.isFinite(h) && h >= 24 && h <= 168) {
+      return { id: 'custom', label: `Custom ${h}h`, fastH: h, eatH: 0, long: true, custom: true };
+    }
+  }
+  return null;
+}
 
 // Diff between the wizard's final working items and the recipe's own
 // currently persisted items, for the "Recipe changes" confirm below. Swaps
@@ -9921,20 +9948,36 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // re-renders only here, never the whole FoodScreen. The protocol seg writes
 // the synced setting; the cycle itself stays in localStorage via the
 // handlers FoodScreen passes in. Compact on purpose: one countdown line,
-// one sub-line, one seg, one action.
+// one sub-line, two seg rows (daily rhythms + long fasts), one action.
 function FdFastingCard({ state, protocol, onProtocol, onStart, onEnd, onReset }) {
   const [, tick] = useStateFd(0);
   useEffectFd(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
   const nowMs = Date.now();
   const ph = fdFastingPhase(state, protocol, nowMs);
+  // eatH 0 = long fast, no eating window: the cycle ends at the target time
+  // and the texts drop the window vocabulary.
+  const isLong = protocol.eatH === 0;
   const main = ph.phase === 'fasting' ? `Fasting · ${fdFmtClock(ph.eatStartMs - nowMs)} left`
     : ph.phase === 'eating' ? `Eating · ${fdFmtClock(ph.eatEndMs - nowMs)} left`
-    : ph.phase === 'complete' ? 'Complete · Start your next fast'
+    : ph.phase === 'complete' ? (isLong ? `Complete · ${protocol.label} fast done` : 'Complete · Start your next fast')
     : 'Ready to fast';
-  const sub = ph.phase === 'fasting' ? `Eating window opens at ${fdHHMM(ph.eatStartMs)}`
+  const sub = ph.phase === 'fasting'
+    ? (isLong
+      ? `Target ${LB.fmtDayLabel(new Date(ph.eatStartMs).toISOString().slice(0, 10), { day: 'numeric', month: 'short' })} · ${fdHHMM(ph.eatStartMs)}`
+      : `Eating window opens at ${fdHHMM(ph.eatStartMs)}`)
     : ph.phase === 'eating' ? `Eating window ends at ${fdHHMM(ph.eatEndMs)}`
-    : ph.phase === 'complete' ? 'Cycle done · tap Start fast to begin the next one'
+    : ph.phase === 'complete' ? 'Tap Start fast to begin the next one'
     : 'Tap Start fast after your last meal';
+  const segRow = (list, caption) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {caption && <div className="micro" style={{ color: UI.inkFaint }}>{caption}</div>}
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+        {list.map(p => (
+          <button key={p.id} onClick={() => onProtocol(p.id)} style={fdSegBtn(protocol.id === p.id)}>{p.label}</button>
+        ))}
+      </div>
+    </div>
+  );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 6, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -9947,13 +9990,10 @@ function FdFastingCard({ state, protocol, onProtocol, onStart, onEnd, onReset })
       </div>
       <div className="num" style={{ fontSize: 26, lineHeight: 1.1, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>{main}</div>
       <div className="micro" style={{ textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>{sub}</div>
-      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-        {LB.FD_FASTING_PRESETS.map(p => (
-          <button key={p.id} onClick={() => onProtocol(p.id)} style={fdSegBtn(protocol.id === p.id)}>{p.label}</button>
-        ))}
-      </div>
+      {segRow(LB.FD_FASTING_PRESETS.filter(p => !p.long), null)}
+      {segRow(LB.FD_FASTING_PRESETS.filter(p => p.long), 'Long fast')}
       {ph.phase === 'fasting' ? (
-        <Btn onClick={onEnd} style={{ width: '100%' }}>End fast</Btn>
+        <Btn onClick={onEnd} style={{ width: '100%' }}>{isLong ? 'Break fast' : 'End fast'}</Btn>
       ) : ph.phase === 'idle' || ph.phase === 'complete' ? (
         <Btn onClick={onStart} style={{ width: '100%' }}>Start fast</Btn>
       ) : null}

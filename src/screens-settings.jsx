@@ -638,6 +638,16 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
   const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
   const [fastingSheet, setFastingSheet] = useStateSet(false);
+  // Custom long fast hours (stored in the id as 'custom:N'); 48h default.
+  const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => {
+    const s = store.settings?.fastingProtocol;
+    if (typeof s === 'string' && s.startsWith('custom:')) {
+      const h = parseInt(s.slice(7), 10);
+      if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
+    }
+    return 48;
+  });
+  const fastingCustomActive = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
   // Segmented-button style for the Intermittent Fasting protocol picker (same
   // shape as fdSegBtn / the health estimator's segBtn).
   const setSegBtn = (active) => ({
@@ -2390,11 +2400,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
             Pick a fast/eat rhythm. The Food Tracker then shows a live fasting timer and tints today's eating window on the timeline. The protocol syncs to all your devices; the running fast itself stays on this device. Tap the active protocol again to switch it off.
           </div>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {LB.FD_FASTING_PRESETS.map(p => (
-              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
-                style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
+                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+              ))}
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>Long fast</div>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
+                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+              ))}
+              {/* Custom long fast: hours live in the id ('custom:96'), the
+                  stepper below edits them. The chip compares by resolved
+                  custom-ness, not the raw id. */}
+              <button onClick={() => {
+                const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
+                patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
+              }} style={setSegBtn(fastingCustomActive)}>Custom</button>
+            </div>
+            {fastingCustomActive && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
+                <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
+                  step={6} min={24} max={168} suffix="h" />
+              </div>
+            )}
           </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFastingSheet(false)}>Done</Btn>

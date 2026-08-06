@@ -5855,11 +5855,20 @@ const MEAL_CATEGORY_DEFS = [
 // in zane_user_settings.fasting_protocol, the hours are the timer math.
 // Lives here rather than in screens-food.jsx because two screens need it
 // now: the FastingCard and the settings editor that turns the feature on.
+// eatH 0 = long fast with no eating window: the cycle goes straight from
+// fasting to complete at the target time.
 const FD_FASTING_PRESETS = [
   { id: '16:8', label: '16:8', fastH: 16, eatH: 8 },
   { id: '18:6', label: '18:6', fastH: 18, eatH: 6 },
   { id: '20:4', label: '20:4', fastH: 20, eatH: 4 },
   { id: 'omad', label: 'OMAD', fastH: 23, eatH: 1 },
+  { id: '36h', label: '36h', fastH: 36, eatH: 0, long: true },
+  { id: '48h', label: '48h', fastH: 48, eatH: 0, long: true },
+  { id: '72h', label: '72h', fastH: 72, eatH: 0, long: true },
+  // Custom long fast: the actual hours travel in the setting id itself
+  // ('custom:96' = 96h fast), so no schema change is needed; fastH here is
+  // only the default when the user picks Custom without ever setting hours.
+  { id: 'custom', label: 'Custom', fastH: 48, eatH: 0, long: true, custom: true },
 ];
 // Resolves settings.mealWindows (six ascending start hours, first always 0)
 // into the [startHour, endHour) ranges the timeline groups by. Defensive about
