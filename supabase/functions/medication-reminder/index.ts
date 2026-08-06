@@ -1,20 +1,29 @@
 // Medication reminder cron function (Medications feature). Mirrors the meal
-// reminder exactly: for each opted-in user it finds today's PLANNED
-// (not-yet-logged) medication doses and nudges when one is still unlogged an
-// hour past its scheduled time. An 8:00 dose fires at 9:00 if you haven't
-// logged it by then.
+// reminder's channel mechanics (opted-in users, push via Pushover or Web
+// Push) but firing is STATE-BASED rather than window-based since the
+// follow-up feature (2026-08, migration 0246): each still-planned dose row
+// carries reminder_sent_at / reminder_count / snoozed_until, and the rules
+// per row are:
+//   - snoozed_until > now: skipped. The client's "Snooze 1h" button on a
+//     still-due row (screens-medications.jsx) writes this through the
+//     normal log sync; nudging resumes once it expires.
+//   - never nudged yet (reminder_count = 0) and past the +1h grace: first
+//     nudge. State-based, not window-based, so a tick skipped by cron
+//     downtime still nudges on the next tick instead of silently dropping
+//     the only chance (the old 1h-window predicate had that failure mode).
+//   - nudged once (reminder_count = 1) and >= 2h since that nudge: second
+//     nudge.
+//   - reminder_count >= 2: never again (cap: 2 nudges per day per dose).
+// The per-row count is naturally per-day: each local date materializes its
+// own planned row, so "per day" needs no separate reset.
 //
-// Fire-once is achieved by a window equal to the cron cadence instead of a
-// throttle column: a dose only fires on the single cron tick where "now"
-// first crosses (scheduled time + grace), i.e. the overdue moment landed
-// within the last interval. The cron runs hourly and the window is 1h, so a
-// dose's threshold falls inside exactly one tick's window and there is no
-// re-nag and no per-entry bookkeeping. Scheduled doses sit on the hour (a
-// schedule slot's time is HH:00, zane_medication_schedule_slots.hour), so an
-// on-the-hour dose fires precisely at its +1h point. Both today and
-// yesterday are queried: a dose at/after 23:00 has its +1h threshold land
-// after local midnight, so it is measured against "now + a full day" and
-// fires in the first tick(s) of the next local day rather than never.
+// The one window bound that survives is for YESTERDAY rows: a dose at/after
+// 23:00 has its +1h threshold land after local midnight, so it is measured
+// against "now + a full day" and fires in the first tick(s) of the next
+// local day. Ordinary yesterday rows must never re-nag (a dose missed
+// yesterday morning is stale history, not a live problem), so a yesterday
+// row only fires on the tick that actually crosses its threshold
+// (past < WINDOW_MS), which also means late doses get no second nudge.
 //
 // Before checking what's due, materializeDueDoses fills in any due schedule
 // slot that has no zane_medication_logs row yet for today/yesterday. The
@@ -27,8 +36,9 @@
 // sync, so whichever side materializes a given dose first, the other's later
 // write just merges into that same row instead of duplicating it.
 //
-// Scheduled via pg_cron (migration 0219_medication_reminder_cron.sql), POST
-// with an empty body, same pattern as the meal/training/water reminders.
+// Scheduled via pg_cron (migration 0219_medication_reminder_cron.sql, auth
+// re-keyed to the Vault-backed CRON_SECRET in migration 0230), POST with an
+// empty body, same pattern as the meal/training/water reminders.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +49,8 @@ const corsHeaders = {
 // Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
 const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a scheduled dose is this far past its time
-const WINDOW_MS = 60 * 60 * 1000;     // = cron cadence (hourly): the dose fires on the tick that crosses the grace threshold
+const NUDGE_MS = 2 * 60 * 60 * 1000;  // second nudge no sooner than this long after the first
+const WINDOW_MS = 60 * 60 * 1000;     // yesterday-row bound: only the tick that crosses a late dose's threshold
 const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-dose (>=23:00) day-boundary look-back
 
 function dbFetch(path: string, options: RequestInit = {}) {
@@ -194,23 +205,32 @@ async function sendReminders() {
     // fetch must not be read as "nothing planned", so skip this user rather
     // than guess.
     const eRes = await dbFetch(
-      `zane_medication_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=date,time,medication_name`
+      `zane_medication_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=id,date,time,medication_name,reminder_sent_at,reminder_count,snoozed_until`
     );
     if (!eRes.ok) { console.error(`[medication-reminder] medication log query failed for ${row.user_id}: ${eRes.status}`); continue; }
-    const entries: { date: string | null; time: string | null; medication_name: string | null }[] = await eRes.json().catch(() => []);
+    const entries: { id: string; date: string | null; time: string | null; medication_name: string | null; reminder_sent_at: string | null; reminder_count: number | null; snoozed_until: string | null }[] = await eRes.json().catch(() => []);
 
-    // A dose is due for a nudge if its (scheduled time + grace) crossed the
-    // current clock within the last cron interval: 0 <= now - (doseTime +
-    // grace) < WINDOW. A yesterday row is measured against "now + a full day"
-    // so a 23:00 dose's threshold (24:00 = today 00:00) is reached exactly at
-    // the first tick today; an ordinary yesterday dose is then far past the
-    // window and never re-fires.
+    // A row is due for a nudge by its STATE, not by a time window:
+    // snoozed_until > now suppresses everything until it expires; otherwise
+    // a never-nudged row fires once its (time + grace) is in the past (any
+    // tick, so a skipped cron tick cannot drop the nudge), a once-nudged row
+    // fires a second time 2h (NUDGE_MS) after the first, and a twice-nudged
+    // row is done for the day. A yesterday row keeps the old window bound
+    // (past < WINDOW_MS): only a late (>=23:00) dose's threshold lands after
+    // midnight, ordinary missed doses from yesterday must never re-nag.
     const due = entries.filter(e => {
+      if (e.snoozed_until && new Date(e.snoozed_until).getTime() > now) return false;
       const [h, m] = (e.time ?? '0:0').split(':').map(Number);
       const doseMs = ((h || 0) * 3600 + (m || 0) * 60) * 1000;
       const dayOffset = e.date === localDate ? 0 : DAY_MS;
       const past = localMsSinceMidnight + dayOffset - doseMs - GRACE_MS;
-      return past >= 0 && past < WINDOW_MS;
+      if (past < 0) return false;
+      if (e.date !== localDate && past >= WINDOW_MS) return false;
+      const count = e.reminder_count ?? 0;
+      if (count >= 2) return false;
+      if (count === 0) return true;
+      const sentAt = e.reminder_sent_at ? new Date(e.reminder_sent_at).getTime() : 0;
+      return now - sentAt >= NUDGE_MS;
     });
     if (!due.length) continue;
 
@@ -237,6 +257,29 @@ async function sendReminders() {
       }
     } else {
       await sendWebPush(row.user_id, title, message);
+    }
+
+    // Persist the fired state so the rules above stay true on later ticks:
+    // reminder_sent_at stamps now and reminder_count advances. Rows in one
+    // tick can sit at different counts (a first nudge for one dose, a
+    // second for another), so group by the target count and PATCH each
+    // group once. return=minimal: nothing to read back. Only touches the
+    // reminder columns, never planned/date/etc, so logging the dose later
+    // works unchanged.
+    const byCount = new Map<number, string[]>();
+    for (const e of due) {
+      const target = (e.reminder_count ?? 0) + 1;
+      const ids = byCount.get(target) ?? [];
+      ids.push(e.id);
+      byCount.set(target, ids);
+    }
+    for (const [target, ids] of byCount) {
+      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
+      });
+      if (!patchRes.ok) console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
     }
   }
 }

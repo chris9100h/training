@@ -828,6 +828,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
         date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
         schedule_slot_id: l.scheduleSlotId ?? null,
+        reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
+        snoozed_until: l.snoozedUntil ?? null,
       }))
     ));
     stepsDone++;
@@ -968,7 +970,7 @@ async function exportBackup(store, userId) {
     // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
     // deletes every zane_medication_logs row first, so exporting only the
     // windowed copy would silently drop every dose logged before the window.
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   if (allCoachingIds.length) {
@@ -1014,7 +1016,9 @@ async function exportBackup(store, userId) {
     medicationLogs: (medicationLogsRes.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
@@ -1274,7 +1278,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
-    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
     isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
@@ -1596,7 +1600,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
@@ -2288,6 +2294,13 @@ async function syncStore(prev, next, userId) {
       id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
       date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
       schedule_slot_id: l.scheduleSlotId ?? null,
+      // Only snoozed_until is client-authored: reminder_sent_at and
+      // reminder_count belong to the medication-reminder cron (service
+      // role), so a stale device's upsert can never roll the nudge counter
+      // back and extend the daily cap. PostgREST merge-duplicates only
+      // sets the columns present in the payload, so omitting them leaves
+      // the server's values untouched.
+      snoozed_until: l.snoozedUntil ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));
   }
@@ -3534,13 +3547,15 @@ async function fetchFoodLogsSince(userId, sinceDateISO) {
 // Same idea as fetchFoodLogsSince above, for the Medications Inventory tab.
 async function fetchMedicationLogsSince(userId, sinceDateISO) {
   const { data, error } = await _supabase.from('zane_medication_logs')
-    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
   return (data || []).map(l => ({
     id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
     date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+    reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+    snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
   }));
 }
 
@@ -6623,7 +6638,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ]);
@@ -6697,7 +6712,9 @@ async function refreshHealthLogs(userId) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,

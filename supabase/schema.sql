@@ -2767,6 +2767,9 @@ CREATE TABLE zane_medication_logs (
   dose_qty         numeric     NOT NULL,
   planned          boolean     NOT NULL DEFAULT false,
   schedule_slot_id text        REFERENCES public.zane_medication_schedule_slots(id) ON DELETE SET NULL,
+  reminder_sent_at timestamptz,                    -- last nudge time, written by the medication-reminder cron (migration 0246)
+  reminder_count   integer     NOT NULL DEFAULT 0, -- nudges sent for this row, capped at 2 by the cron (migration 0246)
+  snoozed_until    timestamptz,                    -- client "Snooze 1h" until, suppresses cron nudges (migration 0246)
   created_at       timestamptz NOT NULL DEFAULT now()
 );
 
