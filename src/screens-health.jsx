@@ -975,7 +975,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   useEffectH(() => {
     if (!open) return;
     const everUsed = {
-      body: (store.dailyLogs || []).some(l => l.weight != null || l.steps != null || l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null),
+      body: (store.dailyLogs || []).some(l => l.weight != null || l.steps != null),
+      measurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null),
       nutrition: (store.dailyLogs || []).some(l => l.protein != null || l.carbs != null || l.fat != null || l.calories != null || l.offPlanNote),
       hydration: (store.dailyLogs || []).some(l => l.waterMl != null),
       note: (store.dailyLogs || []).some(l => l.note),
@@ -1454,7 +1455,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           {numField('weight', 'Weight', UI.unit())}
           {numField('steps', 'Steps')}
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      </CatSection>
+
+      {/* Body measurements in their own section so the daily BODY row stays
+          lean; the section starts collapsed until the first measurement is
+          entered (everUsed below), invisible for users who never take them. */}
+      <CatSection label="MEASUREMENTS" collapsed={collapsedCats.has('measurements')} onToggle={() => toggleCat('measurements')}>
+        <div style={{ display: 'flex', gap: 8 }}>
           {numField('waistCm', 'Waist', 'cm')}
           {numField('hipsCm', 'Hips', 'cm')}
           {numField('chestCm', 'Chest', 'cm')}
