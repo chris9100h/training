@@ -341,13 +341,27 @@ async function sendReminders() {
     // and retries them, instead of silently under-notifying with no path
     // back. One PATCH per row since rows can have had different prior
     // counts/timestamps; only reached on an actual detected delivery
-    // failure, not the common path.
+    // failure, not the common path. Checks res.ok same as the state PATCH
+    // above, not just a rejected promise: an HTTP-level failure here (RLS,
+    // a transient 5xx, ...) resolves normally rather than throwing, and
+    // silently trusting that as "rolled back" would leave the row
+    // permanently marked nudged with nothing having gone out, exactly the
+    // failure this rollback exists to prevent, just one layer deeper and
+    // with no log trail. Nothing left to retry the rollback itself with
+    // this tick, so a failure here is logged, not silently accepted.
     if (!delivered) {
-      await Promise.all(toPush.map(e => dbFetch(`zane_medication_logs?id=eq.${e.id}`, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ reminder_sent_at: e.reminder_sent_at, reminder_count: e.reminder_count ?? 0 }),
-      }).catch(err => console.error(`[medication-reminder] rollback patch failed for ${e.id}:`, err))));
+      await Promise.all(toPush.map(async e => {
+        try {
+          const rollbackRes = await dbFetch(`zane_medication_logs?id=eq.${e.id}`, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ reminder_sent_at: e.reminder_sent_at, reminder_count: e.reminder_count ?? 0 }),
+          });
+          if (!rollbackRes.ok) console.error(`[medication-reminder] rollback patch failed for ${e.id}: ${rollbackRes.status} ${await rollbackRes.text().catch(() => '')}`);
+        } catch (err) {
+          console.error(`[medication-reminder] rollback patch error for ${e.id}:`, err);
+        }
+      }));
     }
   }
 }
