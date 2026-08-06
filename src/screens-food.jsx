@@ -1221,24 +1221,34 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // measure time.
   const stagedAddBtnWrapRef = useRefFd(null);
   // Bumped on every staged-pick landing: the bar's one-shot landing beats
-  // (bar squash, Add-button absorb pulse, count pop, see .fd-bar-land /
-  // .fd-btn-absorb / .fd-count-pop in index.html) are re-triggered via the
-  // effect below (stagedLandRef), NOT by remounting: a keyed remount of the
-  // wrapper restarted the breathing intensity-glow from 0% and reset the
-  // expanded picked-list's scroll on every landing. Pure presentational
+  // (bar squash, Add-button absorb pulse, count pop, chevron fade, see
+  // .fd-bar-land / .fd-btn-absorb / .fd-count-pop / .fd-chevron-hide in
+  // index.html) are re-triggered via the effect below, NOT by remounting:
+  // a keyed remount of the bar wrapper restarted the breathing
+  // intensity-glow from 0% and reset the expanded picked-list's scroll on
+  // every landing, and the chevron/count/button span originally used the
+  // same key={landTick} remount trick individually, which could leave a
+  // stale <i> behind on some devices instead of cleanly swapping it
+  // (reported live, chevrons piling up after repeated stagings,
+  // audit-2026-08 N1). None of the four nodes are ever actually
+  // unmounted now, so nothing can be left behind. Pure presentational
   // counter; the re-triggered subtrees hold no state.
   const [landTick, setLandTick] = useStateFd(0);
   const stagedLandRef = useRefFd(null);
-  // Restarts the .fd-bar-land bounce without touching the DOM subtree: set
-  // animation to none, force a reflow so the change commits, then restore
-  // the class-driven animation. The bar container (glow) and the expanded
-  // list (scroll) stay mounted, only the one-shot beat replays.
+  const chevronRef = useRefFd(null);
+  const countRef = useRefFd(null);
+  // Restarts all four one-shot animations without touching their DOM
+  // subtrees: set animation to none, force a reflow so the change commits,
+  // then restore the class-driven animation. Every node this touches stays
+  // mounted for the bar's whole lifetime, only the one-shot beat replays.
   useEffectFd(() => {
-    const el = stagedLandRef.current;
-    if (!el || !landTick) return;
-    el.style.animation = 'none';
-    void el.offsetWidth;
-    el.style.animation = '';
+    if (!landTick) return;
+    [stagedLandRef.current, chevronRef.current, countRef.current, stagedAddBtnWrapRef.current].forEach(el => {
+      if (!el) return;
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    });
   }, [landTick]);
   // The OTHER ref the flight needs: whichever Log it/Plan it/Add sheet is
   // currently open (the quantity sheet, the recipe portions sheet, Custom
@@ -1321,9 +1331,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // Small sideways bow at the arc's midpoint (0 for a near-vertical
       // drop); consumed by fdChipFly's 45% keyframe. Sign is a taste knob.
       chip.style.setProperty('--arc', Math.min(12, Math.abs(dx) * 0.08) + 'px');
-      // Landing beats: remount the bar's bounce strip + Add-button wrapper
-      // so their one-shot animations replay from rest. Measured BEFORE this
-      // bump so the old (same-sized) instances are used.
+      // Landing beats: bumps landTick, whose effect resets the bar/chevron/
+      // count/button animations in place so they replay from rest. The
+      // target rect above is measured BEFORE this bump on general
+      // principle, though it no longer matters for correctness now that
+      // none of these nodes remount.
       setLandTick(t => t + 1);
       chip.style.animation = 'fdChipFly 0.52s cubic-bezier(0.45, 0.05, 0.55, 0.95) both';
     }));
@@ -4024,17 +4036,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
             {/* .fd-chevron-hide: tucks the chevron away while the bar bounces
                 (the count label scales up into its slot), fades back in as
-                the box settles. key={landTick} remounts only this icon so
-                the one-shot animation replays on every landing; the wrapper
-                no longer remounts (that restarted the glow and reset the
-                expanded list's scroll). */}
-            <i key={landTick} className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
-            {/* key={landTick} + .fd-count-pop: the count pops only on a chip
-                landing (landTick bumps), never on per-item removal: a remove
-                keeps the span's identity and just updates the number in
-                place, so the label doesn't balloon over the chevron (which
-                stays visible when there's no bounce). */}
-            <span key={landTick} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                the box settles. Replayed via the landTick effect above
+                (reset-in-place, same idiom as the bar wrapper), never
+                remounted. */}
+            <i ref={chevronRef} className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+            {/* .fd-count-pop: the count pops only on a chip landing (the
+                landTick effect above replays it), never on per-item removal,
+                a remove just updates the number in place, so the label
+                doesn't balloon over the chevron (which stays visible when
+                there's no bounce). */}
+            <span ref={countRef} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
               Adding {staged.length} item{staged.length === 1 ? '' : 's'}
             </span>
             {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
@@ -4053,10 +4064,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
           {/* The chip flight's landing target (stagedAddBtnWrapRef): wrapped in
               a span because Btn is a function component and doesn't forward
-              refs in React 18. key={landTick} + .fd-btn-absorb pulse the
-              wrapper as the chip arrives; flexShrink: 0 moved here from the
-              Btn, the span is now the flex item. */}
-          <span key={landTick} ref={stagedAddBtnWrapRef} className="fd-btn-absorb" style={{ flexShrink: 0 }}>
+              refs in React 18. .fd-btn-absorb pulses the wrapper as the chip
+              arrives, replayed via the landTick effect above so this ref
+              stays pointed at one stable node for the bar's whole lifetime
+              instead of churning on every landing; flexShrink: 0 moved here
+              from the Btn, the span is now the flex item. */}
+          <span ref={stagedAddBtnWrapRef} className="fd-btn-absorb" style={{ flexShrink: 0 }}>
             <Btn onClick={commitStagedEntries} style={{ padding: '8px 18px', minHeight: 34 }}>
               Add
             </Btn>
