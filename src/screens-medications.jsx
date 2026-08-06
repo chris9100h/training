@@ -622,16 +622,23 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
   }
-  // Snooze 1h: writes the row's snoozedUntil through the normal log sync
-  // (same path as toggleTaken), and the medication-reminder cron skips the
-  // dose until it expires, then nudging resumes (count rules still apply,
-  // snooze consumes no nudge and resets nothing). Re-tapping extends with a
-  // fresh now+1h. Stored server-side in zane_medication_logs.snoozed_until,
+  // Snooze 1h / cancel snooze: only offered once the first nudge actually
+  // fired (reminderCount >= 1, server-set by the medication-reminder cron
+  // and synced back), you can't snooze an alarm that hasn't come yet. The
+  // snoozedUntil write goes through the normal log sync (same path as
+  // toggleTaken); the cron skips the dose until it expires, then nudging
+  // resumes (count rules still apply, snooze consumes no nudge and resets
+  // nothing). Tapping again while snoozed CANCELS the snooze instead of
+  // extending it. Stored server-side in zane_medication_logs.snoozed_until,
   // no localStorage. Preview rows have no DB row to write, so the button
   // only renders on real planned rows (rare anyway: mdAutoFillToday
   // materializes today on mount).
-  function snoozeDose(entry) {
-    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() } : l) }));
+  function toggleSnoozeDose(entry) {
+    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => {
+      if (l.id !== entry.id) return l;
+      const snoozed = l.snoozedUntil && new Date(l.snoozedUntil).getTime() > Date.now();
+      return { ...l, snoozedUntil: snoozed ? null : new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+    }) }));
   }
   // Bulk "mark as taken" for a whole hour row: several doses at the same
   // time are usually swallowed together, so checking each one off one at a
@@ -1624,19 +1631,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                                 <div style={mdEntryName}>{entry.medicationName}</div>
                                 <div style={mdEntryMeta}>
                                   {entry.isPreview ? 'Scheduled · ' : ''}{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}
-                                  {!entry.isPreview && entry.planned && (
-                                    <>
-                                      {entry.snoozedUntil && new Date(entry.snoozedUntil).getTime() > Date.now() && (
-                                        <span> · Snoozed until {mdSnoozeHHMM(entry.snoozedUntil)}</span>
-                                      )}
-                                      {' · '}
-                                      <button onClick={() => snoozeDose(entry)}
-                                        aria-label="Snooze this dose for an hour"
-                                        style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, WebkitTapHighlightColor: 'transparent' }}>
-                                        Snooze
-                                      </button>
-                                    </>
-                                  )}
+                                  {!entry.isPreview && entry.planned && (entry.reminderCount || 0) >= 1 && (() => {
+                                    const snoozed = entry.snoozedUntil && new Date(entry.snoozedUntil).getTime() > Date.now();
+                                    return (
+                                      <>
+                                        {snoozed && <span> · Snoozed until {mdSnoozeHHMM(entry.snoozedUntil)}</span>}
+                                        {' · '}
+                                        <button onClick={() => toggleSnoozeDose(entry)}
+                                          aria-label={snoozed ? 'Cancel snooze' : 'Snooze this dose for an hour'}
+                                          style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, WebkitTapHighlightColor: 'transparent' }}>
+                                          {snoozed ? 'Cancel snooze' : 'Snooze'}
+                                        </button>
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                               {!entry.isPreview && (

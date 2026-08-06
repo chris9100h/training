@@ -2353,7 +2353,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 }} />
               </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
-                Get a nudge when a scheduled dose is still unlogged an hour after its time, a second nudge two hours later, max two per day. Snooze any still-due dose for an hour right on its timeline row. Needs notifications on.
+                Get a nudge when a scheduled dose is still unlogged an hour after its time, a second nudge two hours later, max two per day. After the first nudge you can snooze a still-due dose for an hour, or cancel the snooze again, right on its timeline row. Needs notifications on.
               </div>
               <NavRow label="Pillbox"
                 hint={Array.isArray(store.settings?.pillboxSlots) && store.settings.pillboxSlots.length ? `${store.settings.pillboxSlots.length} set` : null}
