@@ -68,6 +68,46 @@ function healthSeriesFor(logs, days, pick, windowOverride) {
   return { from, to, data };
 }
 
+// Weight trend and plateau stats for the Weight card. Pure: takes the already
+// windowed series points HealthLineChart plots (present days only), so trend
+// and raw share x positions. Returns null below 3 weigh-ins (nothing to
+// smooth, a 2-point mean is noise). Trend points are a trailing simple moving
+// average over the last up-to-7 logged weigh-ins (partial windows at the
+// series start). "Best" is goal-direction aware (goal = settings.macroCalc.goal,
+// same field the AI daily summary feeds direction-aware): 'gain' means the
+// HIGHEST weight is the best, 'cut' the lowest; 'maintain' or null means no
+// direction is known, so no best and no plateau are reported (the app never
+// guesses a direction, see store.js's buildDailySummaryPayload comment).
+// best10 is the best value inside the trailing 10 calendar days from the last
+// weigh-in, falling back to the whole-series best when no weigh-in falls in
+// that window (sparse loggers). plateau is true when the series best was set
+// 14+ calendar days ago, i.e. no better weigh-in since. Weight values are in
+// the display unit, no conversion here.
+function healthWeightTrend(pts, goal) {
+  const sorted = (pts || []).filter(p => p.value != null).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length < 3) return null;
+  const trendPoints = sorted.map((p, i) => ({
+    date: p.date,
+    value: sorted.slice(Math.max(0, i - 6), i + 1).reduce((s, q) => s + q.value, 0) / Math.min(7, i + 1),
+  }));
+  const directional = goal === 'gain' ? 1 : goal === 'cut' ? -1 : 0;
+  // Strict comparison keeps the earliest date on ties (when the best was
+  // first hit).
+  let best = sorted[0];
+  for (const p of sorted) { if ((p.value - best.value) * directional < 0) best = p; }
+  const last = sorted[sorted.length - 1];
+  const tenStart = healthShiftISO(last.date, -9);
+  const inTen = sorted.filter(p => p.date >= tenStart);
+  const best10 = inTen.length ? inTen.reduce((b, p) => ((p.value - b.value) * directional < 0 ? p : b), inTen[0]) : best;
+  return {
+    trendPoints,
+    trend: trendPoints[trendPoints.length - 1].value,
+    best10: directional ? { value: best10.value, date: best10.date } : null,
+    plateau: directional ? healthDayDiff(best.date, last.date) >= 14 : false,
+    plateauDays: healthDayDiff(best.date, last.date),
+  };
+}
+
 function healthCardioSeries(cardioLogs, days, windowOverride) {
   const { start, end } = windowOverride || healthWindow(days);
   const byDay = {};
@@ -561,15 +601,20 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
 }
 
 // Line chart over a date window. series = [{ date, value }] (present days only).
-function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax, step }) {
+// trend (optional) = [{ date, value }] sharing the series dates, drawn as a
+// dashed secondary line (the same treatment WaterDayChart gives its expected
+// line); its values join the y-domain so the axis stays honest if the trend
+// ever leaves the raw range.
+function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax, step, trend }) {
   const pts = (series || []).filter(p => p.value != null).sort((a, b) => a.date.localeCompare(b.date));
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
   const vals = pts.map(p => p.value);
+  const trendVals = (trend || []).filter(p => p.value != null).map(p => p.value);
   const dom = step
-    ? UI.niceStepDomain(Math.min(...vals), Math.max(...vals), step, { min: yMin, max: yMax })
-    : UI.chartDomain(Math.min(...vals), Math.max(...vals), { min: yMin, max: yMax });
+    ? UI.niceStepDomain(Math.min(...vals, ...trendVals), Math.max(...vals, ...trendVals), step, { min: yMin, max: yMax })
+    : UI.chartDomain(Math.min(...vals, ...trendVals), Math.max(...vals, ...trendVals), { min: yMin, max: yMax });
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = d => padL + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -578,6 +623,10 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   const dec = step ? (Number.isInteger(step) ? 0 : 1) : (dom.range >= 4 ? 0 : 1);
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const line = pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
+  // Smoothed overlay: dashed secondary treatment, no points, no hover rows.
+  // Trend points share the series dates, so xOf maps identically.
+  const trendPts = (trend || []).filter(p => p.value != null);
+  const trendLine = trendPts.length >= 2 ? trendPts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ') : null;
   const base = (padTop + plotH).toFixed(1);
   const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
 
@@ -594,6 +643,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
       {pts.length >= 2 && (
         <>
           <polygon points={`${xOf(pts[0].date).toFixed(1)},${base} ${line} ${xOf(pts[pts.length - 1].date).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.10)`} />
+          {trendLine && <polyline points={trendLine} fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.8" />}
           <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         </>
       )}
@@ -602,6 +652,45 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
       ))}
     </svg>
     </ChartHover>
+  );
+}
+
+// Compact Trend / 10d best stat tiles plus the plateau pill, shared by the
+// athlete and coach weight cards (each passes its own display unit and the
+// goal-aware trend object from healthWeightTrend). Returns nothing when the
+// helper returned null (fewer than 3 weigh-ins). With no known direction
+// (goal maintain/null) only the Trend tile renders; the app never guesses a
+// best direction. Mirrors the FdStatsBody statCard idiom but smaller to fit
+// the 2-col grid; the row wraps (flex-basis 96) so the tiles stack
+// full-width on narrow cards instead of ellipsing the value.
+function WeightTrendChips({ trend, unit }) {
+  if (!trend) return null;
+  const w = v => `${Math.round(v * 10) / 10}${unit}`;
+  const tileLabel = { fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi };
+  const tileVal = { fontSize: 14, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+  const tile = { flex: '1 1 96px', minWidth: 0, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '7px 9px' };
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        <div style={tile}>
+          <div style={tileLabel}>Trend</div>
+          <div className="num" style={tileVal}>{w(trend.trend)}</div>
+        </div>
+        {trend.best10 && (
+          <div style={tile}>
+            <div style={tileLabel}>10d best</div>
+            <div className="num" style={tileVal}>{w(trend.best10.value)}</div>
+            <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>{LB.fmtDayLabel(trend.best10.date, { day: 'numeric', month: 'short' })}</div>
+          </div>
+        )}
+      </div>
+      {trend.plateau && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start', background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`, borderRadius: 999, padding: '3px 9px', marginTop: 8 }}>
+          <i className="fa-solid fa-pause" style={{ fontSize: 8, color: UI.warn }} />
+          <span style={{ fontSize: 9, color: UI.warn, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Plateau · no new best in {trend.plateauDays}d</span>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -4279,6 +4368,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvgRaw = avg(weightSeries.data, 'value');
   const weightAvg = weightAvgRaw != null ? Math.round(weightAvgRaw * 10) / 10 : null;
+  // Goal-direction-aware trend stats (best/plateau semantics depend on
+  // settings.macroCalc.goal, see healthWeightTrend).
+  const weightTrend = useMemoH(() => healthWeightTrend(weightSeries.data, store.settings?.macroCalc?.goal), [weightSeries.data, store.settings?.macroCalc?.goal]);
   const stepsAvg = avg(stepsSeries.data, 'value');
   const waterAvg = avg(waterSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
@@ -4496,7 +4588,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} trend={weightTrend?.trendPoints} />
+        <WeightTrendChips trend={weightTrend} unit={UI.unit()} />
       </HealthChartCard>
     ),
     steps: (
@@ -4712,6 +4805,9 @@ function HealthClientLogs({ clientStore }) {
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
+  // Same goal-direction-aware trend stats as the athlete card, read from the
+  // CLIENT's own macro goal.
+  const weightTrend = useMemoH(() => healthWeightTrend(weightSeries.data, clientStore?.settings?.macroCalc?.goal), [weightSeries.data, clientStore?.settings?.macroCalc?.goal]);
   const stepsAvg  = useMemoH(() => { const a = numAvg(stepsSeries);  return a != null ? Math.round(a) : null; }, [stepsSeries]);
   const waterAvg  = useMemoH(() => numAvg(waterSeries), [waterSeries]);
   const adhAvg    = useMemoH(() => { const a = numAvg(adhSeries);    return a != null ? Math.round(a) : null; }, [adhSeries]);
@@ -4802,7 +4898,8 @@ function HealthClientLogs({ clientStore }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} trend={weightTrend?.trendPoints} />
+        <WeightTrendChips trend={weightTrend} unit={clientUnit} />
       </HealthChartCard>
     ),
     steps: (
