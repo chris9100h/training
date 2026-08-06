@@ -745,11 +745,11 @@ function Toggle({ on, onToggle, disabled = false }) {
 // from underneath a still-open admin Sheet. Not a general-purpose knob:
 // only reach for it when there's a concrete overlay this Sheet must clear.
 // panelRef (optional): forwarded onto the actual panel div (not the
-// full-screen backdrop), so a caller can measure/clone it. Only reason this
-// exists: the Food Tracker's "genie" flourish (screens-food.jsx) clones
-// whichever of its Log it/Plan it sheets is currently open and flies that
-// clone into the docked staged-picks bar when it stages an entry, so it
-// needs a real handle on the panel node itself.
+// full-screen backdrop), so a caller can measure it. Only reason this
+// exists: the Food Tracker's staged-chip flight (screens-food.jsx) measures
+// whichever of its Log it/Plan it sheets is currently open as the flight's
+// source rect when it stages an entry, so it needs a real handle on the
+// panel node itself.
 function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);

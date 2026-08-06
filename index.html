@@ -406,40 +406,64 @@
   }
   .low-stock-glow { animation: lowStockGlow 2.5s ease-in-out infinite; }
 
-  /* Food Tracker: tapping Log it/Plan it/Add clones the entire sheet that
-     button lives in (whichever one: the quantity sheet, the recipe portions
-     sheet, Custom item, or the Describe-a-meal review list, all four wired
-     through the same shared Sheet panelRef prop, see ui.jsx and
-     flyToStagedBar in screens-food.jsx) and flies the CLONE down into the
-     docked staged-picks bar, shrinking into a pill and fading as it goes,
-     the real sheet closing instantly underneath it. Same "genie" pop-scale
-     vocabulary as tabPopIn above, just running outward instead of in, and a
-     deliberate replacement for an earlier version that flew a small ghost
-     dot instead: that one had to guess a sensible start point per pick path
-     (the tapped row, the tapped button, ...) and the guess was easy to get
-     wrong or too close to the target to even read as movement. The whole
-     sheet is always in the same, unambiguous place regardless of what
-     opened it, so there's nothing left to get wrong.
-     left/top/width/height are set inline per call (the clone's actual
-     on-screen position when it was captured), the translate/scale
-     destination too (depends on where the docked bar currently is);
-     everything else that doesn't vary lives here, including the transition
-     itself. Deliberately does NOT set background/opacity/border-radius as a
-     base state the way the old ghost dot needed to: cloneNode(true) already
-     carries the real panel's own inline styles (its actual background,
-     border-radius, shadow, padding, content), so this only has to declare
-     what happens to it, not what it starts out looking like. transform and
-     opacity get their own separate transitions on purpose: a brisk ease-in
-     throw for the position/scale (the "whoosh" itself) against a plain,
-     slightly delayed fade, so the clone reads clearly as "the sheet" for a
-     beat before it visibly starts shrinking, rather than the two racing
-     each other. */
-  .fd-genie-sheet-clone {
-    position: fixed; z-index: 600; pointer-events: none; margin: 0;
+  /* Food Tracker staged-picks bar: a small accent pill named for the item(s)
+     just staged flies from the just-closed sheet's title area down into the
+     docked bar's Add button (flyStagedChip in screens-food.jsx), where the
+     bar squashes on landing, the button absorbs the chip with a pulse, and
+     the count pops. Position + distance are dynamic (inline left/top plus
+     --fx/--fy/--arc custom properties set per call); everything that does
+     not vary lives here. Replaces the old whole-sheet genie clone, which
+     read as a bare rectangle after its cssText wipe (see the fd818697
+     revert history) and was too big to read as "the item"; this pill never
+     depends on the sheet's own look. */
+  .fd-chip {
+    position: fixed; z-index: 600; pointer-events: none;
+    display: flex; align-items: center;
+    max-width: 220px; height: 30px; padding: 0 14px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 12px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.55);
     transform-origin: center center;
-    transition: transform 0.5s cubic-bezier(0.55,0.06,0.68,0.19),
-                opacity 0.35s ease 0.28s,
-                border-radius 0.35s ease;
+    text-shadow: none;
+  }
+  /* The flight itself: --fx/--fy hold the distance to the bar's Add button
+     (set inline per call, same dynamic-property idiom as meso-ember below),
+     --arc bows the midpoint slightly sideways so a near-vertical drop still
+     reads as a throw rather than a fall. */
+  @keyframes fdChipFly {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    45%  { transform: translate(calc(var(--fx, 0px) * 0.5 - var(--arc, 0px)), calc(var(--fy, 0px) * 0.44)) scale(0.88); opacity: 1; }
+    100% { transform: translate(var(--fx, 0px), var(--fy, 0px)) scale(0.12); opacity: 0; }
+  }
+  /* Landing beats: one-shot, short, delayed ~0.36s so they hit as the chip
+     arrives (~0.5s in). Re-triggered per landing by remounting with
+     key={landTick} / key={staged.length} in screens-food.jsx; the resting
+     0% frame plus `both` fill keeps the delay period visually silent. */
+  @keyframes fdBarLand {
+    0%   { transform: translateY(0) scale(1, 1); }
+    35%  { transform: translateY(-3px) scale(1.015, 0.88); }
+    70%  { transform: translateY(1px) scale(1, 1.03); }
+    100% { transform: translateY(0) scale(1, 1); }
+  }
+  @keyframes fdBtnAbsorb {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.09); }
+    100% { transform: scale(1); }
+  }
+  @keyframes fdCountPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+  .fd-bar-land { animation: fdBarLand 0.3s ease-out 0.36s both; }
+  .fd-btn-absorb { display: inline-flex; animation: fdBtnAbsorb 0.26s ease-out 0.36s both; }
+  .fd-count-pop { display: inline-block; animation: fdCountPop 0.3s ease-out 0.36s both; }
+  @media (prefers-reduced-motion: reduce) {
+    .fd-chip, .fd-bar-land, .fd-btn-absorb, .fd-count-pop { animation: none !important; }
   }
 
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
