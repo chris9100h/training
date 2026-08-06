@@ -629,7 +629,15 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   const trendPts = (trend || []).filter(p => p.value != null);
   const trendLine = trendPts.length >= 2 ? trendPts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ') : null;
   const base = (padTop + plotH).toFixed(1);
-  const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
+  // Hover rows carry the raw value plus, when a trend value exists for the
+  // same date, the dashed line's value as a labeled second row.
+  const trendByDate = new Map(trendPts.map(p => [p.date, p.value]));
+  const hoverPoints = pts.map(p => {
+    const rows = [{ value: format(p.value) }];
+    const tv = trendByDate.get(p.date);
+    if (tv != null) rows.push({ label: 'Trend', value: format(tv) });
+    return { x: xOf(p.date), y: yOf(p.value), date: p.date, rows };
+  });
 
   return (
     <ChartHover W={W} H={H} points={hoverPoints} markerColor={color}>
