@@ -2346,9 +2346,13 @@ async function syncStore(prev, next, userId) {
       // last known state (set: null -> ISO, or cancel: ISO -> null). An
       // unrelated edit on a stale device then omits the key entirely, so it
       // can neither wipe the server's active snooze (stale null) nor
-      // overwrite a newer snooze (stale truthy value).
+      // overwrite a newer snooze (stale truthy value). Both sides are
+      // normalized with ?? null: locally materialized rows (mdAutoFillToday)
+      // carry snoozedUntil as undefined, which must compare equal to the
+      // loaded rows' null or the very first sync of a materialized row would
+      // send null and wipe a snooze set by another device.
       const prevLog = prevLogsById.get(l.id);
-      if (l.snoozedUntil !== (prevLog?.snoozedUntil ?? null)) row.snoozed_until = l.snoozedUntil ?? null;
+      if ((l.snoozedUntil ?? null) !== (prevLog?.snoozedUntil ?? null)) row.snoozed_until = l.snoozedUntil ?? null;
       return row;
     })));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));

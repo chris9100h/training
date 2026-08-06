@@ -68,22 +68,26 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
-  // Pre-check the subscription: web-push itself answers 202 before async
-  // delivery and returns 200 even with no subscription rows, so a dead
-  // subscription would otherwise count as "pushed" and silently consume the
-  // nudge budget (count advances, the user never receives it, no retry).
-  // Without any subscription there is nothing to deliver to, so report
-  // failure and let the next tick retry (one cheap query per tick; a later
-  // re-subscription then delivers).
-  const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${userId}&select=id`);
-  if (!subRes.ok) return false;
-  const subs: { id: string }[] = await subRes.json().catch(() => []);
-  if (!subs.length) {
-    console.error(`[medication-reminder] no web-push subscription for ${userId}, skipping nudge`);
-    return false;
-  }
   const base = Deno.env.get('SUPABASE_URL') ?? '';
+  // Everything is inside one try/catch: a fetch-level rejection here (DNS,
+  // connection reset, timeout) must degrade to "failed, retry next tick"
+  // like any other push failure, never abort the whole cron loop mid-tick
+  // and rob every later user of their nudge.
   try {
+    // Pre-check the subscription: web-push itself answers 202 before async
+    // delivery and returns 202 even with no subscription rows, so a dead
+    // subscription would otherwise count as "pushed" and silently consume
+    // the nudge budget (count advances, the user never receives it, no
+    // retry). Without any subscription there is nothing to deliver to, so
+    // report failure and let the next tick retry (one cheap query per tick;
+    // a later re-subscription then delivers).
+    const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${userId}&select=id`);
+    if (!subRes.ok) return false;
+    const subs: { id: string }[] = await subRes.json().catch(() => []);
+    if (!subs.length) {
+      console.error(`[medication-reminder] no web-push subscription for ${userId}, skipping nudge`);
+      return false;
+    }
     const res = await fetch(`${base}/functions/v1/web-push`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
