@@ -24,15 +24,10 @@ function healthDayDiff(a, b) {
   return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 }
 
-function healthShiftISO(base, days) {
-  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
-  return LB.fmtISO(d);
-}
-
 // [start, end] ISO bounds for a trailing N-day window ending today.
 function healthWindow(days) {
   const end = LB.todayISO();
-  return { start: healthShiftISO(end, -(days - 1)), end };
+  return { start: LB.shiftDate(end, -(days - 1)), end };
 }
 
 // [start, end] ISO bounds for the Mon-Sun calendar week containing `anchor`.
@@ -42,8 +37,8 @@ function healthWindow(days) {
 // today's weekday and never lines up with the Monday-anchored week above it.
 function healthMondayWeekBounds(anchor) {
   const jsDow = new Date(anchor + 'T12:00:00').getDay();
-  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-  return { start: monday, end: healthShiftISO(monday, 6) };
+  const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+  return { start: monday, end: LB.shiftDate(monday, 6) };
 }
 
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
@@ -64,7 +59,7 @@ function healthSeriesFor(logs, days, pick, windowOverride) {
   const dates = data.map(d => d.date);
   let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
   let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  if (from === to) { from = LB.shiftDate(from, -1); to = LB.shiftDate(to, 1); }
   return { from, to, data };
 }
 
@@ -97,7 +92,7 @@ function healthWeightTrend(pts, goal) {
   let best = sorted[0];
   for (const p of sorted) { if ((p.value - best.value) * directional > 0) best = p; }
   const last = sorted[sorted.length - 1];
-  const tenStart = healthShiftISO(last.date, -9);
+  const tenStart = LB.shiftDate(last.date, -9);
   const inTen = sorted.filter(p => p.date >= tenStart);
   const best10 = inTen.length ? inTen.reduce((b, p) => ((p.value - b.value) * directional > 0 ? p : b), inTen[0]) : best;
   return {
@@ -117,7 +112,7 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   const dates = data.map(d => d.date);
   let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
   let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  if (from === to) { from = LB.shiftDate(from, -1); to = LB.shiftDate(to, 1); }
   return { from, to, data };
 }
 
@@ -130,13 +125,13 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   if (tf === '1W') {
     const anchor = selectedDate;
     const jsDow = new Date(anchor + 'T12:00:00').getDay();
-    const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-    from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
+    const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+    from = monday; to = LB.shiftDate(monday, 6); periodDays = 7;
   } else {
     const days = (HEALTH_TFS.find(t => t.id === tf) || HEALTH_TFS[1]).days;
-    to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
+    to = today; from = LB.shiftDate(today, -(days - 1)); periodDays = days;
   }
-  const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
+  const allDays = Array.from({ length: periodDays }, (_, i) => LB.shiftDate(from, i));
   const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
   const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
@@ -704,6 +699,89 @@ function WeightTrendChips({ trend, unit }) {
         </div>
       )}
     </>
+  );
+}
+
+// Body measurements card, shared by the athlete and coach Health tabs. One
+// dropdown chip switches the metric (waist/hips/chest/arms/thighs/calves in
+// cm, body fat in %, plus a derived BMI segment when a height is set), each
+// drawing the line chart with the directionless trend. Only the ACTIVE
+// metric's series is built per render, not all eight, and the whole card
+// lives once here instead of being copied between the two views.
+function BodyStatsCard({ logs, tf, setTf, dragHandle, onExpand, weekWindow, windowDays, heightCm, weightIsLbs }) {
+  const [bodyMetric, setBodyMetric] = useStateH('waist');
+  const [bmMenuOpen, setBmMenuOpen] = useStateH(false);
+  const activeBodyMetric = (bodyMetric === 'bmi' && heightCm == null) ? 'waist' : bodyMetric;
+  const bmConfig = {
+    waist: { label: 'Waist', unit: 'cm', step: 5 },
+    hips: { label: 'Hips', unit: 'cm', step: 5 },
+    chest: { label: 'Chest', unit: 'cm', step: 5 },
+    arms: { label: 'Arms', unit: 'cm', step: 5 },
+    thighs: { label: 'Thighs', unit: 'cm', step: 5 },
+    calves: { label: 'Calves', unit: 'cm', step: 5 },
+    bodyFat: { label: 'Fat %', unit: '%', step: 5 },
+    bmi: { label: 'BMI', unit: '', step: 1 },
+  };
+  const bmOptions = heightCm != null
+    ? ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat', 'bmi']
+    : ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat'];
+  // Lazy series: only the active metric is scanned per window change (plus
+  // BMI when selected), instead of building all seven plus BMI every time.
+  const bmField = { waist: 'waistCm', hips: 'hipsCm', chest: 'chestCm', arms: 'armCm', thighs: 'thighCm', calves: 'calfCm', bodyFat: 'bodyFatPct' };
+  const bmSeries = useMemoH(() => {
+    if (activeBodyMetric === 'bmi') {
+      // Weight is stored in the display unit, BMI always computes in kg
+      // (LBS_TO_KG, same factor as the estimator).
+      return healthSeriesFor(logs, windowDays, l => ({
+        value: (l.weight != null && heightCm != null)
+          ? Math.round((weightIsLbs ? l.weight * LBS_TO_KG : l.weight) / Math.pow(heightCm / 100, 2) * 100) / 100
+          : null,
+      }), weekWindow);
+    }
+    return healthSeriesFor(logs, windowDays, l => ({ value: l[bmField[activeBodyMetric]] }), weekWindow);
+  }, [logs, windowDays, weekWindow, activeBodyMetric, heightCm, weightIsLbs]);
+  const bmTrend = useMemoH(() => healthWeightTrend(bmSeries.data, null), [bmSeries.data]);
+  const bmLatest = useMemoH(() => {
+    const pts = bmSeries.data.filter(p => p.value != null);
+    if (!pts.length) return null;
+    return pts.reduce((a, b) => (a.date > b.date ? a : b)).value;
+  }, [bmSeries.data]);
+  const bmUnit = bmConfig[activeBodyMetric].unit;
+  return (
+    <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={dragHandle} onExpand={onExpand}
+      headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
+      {/* Metric switcher: ONE dropdown chip (too many metrics for a
+          segmented row). Shows the active metric plus a chevron that flips
+          while the anchored menu is open; the floating list follows the
+          TabBar reveal-menu idiom, a transparent fixed backdrop closes it
+          on any outside tap. */}
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <button data-reorder-ignore="true" onClick={() => setBmMenuOpen(v => !v)} aria-expanded={bmMenuOpen} aria-label="Choose measurement"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', cursor: 'pointer', border: 'none', borderRadius: 4,
+            background: bmMenuOpen ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.12)', color: bmMenuOpen ? 'var(--accent-ink)' : 'var(--accent)',
+            textShadow: 'none', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
+          {bmConfig[activeBodyMetric].label}
+          <i className={`fa-solid fa-chevron-${bmMenuOpen ? 'up' : 'down'}`} style={{ fontSize: 7 }} />
+        </button>
+        {bmMenuOpen && (
+          <>
+            <div onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 5, minWidth: 132, background: 'var(--bg)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', padding: 4 }}>
+              {bmOptions.map(id => (
+                <button key={id} onClick={() => { setBodyMetric(id); setBmMenuOpen(false); }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '6px 8px', cursor: 'pointer', border: 'none', background: 'transparent', borderRadius: 4,
+                    color: activeBodyMetric === id ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: activeBodyMetric === id ? 700 : 400, WebkitTapHighlightColor: 'transparent' }}>
+                  {bmConfig[id].label}
+                  {activeBodyMetric === id && <i className="fa-solid fa-check" style={{ fontSize: 9 }} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <HealthLineChart series={bmSeries.data} from={bmSeries.from} to={bmSeries.to} format={v => `${v}${bmUnit}`} step={bmConfig[activeBodyMetric].step} trend={bmTrend?.trendPoints} />
+      <WeightTrendChips trend={bmTrend} unit={bmUnit} />
+    </HealthChartCard>
   );
 }
 
@@ -3466,8 +3544,8 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const anchor = selectedDate || today;
   const anchorDate = new Date(anchor + 'T12:00:00');
   const jsDow = anchorDate.getDay();
-  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-  const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
+  const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+  const days = Array.from({ length: 7 }, (_, i) => LB.shiftDate(monday, i));
   // A day counts as "logged" (gold marker) only if it carries real content,
   // not merely by row existence, see hlHasLogContent above (a flex day-type-
   // only override log, just targetsSnap.dayType, must not light up either).
@@ -4399,56 +4477,6 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
   const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
 
-  // Body measurements (waist/hips/chest/arms/thighs/calves in cm, body fat in
-  // %) plus a derived BMI segment that only shows when a height exists
-  // (settings.macroCalc.heightCm, the same field the macro estimator
-  // persists). Weight is stored in the display unit, BMI always computes in
-  // kg (LBS_TO_KG, same factor as the estimator). The metric switcher is a
-  // single dropdown chip (too many metrics for a segmented row).
-  const heightCm = store.settings?.macroCalc?.heightCm ?? null;
-  const weightIsLbs = LB.weightAxisUnit(store.settings?.unit) === 'lbs';
-  const [bodyMetric, setBodyMetric] = useStateH('waist');
-  const [bmMenuOpen, setBmMenuOpen] = useStateH(false);
-  const activeBodyMetric = (bodyMetric === 'bmi' && heightCm == null) ? 'waist' : bodyMetric;
-  const bmConfig = {
-    waist: { label: 'Waist', unit: 'cm', step: 5 },
-    hips: { label: 'Hips', unit: 'cm', step: 5 },
-    chest: { label: 'Chest', unit: 'cm', step: 5 },
-    arms: { label: 'Arms', unit: 'cm', step: 5 },
-    thighs: { label: 'Thighs', unit: 'cm', step: 5 },
-    calves: { label: 'Calves', unit: 'cm', step: 5 },
-    bodyFat: { label: 'Fat %', unit: '%', step: 5 },
-    bmi: { label: 'BMI', unit: '', step: 1 },
-  };
-  const bmOptions = heightCm != null
-    ? ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat', 'bmi']
-    : ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat'];
-  const bodyMeasurementsSeries = useMemoH(() => {
-    const by = pick => healthSeriesFor(dailyLogs, windowDays, pick, weekWindow);
-    return {
-      waist: by(l => ({ value: l.waistCm })),
-      hips: by(l => ({ value: l.hipsCm })),
-      chest: by(l => ({ value: l.chestCm })),
-      arms: by(l => ({ value: l.armCm })),
-      thighs: by(l => ({ value: l.thighCm })),
-      calves: by(l => ({ value: l.calfCm })),
-      bodyFat: by(l => ({ value: l.bodyFatPct })),
-    };
-  }, [dailyLogs, tf, selectedDate]);
-  const bmiSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({
-    value: (l.weight != null && heightCm != null)
-      ? Math.round((weightIsLbs ? l.weight * LBS_TO_KG : l.weight) / Math.pow(heightCm / 100, 2) * 100) / 100
-      : null,
-  }), weekWindow), [dailyLogs, tf, selectedDate, heightCm, weightIsLbs]);
-  const bmSeries = activeBodyMetric === 'bmi' ? bmiSeries : bodyMeasurementsSeries[activeBodyMetric];
-  const bmTrend = useMemoH(() => healthWeightTrend(bmSeries.data, null), [bmSeries.data]);
-  const bmLatest = useMemoH(() => {
-    const pts = bmSeries.data.filter(p => p.value != null);
-    if (!pts.length) return null;
-    return pts.reduce((a, b) => (a.date > b.date ? a : b)).value;
-  }, [bmSeries.data]);
-  const bmUnit = bmConfig[activeBodyMetric].unit;
-
   // Cardio chart series, minutes summed per day from store.cardioLogs.
   const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays, weekWindow), [store.cardioLogs, tf, selectedDate]);
 
@@ -4720,42 +4748,14 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     bodyTemp: (store.bodyTempLogs || []).length > 0
       ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
-    // Data-gated like glucose/BP/temp: no card until any day has any measurement.
+    // Data-gated like glucose/BP/temp: no card until any day has any
+    // measurement. The card itself is the shared BodyStatsCard (dropdown
+    // metric switcher, lazy active-only series), so athlete and coach views
+    // cannot drift apart.
     bodyMeasurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
-        headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
-        {/* Metric switcher: ONE dropdown chip (too many metrics for a
-            segmented row). Shows the active metric plus a chevron that flips
-            while the anchored menu is open; the floating list follows the
-            TabBar reveal-menu idiom, a transparent fixed backdrop closes it
-            on any outside tap. */}
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <button data-reorder-ignore="true" onClick={() => setBmMenuOpen(v => !v)} aria-expanded={bmMenuOpen} aria-label="Choose measurement"
-            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', cursor: 'pointer', border: 'none', borderRadius: 4,
-              background: bmMenuOpen ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.12)', color: bmMenuOpen ? 'var(--accent-ink)' : 'var(--accent)',
-              textShadow: 'none', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
-            {bmConfig[activeBodyMetric].label}
-            <i className={`fa-solid fa-chevron-${bmMenuOpen ? 'up' : 'down'}`} style={{ fontSize: 7 }} />
-          </button>
-          {bmMenuOpen && (
-            <>
-              <div onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
-              <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 5, minWidth: 132, background: 'var(--bg)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', padding: 4 }}>
-                {bmOptions.map(id => (
-                  <button key={id} onClick={() => { setBodyMetric(id); setBmMenuOpen(false); }}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '6px 8px', cursor: 'pointer', border: 'none', background: 'transparent', borderRadius: 4,
-                      color: activeBodyMetric === id ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: activeBodyMetric === id ? 700 : 400, WebkitTapHighlightColor: 'transparent' }}>
-                    {bmConfig[id].label}
-                    {activeBodyMetric === id && <i className="fa-solid fa-check" style={{ fontSize: 9 }} />}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <HealthLineChart series={bmSeries.data} from={bmSeries.from} to={bmSeries.to} format={v => `${v}${bmUnit}`} step={bmConfig[activeBodyMetric].step} trend={bmTrend?.trendPoints} />
-        <WeightTrendChips trend={bmTrend} unit={bmUnit} />
-      </HealthChartCard>
+      <BodyStatsCard logs={dailyLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+        weekWindow={weekWindow} windowDays={windowDays} heightCm={store.settings?.macroCalc?.heightCm ?? null}
+        weightIsLbs={LB.weightAxisUnit(store.settings?.unit) === 'lbs'} />
     ) : null,
   };
 
@@ -4938,53 +4938,6 @@ function HealthClientLogs({ clientStore }) {
   const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence }), weekWindow), [logs, tf, selectedDate]);
   const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
 
-  // Body measurements mirror of the athlete card (see HealthScreen's block):
-  // same series, dropdown chip and BMI derivation, read from the CLIENT's
-  // daily logs and the client's own height/unit.
-  const clientHeightCm = clientStore?.settings?.macroCalc?.heightCm ?? null;
-  const clientWeightIsLbs = clientUnit === 'lbs';
-  const [bodyMetric, setBodyMetric] = useStateH('waist');
-  const [bmMenuOpen, setBmMenuOpen] = useStateH(false);
-  const activeBodyMetric = (bodyMetric === 'bmi' && clientHeightCm == null) ? 'waist' : bodyMetric;
-  const bmConfig = {
-    waist: { label: 'Waist', unit: 'cm', step: 5 },
-    hips: { label: 'Hips', unit: 'cm', step: 5 },
-    chest: { label: 'Chest', unit: 'cm', step: 5 },
-    arms: { label: 'Arms', unit: 'cm', step: 5 },
-    thighs: { label: 'Thighs', unit: 'cm', step: 5 },
-    calves: { label: 'Calves', unit: 'cm', step: 5 },
-    bodyFat: { label: 'Fat %', unit: '%', step: 5 },
-    bmi: { label: 'BMI', unit: '', step: 1 },
-  };
-  const bmOptions = clientHeightCm != null
-    ? ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat', 'bmi']
-    : ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat'];
-  const bodyMeasurementsSeries = useMemoH(() => {
-    const by = pick => healthSeriesFor(logs, windowDays, pick, weekWindow);
-    return {
-      waist: by(l => ({ value: l.waistCm })),
-      hips: by(l => ({ value: l.hipsCm })),
-      chest: by(l => ({ value: l.chestCm })),
-      arms: by(l => ({ value: l.armCm })),
-      thighs: by(l => ({ value: l.thighCm })),
-      calves: by(l => ({ value: l.calfCm })),
-      bodyFat: by(l => ({ value: l.bodyFatPct })),
-    };
-  }, [logs, tf, selectedDate]);
-  const bmiSeries = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({
-    value: (l.weight != null && clientHeightCm != null)
-      ? Math.round((clientWeightIsLbs ? l.weight * LBS_TO_KG : l.weight) / Math.pow(clientHeightCm / 100, 2) * 100) / 100
-      : null,
-  }), weekWindow), [logs, tf, selectedDate, clientHeightCm, clientWeightIsLbs]);
-  const bmSeries = activeBodyMetric === 'bmi' ? bmiSeries : bodyMeasurementsSeries[activeBodyMetric];
-  const bmTrend = useMemoH(() => healthWeightTrend(bmSeries.data, null), [bmSeries.data]);
-  const bmLatest = useMemoH(() => {
-    const pts = bmSeries.data.filter(p => p.value != null);
-    if (!pts.length) return null;
-    return pts.reduce((a, b) => (a.date > b.date ? a : b)).value;
-  }, [bmSeries.data]);
-  const bmUnit = bmConfig[activeBodyMetric].unit;
-
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
   // Same goal-direction-aware trend stats as the athlete card, read from the
@@ -5112,35 +5065,9 @@ function HealthClientLogs({ clientStore }) {
       : null,
     // Data-gated mirror of the athlete card (see HealthScreen's cardEls).
     bodyMeasurements: logs.some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
-        headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <button data-reorder-ignore="true" onClick={() => setBmMenuOpen(v => !v)} aria-expanded={bmMenuOpen} aria-label="Choose measurement"
-            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', cursor: 'pointer', border: 'none', borderRadius: 4,
-              background: bmMenuOpen ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.12)', color: bmMenuOpen ? 'var(--accent-ink)' : 'var(--accent)',
-              textShadow: 'none', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
-            {bmConfig[activeBodyMetric].label}
-            <i className={`fa-solid fa-chevron-${bmMenuOpen ? 'up' : 'down'}`} style={{ fontSize: 7 }} />
-          </button>
-          {bmMenuOpen && (
-            <>
-              <div onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
-              <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 5, minWidth: 132, background: 'var(--bg)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', padding: 4 }}>
-                {bmOptions.map(id => (
-                  <button key={id} onClick={() => { setBodyMetric(id); setBmMenuOpen(false); }}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '6px 8px', cursor: 'pointer', border: 'none', background: 'transparent', borderRadius: 4,
-                      color: activeBodyMetric === id ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: activeBodyMetric === id ? 700 : 400, WebkitTapHighlightColor: 'transparent' }}>
-                    {bmConfig[id].label}
-                    {activeBodyMetric === id && <i className="fa-solid fa-check" style={{ fontSize: 9 }} />}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <HealthLineChart series={bmSeries.data} from={bmSeries.from} to={bmSeries.to} format={v => `${v}${bmUnit}`} step={bmConfig[activeBodyMetric].step} trend={bmTrend?.trendPoints} />
-        <WeightTrendChips trend={bmTrend} unit={bmUnit} />
-      </HealthChartCard>
+      <BodyStatsCard logs={logs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+        weekWindow={weekWindow} windowDays={windowDays} heightCm={clientStore?.settings?.macroCalc?.heightCm ?? null}
+        weightIsLbs={clientUnit === 'lbs'} />
     ) : null,
     // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
@@ -5217,12 +5144,12 @@ function HealthClientLogs({ clientStore }) {
 
 function ExportSheet({ open, onClose, store, userId }) {
   const today = LB.todayISO();
-  const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
+  const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
   const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
 
   const applyPreset = (days) => {
-    setFrom(healthShiftISO(today, -(days - 1)));
+    setFrom(LB.shiftDate(today, -(days - 1)));
     setTo(today);
   };
 
@@ -5268,7 +5195,7 @@ function ExportSheet({ open, onClose, store, userId }) {
     setExporting('food');
     try {
       const dates = [];
-      for (let d = from; d <= to; d = healthShiftISO(d, 1)) dates.push(d);
+      for (let d = from; d <= to; d = LB.shiftDate(d, 1)) dates.push(d);
       const have = new Set((store.foodLogs || []).map(l => l.date));
       const missing = dates.filter(d => !have.has(d));
       let extra = [];
@@ -5503,8 +5430,8 @@ function ExportSheet({ open, onClose, store, userId }) {
             {presets.map(p => (
               <button key={p.days} onClick={() => applyPreset(p.days)} style={{
                 flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
-                background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
-                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
+                background: from === LB.shiftDate(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
+                color: from === LB.shiftDate(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
                 textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',

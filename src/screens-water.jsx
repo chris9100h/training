@@ -64,14 +64,6 @@ function wtDateStr(offset = 0) {
   d.setDate(d.getDate() + offset);
   return LB.fmtISO(d);
 }
-// Shifts an arbitrary date string, unlike wtDateStr above (always relative to
-// right now). Same helper Food keeps under this exact name (fdShiftDate,
-// screens-food.jsx) for its own day-nav.
-function wtShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 function wtHhmmToDecimal(t) {
   const [h, m] = (t || '0:0').split(':').map(Number);
   return (h || 0) + (m || 0) / 60;
@@ -305,6 +297,20 @@ function WaterScreen({ store, setStore, go, userId }) {
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
+  // When the real date rolls over while the screen sits on the old "today",
+  // follow it: `today` refreshes on the timer above, but `curDate` was seeded
+  // once at mount and would otherwise pin yesterday, so every quick-add after
+  // midnight landed on the wrong day (and the ring kept showing yesterday's
+  // progress). A day the user deliberately navigated to stays put, only the
+  // "was on the old today" case follows.
+  const prevTodayRef = useRefW(today);
+  useEffectW(() => {
+    const prev = prevTodayRef.current;
+    if (today !== prev) {
+      setCurDate(d => d === prev ? today : d);
+      prevTodayRef.current = today;
+    }
+  }, [today]);
 
   // Day nav: same idiom as the Food Tracker's own date switcher
   // (screens-food.jsx), unbounded both ways. `today` above stays the
@@ -315,9 +321,9 @@ function WaterScreen({ store, setStore, go, userId }) {
   // otherwise fully independent of it, so viewing (or backlogging) another day
   // never has to fight the 30s/visibilitychange correction above.
   const [curDate, setCurDate] = useStateW(() => wtDateStr(0));
-  const shiftDay = (delta) => setCurDate(d => wtShiftDate(d, delta));
+  const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
   const isToday = curDate === today;
-  const dayLabel = curDate === today ? 'Today' : curDate === wtShiftDate(today, -1) ? 'Yesterday' : curDate === wtShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
 
   const dayEntries = useMemoW(
     () => (store.waterLogs || []).filter(l => l.date === curDate),

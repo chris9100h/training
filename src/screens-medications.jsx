@@ -93,13 +93,6 @@
 
 const { useState: useStateMd, useEffect: useEffectMd, useMemo: useMemoMd, useRef: useRefMd } = React;
 
-// Own copy of fdShiftDate (screens-food.jsx), same reasoning as MdCheckbox:
-// that one is private to the Food Tracker's own module scope.
-function mdShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 
 // Same "day streak" idiom as Water's own hero (wtStreak, screens-water.jsx),
 // with one deliberate difference: a day with nothing due (due === 0, e.g. a
@@ -117,7 +110,7 @@ function mdStreak(store, todayISO) {
   let streak = 0;
   let offset = (todayTally.due > 0 && todayTally.taken < todayTally.due) ? -1 : 0;
   for (let guard = 0; guard < 400; guard++) {
-    const dateISO = mdShiftDate(todayISO, offset);
+    const dateISO = LB.shiftDate(todayISO, offset);
     const { due, taken } = LB.dsMedsDueTaken(store, dateISO);
     if (due === 0) { offset--; continue; }
     if (taken < due) break;
@@ -260,11 +253,6 @@ function mdFmtQty(n, unitLabel) {
   return `${trimmed} ${unitLabel || 'pills'}`;
 }
 
-// Local HH:MM from an ISO snoozedUntil instant, for the timeline hint.
-function mdSnoozeHHMM(iso) {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 
 // Mirrors fdConsumedSince (screens-food.jsx) exactly, one field name over:
 // compares real Date moments (entry.date/.time, both local, against the full
@@ -538,8 +526,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // date switcher plus a full 0-23 hour grid that's always rendered, filled
   // or not, rather than an empty-state takeover on a day with nothing yet.
   const [curDate, setCurDate] = useStateMd(today);
-  const dayLabel = curDate === today ? 'Today' : curDate === mdShiftDate(today, -1) ? 'Yesterday' : curDate === mdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
-  const shiftDay = (delta) => setCurDate(d => mdShiftDate(d, delta));
+  const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
   const curDateLogs = useMemoMd(
     () => medicationLogs.filter(l => l.date === curDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
     [medicationLogs, curDate],
@@ -1637,11 +1625,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                                 <div style={mdEntryName}>{entry.medicationName}</div>
                                 <div style={mdEntryMeta}>
                                   {entry.isPreview ? 'Scheduled · ' : ''}{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}
-                                  {!entry.isPreview && entry.planned && (entry.reminderCount || 0) >= 1 && (() => {
+                                  {!entry.isPreview && entry.planned && (entry.reminderCount || 0) >= 1 && (entry.reminderCount || 0) < 2 && (() => {
                                     const snoozed = entry.snoozedUntil && new Date(entry.snoozedUntil).getTime() > Date.now();
                                     return (
                                       <>
-                                        {snoozed && <span> · Snoozed until {mdSnoozeHHMM(entry.snoozedUntil)}</span>}
+                                        {snoozed && <span> · Snoozed until {LB.fmtHHMM(entry.snoozedUntil)}</span>}
                                         {' · '}
                                         <button onClick={() => toggleSnoozeDose(entry)}
                                           aria-label={snoozed ? 'Cancel snooze' : 'Snooze this dose for an hour'}
@@ -2404,7 +2392,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
     const medicationScheduleSlots = store.medicationScheduleSlots || [];
     const out = [];
     for (let i = 0; i < 7; i++) {
-      const d = mdShiftDate(todayStr, i);
+      const d = LB.shiftDate(todayStr, i);
       const wd = LB.isoWd(new Date(d + 'T12:00:00'));
       const buckets = new Map();
       medicationScheduleSlots.forEach(slot => {

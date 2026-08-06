@@ -639,14 +639,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
   const [fastingSheet, setFastingSheet] = useStateSet(false);
   // Custom long fast hours (stored in the id as 'custom:N'); 48h default.
-  const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => {
-    const s = store.settings?.fastingProtocol;
-    if (typeof s === 'string' && s.startsWith('custom:')) {
-      const h = parseInt(s.slice(7), 10);
-      if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
-    }
-    return 48;
-  });
+  // Parsed by the single shared LB.fastingCustomHours (same source the food
+  // card's protocol resolver uses).
+  const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => LB.fastingCustomHours(store.settings?.fastingProtocol));
   const fastingCustomActive = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
   // Segmented-button style for the Intermittent Fasting protocol picker (same
   // shape as fdSegBtn / the health estimator's segBtn).

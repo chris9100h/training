@@ -159,6 +159,30 @@ function fmtDayLabel(iso, opts = { weekday: 'short', day: 'numeric', month: 'sho
   if (!iso) return '';
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', opts);
 }
+// Noon-anchored YYYY-MM-DD shift (DST-safe: noon never crosses a date
+// boundary). Shared helper, was duplicated byte-identically as
+// fdShiftDate/wtShiftDate/mdShiftDate/healthShiftISO across four screens.
+function shiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return fmtISO(d);
+}
+// Local wall-clock HH:MM from a Date or epoch-ms instant. Shared helper, was
+// duplicated as fdHHMM (fasting card) and mdSnoozeHHMM (meds snooze hint).
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+// Countdown clock H:MM:SS from a millisecond span. Shared helper, was
+// duplicated as fdFmtClock (fasting card); distinct from fmtDuration below
+// (m:ss), which is the session/rest idiom.
+function fmtClock(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 // Returns the coming Monday as YYYY-MM-DD (returns today if today is Monday).
 function nextMondayISO() {
   const today = new Date();
@@ -2304,18 +2328,29 @@ async function syncStore(prev, next, userId) {
   }
   if (prev.medicationLogs !== next.medicationLogs) {
     const { upsert, removed } = diffCollectionById(prev.medicationLogs, next.medicationLogs);
-    if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => ({
-      id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
-      date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
-      schedule_slot_id: l.scheduleSlotId ?? null,
+    // prev-by-id for the snooze key decision below: a stale second device
+    // that edits a row while another device's snooze is active must not
+    // write its stale null over the server's snoozed_until.
+    const prevLogsById = new Map((prev.medicationLogs || []).map(l => [l.id, l]));
+    if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => {
       // Only snoozed_until is client-authored: reminder_sent_at and
       // reminder_count belong to the medication-reminder cron (service
       // role), so a stale device's upsert can never roll the nudge counter
       // back and extend the daily cap. PostgREST merge-duplicates only
       // sets the columns present in the payload, so omitting them leaves
       // the server's values untouched.
-      snoozed_until: l.snoozedUntil ?? null,
-    }))));
+      const row = { id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
+        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+        schedule_slot_id: l.scheduleSlotId ?? null };
+      // Send snoozed_until only when it is set, or when this row previously
+      // had one and is being deliberately cleared (the Cancel snooze path).
+      // A row that never had a snooze on this device omits the key entirely,
+      // so a stale device's unrelated edit cannot wipe the server's active
+      // snooze.
+      const hadSnooze = !!(prevLogsById.get(l.id)?.snoozedUntil);
+      if (l.snoozedUntil || hadSnooze) row.snoozed_until = l.snoozedUntil ?? null;
+      return row;
+    })));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));
   }
   if (prev.medicationPlanItems !== next.medicationPlanItems) {
@@ -5870,6 +5905,17 @@ const FD_FASTING_PRESETS = [
   // only the default when the user picks Custom without ever setting hours.
   { id: 'custom', label: 'Custom', fastH: 48, eatH: 0, long: true, custom: true },
 ];
+// Parses the custom fast hours out of a stored fasting_protocol id
+// ('custom:96' -> 96, anything else or out of range -> the 48h default).
+// Single source for the parse so the card, the settings stepper and the
+// phase resolver cannot drift apart.
+function fastingCustomHours(setting) {
+  if (typeof setting === 'string' && setting.startsWith('custom:')) {
+    const h = parseInt(setting.slice(7), 10);
+    if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
+  }
+  return 48;
+}
 // Resolves settings.mealWindows (six ascending start hours, first always 0)
 // into the [startHour, endHour) ranges the timeline groups by. Defensive about
 // the stored value: a short, non-ascending or non-numeric array falls back to
@@ -9038,7 +9084,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
@@ -9058,7 +9104,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,

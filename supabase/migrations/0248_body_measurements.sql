@@ -25,9 +25,15 @@ ALTER TABLE zane_daily_logs
 -- syncs silently never (migration 0211's note, still no CI gate for it).
 -- CREATE OR REPLACE with the identical signature preserves the existing
 -- REVOKE/GRANT (PUBLIC + anon revoked in 0141, authenticated granted), no
--- grants need to be reapplied. Plain EXCLUDED assignment for the new columns,
--- same as weight/steps/etc.: an old client's payload simply omits the keys
--- and the row updates to null, identical to the other numeric fields.
+-- grants need to be reapplied. The new columns are COALESCEd in the DO UPDATE
+-- like meal_of_choice (0211), NOT plain EXCLUDED like weight/steps: old
+-- clients never carried these keys (weight/steps were always in every
+-- payload, these are brand-new columns), so a plain assignment would null
+-- out a user's measurements whenever a pre-update device syncs a daily-log
+-- edit during the rollout window. COALESCE keeps the existing value when the
+-- key is absent, at the cost that a deliberate clear (saving an empty
+-- field) cannot wipe the value either, the same accepted tradeoff as
+-- meal_of_choice.
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql
@@ -70,13 +76,13 @@ AS $function$
   FROM jsonb_array_elements(p_logs) AS l
   ON CONFLICT (user_id, date) DO UPDATE SET
     weight             = EXCLUDED.weight,
-    waist_cm           = EXCLUDED.waist_cm,
-    hips_cm            = EXCLUDED.hips_cm,
-    chest_cm           = EXCLUDED.chest_cm,
-    arm_cm             = EXCLUDED.arm_cm,
-    thigh_cm           = EXCLUDED.thigh_cm,
-    calf_cm            = EXCLUDED.calf_cm,
-    body_fat_pct       = EXCLUDED.body_fat_pct,
+    waist_cm           = COALESCE(EXCLUDED.waist_cm, zane_daily_logs.waist_cm),
+    hips_cm            = COALESCE(EXCLUDED.hips_cm, zane_daily_logs.hips_cm),
+    chest_cm           = COALESCE(EXCLUDED.chest_cm, zane_daily_logs.chest_cm),
+    arm_cm             = COALESCE(EXCLUDED.arm_cm, zane_daily_logs.arm_cm),
+    thigh_cm           = COALESCE(EXCLUDED.thigh_cm, zane_daily_logs.thigh_cm),
+    calf_cm            = COALESCE(EXCLUDED.calf_cm, zane_daily_logs.calf_cm),
+    body_fat_pct       = COALESCE(EXCLUDED.body_fat_pct, zane_daily_logs.body_fat_pct),
     steps              = EXCLUDED.steps,
     calories           = EXCLUDED.calories,
     protein            = EXCLUDED.protein,

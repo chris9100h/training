@@ -215,9 +215,13 @@ async function sendReminders() {
     // a never-nudged row fires once its (time + grace) is in the past (any
     // tick, so a skipped cron tick cannot drop the nudge), a once-nudged row
     // fires a second time 2h (NUDGE_MS) after the first, and a twice-nudged
-    // row is done for the day. A yesterday row keeps the old window bound
-    // (past < WINDOW_MS): only a late (>=23:00) dose's threshold lands after
-    // midnight, ordinary missed doses from yesterday must never re-nag.
+    // row is done for the day. A snoozed row fires on the first tick at/after
+    // its snooze expiry (the user chose that moment: the expiry is a real
+    // nudge time), regardless of the 2h gap AND regardless of the yesterday
+    // bound, since the expiry can land after local midnight where that rule
+    // would otherwise swallow the promised nudge. The yesterday bound only
+    // applies to never-snoozed rows: a late (>=23:00) dose's threshold lands
+    // after midnight, ordinary missed doses from yesterday must never re-nag.
     const due = entries.filter(e => {
       if (e.snoozed_until && new Date(e.snoozed_until).getTime() > now) return false;
       const [h, m] = (e.time ?? '0:0').split(':').map(Number);
@@ -225,25 +229,53 @@ async function sendReminders() {
       const dayOffset = e.date === localDate ? 0 : DAY_MS;
       const past = localMsSinceMidnight + dayOffset - doseMs - GRACE_MS;
       if (past < 0) return false;
-      if (e.date !== localDate && past >= WINDOW_MS) return false;
       const count = e.reminder_count ?? 0;
       if (count >= 2) return false;
-      if (count === 0) return true;
       const sentAt = e.reminder_sent_at ? new Date(e.reminder_sent_at).getTime() : 0;
       const snoozeUntil = e.snoozed_until ? new Date(e.snoozed_until).getTime() : 0;
-      // A snoozed row fires on the first tick at/after its snooze expiry
-      // (the user chose that moment: the expiry is a real nudge time, not a
-      // hint to wait for one), regardless of the 2h gap. A never-snoozed row
-      // keeps the 2h rule between first and second nudge.
-      const nextAt = snoozeUntil > sentAt ? snoozeUntil : sentAt + NUDGE_MS;
-      return now >= nextAt;
+      if (snoozeUntil > sentAt) return now >= snoozeUntil;
+      if (e.date !== localDate && past >= WINDOW_MS) return false;
+      if (count === 0) return true;
+      return now >= sentAt + NUDGE_MS;
     });
     if (!due.length) continue;
 
+    // Persist the fired state FIRST, then push: reminder_sent_at stamps now
+    // and reminder_count advances, so a failed push cannot leave the count at
+    // 0 and re-fire the same nudge on every hourly tick forever. Rows in one
+    // tick can sit at different counts (a first nudge for one dose, a second
+    // for another), so group by the target count and PATCH each group once.
+    // return=minimal: nothing to read back. Only touches the reminder
+    // columns, never planned/date/etc, so logging the dose later works
+    // unchanged. Rows whose state failed to persist are NOT pushed this tick:
+    // they retry next tick with the count unchanged, one attempt per tick
+    // instead of unbounded duplicates.
+    const byCount = new Map<number, string[]>();
+    for (const e of due) {
+      const target = (e.reminder_count ?? 0) + 1;
+      const ids = byCount.get(target) ?? [];
+      ids.push(e.id);
+      byCount.set(target, ids);
+    }
+    const failedIds = new Set<string>();
+    for (const [target, ids] of byCount) {
+      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
+      });
+      if (!patchRes.ok) {
+        console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
+        ids.forEach(id => failedIds.add(id));
+      }
+    }
+    const toPush = due.filter(e => !failedIds.has(e.id));
+    if (!toPush.length) continue;
+
     const title = 'Zane · Medication Reminder';
-    const message = due.length === 1
-      ? `Still due: ${due[0].medication_name || 'a scheduled dose'}. 💊`
-      : `You have ${due.length} scheduled doses still to log. 💊`;
+    const message = toPush.length === 1
+      ? `Still due: ${toPush[0].medication_name || 'a scheduled dose'}. 💊`
+      : `You have ${toPush.length} scheduled doses still to log. 💊`;
 
     // Respect the user's channel choice: when Pushover is enabled (use_pushover
     // and a key set) send only Pushover, otherwise send native Web Push. This
@@ -263,29 +295,6 @@ async function sendReminders() {
       }
     } else {
       await sendWebPush(row.user_id, title, message);
-    }
-
-    // Persist the fired state so the rules above stay true on later ticks:
-    // reminder_sent_at stamps now and reminder_count advances. Rows in one
-    // tick can sit at different counts (a first nudge for one dose, a
-    // second for another), so group by the target count and PATCH each
-    // group once. return=minimal: nothing to read back. Only touches the
-    // reminder columns, never planned/date/etc, so logging the dose later
-    // works unchanged.
-    const byCount = new Map<number, string[]>();
-    for (const e of due) {
-      const target = (e.reminder_count ?? 0) + 1;
-      const ids = byCount.get(target) ?? [];
-      ids.push(e.id);
-      byCount.set(target, ids);
-    }
-    for (const [target, ids] of byCount) {
-      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
-      });
-      if (!patchRes.ok) console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
     }
   }
 }

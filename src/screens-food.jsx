@@ -20,12 +20,6 @@
    (source: 'recipe'), not N separate ones. */
 
 const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef: useRefFd } = React;
-
-function fdShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 // Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
 // Used by the Stats sheet to build a chart series with a bar (or gap) for
 // every day in the period, not just days that happen to have a log.
@@ -430,7 +424,7 @@ function fdReconcileShoppingTally(tally) {
 // Mode allows future-dated rows, and those belong to the projection below,
 // not the "what did I eat" tally.
 function fdShoppingHistoryTally(foodLogs, todayISO) {
-  const cutoff = fdShiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
+  const cutoff = LB.shiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
   const tally = new Map();
   (foodLogs || []).forEach(e => {
     if (e.planned || e.date < cutoff || e.date > todayISO) return;
@@ -456,7 +450,7 @@ function fdShoppingProjectionTally(store, todayISO, days) {
   const slots = activePlanId ? (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId) : [];
   if (!slots.length) return tally;
   for (let i = 0; i < days; i++) {
-    const d = fdShiftDate(todayISO, i);
+    const d = LB.shiftDate(todayISO, i);
     slots.forEach(slot => {
       if (!fdSlotMatchesDate(slot, store, d)) return;
       fdExplodeForShopping(fdMaterializeSlotEntry(slot, d)).forEach(leaf => {
@@ -1069,7 +1063,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // the filtering, on a double-run race.
     const pending = [];
     for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
-      const date = fdShiftDate(today, i);
+      const date = LB.shiftDate(today, i);
       const markerId = `${userId}_${date}`;
       if (markedDates.has(markerId)) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
@@ -1105,15 +1099,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => fdResolveFastingProtocol(store.settings?.fastingProtocol),
     [store.settings?.fastingProtocol]
   );
-  // Custom fast hours: from the stored id ('custom:96') or the 48h default.
-  const customFastHours = useMemoFd(() => {
-    const s = store.settings?.fastingProtocol;
-    if (typeof s === 'string' && s.startsWith('custom:')) {
-      const h = parseInt(s.slice(7), 10);
-      if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
-    }
-    return 48;
-  }, [store.settings?.fastingProtocol]);
+  // Custom fast hours: from the stored id ('custom:96') or the 48h default,
+  // parsed by the single shared LB.fastingCustomHours (same source the
+  // settings stepper uses).
+  const customFastHours = useMemoFd(() => LB.fastingCustomHours(store.settings?.fastingProtocol), [store.settings?.fastingProtocol]);
   const setFastingProtocol = id => {
     const val = id === 'custom' ? `custom:${customFastHours}` : id;
     setStore(s => ({ ...s, settings: { ...s.settings, fastingProtocol: val } }));
@@ -1203,10 +1192,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const stagedAddBtnWrapRef = useRefFd(null);
   // Bumped on every staged-pick landing: the bar's one-shot landing beats
   // (bar squash, Add-button absorb pulse, count pop, see .fd-bar-land /
-  // .fd-btn-absorb / .fd-count-pop in index.html) are re-triggered by
-  // remounting their wrappers with key={landTick} / key={staged.length}.
-  // Pure presentational counter; the remounted subtrees hold no state.
+  // .fd-btn-absorb / .fd-count-pop in index.html) are re-triggered via the
+  // effect below (stagedLandRef), NOT by remounting: a keyed remount of the
+  // wrapper restarted the breathing intensity-glow from 0% and reset the
+  // expanded picked-list's scroll on every landing. Pure presentational
+  // counter; the re-triggered subtrees hold no state.
   const [landTick, setLandTick] = useStateFd(0);
+  const stagedLandRef = useRefFd(null);
+  // Restarts the .fd-bar-land bounce without touching the DOM subtree: set
+  // animation to none, force a reflow so the change commits, then restore
+  // the class-driven animation. The bar container (glow) and the expanded
+  // list (scroll) stay mounted, only the one-shot beat replays.
+  useEffectFd(() => {
+    const el = stagedLandRef.current;
+    if (!el || !landTick) return;
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  }, [landTick]);
   // The OTHER ref the flight needs: whichever Log it/Plan it/Add sheet is
   // currently open (the quantity sheet, the recipe portions sheet, Custom
   // item, or the Describe-a-meal review list). All four hand this same ref
@@ -1475,7 +1478,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editUnitNewLabel, setEditUnitNewLabel] = useStateFd('');
   const [editUnitNewGrams, setEditUnitNewGrams] = useStateFd('');
 
-  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : curDate === fdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
   // A day that hasn't happened yet can't have anything "already eaten" on it:
   // Log it is unavailable and an edited entry can't be flipped back to logged.
   const curDateIsFuture = curDate > today;
@@ -2006,7 +2009,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // for this, so on a day whose predecessor sits outside the boot window the
   // offer simply doesn't appear rather than firing a request nobody asked for.
   const prevDayByCategory = useMemoFd(() => {
-    const prev = fdShiftDate(curDate, -1);
+    const prev = LB.shiftDate(curDate, -1);
     const out = {};
     (store.foodLogs || []).forEach(l => {
       if (l.date !== prev || l.planned) return;
@@ -2149,7 +2152,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Unbounded both ways: backward lazy-fetches outside the boot window, forward
   // is needed for Plan Mode (plan tomorrow's meals), matching the calendar input
   // (no max) and the day-nav comment below.
-  const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
+  const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
   // patchDaily/doAdd use in screens-water.jsx. Calories are summed from each
@@ -3956,7 +3959,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // transparent; everything visible (background, border, glow, list) sits
     // inside it, so it all moves as one box. flexShrink: 0 lives here now,
     // the wrapper is the flex item.
-    <div key={landTick} className="fd-bar-land" style={{ flexShrink: 0 }}>
+    <div ref={stagedLandRef} className="fd-bar-land" style={{ flexShrink: 0 }}>
       {/* Same breathing box-shadow as the Intensity sheet (.intensity-glow,
           index.html): a live batch waiting to be added is easy to forget
           about otherwise, the glow keeps drawing the eye back to it. Regular
@@ -8452,29 +8455,18 @@ function fdFastingEatHourTint(eatStartMs, eatEndMs, h, dateStr) {
   const slotStart = new Date(dateStr + 'T' + String(h).padStart(2, '0') + ':00:00').getTime();
   return eatStartMs < slotStart + 3600 * 1000 && eatEndMs > slotStart;
 }
-function fdFmtClock(ms) {
-  const t = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-function fdHHMM(ms) {
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 // Resolves the stored fasting_protocol setting into a preset object. The
 // custom long fast keeps its hours in the id itself ('custom:96'), so the
 // base 'custom' preset is just the 48h default until the user sets hours.
+// Time/countdown formatting lives in LB.fmtHHMM / LB.fmtClock (shared with
+// the meds snooze hint), not in this file.
 function fdResolveFastingProtocol(setting) {
   if (!setting) return null;
   const base = LB.FD_FASTING_PRESETS.find(p => p.id === setting);
   if (base) return base;
   if (typeof setting === 'string' && setting.startsWith('custom:')) {
-    const h = parseInt(setting.slice(7), 10);
-    if (Number.isFinite(h) && h >= 24 && h <= 168) {
-      return { id: 'custom', label: `Custom ${h}h`, fastH: h, eatH: 0, long: true, custom: true };
-    }
+    const h = LB.fastingCustomHours(setting);
+    return { id: 'custom', label: `Custom ${h}h`, fastH: h, eatH: 0, long: true, custom: true };
   }
   return null;
 }
@@ -9103,13 +9095,13 @@ const FD_PICKER_TABS = [
 // not a hit, not a gap in the data.
 function FdStatsBody({ store }) {
   const [period, setPeriod] = useStateFd(30);
-  const [from, setFrom] = useStateFd(fdShiftDate(LB.todayISO(), -29));
+  const [from, setFrom] = useStateFd(LB.shiftDate(LB.todayISO(), -29));
   const [to, setTo] = useStateFd(LB.todayISO());
   const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
 
   const range = useMemoFd(() => {
     if (period === 'custom') return (from > to) ? { from: to, to: from } : { from, to };
-    return { from: fdShiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
+    return { from: LB.shiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
   }, [period, from, to]);
 
   const s = useMemoFd(() => {
@@ -9951,21 +9943,32 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // one sub-line, two seg rows (daily rhythms + long fasts), one action.
 function FdFastingCard({ state, protocol, onProtocol, onStart, onEnd, onReset }) {
   const [, tick] = useStateFd(0);
-  useEffectFd(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
   const nowMs = Date.now();
   const ph = fdFastingPhase(state, protocol, nowMs);
+  // The 1s tick only runs while a countdown is actually live (fasting or
+  // eating phase): idle and complete render static text, so a permanently
+  // open Food tab with no active fast would otherwise re-render this card
+  // ~86k times a day for nothing.
+  const live = ph.phase === 'fasting' || ph.phase === 'eating';
+  useEffectFd(() => {
+    if (!live) return;
+    const t = setInterval(() => tick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [live]);
   // eatH 0 = long fast, no eating window: the cycle ends at the target time
   // and the texts drop the window vocabulary.
   const isLong = protocol.eatH === 0;
-  const main = ph.phase === 'fasting' ? `Fasting · ${fdFmtClock(ph.eatStartMs - nowMs)} left`
-    : ph.phase === 'eating' ? `Eating · ${fdFmtClock(ph.eatEndMs - nowMs)} left`
+  const main = ph.phase === 'fasting' ? `Fasting · ${LB.fmtClock(ph.eatStartMs - nowMs)} left`
+    : ph.phase === 'eating' ? `Eating · ${LB.fmtClock(ph.eatEndMs - nowMs)} left`
     : ph.phase === 'complete' ? (isLong ? `Complete · ${protocol.label} fast done` : 'Complete · Start your next fast')
     : 'Ready to fast';
   const sub = ph.phase === 'fasting'
     ? (isLong
-      ? `Target ${LB.fmtDayLabel(new Date(ph.eatStartMs).toISOString().slice(0, 10), { day: 'numeric', month: 'short' })} · ${fdHHMM(ph.eatStartMs)}`
-      : `Eating window opens at ${fdHHMM(ph.eatStartMs)}`)
-    : ph.phase === 'eating' ? `Eating window ends at ${fdHHMM(ph.eatEndMs)}`
+      // LB.fmtISO yields the LOCAL calendar date, never the UTC one (which is
+      // off by one day for fasts ending near local midnight).
+      ? `Target ${LB.fmtDayLabel(LB.fmtISO(new Date(ph.eatStartMs)), { day: 'numeric', month: 'short' })} · ${LB.fmtHHMM(ph.eatStartMs)}`
+      : `Eating window opens at ${LB.fmtHHMM(ph.eatStartMs)}`)
+    : ph.phase === 'eating' ? `Eating window ends at ${LB.fmtHHMM(ph.eatEndMs)}`
     : ph.phase === 'complete' ? 'Tap Start fast to begin the next one'
     : 'Tap Start fast after your last meal';
   const segRow = (list, caption) => (
