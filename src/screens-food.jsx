@@ -3745,69 +3745,77 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // back) mid-batch doesn't lose it, both (and a staged recipe, see
   // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
-    // Same breathing box-shadow as the Intensity sheet (.intensity-glow,
-    // index.html): a live batch waiting to be added is easy to forget about
-    // otherwise, the glow keeps drawing the eye back to it. Regular
-    // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
-    // glow uses), since this bar sits on the normal theme-reactive Screen
-    // background and should mute along with everything else on Paper.
-    <div ref={stagedBarRef} className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-      {pickedExpanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
-          {staged.map(e => (
-            <div key={e.id} style={fdDraftRow}>
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                <span style={fdEntryMeta}>
-                  {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
-                  <span style={fdMetaDivider} />
-                  <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
-                </span>
+    // key={landTick} + .fd-bar-land: the WHOLE bar bounces once per chip
+    // landing (flyStagedChip bumps landTick on arrival), replayed by
+    // remounting this wrapper. The wrapper exists because the bar's own
+    // .intensity-glow class owns the element's `animation` property: a
+    // second animation class on the container would override the breathing
+    // glow, and remounting the container would restart it. The wrapper is
+    // transparent; everything visible (background, border, glow, list) sits
+    // inside it, so it all moves as one box. flexShrink: 0 lives here now,
+    // the wrapper is the flex item.
+    <div key={landTick} className="fd-bar-land" style={{ flexShrink: 0 }}>
+      {/* Same breathing box-shadow as the Intensity sheet (.intensity-glow,
+          index.html): a live batch waiting to be added is easy to forget
+          about otherwise, the glow keeps drawing the eye back to it. Regular
+          --accent-rgb (not the -raw variant the Intensity sheet's own
+          backdrop glow uses), since this bar sits on the normal
+          theme-reactive Screen background and should mute along with
+          everything else on Paper. */}
+      <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+        {pickedExpanded && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
+            {staged.map(e => (
+              <div key={e.id} style={fdDraftRow}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+                  <span style={fdEntryMeta}>
+                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                  </span>
+                </div>
+                <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                </button>
               </div>
-              <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+          <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
+            <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+            {/* key={staged.length} + .fd-count-pop: the count pops on every
+                change (chip landing and per-item removal alike). */}
+            <span key={staged.length} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              Adding {staged.length} item{staged.length === 1 ? '' : 's'}
+            </span>
+            {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
+                kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
+                reads consistently with the rest of the food module. Smaller
+                (fontSize 10, same as fdEntryMeta elsewhere) and the one part
+                allowed to clip on a narrow screen, so "Adding N items" and the
+                Add button both stay fully readable no matter what. FdMacroBits
+                itself sets no font-size, it inherits this span's, same as
+                every other call site (they all sit inside an fdEntryMeta span). */}
+            <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
+              <span style={fdMetaDivider} />
+              <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
+            </span>
+          </button>
+          {/* The chip flight's landing target (stagedAddBtnWrapRef): wrapped in
+              a span because Btn is a function component and doesn't forward
+              refs in React 18. key={landTick} + .fd-btn-absorb pulse the
+              wrapper as the chip arrives; flexShrink: 0 moved here from the
+              Btn, the span is now the flex item. */}
+          <span key={landTick} ref={stagedAddBtnWrapRef} className="fd-btn-absorb" style={{ flexShrink: 0 }}>
+            <Btn onClick={commitStagedEntries} style={{ padding: '8px 18px', minHeight: 34 }}>
+              Add
+            </Btn>
+          </span>
         </div>
-      )}
-      {/* key={landTick} + .fd-bar-land: the strip squashes once per chip
-          landing (flyStagedChip bumps landTick on arrival), replaying the
-          one-shot animation by remounting this purely presentational strip;
-          the outer container keeps its ref and breathing glow untouched. */}
-      <div key={landTick} className="fd-bar-land" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
-          <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
-          {/* key={staged.length} + .fd-count-pop: the count pops on every
-              change (chip landing and per-item removal alike). */}
-          <span key={staged.length} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
-            Adding {staged.length} item{staged.length === 1 ? '' : 's'}
-          </span>
-          {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
-              kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
-              reads consistently with the rest of the food module. Smaller
-              (fontSize 10, same as fdEntryMeta elsewhere) and the one part
-              allowed to clip on a narrow screen, so "Adding N items" and the
-              Add button both stay fully readable no matter what. FdMacroBits
-              itself sets no font-size, it inherits this span's, same as
-              every other call site (they all sit inside an fdEntryMeta span). */}
-          <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
-            <span style={fdMetaDivider} />
-            <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
-          </span>
-        </button>
-        {/* The chip flight's landing target (stagedAddBtnWrapRef): wrapped in
-            a span because Btn is a function component and doesn't forward
-            refs in React 18. key={landTick} + .fd-btn-absorb pulse the
-            wrapper as the chip arrives; flexShrink: 0 moved here from the
-            Btn, the span is now the flex item. */}
-        <span key={landTick} ref={stagedAddBtnWrapRef} className="fd-btn-absorb" style={{ flexShrink: 0 }}>
-          <Btn onClick={commitStagedEntries} style={{ padding: '8px 18px', minHeight: 34 }}>
-            Add
-          </Btn>
-        </span>
       </div>
     </div>
   ) : null;
