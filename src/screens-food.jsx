@@ -1097,6 +1097,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
   const [extrasOpen, setExtrasOpen] = useStateFd(false);
+  // Intermittent fasting: per-device cycle (localStorage, cooking-draft
+  // pattern), lazy-read once at mount so a reload resumes mid-fast. The
+  // protocol itself is the synced setting (store.settings.fastingProtocol).
+  const [fastingState, setFastingState] = useStateFd(fdReadFastingState);
+  const fastingProtocol = useMemoFd(
+    () => LB.FD_FASTING_PRESETS.find(p => p.id === store.settings?.fastingProtocol) || null,
+    [store.settings?.fastingProtocol]
+  );
+  const setFastingProtocol = id => setStore(s => ({ ...s, settings: { ...s.settings, fastingProtocol: id } }));
+  const startFast = () => {
+    const next = { fastStartedAt: new Date().toISOString(), eatStartedAt: null };
+    fdWriteFastingState(next);
+    setFastingState(next);
+  };
+  const endFast = () => {
+    if (!fastingState?.fastStartedAt) return;
+    const next = { ...fastingState, eatStartedAt: new Date().toISOString() };
+    fdWriteFastingState(next);
+    setFastingState(next);
+  };
+  const resetFast = () => {
+    fdClearFastingState();
+    setFastingState(null);
+  };
+  // Absolute eating-window boundaries for the timeline tint. Timestamp-only,
+  // so it needs no 1s tick: it changes only when the user acts.
+  const fastingEatWin = useMemoFd(() => {
+    if (!fastingState || !fastingProtocol) return null;
+    const ph = fdFastingPhase(fastingState, fastingProtocol, Date.now());
+    return ph.phase === 'idle' ? null : { eatStartMs: ph.eatStartMs, eatEndMs: ph.eatEndMs };
+  }, [fastingState, fastingProtocol]);
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
@@ -4282,6 +4313,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 onSetTargets={() => go(store.settings?.showHealthTab ? { name: 'health', openMacroTargets: true } : { name: 'home' })} />
             </BracketFrame>
 
+            {/* Intermittent fasting (migration 0249): the protocol is the
+                synced setting, the running cycle is per-device localStorage
+                (cooking-draft pattern), so it survives a reload and needs no
+                sync. Hidden entirely when no protocol is picked (feature
+                off); turn it on in Settings > Health > Food. */}
+            {fastingProtocol && (
+              <FdFastingCard state={fastingState} protocol={fastingProtocol}
+                onProtocol={setFastingProtocol} onStart={startFast} onEnd={endFast} onReset={resetFast} />
+            )}
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
                 Deliberately OUTSIDE the hero frame and folded away: they are
@@ -4393,10 +4433,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         // matching the user's own timezone, same as entryTime()/
                         // LB.nowHHMM() already do for the "log at now" default.
                         const isNow = curDate === today && h === new Date().getHours();
+                        // Eating-window tint: today's rows inside the fasting
+                        // eating window get a faint accent wash so "when can I
+                        // eat" reads off the hour list. The current hour keeps
+                        // its own accent border + tint (isNow wins). Style-only,
+                        // so drag-reorder hit targets are untouched.
+                        const eatTint = isNow || curDate !== today || !fastingEatWin ? null
+                          : fdFastingEatHourTint(fastingEatWin.eatStartMs, fastingEatWin.eatEndMs, h, curDate);
                         return (
                           <div key={h} style={{ display: 'flex', alignItems: 'center' }}>
                             <FdHourTick />
-                            <div style={{ ...fdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
+                            <div style={{ ...fdHourRow(filled, isNow), ...(eatTint ? { background: 'rgba(var(--accent-rgb),0.05)', borderColor: 'rgba(var(--accent-rgb),0.3)' } : null), flex: 1, minWidth: 0 }}>
                               <div data-reorder-ignore="true" style={fdHourLabelCol}>
                                 <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkFaint) }}>{String(h).padStart(2, '0')}</span>
                               </div>
@@ -8344,6 +8391,67 @@ function fdClearCookingDraft() {
   try { localStorage.removeItem('logbook-cooking-draft'); } catch (_) {}
 }
 
+// ── Intermittent fasting: per-device cycle state (never synced) ────────────
+// Mirror of the cooking draft: timestamps are absolute ISO strings, so the
+// phase is always derived from (now - start), never an incrementing counter,
+// and a reload or app kill cannot desync the timer. Shape:
+// { fastStartedAt: ISO|null, eatStartedAt: ISO|null }; both null = idle
+// (written state never stores that, idle = key absent, cleared on Reset).
+function fdReadFastingState() {
+  try {
+    const raw = localStorage.getItem('logbook-fasting-state');
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    const fastStartedAt = typeof s?.fastStartedAt === 'string' ? s.fastStartedAt : null;
+    const eatStartedAt = typeof s?.eatStartedAt === 'string' ? s.eatStartedAt : null;
+    return fastStartedAt ? { fastStartedAt, eatStartedAt } : null;
+  } catch (_) { return null; }
+}
+function fdWriteFastingState(state) {
+  try { localStorage.setItem('logbook-fasting-state', JSON.stringify(state)); } catch (_) {}
+}
+function fdClearFastingState() {
+  try { localStorage.removeItem('logbook-fasting-state'); } catch (_) {}
+}
+
+// Pure phase derivation. state is fdReadFastingState's shape, protocol one of
+// LB.FD_FASTING_PRESETS, nowMs epoch ms. No eatStartedAt yet = the eating
+// window auto-opens at fastStartedAt + fastH; "End fast" sets it earlier.
+// eatStartMs/eatEndMs are absolute boundaries the countdown and the timeline
+// tint both read, so they are derived once here.
+function fdFastingPhase(state, protocol, nowMs) {
+  if (!state || !protocol) return { phase: 'idle' };
+  const fastStartMs = Date.parse(state.fastStartedAt);
+  if (!Number.isFinite(fastStartMs)) return { phase: 'idle' };
+  const plannedEatMs = fastStartMs + protocol.fastH * 3600 * 1000;
+  const rawEatMs = state.eatStartedAt ? Date.parse(state.eatStartedAt) : NaN;
+  const eatStartMs = Number.isFinite(rawEatMs) ? rawEatMs : plannedEatMs;
+  const eatEndMs = eatStartMs + protocol.eatH * 3600 * 1000;
+  if (nowMs < eatStartMs) return { phase: 'fasting', fastStartMs, eatStartMs, eatEndMs };
+  if (nowMs < eatEndMs)  return { phase: 'eating',  fastStartMs, eatStartMs, eatEndMs };
+  return { phase: 'complete', fastStartMs, eatStartMs, eatEndMs };
+}
+// Does today's wall-clock hour slot h (0-23) fall inside the eating window?
+// Absolute-overlap test, not hour-of-start math: a window that crosses
+// midnight (fast started yesterday, or a late OMAD) still tints the correct
+// hours of today. Slot is [hh:00, hh+1:00) local time, matching how the
+// timeline and isNow already think in local wall-clock hours.
+function fdFastingEatHourTint(eatStartMs, eatEndMs, h, dateStr) {
+  const slotStart = new Date(dateStr + 'T' + String(h).padStart(2, '0') + ':00:00').getTime();
+  return eatStartMs < slotStart + 3600 * 1000 && eatEndMs > slotStart;
+}
+function fdFmtClock(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+function fdHHMM(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 // Diff between the wizard's final working items and the recipe's own
 // currently persisted items, for the "Recipe changes" confirm below. Swaps
 // are NOT re-derived from a generic added+removed pair (that would have to
@@ -9808,6 +9916,51 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
     </div>
   );
 }
+
+// Live fasting card. The 1s tick is this leaf's own state, so the countdown
+// re-renders only here, never the whole FoodScreen. The protocol seg writes
+// the synced setting; the cycle itself stays in localStorage via the
+// handlers FoodScreen passes in. Compact on purpose: one countdown line,
+// one sub-line, one seg, one action.
+function FdFastingCard({ state, protocol, onProtocol, onStart, onEnd, onReset }) {
+  const [, tick] = useStateFd(0);
+  useEffectFd(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
+  const nowMs = Date.now();
+  const ph = fdFastingPhase(state, protocol, nowMs);
+  const main = ph.phase === 'fasting' ? `Fasting · ${fdFmtClock(ph.eatStartMs - nowMs)} left`
+    : ph.phase === 'eating' ? `Eating · ${fdFmtClock(ph.eatEndMs - nowMs)} left`
+    : ph.phase === 'complete' ? 'Complete · Start your next fast'
+    : 'Ready to fast';
+  const sub = ph.phase === 'fasting' ? `Eating window opens at ${fdHHMM(ph.eatStartMs)}`
+    : ph.phase === 'eating' ? `Eating window ends at ${fdHHMM(ph.eatEndMs)}`
+    : ph.phase === 'complete' ? 'Cycle done · tap Start fast to begin the next one'
+    : 'Tap Start fast after your last meal';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 6, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span className="micro" style={{ color: 'var(--accent)' }}>Fasting · {protocol.label}</span>
+        {state?.fastStartedAt && (
+          <button onClick={onReset} aria-label="Reset fasting cycle" style={fdIconBtn(24)}>
+            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+          </button>
+        )}
+      </div>
+      <div className="num" style={{ fontSize: 26, lineHeight: 1.1, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>{main}</div>
+      <div className="micro" style={{ textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>{sub}</div>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+        {LB.FD_FASTING_PRESETS.map(p => (
+          <button key={p.id} onClick={() => onProtocol(p.id)} style={fdSegBtn(protocol.id === p.id)}>{p.label}</button>
+        ))}
+      </div>
+      {ph.phase === 'fasting' ? (
+        <Btn onClick={onEnd} style={{ width: '100%' }}>End fast</Btn>
+      ) : ph.phase === 'idle' || ph.phase === 'complete' ? (
+        <Btn onClick={onStart} style={{ width: '100%' }}>Start fast</Btn>
+      ) : null}
+    </div>
+  );
+}
+
 // Plan Mode projection: still-to-eat macros vs. the full logged+planned
 // projection, each in its own centered column. Sits under the real totals as
 // a lighter, dashed-topped table so it reads as a forecast, not part of the

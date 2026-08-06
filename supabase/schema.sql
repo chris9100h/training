@@ -335,7 +335,8 @@ CREATE TABLE public.zane_user_settings (
   daily_log_reminder_enabled boolean NOT NULL DEFAULT false,
   daily_log_reminder_time text NOT NULL DEFAULT '19:00'::text,
   daily_log_reminder_last_date text,
-  pillbox_slots jsonb
+  pillbox_slots jsonb,
+  fasting_protocol text  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
 );
 
 CREATE TABLE public.zane_pushover_active (

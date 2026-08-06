@@ -471,6 +471,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     macro_targets: sett.macroTargets ?? null,
     macro_calc: sett.macroCalc ?? null,
     meal_windows: sett.mealWindows ?? null,
+    fasting_protocol: sett.fastingProtocol ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     show_water_tab: sett.showWaterTab ?? false,
     show_food_tab: sett.showFoodTab ?? false,
@@ -1713,6 +1714,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         macroTargets: sett.macro_targets ?? null,
         macroCalc: sett.macro_calc ?? null,
         mealWindows: sett.meal_windows ?? null,
+        fastingProtocol: sett.fasting_protocol ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         showWaterTab: sett.show_water_tab ?? false,
         showFoodTab: sett.show_food_tab ?? false,
@@ -2482,6 +2484,7 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
+    prev.settings?.fastingProtocol     !== next.settings?.fastingProtocol     ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
@@ -2555,6 +2558,7 @@ async function syncStore(prev, next, userId) {
       macro_targets: next.settings?.macroTargets ?? null,
       macro_calc: next.settings?.macroCalc ?? null,
       meal_windows: next.settings?.mealWindows ?? null,
+      fasting_protocol: next.settings?.fastingProtocol ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       show_water_tab: next.settings?.showWaterTab ?? false,
       show_food_tab: next.settings?.showFoodTab ?? false,
@@ -5847,6 +5851,16 @@ const MEAL_CATEGORY_DEFS = [
   { id: 'dinner', label: 'Dinner', defaultStart: 16 },
   { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
 ];
+// Intermittent fasting presets (migration 0249): the id is stored verbatim
+// in zane_user_settings.fasting_protocol, the hours are the timer math.
+// Lives here rather than in screens-food.jsx because two screens need it
+// now: the FastingCard and the settings editor that turns the feature on.
+const FD_FASTING_PRESETS = [
+  { id: '16:8', label: '16:8', fastH: 16, eatH: 8 },
+  { id: '18:6', label: '18:6', fastH: 18, eatH: 6 },
+  { id: '20:4', label: '20:4', fastH: 20, eatH: 4 },
+  { id: 'omad', label: 'OMAD', fastH: 23, eatH: 1 },
+];
 // Resolves settings.mealWindows (six ascending start hours, first always 0)
 // into the [startHour, endHour) ranges the timeline groups by. Defensive about
 // the stored value: a short, non-ascending or non-numeric array falls back to
@@ -9035,7 +9049,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS,
   estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,

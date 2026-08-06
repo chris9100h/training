@@ -637,6 +637,17 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
   const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
+  const [fastingSheet, setFastingSheet] = useStateSet(false);
+  // Segmented-button style for the Intermittent Fasting protocol picker (same
+  // shape as fdSegBtn / the health estimator's segBtn).
+  const setSegBtn = (active) => ({
+    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+    textShadow: active ? 'none' : 'var(--text-lift)',
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+    WebkitTapHighlightColor: 'transparent',
+  });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
   // Food tracker meal boundaries (migration 0206). Resolved rather than read
@@ -2276,6 +2287,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <>
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
               <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+              <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
             </>
           )}
           <div style={{ marginTop: 24 }}>
@@ -2367,6 +2379,25 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setMealTimesSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Food › Intermittent Fasting: only the protocol
+          preference lives here, the running fast is per-device ══ */}
+      <SettingsSheet open={fastingSheet} onClose={() => setFastingSheet(false)} title="Intermittent Fasting">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
+            Pick a fast/eat rhythm. The Food Tracker then shows a live fasting timer and tints today's eating window on the timeline. The protocol syncs to all your devices; the running fast itself stays on this device. Tap the active protocol again to switch it off.
+          </div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+            {LB.FD_FASTING_PRESETS.map(p => (
+              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+            ))}
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFastingSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
