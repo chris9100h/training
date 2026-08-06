@@ -3789,9 +3789,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 (the count label scales up into its slot), fades back in as
                 the box settles. */}
             <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
-            {/* key={staged.length} + .fd-count-pop: the count pops on every
-                change (chip landing and per-item removal alike). */}
-            <span key={staged.length} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {/* key={landTick} + .fd-count-pop: the count pops only on a chip
+                landing (landTick bumps), never on per-item removal: a remove
+                keeps the span's identity and just updates the number in
+                place, so the label doesn't balloon over the chevron (which
+                stays visible when there's no bounce). */}
+            <span key={landTick} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
               Adding {staged.length} item{staged.length === 1 ? '' : 's'}
             </span>
             {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
