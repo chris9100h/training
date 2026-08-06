@@ -264,46 +264,21 @@ async function sendReminders() {
     });
     if (!due.length) continue;
 
-    const title = 'Zane · Medication Reminder';
-    const message = due.length === 1
-      ? `Still due: ${due[0].medication_name || 'a scheduled dose'}. 💊`
-      : `You have ${due.length} scheduled doses still to log. 💊`;
-
-    // Send FIRST, then persist state only when the push actually landed: a
-    // failed push must not advance reminder_count, or the nudge would be
-    // silently lost forever with no retry (the earlier patch-first order had
-    // the inverse failure mode, an endless re-fire loop when the state PATCH
-    // failed; the older push-then-patch order swallowed push failures the
-    // same way). At-least-once semantics: a push that landed but whose
-    // response was lost retries next tick, a rare duplicate over a permanent
-    // miss.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    let pushed = false;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
-        });
-        pushed = res.ok;
-        console.log(`[medication-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        console.error(`[medication-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      pushed = await sendWebPush(row.user_id, title, message);
-    }
-    if (!pushed) continue;
-
-    // Persist the fired state so the rules above stay true on later ticks:
-    // reminder_sent_at stamps now and reminder_count advances. Rows in one
-    // tick can sit at different counts (a first nudge for one dose, a
+    // Persist the fired state FIRST, then push: reminder_sent_at stamps now
+    // and reminder_count advances, so a failed STATE PATCH cannot leave the
+    // count where it was and re-fire the same nudge on every hourly tick
+    // forever, unbounded, for as long as the underlying PATCH failure
+    // persists (a push-first order only ever protects the ONE failure mode
+    // it defers past, whichever operation still runs second inherits this
+    // exact risk if it fails; state patches are the one it's actually
+    // possible to protect on both sides of, via the rollback below). Rows in
+    // one tick can sit at different counts (a first nudge for one dose, a
     // second for another), so group by the target count and PATCH each
     // group once. return=minimal: nothing to read back. Only touches the
     // reminder columns, never planned/date/etc, so logging the dose later
-    // works unchanged. A failed PATCH here re-fires next tick (count
-    // unchanged), one duplicate at most, the at-least-once tradeoff above.
+    // works unchanged. Rows whose state failed to persist are NOT pushed
+    // this tick: they retry next tick with the count unchanged, one attempt
+    // per tick instead of unbounded duplicates.
     const byCount = new Map<number, string[]>();
     for (const e of due) {
       const target = (e.reminder_count ?? 0) + 1;
@@ -311,13 +286,68 @@ async function sendReminders() {
       ids.push(e.id);
       byCount.set(target, ids);
     }
+    const failedIds = new Set<string>();
     for (const [target, ids] of byCount) {
       const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
         body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
       });
-      if (!patchRes.ok) console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
+      if (!patchRes.ok) {
+        console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
+        ids.forEach(id => failedIds.add(id));
+      }
+    }
+    const toPush = due.filter(e => !failedIds.has(e.id));
+    if (!toPush.length) continue;
+
+    const title = 'Zane · Medication Reminder';
+    const message = toPush.length === 1
+      ? `Still due: ${toPush[0].medication_name || 'a scheduled dose'}. 💊`
+      : `You have ${toPush.length} scheduled doses still to log. 💊`;
+
+    // Respect the user's channel choice: when Pushover is enabled (use_pushover
+    // and a key set) send only Pushover, otherwise send native Web Push (which
+    // pre-checks the user actually has a subscription, see sendWebPush). This
+    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
+    // so the user never gets the same nudge on both channels.
+    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
+    let delivered: boolean;
+    if (viaPushover) {
+      try {
+        const res = await fetch('https://api.pushover.net/1/messages.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
+        });
+        delivered = res.ok;
+        if (!delivered) console.error(`[medication-reminder] pushover failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
+        else console.log(`[medication-reminder] pushover sent to ${row.user_id}: ${res.status}`);
+      } catch (e) {
+        delivered = false;
+        console.error(`[medication-reminder] pushover error for ${row.user_id}:`, e);
+      }
+    } else {
+      delivered = await sendWebPush(row.user_id, title, message);
+    }
+
+    // Compensating rollback: the state PATCH above already advanced every
+    // row in toPush, but delivery just failed (including the "no
+    // subscription to deliver to" case sendWebPush itself now detects), so
+    // nothing actually reached the user despite the persisted state now
+    // claiming otherwise. Restore each row's own PRE-tick reminder_count/
+    // reminder_sent_at (captured from `due`, before this tick touched them)
+    // so the next tick's due-filter sees these doses as still owed a nudge
+    // and retries them, instead of silently under-notifying with no path
+    // back. One PATCH per row since rows can have had different prior
+    // counts/timestamps; only reached on an actual detected delivery
+    // failure, not the common path.
+    if (!delivered) {
+      await Promise.all(toPush.map(e => dbFetch(`zane_medication_logs?id=eq.${e.id}`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ reminder_sent_at: e.reminder_sent_at, reminder_count: e.reminder_count ?? 0 }),
+      }).catch(err => console.error(`[medication-reminder] rollback patch failed for ${e.id}:`, err))));
     }
   }
 }

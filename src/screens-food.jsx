@@ -946,15 +946,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
   // When the real date rolls over while the screen sits on the old "today",
-  // follow it (a day the user deliberately navigated to stays put).
+  // follow it (a day the user deliberately navigated to stays put). A `date`
+  // this screen is route-pinned to (the Health tab's "view this day" deep
+  // link) is an even more deliberate pin than a day-nav click and must stay
+  // put too, even in the one case where it happened to equal "today" at the
+  // moment of linking: without this guard, that pin would silently follow
+  // the rollover exactly like an ordinary live view, the same as if the
+  // pin had never been set.
   const prevTodayRef = useRefFd(today);
   useEffectFd(() => {
     const prev = prevTodayRef.current;
     if (today !== prev) {
-      setCurDate(d => d === prev ? today : d);
+      if (!date) setCurDate(d => d === prev ? today : d);
       prevTodayRef.current = today;
     }
-  }, [today]);
+  }, [today, date]);
 
   // store.foodLogs only carries FOOD_HISTORY_WINDOW_DAYS from boot; scrolling
   // further back needs a lazy fetch (mirrors fetchSessionEntries for old
