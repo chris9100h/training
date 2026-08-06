@@ -410,11 +410,9 @@
      button lives in (whichever one: the quantity sheet, the recipe portions
      sheet, Custom item, or the Describe-a-meal review list, all four wired
      through the same shared Sheet panelRef prop, see ui.jsx and
-     flyToStagedBar in screens-food.jsx). Two beats: the clone first fades to
-     a solid accent color in place (fd-genie-accent-fade below, an overlay
-     child of this element), THEN flies down into the docked staged-picks
-     bar, shrinking into a pill and fading out as it goes, the real sheet
-     closing instantly underneath it the whole time. Same "genie" pop-scale
+     flyToStagedBar in screens-food.jsx) and flies the CLONE down into the
+     docked staged-picks bar, shrinking into a pill and fading as it goes,
+     the real sheet closing instantly underneath it. Same "genie" pop-scale
      vocabulary as tabPopIn above, just running outward instead of in, and a
      deliberate replacement for an earlier version that flew a small ghost
      dot instead: that one had to guess a sensible start point per pick path
@@ -442,22 +440,6 @@
     transition: transform 0.5s cubic-bezier(0.55,0.06,0.68,0.19),
                 opacity 0.35s ease 0.28s,
                 border-radius 0.35s ease;
-  }
-  /* First beat of the flourish above, an extra child painted last (so it
-     covers everything else already cloned inside the panel): fades the
-     whole card to a solid accent color BEFORE the fold/fly starts,
-     flyToStagedBar only sets its own opacity in motion once this one's
-     transition has actually finished. border-radius: inherit rather than a
-     fixed value, so it always matches the outer clone's own current
-     corners, both the panel's natural resting shape (e.g. a bottom sheet's
-     rounded-top-only) and, later, as the outer clone's radius itself
-     animates toward a full pill during the fold: no separate transition
-     needed on this element for that half, the inherited value just tracks
-     the parent's live computed one every frame. */
-  .fd-genie-accent-fade {
-    position: absolute; inset: 0; background: var(--accent); opacity: 0;
-    border-radius: inherit;
-    transition: opacity 0.3s ease;
   }
 
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
