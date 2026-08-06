@@ -410,18 +410,17 @@
      button lives in (whichever one: the quantity sheet, the recipe portions
      sheet, Custom item, or the Describe-a-meal review list, all four wired
      through the same shared Sheet panelRef prop, see ui.jsx and
-     flyToStagedBar in screens-food.jsx). Two beats: the clone first fades to
-     a solid accent color in place (fd-genie-accent-fade below, an overlay
-     child of this element), THEN flies down into the docked staged-picks
-     bar, shrinking into a pill and fading out as it goes, the real sheet
-     closing instantly underneath it the whole time. Same "genie" pop-scale
-     vocabulary as tabPopIn above, just running outward instead of in, and a
-     deliberate replacement for an earlier version that flew a small ghost
-     dot instead: that one had to guess a sensible start point per pick path
-     (the tapped row, the tapped button, ...) and the guess was easy to get
-     wrong or too close to the target to even read as movement. The whole
-     sheet is always in the same, unambiguous place regardless of what
-     opened it, so there's nothing left to get wrong.
+     flyToStagedBar in screens-food.jsx) and flies the CLONE down into the
+     docked staged-picks bar, fading to a solid accent color WHILE it shrinks
+     into a pill and flies, the real sheet closing instantly underneath it.
+     Same "genie" pop-scale vocabulary as tabPopIn above, just running
+     outward instead of in, and a deliberate replacement for an earlier
+     version that flew a small ghost dot instead: that one had to guess a
+     sensible start point per pick path (the tapped row, the tapped button,
+     ...) and the guess was easy to get wrong or too close to the target to
+     even read as movement. The whole sheet is always in the same,
+     unambiguous place regardless of what opened it, so there's nothing left
+     to get wrong.
      left/top/width/height are set inline per call (the clone's actual
      on-screen position when it was captured), the translate/scale
      destination too (depends on where the docked bar currently is);
@@ -430,12 +429,19 @@
      base state the way the old ghost dot needed to: cloneNode(true) already
      carries the real panel's own inline styles (its actual background,
      border-radius, shadow, padding, content), so this only has to declare
-     what happens to it, not what it starts out looking like. transform and
-     opacity get their own separate transitions on purpose: a brisk ease-in
+     what happens to it, not what it starts out looking like. The accent
+     color fade (fd-genie-accent-fade below, an overlay child of this
+     element) runs its own separate transition, started in the very same
+     frame as this element's transform/opacity/border-radius so the tint
+     builds up DURING the flight, not before it: an earlier version faded to
+     solid accent first and only started the fold once that finished, which
+     read as too heavy a beat, sitting there fully colored at full size
+     before doing anything else. transform and this element's own opacity
+     still get their own separate transitions on purpose: a brisk ease-in
      throw for the position/scale (the "whoosh" itself) against a plain,
-     slightly delayed fade, so the clone reads clearly as "the sheet" for a
-     beat before it visibly starts shrinking, rather than the two racing
-     each other. */
+     slightly delayed fade, so the clone still reads clearly as "the sheet"
+     (now tinting accent) for a beat before it visibly starts disappearing,
+     rather than the two racing each other. */
   .fd-genie-sheet-clone {
     position: fixed; z-index: 600; pointer-events: none; margin: 0;
     transform-origin: center center;
@@ -443,21 +449,24 @@
                 opacity 0.35s ease 0.28s,
                 border-radius 0.35s ease;
   }
-  /* First beat of the flourish above, an extra child painted last (so it
-     covers everything else already cloned inside the panel): fades the
-     whole card to a solid accent color BEFORE the fold/fly starts,
-     flyToStagedBar only sets its own opacity in motion once this one's
-     transition has actually finished. border-radius: inherit rather than a
-     fixed value, so it always matches the outer clone's own current
-     corners, both the panel's natural resting shape (e.g. a bottom sheet's
-     rounded-top-only) and, later, as the outer clone's radius itself
+  /* Accent-color overlay for the flourish above, an extra child painted last
+     (so it covers everything else already cloned inside the panel). Its own
+     opacity is set to 1 in the same frame flyToStagedBar sets the outer
+     clone's transform/opacity/border-radius, so the tint builds up WHILE
+     the card is already shrinking and flying, not as a separate beat before
+     it. 0.4s finishes a little ahead of the 0.5s transform, so it's fully
+     tinted solid just before the card reaches its smallest, rather than
+     still half-tinted right up to the very end. border-radius: inherit
+     rather than a fixed value, so it always matches the outer clone's own
+     current corners, both the panel's natural resting shape (e.g. a bottom
+     sheet's rounded-top-only) and, later, as the outer clone's radius itself
      animates toward a full pill during the fold: no separate transition
      needed on this element for that half, the inherited value just tracks
      the parent's live computed one every frame. */
   .fd-genie-accent-fade {
     position: absolute; inset: 0; background: var(--accent); opacity: 0;
     border-radius: inherit;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.4s ease;
   }
 
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
