@@ -931,9 +931,30 @@ function FdCheckbox({ checked, onToggle, disabled, label }) {
 
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
-  const today = LB.todayISO();
+  // `today` refreshes on a timer and on visibility return (same idiom as the
+  // Water Tracker): leaving this screen open over midnight kept "today" (and
+  // the isNow hour highlight) stale, and curDate pinned yesterday so every
+  // new pick landed on the wrong day.
+  const [today, setToday] = useStateFd(() => LB.todayISO());
+  useEffectFd(() => {
+    const tick = () => setToday(cur => { const now = LB.todayISO(); return now === cur ? cur : now; });
+    const iv = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
+  // When the real date rolls over while the screen sits on the old "today",
+  // follow it (a day the user deliberately navigated to stays put).
+  const prevTodayRef = useRefFd(today);
+  useEffectFd(() => {
+    const prev = prevTodayRef.current;
+    if (today !== prev) {
+      setCurDate(d => d === prev ? today : d);
+      prevTodayRef.current = today;
+    }
+  }, [today]);
 
   // store.foodLogs only carries FOOD_HISTORY_WINDOW_DAYS from boot; scrolling
   // further back needs a lazy fetch (mirrors fetchSessionEntries for old
@@ -1123,9 +1144,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setFastingState(null);
   };
   // Absolute eating-window boundaries for the timeline tint. Timestamp-only,
-  // so it needs no 1s tick: it changes only when the user acts.
+  // so it needs no 1s tick: it changes only when the user acts. Long fasts
+  // (eatH 0) have no eating window, so no tint at all: the boundary-hour
+  // overlap test would otherwise paint the single hour the fast ended in as
+  // a window once the cycle is complete.
   const fastingEatWin = useMemoFd(() => {
-    if (!fastingState || !fastingProtocol) return null;
+    if (!fastingState || !fastingProtocol || fastingProtocol.eatH === 0) return null;
     const ph = fdFastingPhase(fastingState, fastingProtocol, Date.now());
     return ph.phase === 'idle' ? null : { eatStartMs: ph.eatStartMs, eatEndMs: ph.eatEndMs };
   }, [fastingState, fastingProtocol]);
@@ -3992,8 +4016,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
             {/* .fd-chevron-hide: tucks the chevron away while the bar bounces
                 (the count label scales up into its slot), fades back in as
-                the box settles. */}
-            <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+                the box settles. key={landTick} remounts only this icon so
+                the one-shot animation replays on every landing; the wrapper
+                no longer remounts (that restarted the glow and reset the
+                expanded list's scroll). */}
+            <i key={landTick} className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
             {/* key={landTick} + .fd-count-pop: the count pops only on a chip
                 landing (landTick bumps), never on per-item removal: a remove
                 keeps the span's identity and just updates the number in

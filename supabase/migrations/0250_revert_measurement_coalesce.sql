@@ -1,34 +1,17 @@
--- Body measurements: waist, hips, chest, upper arms, thighs and calves in cm,
--- body fat in percent, entered per day in the Daily Log's BODY section and
--- charted on a new "Body Measurements" Health card with a dropdown metric
--- switcher (plus a derived BMI segment when a height is set in the macro
--- estimator).
+-- Reverts the COALESCE on the body-measurement columns back to plain
+-- EXCLUDED assignment (migration 0248 shipped the COALESCE variant in its
+-- review-fix pass; this restores deletable measurements).
 --
--- No new table: the values become nullable columns on zane_daily_logs, so
--- they ride the existing daily-log plumbing end to end (sync_daily_logs_batch
--- RPC, diff-based syncStore payload, backup round trip, coach read-only view).
--- They deliberately touch no reminder logic: the daily-log-reminder cron
--- gates on zane_daily_logs.weight only, so entering measurements without a
--- weight never suppresses the weight nudge.
-
-ALTER TABLE zane_daily_logs
-  ADD COLUMN IF NOT EXISTS waist_cm numeric,
-  ADD COLUMN IF NOT EXISTS hips_cm numeric,
-  ADD COLUMN IF NOT EXISTS chest_cm numeric,
-  ADD COLUMN IF NOT EXISTS arm_cm numeric,
-  ADD COLUMN IF NOT EXISTS thigh_cm numeric,
-  ADD COLUMN IF NOT EXISTS calf_cm numeric,
-  ADD COLUMN IF NOT EXISTS body_fat_pct numeric;
-
--- The sync RPC hardcodes its column list three times over (INSERT list,
--- SELECT projection, ON CONFLICT SET), so a new column that is not added here
--- syncs silently never (migration 0211's note, still no CI gate for it).
--- CREATE OR REPLACE with the identical signature preserves the existing
--- REVOKE/GRANT (PUBLIC + anon revoked in 0141, authenticated granted), no
--- grants need to be reapplied. Plain EXCLUDED assignment for the new columns,
--- same as weight/steps/etc.: an old client's payload simply omits the keys
--- and the row updates to null. See migration 0250 for the COALESCE
--- experiment this reverts (it made cleared fields permanently undeletable).
+-- Why: the meal_of_choice precedent does not apply. meal_of_choice is a
+-- boolean that no client ever sends as null (the payload always carries
+-- `!!l.mealOfChoice`), so COALESCE there only guards key-absence. The body
+-- measurements ARE sent as null for cleared fields (`waist_cm:
+-- l.waistCm ?? null`), so COALESCE makes a deliberately cleared field
+-- resurrect on every subsequent sync, forever. That permanent data-integrity
+-- bug is worse than the short rollout-window wipe plain EXCLUDED accepts:
+-- a pre-update client syncing a daily-log edit nulls the measurements of
+-- that day, but only until the old client updates (the SW cache bump ships
+-- the fix to all devices within days).
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql
@@ -95,6 +78,3 @@ AS $function$
     updated_at         = EXCLUDED.updated_at
   WHERE zane_daily_logs.updated_at < EXCLUDED.updated_at;
 $function$;
-
--- Post-apply verification (same query as migration 0141): must return false.
--- SELECT has_function_privilege('anon', 'public.sync_daily_logs_batch(jsonb)', 'execute');

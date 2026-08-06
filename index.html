@@ -464,9 +464,11 @@
   }
   /* The chevron tucks away while the bar bounces (the count label scales
      up into its slot during the same window, see fdCountPop) and fades
-     back in as the box settles. Replays on every landing because the
-     chevron remounts with the bounce wrapper (key={landTick}); removal
-     doesn't remount the wrapper, so it stays visible there. */
+     back in as the box settles. The chevron icon itself carries
+     key={landTick} in screens-food.jsx, so it remounts and replays on
+     every landing while the wrapper stays mounted (a keyed wrapper would
+     restart the breathing glow and reset the expanded list's scroll);
+     removal doesn't remount it, so it stays visible there. */
   @keyframes fdChevronHide {
     0%   { opacity: 1; }
     20%  { opacity: 0; }

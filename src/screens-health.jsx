@@ -708,7 +708,7 @@ function WeightTrendChips({ trend, unit }) {
 // drawing the line chart with the directionless trend. Only the ACTIVE
 // metric's series is built per render, not all eight, and the whole card
 // lives once here instead of being copied between the two views.
-function BodyStatsCard({ logs, tf, setTf, dragHandle, onExpand, weekWindow, windowDays, heightCm, weightIsLbs }) {
+function BodyStatsCard({ logs, tf, selectedDate, setTf, dragHandle, onExpand, weekWindow, windowDays, heightCm, weightIsLbs }) {
   const [bodyMetric, setBodyMetric] = useStateH('waist');
   const [bmMenuOpen, setBmMenuOpen] = useStateH(false);
   const activeBodyMetric = (bodyMetric === 'bmi' && heightCm == null) ? 'waist' : bodyMetric;
@@ -739,7 +739,10 @@ function BodyStatsCard({ logs, tf, setTf, dragHandle, onExpand, weekWindow, wind
       }), weekWindow);
     }
     return healthSeriesFor(logs, windowDays, l => ({ value: l[bmField[activeBodyMetric]] }), weekWindow);
-  }, [logs, windowDays, weekWindow, activeBodyMetric, heightCm, weightIsLbs]);
+    // Deps on primitives only, like every other series memo in this file:
+    // weekWindow/windowDays are derived from (tf, selectedDate), so keying
+    // on the fresh object would recompute on every render in the 1W view.
+  }, [logs, tf, selectedDate, activeBodyMetric, heightCm, weightIsLbs]);
   const bmTrend = useMemoH(() => healthWeightTrend(bmSeries.data, null), [bmSeries.data]);
   const bmLatest = useMemoH(() => {
     const pts = bmSeries.data.filter(p => p.value != null);
@@ -4753,7 +4756,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     // metric switcher, lazy active-only series), so athlete and coach views
     // cannot drift apart.
     bodyMeasurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <BodyStatsCard logs={dailyLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+      <BodyStatsCard logs={dailyLogs} tf={tf} selectedDate={selectedDate} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
         weekWindow={weekWindow} windowDays={windowDays} heightCm={store.settings?.macroCalc?.heightCm ?? null}
         weightIsLbs={LB.weightAxisUnit(store.settings?.unit) === 'lbs'} />
     ) : null,
@@ -5065,7 +5068,7 @@ function HealthClientLogs({ clientStore }) {
       : null,
     // Data-gated mirror of the athlete card (see HealthScreen's cardEls).
     bodyMeasurements: logs.some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
-      <BodyStatsCard logs={logs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+      <BodyStatsCard logs={logs} tf={tf} selectedDate={selectedDate} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
         weekWindow={weekWindow} windowDays={windowDays} heightCm={clientStore?.settings?.macroCalc?.heightCm ?? null}
         weightIsLbs={clientUnit === 'lbs'} />
     ) : null,
