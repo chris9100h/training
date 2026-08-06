@@ -3785,7 +3785,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
           <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
             style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
-            <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+            {/* .fd-chevron-hide: tucks the chevron away while the bar bounces
+                (the count label scales up into its slot), fades back in as
+                the box settles. */}
+            <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
             {/* key={staged.length} + .fd-count-pop: the count pops on every
                 change (chip landing and per-item removal alike). */}
             <span key={staged.length} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
