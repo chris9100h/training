@@ -3974,15 +3974,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // back) mid-batch doesn't lose it, both (and a staged recipe, see
   // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
-    // key={landTick} + .fd-bar-land: the WHOLE bar bounces once per chip
-    // landing (flyStagedChip bumps landTick on arrival), replayed by
-    // remounting this wrapper. The wrapper exists because the bar's own
-    // .intensity-glow class owns the element's `animation` property: a
-    // second animation class on the container would override the breathing
-    // glow, and remounting the container would restart it. The wrapper is
-    // transparent; everything visible (background, border, glow, list) sits
-    // inside it, so it all moves as one box. flexShrink: 0 lives here now,
-    // the wrapper is the flex item.
+    // .fd-bar-land: the WHOLE bar bounces once per chip landing. The beat is
+    // re-triggered by the stagedLandRef effect (set animation to none, force
+    // a reflow, restore), NOT by remounting: a keyed remount restarted the
+    // breathing glow from 0% and reset the expanded list's scroll. The
+    // wrapper exists because the bar's own .intensity-glow class owns the
+    // element's `animation` property: a second animation class on the
+    // container would override the breathing glow, and remounting the
+    // container would restart it. The wrapper is transparent; everything
+    // visible (background, border, glow, list) sits inside it, so it all
+    // moves as one box. flexShrink: 0 lives here now, the wrapper is the
+    // flex item.
     <div ref={stagedLandRef} className="fd-bar-land" style={{ flexShrink: 0 }}>
       {/* Same breathing box-shadow as the Intensity sheet (.intensity-glow,
           index.html): a live batch waiting to be added is easy to forget

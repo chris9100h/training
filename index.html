@@ -440,11 +440,15 @@
     100% { transform: translate(var(--fx, 0px), var(--fy, 0px)) scale(0.12); opacity: 0; }
   }
   /* Landing beats: one-shot, short, delayed ~0.36s so they hit as the chip
-     arrives (~0.5s in). Re-triggered per landing by remounting with
-     key={landTick} in screens-food.jsx (the bar bounce wrapper carries the
-     strip, button and chevron along; the count span is keyed on landTick
-     too, so a per-item removal never replays the pop); the resting 0%
-     frame plus `both` fill keeps the delay period visually silent. */
+     arrives (~0.5s in). Re-triggered per landing by an effect in
+     screens-food.jsx that sets the wrapper's animation to none, forces a
+     reflow and restores it (stagedLandRef), so only the beat replays while
+     the bar subtree keeps its DOM identity (the breathing glow never
+     restarts, the expanded list keeps its scroll). The chevron and the Add
+     span carry key={landTick} themselves and remount for their own one-shot
+     animations; the count span is keyed on landTick too, so a per-item
+     removal never replays the pop. The resting 0% frame plus `both` fill
+     keeps the delay period visually silent. */
   @keyframes fdBarLand {
     0%   { transform: translateY(0) scale(1, 1); }
     28%  { transform: translateY(-6px) scale(1.02, 0.86); }

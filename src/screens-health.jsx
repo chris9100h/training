@@ -3298,13 +3298,6 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
 }
 
-// Own copy per file (same convention as mdShiftDate/fdShiftDate): shifts an
-// ISO date string by N days, local calendar day.
-function hlShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 
 // A zane_daily_logs row counts as "logged" only if it carries real content,
 // not merely by existing: a flex day-type-only override (just
@@ -3342,7 +3335,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
   // the server independently enforces the same bypass (ai-daily-summary), this
   // is purely so a non-admin never even sees an affordance that would 409.
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const yesterday = hlShiftDate(LB.todayISO(), -1);
+  const yesterday = LB.shiftDate(LB.todayISO(), -1);
   const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
   const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
   const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');

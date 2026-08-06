@@ -8,10 +8,13 @@
 -- measurements ARE sent as null for cleared fields (`waist_cm:
 -- l.waistCm ?? null`), so COALESCE makes a deliberately cleared field
 -- resurrect on every subsequent sync, forever. That permanent data-integrity
--- bug is worse than the short rollout-window wipe plain EXCLUDED accepts:
--- a pre-update client syncing a daily-log edit nulls the measurements of
--- that day, but only until the old client updates (the SW cache bump ships
--- the fix to all devices within days).
+-- bug is worse than the rollout-window wipe plain EXCLUDED accepts: a
+-- pre-update client syncing a daily-log edit nulls the measurements of that
+-- day. That is permanent data loss for those rows (the old device never
+-- held the values, nothing restores them), but it only happens while any
+-- device still runs pre-update JS, and the SW cache bump ships the fix to
+-- all devices within days. Deleting a wrong measurement afterwards must
+-- work, forever.
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql

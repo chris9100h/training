@@ -2330,7 +2330,7 @@ async function syncStore(prev, next, userId) {
     const { upsert, removed } = diffCollectionById(prev.medicationLogs, next.medicationLogs);
     // prev-by-id for the snooze key decision below: a stale second device
     // that edits a row while another device's snooze is active must not
-    // write its stale null over the server's snoozed_until.
+    // overwrite the server's current snoozed_until with its stale value.
     const prevLogsById = new Map((prev.medicationLogs || []).map(l => [l.id, l]));
     if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => {
       // Only snoozed_until is client-authored: reminder_sent_at and
@@ -2342,13 +2342,13 @@ async function syncStore(prev, next, userId) {
       const row = { id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
         date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
         schedule_slot_id: l.scheduleSlotId ?? null };
-      // Send snoozed_until only when it is set, or when this row previously
-      // had one and is being deliberately cleared (the Cancel snooze path).
-      // A row that never had a snooze on this device omits the key entirely,
-      // so a stale device's unrelated edit cannot wipe the server's active
-      // snooze.
-      const hadSnooze = !!(prevLogsById.get(l.id)?.snoozedUntil);
-      if (l.snoozedUntil || hadSnooze) row.snoozed_until = l.snoozedUntil ?? null;
+      // Send snoozed_until only when THIS device's value CHANGED since its
+      // last known state (set: null -> ISO, or cancel: ISO -> null). An
+      // unrelated edit on a stale device then omits the key entirely, so it
+      // can neither wipe the server's active snooze (stale null) nor
+      // overwrite a newer snooze (stale truthy value).
+      const prevLog = prevLogsById.get(l.id);
+      if (l.snoozedUntil !== (prevLog?.snoozedUntil ?? null)) row.snoozed_until = l.snoozedUntil ?? null;
       return row;
     })));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));

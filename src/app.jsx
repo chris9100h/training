@@ -470,7 +470,12 @@ function App() {
       setStore(s => (s && s.settings?.tzOffsetMinutes !== off ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
     };
     sync();
-    const iv = setInterval(sync, 15 * 60 * 1000);
+    // 5-minute poll: the crons fire on fixed UTC schedules, so a longer
+    // boot-anchored interval would leave the column stale for a whole
+    // interval after a DST/travel change (a cron firing inside that window
+    // would nudge at the wrong local hour/date). The check is a cheap
+    // comparison that only writes on an actual change.
+    const iv = setInterval(sync, 5 * 60 * 1000);
     const onVis = () => { if (!document.hidden) sync(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };

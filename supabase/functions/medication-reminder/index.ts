@@ -68,6 +68,20 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
+  // Pre-check the subscription: web-push itself answers 202 before async
+  // delivery and returns 200 even with no subscription rows, so a dead
+  // subscription would otherwise count as "pushed" and silently consume the
+  // nudge budget (count advances, the user never receives it, no retry).
+  // Without any subscription there is nothing to deliver to, so report
+  // failure and let the next tick retry (one cheap query per tick; a later
+  // re-subscription then delivers).
+  const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${userId}&select=id`);
+  if (!subRes.ok) return false;
+  const subs: { id: string }[] = await subRes.json().catch(() => []);
+  if (!subs.length) {
+    console.error(`[medication-reminder] no web-push subscription for ${userId}, skipping nudge`);
+    return false;
+  }
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   try {
     const res = await fetch(`${base}/functions/v1/web-push`, {

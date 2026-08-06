@@ -10,12 +10,6 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
 // Same noon-anchored day-shift screens-health.jsx's healthShiftISO uses (avoids
-// a DST-boundary date landing on the wrong day), kept local to this file since
-// it's the only date-range picker in Settings.
-function settingsShiftISO(base, days) {
-  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
-  return LB.fmtISO(d);
-}
 
 // Health-tab card visibility toggles: id must match screens-health.jsx's
 // DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
@@ -737,7 +731,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [trainingExportSheet, setTrainingExportSheet] = useStateSet(false);
   const [exportFormat, setExportFormat] = useStateSet('csv'); // 'csv' | 'xlsx' | 'pdf'
   const [exportRange, setExportRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
-  const [exportFrom, setExportFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
+  const [exportFrom, setExportFrom] = useStateSet(() => LB.shiftDate(LB.todayISO(), -29));
   const [exportTo, setExportTo] = useStateSet(() => LB.todayISO());
   // Weight axis only: 'mixed' is kg on the weight side, and the picker below
   // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
@@ -1334,8 +1328,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // cell instead of the blank-repeat trick CSV has to fall back on.
   const buildTrainingExportRows = async () => {
     const today = LB.todayISO();
-    const from = exportRange === '7' ? settingsShiftISO(today, -6)
-      : exportRange === '30' ? settingsShiftISO(today, -29)
+    const from = exportRange === '7' ? LB.shiftDate(today, -6)
+      : exportRange === '30' ? LB.shiftDate(today, -29)
       : exportRange === 'custom' ? exportFrom
       : null; // 'all' -> no lower bound
     const to = exportRange === 'custom' ? exportTo : today;
