@@ -1127,6 +1127,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the last expand state.
   const [pickedExpanded, setPickedExpanded] = useStateFd(false);
   useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
+  // Latest staged value for the leave guard below: the guard is registered
+  // once at mount (stable window slot) but must never read a stale staged,
+  // so it reads through this ref instead of the closure.
+  const stagedRef = useRefFd(staged);
+  useEffectFd(() => { stagedRef.current = staged; }, [staged]);
+  // App's go() consults this before any navigation away from the food route
+  // (main tabs, back button, TopBar long-press home, "Set macro targets").
+  // Same "Discard picks?" wording the back button's dialog used, now on
+  // every route change so a staged batch is never dropped without asking.
+  // Unmount cleanup nulls the slot only if it is still ours, so a later
+  // screen's guard (or none) wins after this screen unmounts.
+  useEffectFd(() => {
+    const guard = async () => {
+      const n = stagedRef.current.length;
+      if (!n) return true;
+      return await confirm(`${n} picked item${n === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true });
+    };
+    window.__foodLeaveGuard = guard;
+    return () => { if (window.__foodLeaveGuard === guard) window.__foodLeaveGuard = null; };
+  }, []);
   // The docked staged-picks bar itself (stagedPanel below): the landing
   // target of the staged-chip flight (flyStagedChip, right below). Stays
   // mounted for the bar's lifetime so the breathing intensity-glow never
@@ -2199,16 +2219,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const ok = await commitEntries(staged);
     if (ok) setStaged([]);
   }
-  // TopBar back: warns first if there's a staged-but-uncommitted batch, same
-  // "Discard picks?" wording FdIngredientPicker's own back/backdrop already
-  // uses, so an accidental tap here doesn't silently drop everything picked.
-  async function requestLeaveFood() {
-    if (staged.length && !await confirm(`${staged.length} picked item${staged.length === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
-    // Health is an independently-toggleable tab now, not guaranteed on: fall
-    // back to Home instead of navigating into a hidden tab.
-    go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' });
-  }
-
   // Time stamped on a newly logged entry: the timeline hour the user tapped
   // "+" on, else the current wall-clock time.
   function entryTime() {
@@ -2459,7 +2469,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   // Backdrop tap used to drop the whole picker (selection, target date,
   // mode) silently. Same "Discard picks?" wording/pattern as the staged-
-  // items guard (requestLeaveFood) and FdIngredientPicker's own; phrased
+  // items leave guard and FdIngredientPicker's own; phrased
   // mode-agnostically since closing without submitting leaves every entry
   // untouched regardless of whether Copy, Move or Delete was selected.
   async function requestCloseCopyMove() {
@@ -3249,8 +3259,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealItems(next);
   }
   // Cancel/backdrop/back on the review list: same "won't be added" dirty
-  // check requestLeaveFood uses for the main staged batch, scoped to just
-  // this not-yet-staged meal-description batch.
+  // check the staged-items leave guard uses for the main batch, scoped to
+  // just this not-yet-staged meal-description batch.
   async function requestCloseMealReview() {
     if (mealParsing) return;
     const n = mealItems?.length || 0;
@@ -4094,7 +4104,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
       {confirmEl}
-      <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
+      {/* Back and every tab switch share one leave guard in App's go():
+          the "Discard picks?" dialog fires there when a batch is staged. */}
+      <TopBar title="Food" sub={dayLabel} onBack={() => go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' })}
         right={
           tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
             <div style={{ display: 'flex', gap: 8 }}>

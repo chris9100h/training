@@ -1733,7 +1733,19 @@ function App() {
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
-  const go    = (r) => setRoute(r);
+  const go = async (r) => {
+    const cur = routeRef.current;
+    // While FoodScreen is mounted it registers __foodLeaveGuard: any
+    // navigation away from the current route asks it first, so a staged
+    // batch is never dropped silently (the same "Discard picks?" dialog
+    // the back button already used). With no guard registered this stays
+    // a fully synchronous setRoute, unchanged for every other screen.
+    if (window.__foodLeaveGuard && r.name !== cur.name) {
+      const ok = await window.__foodLeaveGuard();
+      if (!ok) return;
+    }
+    setRoute(r);
+  };
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.
   window.__goHome = () => go({ name: 'home' });
