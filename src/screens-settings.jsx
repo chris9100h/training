@@ -10,12 +10,6 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
 // Same noon-anchored day-shift screens-health.jsx's healthShiftISO uses (avoids
-// a DST-boundary date landing on the wrong day), kept local to this file since
-// it's the only date-range picker in Settings.
-function settingsShiftISO(base, days) {
-  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
-  return LB.fmtISO(d);
-}
 
 // Health-tab card visibility toggles: id must match screens-health.jsx's
 // DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
@@ -31,6 +25,7 @@ const HEALTH_CARD_TOGGLES = [
   { id: 'glucose', label: 'Glucose' },
   { id: 'bloodPressure', label: 'Blood pressure' },
   { id: 'bodyTemp', label: 'Body temperature' },
+  { id: 'bodyMeasurements', label: 'Body measurements' },
 ];
 
 // Boxed input look shared by the settings sheets' plain text/password/email/
@@ -631,10 +626,27 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [waterGoalSheet, setWaterGoalSheet] = useStateSet(false);
   const [waterBottleSheet, setWaterBottleSheet] = useStateSet(false);
   const [waterRemindersSheet, setWaterRemindersSheet] = useStateSet(false);
+  const [dailyLogReminderSheet, setDailyLogReminderSheet] = useStateSet(false);
   const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
   const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
   const [mealPlanningSheet, setMealPlanningSheet] = useStateSet(false);
   const [mealTimesSheet, setMealTimesSheet] = useStateSet(false);
+  const [fastingSheet, setFastingSheet] = useStateSet(false);
+  // Custom long fast hours (stored in the id as 'custom:N'); 48h default.
+  // Parsed by the single shared LB.fastingCustomHours (same source the food
+  // card's protocol resolver uses).
+  const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => LB.fastingCustomHours(store.settings?.fastingProtocol));
+  const fastingCustomActive = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
+  // Segmented-button style for the Intermittent Fasting protocol picker (same
+  // shape as fdSegBtn / the health estimator's segBtn).
+  const setSegBtn = (active) => ({
+    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+    textShadow: active ? 'none' : 'var(--text-lift)',
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+    WebkitTapHighlightColor: 'transparent',
+  });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
   // Food tracker meal boundaries (migration 0206). Resolved rather than read
@@ -719,7 +731,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [trainingExportSheet, setTrainingExportSheet] = useStateSet(false);
   const [exportFormat, setExportFormat] = useStateSet('csv'); // 'csv' | 'xlsx' | 'pdf'
   const [exportRange, setExportRange] = useStateSet('30'); // '7' | '30' | 'custom' | 'all'
-  const [exportFrom, setExportFrom] = useStateSet(() => settingsShiftISO(LB.todayISO(), -29));
+  const [exportFrom, setExportFrom] = useStateSet(() => LB.shiftDate(LB.todayISO(), -29));
   const [exportTo, setExportTo] = useStateSet(() => LB.todayISO());
   // Weight axis only: 'mixed' is kg on the weight side, and the picker below
   // offers exactly kg / lbs. Seeding this with the raw setting left a 'mixed'
@@ -785,6 +797,8 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [emailMsg, setEmailMsg] = useStateSet(null);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
+  const [dailyLogReminderEnabled, setDailyLogReminderEnabled] = useStateSet(() => store.settings?.dailyLogReminderEnabled ?? false);
+  const [dailyLogReminderTime, setDailyLogReminderTime] = useStateSet(() => store.settings?.dailyLogReminderTime ?? '19:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   // Paper mutes the chosen accent to grey by default (applyAccentColor,
@@ -1257,6 +1271,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } }));
   };
   const updateReminderTime = (val) => { setReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } })); };
+  const toggleDailyLogReminder = () => {
+    const next = !dailyLogReminderEnabled;
+    if (next && !pushEnabled) {
+      // Push not active, open push sheet instead of enabling reminder
+      setDailyLogReminderSheet(false);
+      setPushSheet(true);
+      return;
+    }
+    setDailyLogReminderEnabled(next);
+    setStore(s => ({ ...s, settings: { ...s.settings, dailyLogReminderEnabled: next } }));
+  };
+  const updateDailyLogReminderTime = (val) => { setDailyLogReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, dailyLogReminderTime: val } })); };
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
   // exportBackup throws on a partial fetch on purpose (an incomplete backup
   // silently wipes the missing rows on the next restore). That throw used to
@@ -1302,8 +1328,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // cell instead of the blank-repeat trick CSV has to fall back on.
   const buildTrainingExportRows = async () => {
     const today = LB.todayISO();
-    const from = exportRange === '7' ? settingsShiftISO(today, -6)
-      : exportRange === '30' ? settingsShiftISO(today, -29)
+    const from = exportRange === '7' ? LB.shiftDate(today, -6)
+      : exportRange === '30' ? LB.shiftDate(today, -29)
       : exportRange === 'custom' ? exportFrom
       : null; // 'all' -> no lower bound
     const to = exportRange === 'custom' ? exportTo : today;
@@ -2161,11 +2187,35 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
               <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
               <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+              <NavRow label="Daily log reminder" onTap={() => { setHealthSubSheet(false); setDailyLogReminderSheet(true); }} />
             </div>
           )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSubSheet(false)}>Done</Btn>
           </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Daily log reminder (drill-in off Health, mirror of the
+          training reminder sheet: toggle gated on push_enabled, time input,
+          one nudge per local day when today's weight is still unlogged). ══ */}
+      <SettingsSheet open={dailyLogReminderSheet} onClose={() => { setDailyLogReminderSheet(false); setHealthSubSheet(true); }} title="Daily log reminder">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <Row label="Enabled" first>
+            <Toggle on={dailyLogReminderEnabled} onToggle={() => { toggleDailyLogReminder(); if (dailyLogReminderEnabled) setDailyLogReminderSheet(false); }} />
+          </Row>
+          {dailyLogReminderEnabled && (
+            <Row label="Notify at">
+              <input type="time" value={dailyLogReminderTime} onChange={e => updateDailyLogReminderTime(e.target.value)}
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+            </Row>
+          )}
+          {dailyLogReminderEnabled && (
+            <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>
+              One nudge per day when today's weight is still unlogged.
+            </div>
+          )}
+          <Btn onClick={() => setDailyLogReminderSheet(false)}>Done</Btn>
         </div>
       </SettingsSheet>
 
@@ -2236,6 +2286,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <>
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
               <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+              <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
             </>
           )}
           <div style={{ marginTop: 24 }}>
@@ -2302,7 +2353,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
                 <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</span>
                 {i === 0 ? (
-                  <span className="num" style={{ fontSize: 13, color: UI.inkGhost }}>00:00</span>
+                  <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>00:00</span>
                 ) : (
                   <>
                     <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= mealCats[i - 1].startHour + 1}
@@ -2331,6 +2382,48 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         </div>
       </SettingsSheet>
 
+      {/* ══ Health › Food › Intermittent Fasting: only the protocol
+          preference lives here, the running fast is per-device ══ */}
+      <SettingsSheet open={fastingSheet} onClose={() => setFastingSheet(false)} title="Intermittent Fasting">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
+            Pick a fast/eat rhythm. The Food Tracker then shows a live fasting timer and tints today's eating window on the timeline. The protocol syncs to all your devices; the running fast itself stays on this device. Tap the active protocol again to switch it off.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
+                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+              ))}
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>Long fast</div>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+              {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
+                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+              ))}
+              {/* Custom long fast: hours live in the id ('custom:96'), the
+                  stepper below edits them. The chip compares by resolved
+                  custom-ness, not the raw id. */}
+              <button onClick={() => {
+                const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
+                patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
+              }} style={setSegBtn(fastingCustomActive)}>Custom</button>
+            </div>
+            {fastingCustomActive && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
+                <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
+                  step={6} min={24} max={168} suffix="h" />
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFastingSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
       {/* ══ Health › Medications ══ */}
       <SettingsSheet open={medsSubSheet} onClose={() => setMedsSubSheet(false)} title="Medications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -2353,7 +2446,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 }} />
               </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
-                Get a nudge when a scheduled dose is still unlogged an hour after its time. Needs notifications on.
+                Get a nudge when a scheduled dose is still unlogged an hour after its time, a second nudge two hours later, max two per day. After the first nudge you can snooze a still-due dose for an hour, or cancel the snooze again, right on its timeline row; the next nudge fires right when the snooze ends. Needs notifications on.
               </div>
               <NavRow label="Pillbox"
                 hint={Array.isArray(store.settings?.pillboxSlots) && store.settings.pillboxSlots.length ? `${store.settings.pillboxSlots.length} set` : null}
@@ -2785,7 +2878,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${watermarkOpacityPct}%, var(--range-track) ${watermarkOpacityPct}%)` }} />
             <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 32, textAlign: 'right' }}>{watermarkOpacityPct}%</span>
           </div>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginBottom: 14, lineHeight: 1.4 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, marginBottom: 14, lineHeight: 1.4 }}>
             How visible the logo (or your VIP background) is behind the Home screen.
           </div>
           <Row label="Week view in cycle mode" first>

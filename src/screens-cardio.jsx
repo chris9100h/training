@@ -723,7 +723,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               background: useTargets ? 'var(--accent)' : 'transparent',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              {useTargets && <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="1.8"><path d="M1.5 5l2.5 2.5L8.5 2"/></svg>}
+              {useTargets && <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent-ink)" strokeWidth="1.8"><path d="M1.5 5l2.5 2.5L8.5 2"/></svg>}
             </div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, color: UI.ink }}>Daily targets</div>

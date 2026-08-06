@@ -3709,7 +3709,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
                   fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
                 }}>
                   <span>Set {i + 1}</span>
-                  <span className="micro" style={{ color: tech ? UI.gold : UI.inkGhost, letterSpacing: '0.06em' }}>{tech ? LB.plannedTechniqueShort(tech) : 'none'}</span>
+                  <span className="micro" style={{ color: tech ? UI.gold : UI.inkFaint, letterSpacing: '0.06em' }}>{tech ? LB.plannedTechniqueShort(tech) : 'none'}</span>
                 </button>
               );
             })}
@@ -4196,7 +4196,7 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
         })}
         {list.length === 0 && systemList.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
         {!dbActive && (window.SYSTEM_EXERCISES || []).length > 0 && (
-          <div className="micro" style={{ padding: '12px 8px 2px', textAlign: 'center', color: UI.inkGhost, letterSpacing: '0.04em', textTransform: 'none', fontStyle: 'italic' }}>
+          <div className="micro" style={{ padding: '12px 8px 2px', textAlign: 'center', color: UI.inkFaint, letterSpacing: '0.04em', textTransform: 'none', fontStyle: 'italic' }}>
             Search or pick a muscle to also add from the exercise database.
           </div>
         )}
@@ -4771,7 +4771,7 @@ function PlanWizard({ store, setStore, go }) {
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
                 <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{stepTitle}</div>
-                <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
+                <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
               </div>
               <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{stepIntro}</div>
             </div>

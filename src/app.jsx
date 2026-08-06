@@ -445,21 +445,40 @@ function App() {
   }, [store?.settings?.darkMode]);
 
   // Keeps settings.tzOffsetMinutes fresh for every reminder cron (medication,
-  // water, meal) that places "now" on the user's local clock. Used to be
-  // three separate per-screen writers (Water: only while that tab is open,
-  // Food: only in Plan Mode, Meds: only while that tab is open), so a user
-  // who never opened any of those three screens never got it written at all,
-  // which is exactly the population the medication reminder's server-side
-  // materialization (M8) was meant to help: it can now find a due dose
-  // without the Meds tab ever having been opened, but was still firing at
-  // the wrong local hour (UTC fallback) for that same user (M8-Rest,
+  // water, meal, daily-log) that places "now" on the user's local clock. Used
+  // to be three separate per-screen writers (Water: only while that tab is
+  // open, Food: only in Plan Mode, Meds: only while that tab is open), so a
+  // user who never opened any of those three screens never got it written at
+  // all, which is exactly the population the medication reminder's
+  // server-side materialization (M8) was meant to help: it can now find a due
+  // dose without the Meds tab ever having been opened, but was still firing
+  // at the wrong local hour (UTC fallback) for that same user (M8-Rest,
   // audit-2026-08 verification). App-level instead so it fires for every
-  // signed-in user regardless of navigation, once per boot like the SW
-  // version flush above; only writes when it actually changed (travel/DST).
+  // signed-in user regardless of navigation; only writes when it actually
+  // changed (travel/DST). A single boot-time write was still stale by an hour
+  // across a DST switch (and wrong across travel) while the app stayed open,
+  // so the check also runs on every visibility return and on a 15-minute
+  // timer: the crons read this column, they only need it correct around
+  // their own fire times.
   useEffectA(() => {
     if (!store) return;
-    const off = -new Date().getTimezoneOffset();
-    if (store.settings?.tzOffsetMinutes !== off) setStore(s => (s ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+    // Functional setStore: the timer/visibility callbacks run long after this
+    // effect's closure was created, so the comparison must read the LATEST
+    // store, not the one captured here, and only write when it changed.
+    const sync = () => {
+      const off = -new Date().getTimezoneOffset();
+      setStore(s => (s && s.settings?.tzOffsetMinutes !== off ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+    };
+    sync();
+    // 5-minute poll: the crons fire on fixed UTC schedules, so a longer
+    // boot-anchored interval would leave the column stale for a whole
+    // interval after a DST/travel change (a cron firing inside that window
+    // would nudge at the wrong local hour/date). The check is a cheap
+    // comparison that only writes on an actual change.
+    const iv = setInterval(sync, 5 * 60 * 1000);
+    const onVis = () => { if (!document.hidden) sync(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [!!store]);
 
   // Report the active SW cache version to Supabase (so an admin can spot a
@@ -1733,7 +1752,19 @@ function App() {
   if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
-  const go    = (r) => setRoute(r);
+  const go = async (r) => {
+    const cur = routeRef.current;
+    // While FoodScreen is mounted it registers __foodLeaveGuard: any
+    // navigation away from the current route asks it first, so a staged
+    // batch is never dropped silently (the same "Discard picks?" dialog
+    // the back button already used). With no guard registered this stays
+    // a fully synchronous setRoute, unchanged for every other screen.
+    if (window.__foodLeaveGuard && r.name !== cur.name) {
+      const ok = await window.__foodLeaveGuard();
+      if (!ok) return;
+    }
+    setRoute(r);
+  };
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.
   window.__goHome = () => go({ name: 'home' });

@@ -85,7 +85,9 @@ const PER_TABLE_ALLOW = {
   // them to loadFromSupabase + the store if they ever become real settings.
   // tz_offset_minutes: environment-derived, auto-set by the client on load.
   // water_last_push_at: server-written throttle for the water reminder cron.
-  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at']),
+  // daily_log_reminder_last_date: server-written per-day throttle for the
+  // daily-log-reminder cron, same status as water_last_push_at.
+  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at', 'daily_log_reminder_last_date']),
   // tier / tier_granted_at: server-authored, granted by grant_lifetime_if_qualified()
   // and reverted on any client write by zane_profiles_protect_tier. Deliberately
   // NOT restorable: a backup file is user-editable, so importing it would be a

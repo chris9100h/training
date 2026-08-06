@@ -93,13 +93,6 @@
 
 const { useState: useStateMd, useEffect: useEffectMd, useMemo: useMemoMd, useRef: useRefMd } = React;
 
-// Own copy of fdShiftDate (screens-food.jsx), same reasoning as MdCheckbox:
-// that one is private to the Food Tracker's own module scope.
-function mdShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 
 // Same "day streak" idiom as Water's own hero (wtStreak, screens-water.jsx),
 // with one deliberate difference: a day with nothing due (due === 0, e.g. a
@@ -117,7 +110,7 @@ function mdStreak(store, todayISO) {
   let streak = 0;
   let offset = (todayTally.due > 0 && todayTally.taken < todayTally.due) ? -1 : 0;
   for (let guard = 0; guard < 400; guard++) {
-    const dateISO = mdShiftDate(todayISO, offset);
+    const dateISO = LB.shiftDate(todayISO, offset);
     const { due, taken } = LB.dsMedsDueTaken(store, dateISO);
     if (due === 0) { offset--; continue; }
     if (taken < due) break;
@@ -259,6 +252,7 @@ function mdFmtQty(n, unitLabel) {
   const trimmed = parseFloat(Number(n).toFixed(2));
   return `${trimmed} ${unitLabel || 'pills'}`;
 }
+
 
 // Mirrors fdConsumedSince (screens-food.jsx) exactly, one field name over:
 // compares real Date moments (entry.date/.time, both local, against the full
@@ -532,8 +526,8 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // date switcher plus a full 0-23 hour grid that's always rendered, filled
   // or not, rather than an empty-state takeover on a day with nothing yet.
   const [curDate, setCurDate] = useStateMd(today);
-  const dayLabel = curDate === today ? 'Today' : curDate === mdShiftDate(today, -1) ? 'Yesterday' : curDate === mdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
-  const shiftDay = (delta) => setCurDate(d => mdShiftDate(d, delta));
+  const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
   const curDateLogs = useMemoMd(
     () => medicationLogs.filter(l => l.date === curDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
     [medicationLogs, curDate],
@@ -600,12 +594,45 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const scheduled = Object.values(byHour).flat().filter(e => e.scheduleSlotId);
     return { due: scheduled.length, taken: scheduled.filter(e => !e.planned).length };
   }, [byHour]);
+  // How many still-due doses are currently snoozed (hint shown in the hero
+  // so a user who snoozed everything still sees why the "still due" line
+  // has not changed). Preview rows have no row to snooze, so excluded.
+  const snoozedCount = useMemoMd(() => {
+    const nowMs = Date.now();
+    return Object.values(byHour).flat().filter(e =>
+      !e.isPreview && e.planned && e.snoozedUntil && new Date(e.snoozedUntil).getTime() > nowMs
+    ).length;
+  }, [byHour]);
   // Off store/today, not curDate: a streak is always "as of today", browsing
   // the day-switcher to some other date shouldn't change the number shown.
   const streak = useMemoMd(() => mdStreak(store, today),
     [store.medicationScheduleSlots, store.medicationLogs, store.medications, store.medicationPlans, today]);
   function toggleTaken(entry) {
     setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, planned: !l.planned } : l) }));
+  }
+  // Snooze 1h / cancel snooze: only offered once the first nudge actually
+  // fired (reminderCount >= 1, server-set by the medication-reminder cron
+  // and synced back), you can't snooze an alarm that hasn't come yet. The
+  // snoozedUntil write goes through the normal log sync (same path as
+  // toggleTaken); the cron skips the dose until it expires, then nudging
+  // resumes (count rules still apply, snooze consumes no nudge and resets
+  // nothing). Tapping again while snoozed CANCELS the snooze instead of
+  // extending it. Stored server-side in zane_medication_logs.snoozed_until,
+  // no localStorage. Preview rows have no DB row to write, so the button
+  // only renders on real planned rows (rare anyway: mdAutoFillToday
+  // materializes today on mount).
+  function toggleSnoozeDose(entry) {
+    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).map(l => {
+      if (l.id !== entry.id) return l;
+      const snoozed = l.snoozedUntil && new Date(l.snoozedUntil).getTime() > Date.now();
+      if (snoozed) return { ...l, snoozedUntil: null };
+      // ~1h, rounded UP to the next full hour: the cron ticks hourly, so the
+      // expiry must land on a tick for it to be a real nudge moment (an
+      // 11:45 expiry would make the user wait for a time when nothing ever
+      // fires; 12:00 is when the server actually nudges).
+      const expiry = new Date(Math.ceil((Date.now() + 60 * 60 * 1000) / 3600000) * 3600000);
+      return { ...l, snoozedUntil: expiry.toISOString() };
+    }) }));
   }
   // Bulk "mark as taken" for a whole hour row: several doses at the same
   // time are usually swallowed together, so checking each one off one at a
@@ -1544,7 +1571,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginTop: 6 }}>
                       {doseTally.taken >= doseTally.due
                         ? 'All doses taken'
-                        : `${doseTally.due - doseTally.taken} dose${doseTally.due - doseTally.taken === 1 ? '' : 's'} still due`}
+                        : `${doseTally.due - doseTally.taken} dose${doseTally.due - doseTally.taken === 1 ? '' : 's'} still due${snoozedCount > 0 ? ` · ${snoozedCount} snoozed` : ''}`}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
                       <i className="fa-solid fa-fire" style={{ fontSize: 12, color: streak > 0 ? UI.gold : UI.inkFaint }} />
@@ -1586,7 +1613,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                       <MdHourTick />
                       <div style={{ ...mdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
                         <div style={mdHourLabelCol}>
-                          <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                          <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkFaint) }}>{String(h).padStart(2, '0')}</span>
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {filled ? es.map(entry => (
@@ -1596,7 +1623,23 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                                 : <MdCheckbox checked={!entry.planned} onToggle={() => toggleTaken(entry)} label={entry.planned ? 'Mark as taken' : 'Mark as not taken'} />}
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={mdEntryName}>{entry.medicationName}</div>
-                                <div style={mdEntryMeta}>{entry.isPreview ? 'Scheduled · ' : ''}{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}</div>
+                                <div style={mdEntryMeta}>
+                                  {entry.isPreview ? 'Scheduled · ' : ''}{mdFmtQty(entry.doseQty, medications.find(m => m.id === entry.medicationId)?.unitLabel)}
+                                  {!entry.isPreview && entry.planned && (entry.reminderCount || 0) >= 1 && (entry.reminderCount || 0) < 2 && (() => {
+                                    const snoozed = entry.snoozedUntil && new Date(entry.snoozedUntil).getTime() > Date.now();
+                                    return (
+                                      <>
+                                        {snoozed && <span> · Snoozed until {LB.fmtHHMM(entry.snoozedUntil)}</span>}
+                                        {' · '}
+                                        <button onClick={() => toggleSnoozeDose(entry)}
+                                          aria-label={snoozed ? 'Cancel snooze' : 'Snooze this dose for an hour'}
+                                          style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, WebkitTapHighlightColor: 'transparent' }}>
+                                          {snoozed ? 'Cancel snooze' : 'Snooze'}
+                                        </button>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
                               </div>
                               {!entry.isPreview && (
                                 <button onClick={() => deleteLogEntry(entry)} aria-label="Delete entry" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
@@ -2349,7 +2392,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
     const medicationScheduleSlots = store.medicationScheduleSlots || [];
     const out = [];
     for (let i = 0; i < 7; i++) {
-      const d = mdShiftDate(todayStr, i);
+      const d = LB.shiftDate(todayStr, i);
       const wd = LB.isoWd(new Date(d + 'T12:00:00'));
       const buckets = new Map();
       medicationScheduleSlots.forEach(slot => {

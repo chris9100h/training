@@ -24,15 +24,10 @@ function healthDayDiff(a, b) {
   return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 }
 
-function healthShiftISO(base, days) {
-  const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
-  return LB.fmtISO(d);
-}
-
 // [start, end] ISO bounds for a trailing N-day window ending today.
 function healthWindow(days) {
   const end = LB.todayISO();
-  return { start: healthShiftISO(end, -(days - 1)), end };
+  return { start: LB.shiftDate(end, -(days - 1)), end };
 }
 
 // [start, end] ISO bounds for the Mon-Sun calendar week containing `anchor`.
@@ -42,8 +37,8 @@ function healthWindow(days) {
 // today's weekday and never lines up with the Monday-anchored week above it.
 function healthMondayWeekBounds(anchor) {
   const jsDow = new Date(anchor + 'T12:00:00').getDay();
-  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-  return { start: monday, end: healthShiftISO(monday, 6) };
+  const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+  return { start: monday, end: LB.shiftDate(monday, 6) };
 }
 
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
@@ -64,8 +59,49 @@ function healthSeriesFor(logs, days, pick, windowOverride) {
   const dates = data.map(d => d.date);
   let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
   let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  if (from === to) { from = LB.shiftDate(from, -1); to = LB.shiftDate(to, 1); }
   return { from, to, data };
+}
+
+// Weight trend and plateau stats for the Weight card. Pure: takes the already
+// windowed series points HealthLineChart plots (present days only), so trend
+// and raw share x positions. Returns null below 3 weigh-ins (nothing to
+// smooth, a 2-point mean is noise). Trend points are a trailing simple moving
+// average over the last up-to-7 logged weigh-ins (partial windows at the
+// series start). "Best" is goal-direction aware (goal = settings.macroCalc.goal,
+// same field the AI daily summary feeds direction-aware): 'gain' means the
+// HIGHEST weight is the best, 'cut' the lowest; 'maintain' or null means no
+// direction is known, so no best and no plateau are reported (the app never
+// guesses a direction, see store.js's buildDailySummaryPayload comment).
+// best10 is the best value inside the trailing 10 calendar days from the last
+// weigh-in, falling back to the whole-series best when no weigh-in falls in
+// that window (sparse loggers). plateau is true when the series best was set
+// 14+ calendar days ago, i.e. no better weigh-in since. Weight values are in
+// the display unit, no conversion here.
+function healthWeightTrend(pts, goal) {
+  const sorted = (pts || []).filter(p => p.value != null).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length < 3) return null;
+  const trendPoints = sorted.map((p, i) => ({
+    date: p.date,
+    value: sorted.slice(Math.max(0, i - 6), i + 1).reduce((s, q) => s + q.value, 0) / Math.min(7, i + 1),
+  }));
+  const directional = goal === 'gain' ? 1 : goal === 'cut' ? -1 : 0;
+  // Better = (candidate - best) * directional > 0: gain ranks the HIGHEST
+  // weight as best, cut the LOWEST. Strict comparison keeps the earliest
+  // date on ties (when the best was first hit).
+  let best = sorted[0];
+  for (const p of sorted) { if ((p.value - best.value) * directional > 0) best = p; }
+  const last = sorted[sorted.length - 1];
+  const tenStart = LB.shiftDate(last.date, -9);
+  const inTen = sorted.filter(p => p.date >= tenStart);
+  const best10 = inTen.length ? inTen.reduce((b, p) => ((p.value - b.value) * directional > 0 ? p : b), inTen[0]) : best;
+  return {
+    trendPoints,
+    trend: trendPoints[trendPoints.length - 1].value,
+    best10: directional ? { value: best10.value, date: best10.date } : null,
+    plateau: directional ? healthDayDiff(best.date, last.date) >= 14 : false,
+    plateauDays: healthDayDiff(best.date, last.date),
+  };
 }
 
 function healthCardioSeries(cardioLogs, days, windowOverride) {
@@ -76,7 +112,7 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   const dates = data.map(d => d.date);
   let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
   let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  if (from === to) { from = LB.shiftDate(from, -1); to = LB.shiftDate(to, 1); }
   return { from, to, data };
 }
 
@@ -89,13 +125,13 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   if (tf === '1W') {
     const anchor = selectedDate;
     const jsDow = new Date(anchor + 'T12:00:00').getDay();
-    const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-    from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
+    const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+    from = monday; to = LB.shiftDate(monday, 6); periodDays = 7;
   } else {
     const days = (HEALTH_TFS.find(t => t.id === tf) || HEALTH_TFS[1]).days;
-    to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
+    to = today; from = LB.shiftDate(today, -(days - 1)); periodDays = days;
   }
-  const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
+  const allDays = Array.from({ length: periodDays }, (_, i) => LB.shiftDate(from, i));
   const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
   const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
@@ -356,7 +392,7 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: isLightCanvasActive() ? '#0369a1' : '#4a9fe0', other: UI.inkSoft };
   const CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
   const unitLabel = glucoseUnitLabel(unit);
   const fedY = yOf(refFed).toFixed(1);
@@ -376,7 +412,7 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
         fill={`rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.16 : 0.07})`} />
       {/* fed upper reference line */}
-      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke={isLightCanvasActive() ? '#0369a1' : '#4a9fe0'} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -561,15 +597,20 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
 }
 
 // Line chart over a date window. series = [{ date, value }] (present days only).
-function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax, step }) {
+// trend (optional) = [{ date, value }] sharing the series dates, drawn as a
+// dashed secondary line (the same treatment WaterDayChart gives its expected
+// line); its values join the y-domain so the axis stays honest if the trend
+// ever leaves the raw range.
+function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax, step, trend }) {
   const pts = (series || []).filter(p => p.value != null).sort((a, b) => a.date.localeCompare(b.date));
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
   const vals = pts.map(p => p.value);
+  const trendVals = (trend || []).filter(p => p.value != null).map(p => p.value);
   const dom = step
-    ? UI.niceStepDomain(Math.min(...vals), Math.max(...vals), step, { min: yMin, max: yMax })
-    : UI.chartDomain(Math.min(...vals), Math.max(...vals), { min: yMin, max: yMax });
+    ? UI.niceStepDomain(Math.min(...vals, ...trendVals), Math.max(...vals, ...trendVals), step, { min: yMin, max: yMax })
+    : UI.chartDomain(Math.min(...vals, ...trendVals), Math.max(...vals, ...trendVals), { min: yMin, max: yMax });
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = d => padL + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -578,8 +619,22 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   const dec = step ? (Number.isInteger(step) ? 0 : 1) : (dom.range >= 4 ? 0 : 1);
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const line = pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
+  // Smoothed overlay: dashed secondary treatment, no points, no hover rows.
+  // Trend points share the series dates, so xOf maps identically.
+  const trendPts = (trend || []).filter(p => p.value != null);
+  const trendLine = trendPts.length >= 2 ? trendPts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ') : null;
   const base = (padTop + plotH).toFixed(1);
-  const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
+  // Hover rows carry the raw value plus, when a trend value exists for the
+  // same date, the dashed line's value as a labeled second row.
+  const trendByDate = new Map(trendPts.map(p => [p.date, p.value]));
+  const hoverPoints = pts.map(p => {
+    const rows = [{ value: format(p.value) }];
+    const tv = trendByDate.get(p.date);
+    // Trend values are computed means and carry float noise (99.9999...),
+    // round to 1 decimal like every other weight display.
+    if (tv != null) rows.push({ label: 'Trend', value: format(Math.round(tv * 10) / 10) });
+    return { x: xOf(p.date), y: yOf(p.value), date: p.date, rows };
+  });
 
   return (
     <ChartHover W={W} H={H} points={hoverPoints} markerColor={color}>
@@ -594,6 +649,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
       {pts.length >= 2 && (
         <>
           <polygon points={`${xOf(pts[0].date).toFixed(1)},${base} ${line} ${xOf(pts[pts.length - 1].date).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.10)`} />
+          {trendLine && <polyline points={trendLine} fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.8" />}
           <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         </>
       )}
@@ -602,6 +658,133 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
       ))}
     </svg>
     </ChartHover>
+  );
+}
+
+// Trend / 10d best stat tiles plus the plateau pill, shared by the athlete
+// and coach weight cards (each passes its own display unit and the
+// goal-aware trend object from healthWeightTrend). Expanded chart only: the
+// grid-squeezed cards skip the tiles (ChartCompactContext), the expand
+// sheet renders them. Returns nothing when the helper returned null (fewer
+// than 3 weigh-ins). With no known direction (goal maintain/null) only the
+// Trend tile renders; the app never guesses a best direction. Mirrors the
+// FdStatsBody statCard idiom; the row wraps (flex-basis 96) so the tiles
+// stack full-width on narrow cards instead of ellipsing the value.
+function WeightTrendChips({ trend, unit }) {
+  if (!trend) return null;
+  if (React.useContext(ChartCompactContext)) return null;
+  const w = v => `${Math.round(v * 10) / 10}${unit}`;
+  const tileLabel = { fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi };
+  const tileVal = { fontSize: 14, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+  const tile = { flex: '1 1 96px', minWidth: 0, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '7px 9px' };
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        <div style={tile}>
+          <div style={tileLabel}>Trend</div>
+          <div className="num" style={tileVal}>{w(trend.trend)}</div>
+        </div>
+        {trend.best10 && (
+          <div style={tile}>
+            <div style={tileLabel}>10d best</div>
+            <div className="num" style={tileVal}>{w(trend.best10.value)}</div>
+            <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>{LB.fmtDayLabel(trend.best10.date, { day: 'numeric', month: 'short' })}</div>
+          </div>
+        )}
+      </div>
+      {trend.plateau && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start', background: 'rgba(var(--warn-rgb),0.12)', border: `var(--hair-width) solid ${UI.warn}`, borderRadius: 999, padding: '3px 9px', marginTop: 8 }}>
+          <i className="fa-solid fa-pause" style={{ fontSize: 8, color: UI.warn }} />
+          <span style={{ fontSize: 9, color: UI.warn, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Plateau · no new best in {trend.plateauDays}d</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Body measurements card, shared by the athlete and coach Health tabs. One
+// dropdown chip switches the metric (waist/hips/chest/arms/thighs/calves in
+// cm, body fat in %, plus a derived BMI segment when a height is set), each
+// drawing the line chart with the directionless trend. Only the ACTIVE
+// metric's series is built per render, not all eight, and the whole card
+// lives once here instead of being copied between the two views.
+function BodyStatsCard({ logs, tf, selectedDate, setTf, dragHandle, onExpand, weekWindow, windowDays, heightCm, weightIsLbs }) {
+  const [bodyMetric, setBodyMetric] = useStateH('waist');
+  const [bmMenuOpen, setBmMenuOpen] = useStateH(false);
+  const activeBodyMetric = (bodyMetric === 'bmi' && heightCm == null) ? 'waist' : bodyMetric;
+  const bmConfig = {
+    waist: { label: 'Waist', unit: 'cm', step: 5 },
+    hips: { label: 'Hips', unit: 'cm', step: 5 },
+    chest: { label: 'Chest', unit: 'cm', step: 5 },
+    arms: { label: 'Arms', unit: 'cm', step: 5 },
+    thighs: { label: 'Thighs', unit: 'cm', step: 5 },
+    calves: { label: 'Calves', unit: 'cm', step: 5 },
+    bodyFat: { label: 'Fat %', unit: '%', step: 5 },
+    bmi: { label: 'BMI', unit: '', step: 1 },
+  };
+  const bmOptions = heightCm != null
+    ? ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat', 'bmi']
+    : ['waist', 'hips', 'chest', 'arms', 'thighs', 'calves', 'bodyFat'];
+  // Lazy series: only the active metric is scanned per window change (plus
+  // BMI when selected), instead of building all seven plus BMI every time.
+  const bmField = { waist: 'waistCm', hips: 'hipsCm', chest: 'chestCm', arms: 'armCm', thighs: 'thighCm', calves: 'calfCm', bodyFat: 'bodyFatPct' };
+  const bmSeries = useMemoH(() => {
+    if (activeBodyMetric === 'bmi') {
+      // Weight is stored in the display unit, BMI always computes in kg
+      // (LBS_TO_KG, same factor as the estimator).
+      return healthSeriesFor(logs, windowDays, l => ({
+        value: (l.weight != null && heightCm != null)
+          ? Math.round((weightIsLbs ? l.weight * LBS_TO_KG : l.weight) / Math.pow(heightCm / 100, 2) * 100) / 100
+          : null,
+      }), weekWindow);
+    }
+    return healthSeriesFor(logs, windowDays, l => ({ value: l[bmField[activeBodyMetric]] }), weekWindow);
+    // Deps on primitives only, like every other series memo in this file:
+    // weekWindow/windowDays are derived from (tf, selectedDate), so keying
+    // on the fresh object would recompute on every render in the 1W view.
+  }, [logs, tf, selectedDate, activeBodyMetric, heightCm, weightIsLbs]);
+  const bmTrend = useMemoH(() => healthWeightTrend(bmSeries.data, null), [bmSeries.data]);
+  const bmLatest = useMemoH(() => {
+    const pts = bmSeries.data.filter(p => p.value != null);
+    if (!pts.length) return null;
+    return pts.reduce((a, b) => (a.date > b.date ? a : b)).value;
+  }, [bmSeries.data]);
+  const bmUnit = bmConfig[activeBodyMetric].unit;
+  return (
+    <HealthChartCard title="Body Stats" icon="fa-ruler" tf={tf} setTf={setTf} dragHandle={dragHandle} onExpand={onExpand}
+      headline={bmLatest != null ? `${Math.round(bmLatest * 10) / 10}${bmUnit}` : null} sub={bmLatest != null ? 'latest' : null}>
+      {/* Metric switcher: ONE dropdown chip (too many metrics for a
+          segmented row). Shows the active metric plus a chevron that flips
+          while the anchored menu is open; the floating list follows the
+          TabBar reveal-menu idiom, a transparent fixed backdrop closes it
+          on any outside tap. */}
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <button data-reorder-ignore="true" onClick={() => setBmMenuOpen(v => !v)} aria-expanded={bmMenuOpen} aria-label="Choose measurement"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', cursor: 'pointer', border: 'none', borderRadius: 4,
+            background: bmMenuOpen ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.12)', color: bmMenuOpen ? 'var(--accent-ink)' : 'var(--accent)',
+            textShadow: 'none', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
+          {bmConfig[activeBodyMetric].label}
+          <i className={`fa-solid fa-chevron-${bmMenuOpen ? 'up' : 'down'}`} style={{ fontSize: 7 }} />
+        </button>
+        {bmMenuOpen && (
+          <>
+            <div onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 5, minWidth: 132, background: 'var(--bg)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', padding: 4 }}>
+              {bmOptions.map(id => (
+                <button key={id} onClick={() => { setBodyMetric(id); setBmMenuOpen(false); }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '6px 8px', cursor: 'pointer', border: 'none', background: 'transparent', borderRadius: 4,
+                    color: activeBodyMetric === id ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: activeBodyMetric === id ? 700 : 400, WebkitTapHighlightColor: 'transparent' }}>
+                  {bmConfig[id].label}
+                  {activeBodyMetric === id && <i className="fa-solid fa-check" style={{ fontSize: 9 }} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <HealthLineChart series={bmSeries.data} from={bmSeries.from} to={bmSeries.to} format={v => `${v}${bmUnit}`} step={bmConfig[activeBodyMetric].step} trend={bmTrend?.trendPoints} />
+      <WeightTrendChips trend={bmTrend} unit={bmUnit} />
+    </HealthChartCard>
   );
 }
 
@@ -762,16 +945,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const storeRef = useRefH(store);
   storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  // The water tracker owns TODAY's total once it has any entry for today: it
-  // recomputes and overwrites water_ml on its own every time a drink is
-  // logged, so a manual edit here would silently vanish on the next one. Only
-  // today can still be overwritten this way (the tracker has no UI to add or
-  // edit an entry for a past day), so a past day's water field never locks
-  // even if it happens to have old tracker entries. Locked until the user
-  // explicitly opts to override for this session (see requestWaterUnlock
-  // below); a day with no tracker entries stays plain.
+  // The water tracker owns a day's total once it has any entry for that day:
+  // it recomputes and overwrites water_ml on its own every time a drink is
+  // logged there, so a manual edit here would silently vanish on the next
+  // one. The tracker can now backlog any day (its own day-nav,
+  // screens-water.jsx), not just today, so this locks per-date rather than
+  // only for today. store.waterLogs loads in full at boot (no history
+  // window, unlike store.foodLogs below), so a plain per-date check here is
+  // already the true state, no lazy-fetch needed to verify an older date.
+  // Locked until the user explicitly opts to override for this session (see
+  // requestWaterUnlock below); a day with no tracker entries stays plain.
   const waterHasTrackerEntries = useMemoH(
-    () => date === LB.todayISO() && (store.waterLogs || []).some(l => l.date === date),
+    () => (store.waterLogs || []).some(l => l.date === date),
     [store.waterLogs, date],
   );
   const [waterUnlocked, setWaterUnlocked] = useStateH(false);
@@ -837,7 +1022,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     () => LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId)),
     [store.schedules, store.activeScheduleId]
   );
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
+  const empty = { weight: '', steps: '', waistCm: '', hipsCm: '', chestCm: '', armCm: '', thighCm: '', calfCm: '', bodyFatPct: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
   // Defaults to the user's global preference; an existing net-logged day (fiber
@@ -872,6 +1057,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     if (!open) return;
     const everUsed = {
       body: (store.dailyLogs || []).some(l => l.weight != null || l.steps != null),
+      measurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null),
       nutrition: (store.dailyLogs || []).some(l => l.protein != null || l.carbs != null || l.fat != null || l.calories != null || l.offPlanNote),
       hydration: (store.dailyLogs || []).some(l => l.waterMl != null),
       note: (store.dailyLogs || []).some(l => l.note),
@@ -1101,6 +1287,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     const nextForm = existing ? {
       weight: existing.weight != null ? String(existing.weight) : '',
       steps: existing.steps != null ? String(existing.steps) : '',
+      waistCm: existing.waistCm != null ? String(existing.waistCm) : '',
+      hipsCm: existing.hipsCm != null ? String(existing.hipsCm) : '',
+      chestCm: existing.chestCm != null ? String(existing.chestCm) : '',
+      armCm: existing.armCm != null ? String(existing.armCm) : '',
+      thighCm: existing.thighCm != null ? String(existing.thighCm) : '',
+      calfCm: existing.calfCm != null ? String(existing.calfCm) : '',
+      bodyFatPct: existing.bodyFatPct != null ? String(existing.bodyFatPct) : '',
       protein: existing.protein != null ? String(existing.protein) : '',
       carbs: existing.carbs != null ? String(existing.carbs) : '',
       fat: existing.fat != null ? String(existing.fat) : '',
@@ -1181,6 +1374,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       date,
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
+      waistCm: healthNum(form.waistCm),
+      hipsCm: healthNum(form.hipsCm),
+      chestCm: healthNum(form.chestCm),
+      armCm: healthNum(form.armCm),
+      thighCm: healthNum(form.thighCm),
+      calfCm: healthNum(form.calfCm),
+      bodyFatPct: healthNum(form.bodyFatPct),
       calories, protein, carbs, fat, fiber,
       // Belt and suspenders: the locked field has no real input to type into
       // (see the HYDRATION section below), but save() itself never trusts
@@ -1432,6 +1632,26 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+      </CatSection>
+
+      {/* Body measurements in their own section, grouped with the other
+          measurement sections (glucose/BP/temp) below; starts collapsed until
+          the first measurement is entered (everUsed below), invisible for
+          users who never take them. */}
+      <CatSection label="MEASUREMENTS" collapsed={collapsedCats.has('measurements')} onToggle={() => toggleCat('measurements')}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {numField('waistCm', 'Waist', 'cm')}
+          {numField('hipsCm', 'Hips', 'cm')}
+          {numField('chestCm', 'Chest', 'cm')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          {numField('armCm', 'Arms', 'cm')}
+          {numField('thighCm', 'Thighs', 'cm')}
+          {numField('calfCm', 'Calves', 'cm')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          {numField('bodyFatPct', 'Body Fat', '%')}
+        </div>
       </CatSection>
 
       <CatSection label="GLUCOSE" collapsed={collapsedCats.has('glucose')} onToggle={() => toggleCat('glucose')} extra={
@@ -3057,7 +3277,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
-              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
+              <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
             </div>
           ))}
         </div>
@@ -3078,13 +3298,6 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
 }
 
-// Own copy per file (same convention as mdShiftDate/fdShiftDate): shifts an
-// ISO date string by N days, local calendar day.
-function hlShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 
 // A zane_daily_logs row counts as "logged" only if it carries real content,
 // not merely by existing: a flex day-type-only override (just
@@ -3122,7 +3335,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
   // the server independently enforces the same bypass (ai-daily-summary), this
   // is purely so a non-admin never even sees an affordance that would 409.
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const yesterday = hlShiftDate(LB.todayISO(), -1);
+  const yesterday = LB.shiftDate(LB.todayISO(), -1);
   const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
   const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
   const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');
@@ -3327,8 +3540,8 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   const anchor = selectedDate || today;
   const anchorDate = new Date(anchor + 'T12:00:00');
   const jsDow = anchorDate.getDay();
-  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-  const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
+  const monday = LB.shiftDate(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+  const days = Array.from({ length: 7 }, (_, i) => LB.shiftDate(monday, i));
   // A day counts as "logged" (gold marker) only if it carries real content,
   // not merely by row existence, see hlHasLogContent above (a flex day-type-
   // only override log, just targetsSnap.dayType, must not light up either).
@@ -3528,7 +3741,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
-  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: isLightCanvasActive() ? '#0369a1' : '#4a9fe0', other: UI.inkSoft };
 
   return (
     <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
@@ -3836,7 +4049,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
                   {todayEntries.map(n => (
                     <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
+                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>{n.time}</div>
                         {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 1 }}>{n.name}</div>}
                       </div>
                       <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
@@ -3848,7 +4061,7 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
           </>
         )
       ) : (
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color={isLightCanvasActive() ? '#0369a1' : '#4a9fe0'} colorSoft={isLightCanvasActive() ? 'rgba(3,105,161,0.35)' : 'rgba(74,159,224,0.35)'} />
       )}
     </HealthChartCard>
   );
@@ -4277,6 +4490,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvgRaw = avg(weightSeries.data, 'value');
   const weightAvg = weightAvgRaw != null ? Math.round(weightAvgRaw * 10) / 10 : null;
+  // Goal-direction-aware trend stats (best/plateau semantics depend on
+  // settings.macroCalc.goal, see healthWeightTrend).
+  const weightTrend = useMemoH(() => healthWeightTrend(weightSeries.data, store.settings?.macroCalc?.goal), [weightSeries.data, store.settings?.macroCalc?.goal]);
   const stepsAvg = avg(stepsSeries.data, 'value');
   const waterAvg = avg(waterSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
@@ -4288,7 +4504,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
   // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'bodyMeasurements'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -4494,7 +4710,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} trend={weightTrend?.trendPoints} />
+        <WeightTrendChips trend={weightTrend} unit={UI.unit()} />
       </HealthChartCard>
     ),
     steps: (
@@ -4527,6 +4744,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     bodyTemp: (store.bodyTempLogs || []).length > 0
       ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
+    // Data-gated like glucose/BP/temp: no card until any day has any
+    // measurement. The card itself is the shared BodyStatsCard (dropdown
+    // metric switcher, lazy active-only series), so athlete and coach views
+    // cannot drift apart.
+    bodyMeasurements: (store.dailyLogs || []).some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
+      <BodyStatsCard logs={dailyLogs} tf={tf} selectedDate={selectedDate} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+        weekWindow={weekWindow} windowDays={windowDays} heightCm={store.settings?.macroCalc?.heightCm ?? null}
+        weightIsLbs={LB.weightAxisUnit(store.settings?.unit) === 'lbs'} />
+    ) : null,
   };
 
   // Sheet lookup for expandedCardId, every id any onExpand above can set.
@@ -4534,7 +4760,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
   const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
     macroAdherence: macroAdherenceCard, macros: macrosCard,
-    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp, bodyMeasurements: cardEls.bodyMeasurements };
 
   // Only Week/Today/the macro group ever span full width. Everything else
   // stays in the 2-col grid no matter what, a card left alone at the end of
@@ -4659,7 +4885,7 @@ function HealthClientLogs({ clientStore }) {
   // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
   // cardEls entry below, same grouping as the client's own Health tab, and
   // required for hiddenHealthCards (client setting) to hide it correctly here too.
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'bodyMeasurements', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -4710,6 +4936,9 @@ function HealthClientLogs({ clientStore }) {
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
+  // Same goal-direction-aware trend stats as the athlete card, read from the
+  // CLIENT's own macro goal.
+  const weightTrend = useMemoH(() => healthWeightTrend(weightSeries.data, clientStore?.settings?.macroCalc?.goal), [weightSeries.data, clientStore?.settings?.macroCalc?.goal]);
   const stepsAvg  = useMemoH(() => { const a = numAvg(stepsSeries);  return a != null ? Math.round(a) : null; }, [stepsSeries]);
   const waterAvg  = useMemoH(() => numAvg(waterSeries), [waterSeries]);
   const adhAvg    = useMemoH(() => { const a = numAvg(adhSeries);    return a != null ? Math.round(a) : null; }, [adhSeries]);
@@ -4800,7 +5029,8 @@ function HealthClientLogs({ clientStore }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} trend={weightTrend?.trendPoints} />
+        <WeightTrendChips trend={weightTrend} unit={clientUnit} />
       </HealthChartCard>
     ),
     steps: (
@@ -4829,6 +5059,12 @@ function HealthClientLogs({ clientStore }) {
     bodyTemp: bodyTempLogs.length > 0
       ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
+    // Data-gated mirror of the athlete card (see HealthScreen's cardEls).
+    bodyMeasurements: logs.some(l => l.waistCm != null || l.hipsCm != null || l.chestCm != null || l.armCm != null || l.thighCm != null || l.calfCm != null || l.bodyFatPct != null) ? (
+      <BodyStatsCard logs={logs} tf={tf} selectedDate={selectedDate} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyMeasurements')}
+        weekWindow={weekWindow} windowDays={windowDays} heightCm={clientStore?.settings?.macroCalc?.heightCm ?? null}
+        weightIsLbs={clientUnit === 'lbs'} />
+    ) : null,
     // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
       <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
@@ -4863,7 +5099,7 @@ function HealthClientLogs({ clientStore }) {
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
   const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
     adherence: adherenceCard, macros: macrosCard,
-    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp, bodyMeasurements: cardEls.bodyMeasurements };
 
   // Only Week/Today/the macro group/Weekly Averages ever span full width.
   // Everything else stays in the 2-col grid no matter what, matches the
@@ -4904,12 +5140,12 @@ function HealthClientLogs({ clientStore }) {
 
 function ExportSheet({ open, onClose, store, userId }) {
   const today = LB.todayISO();
-  const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
+  const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
   const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
 
   const applyPreset = (days) => {
-    setFrom(healthShiftISO(today, -(days - 1)));
+    setFrom(LB.shiftDate(today, -(days - 1)));
     setTo(today);
   };
 
@@ -4955,7 +5191,7 @@ function ExportSheet({ open, onClose, store, userId }) {
     setExporting('food');
     try {
       const dates = [];
-      for (let d = from; d <= to; d = healthShiftISO(d, 1)) dates.push(d);
+      for (let d = from; d <= to; d = LB.shiftDate(d, 1)) dates.push(d);
       const have = new Set((store.foodLogs || []).map(l => l.date));
       const missing = dates.filter(d => !have.has(d));
       let extra = [];
@@ -5190,8 +5426,8 @@ function ExportSheet({ open, onClose, store, userId }) {
             {presets.map(p => (
               <button key={p.days} onClick={() => applyPreset(p.days)} style={{
                 flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
-                background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
-                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
+                background: from === LB.shiftDate(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
+                color: from === LB.shiftDate(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
                 textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',

@@ -375,7 +375,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
                 ))}
                 {n.body && <div style={{ fontSize: 13, color: isMe ? 'var(--accent-ink)' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
               </div>
-              <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
+              <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
                 {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
               </div>
             </div>

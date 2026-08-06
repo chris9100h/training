@@ -776,6 +776,201 @@ function GoldSectionLabel({ children, style }) {
   );
 }
 
+// The three custom families every exported card mixes: Inter for body copy,
+// JetBrains Mono for `.num`, Big Shoulders Display for `.display` titles.
+// Each carries its own fallback stack, so a probe rendered with it measures
+// the same in two documents only when both resolved the real family (see
+// shotFontsUsable). Bare family lists, no size/weight: shotProbeWidth sets
+// those itself.
+const SHOT_FONTS = ['"Inter", system-ui, sans-serif', '"JetBrains Mono", ui-monospace, monospace', '"Big Shoulders Display", "Arial Narrow", sans-serif'];
+
+// Renders a probe string in `doc` and returns its width. The one measurement
+// that actually answers "is this document laying text out in the real family
+// or in a fallback", which is what decides where lines wrap.
+function shotProbeWidth(doc, family) {
+  const el = doc.createElement('span');
+  el.style.cssText = 'position:absolute;left:-9999px;top:0;white-space:pre;font-size:64px;font-weight:600;font-family:' + family;
+  el.textContent = 'HAMBURGEFONTSIV hamburgefontsiv 0123456789';
+  doc.body.appendChild(el);
+  const w = el.getBoundingClientRect().width;
+  el.parentNode.removeChild(el);
+  return w;
+}
+
+// Wait until `doc` lays text out the same way the live document does. Capped
+// so a genuinely unreachable font host can't hang an export forever; falling
+// through after the cap just means the old fallback-metrics behaviour.
+//
+// Needed for html2canvas's clone in particular: it paints into an <iframe>
+// copy of the document, and that copy re-requests the webfont stylesheet from
+// scratch. html2canvas does await the clone's `document.fonts.ready`, but on a
+// fresh document that resolves as soon as nothing is *pending*, which is true
+// before the font CSS has even been parsed: no @font-face is registered yet,
+// so there is nothing to wait for. The clone then lays text out in fallback
+// metrics while the canvas draws the glyphs with the real, long-since-loaded
+// family from the main document, so lines wrap at different points than the
+// live view and the canvas ends up taller than the content it shows.
+//
+// FontFaceSet.check() cannot detect that state and is deliberately not used
+// here: asked about a family it has never heard of, it answers true (there is
+// nothing left to load). On a cold profile, which is exactly when this goes
+// wrong, that is the state it is in. Comparing a rendered probe against the
+// live document is unambiguous.
+async function shotFontsUsable(doc, families) {
+  if (!doc || !doc.body || !doc.defaultView) return;
+  let want;
+  try { want = families.map(f => shotProbeWidth(document, f)); } catch (_) { return; }
+  for (let attempt = 0; attempt < 60; attempt++) {
+    let matched = true;
+    try {
+      families.forEach((f, i) => { if (Math.abs(shotProbeWidth(doc, f) - want[i]) > 0.5) matched = false; });
+    } catch (_) { return; }
+    if (matched) return;
+    try { await Promise.all(families.map(f => Promise.resolve(doc.fonts.load('600 64px ' + f)).catch(() => {}))); } catch (_) {}
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+
+// Marks the one-word wrappers the two helpers below cooperate through.
+const SHOT_WORD_ATTR = 'data-shot-word';
+
+// html2canvas positions every text run from a DOM Range over the text node
+// (Range.getClientRects), and that is the one measurement Safari on the
+// reported device gets wrong: the boxes it draws around the text (plain
+// element rects) land correctly, but runs of text inside them come out a few
+// px too high, so a wrapped paragraph exports as one long line whose tail
+// floats above the baseline while the row around it keeps its real, taller
+// height (support report, recipe + shopping list screenshots, 2026-08-05).
+// html2canvas 1.4.1 still ships a probe for this class of bug
+// (testIOSLineBreak, "ios does not handle range getBoundingClientRect line
+// changes correctly") but no longer reads its result anywhere.
+//
+// Fixed in two steps, both on html2canvas's CLONE only (via its onclone
+// hook), never on the live DOM that React owns:
+//
+//   1. shotSplitWordsForMeasurement wraps every single word in its own
+//      <span data-shot-word>. Whitespace stays plain text between them, so
+//      the soft-wrap opportunities (and therefore the layout) are byte for
+//      byte what they were, but now every text node html2canvas measures
+//      sits inside a box of its own that can only ever be on one line.
+//   2. shotPinTextRectsToTheirBox makes Range.getClientRects inside those
+//      wrappers take its vertical position from the wrapper's own
+//      getBoundingClientRect. Horizontal stays with the range (it is
+//      correct, and per-glyph advances have to come from there).
+//
+// Splitting alone is not enough: a per-word range still reports the wrong y
+// on the affected device. Pinning alone is not enough either: without the
+// one-word wrappers there is no single-line box to pin to. Together they
+// take Range's y out of the picture entirely.
+//
+// Splitting is skipped where a <span> would not be inert: inside a
+// flex/grid/table container each word would become its own item (and the
+// whitespace between them would be dropped), and under a text-decoration the
+// words would leave the decorated element's own text run, losing the
+// underline/line-through.
+function shotSplitWordsForMeasurement(root) {
+  const doc = root && root.ownerDocument;
+  const view = doc && doc.defaultView;
+  if (!doc || !view || !doc.createTreeWalker) return;
+  const XHTML = 'http://www.w3.org/1999/xhtml';
+  const SKIP_TAGS = { STYLE: 1, SCRIPT: 1, TEXTAREA: 1, TITLE: 1, NOSCRIPT: 1 };
+  const SKIP_DISPLAY = /flex|grid|table|ruby|box/;
+  const walker = doc.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
+  const targets = [];
+  // Collect first, mutate after: replacing nodes mid-walk invalidates the walk.
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const parent = n.parentNode;
+    if (!parent || parent.nodeType !== 1 || parent.namespaceURI !== XHTML || SKIP_TAGS[parent.nodeName]) continue;
+    if (!/\S/.test(n.data)) continue;
+    const cs = view.getComputedStyle(parent);
+    if (!cs || SKIP_DISPLAY.test(cs.display) || (cs.textDecorationLine && cs.textDecorationLine !== 'none')) continue;
+    targets.push(n);
+  }
+  targets.forEach(node => {
+    const parent = node.parentNode;
+    if (!parent) return;
+    const frag = doc.createDocumentFragment();
+    // Split on whitespace runs but keep them: they are the line-break
+    // opportunities, and under white-space: pre(-wrap) they are the layout.
+    node.data.split(/(\s+)/).forEach(part => {
+      if (!part) return;
+      if (/^\s+$/.test(part)) { frag.appendChild(doc.createTextNode(part)); return; }
+      const span = doc.createElement('span');
+      span.setAttribute(SHOT_WORD_ATTR, '');
+      span.textContent = part;
+      frag.appendChild(span);
+    });
+    parent.replaceChild(frag, node);
+  });
+}
+
+// html2canvas clones the document into a fresh iframe, where every CSS
+// animation and transition starts over from zero: the app's sheet screens open
+// on `animation: sheet-up`, a translateY, so an ancestor of the capture can be
+// mid-flight while the crop rect, then every box, then every text run are
+// measured one after another. Freeze the lot before anything is measured. The
+// base (un-animated) state is also the finished state for every animation the
+// app opens a surface with, so this changes nothing about how the card looks.
+function shotFreezeAnimations(doc) {
+  if (!doc || !doc.createElement) return;
+  const style = doc.createElement('style');
+  style.textContent = '*,*::before,*::after{animation:none !important;transition:none !important;}';
+  (doc.head || doc.documentElement).appendChild(style);
+}
+
+// Every poster hangs in a `position: fixed` overlay (and often inside a
+// fixed full-screen Screen on top of that), which is the other half of the
+// vertical-offset story: a fixed box does not move with a scroll, html2canvas
+// assumes measured positions do, and iOS reports fixed-descendant positions
+// inconsistently while a tree is being walked. Combined with scrollX/scrollY:0
+// on the capture itself, this takes fixed positioning out of the clone
+// altogether: absolute at the origin resolves against the initial containing
+// block of an unscrolled document, which is the same box, minus the scroll
+// coupling. Ancestors are neutralised rather than the node being reparented,
+// so everything it inherits (font family, colour, text-shadow) stays intact.
+function shotUnpinFixedAncestors(el) {
+  const doc = el && el.ownerDocument;
+  const view = doc && doc.defaultView;
+  if (!view) return;
+  for (let a = el.parentElement; a && a !== doc.body && a !== doc.documentElement; a = a.parentElement) {
+    let cs;
+    try { cs = view.getComputedStyle(a); } catch (_) { return; }
+    if (!cs || cs.position !== 'fixed') continue;
+    // Self-verifying: an overlay pinned with inset:0 lands in exactly the same
+    // place either way in an unscrolled document, but one relying on its static
+    // position would jump. Measure, switch, measure again, and keep the change
+    // only when it provably moved nothing.
+    const before = a.getBoundingClientRect();
+    a.style.position = 'absolute';
+    const after = a.getBoundingClientRect();
+    if (Math.abs(after.top - before.top) > 0.5 || Math.abs(after.left - before.left) > 0.5) a.style.position = 'fixed';
+  }
+}
+
+// Step 2 of the pair documented above: inside a one-word wrapper, a range's
+// vertical position comes from the wrapper's element rect instead of from the
+// range itself. Element rects are what html2canvas already positions every
+// box with, and they are demonstrably right on the affected device.
+//
+// A no-op on a browser that reports ranges correctly: there the two rects
+// have the same top and height by definition, so the substituted values are
+// the values that were already there (asserted in the repro harness, the
+// exported PNG comes out byte-identical). Patches the clone's own Range
+// prototype, so nothing outside this one throwaway document is affected.
+function shotPinTextRectsToTheirBox(doc) {
+  const view = doc && doc.defaultView;
+  if (!view || !view.Range || !view.DOMRect) return;
+  const original = view.Range.prototype.getClientRects;
+  view.Range.prototype.getClientRects = function () {
+    const rects = original.call(this);
+    const start = this.startContainer;
+    const box = start && start.nodeType === 3 && start.parentElement;
+    if (!box || !box.hasAttribute || !box.hasAttribute(SHOT_WORD_ATTR)) return rects;
+    const el = box.getBoundingClientRect();
+    return Array.from(rects).map(r => new view.DOMRect(r.left, el.top, r.width, el.height));
+  };
+}
+
 // Shared html2canvas capture flow for SessionDetailScreen, SessionCompareScreen,
 // and the plan poster: expand the scroll parent, draw the imperative knurl
 // canvases, wait for the watermark avatar to decode, capture, then share/
@@ -806,8 +1001,29 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   // next to another element in the correct font, at a different size/baseline.
   // document.fonts.ready blocks until every font already requested by the
   // page (including whatever the capturing re-render above just triggered)
-  // has finished loading.
+  // has finished loading. Resolving there is not the same as the browser
+  // having already REFLOWED with the new font metrics, an extra frame is
+  // needed to guarantee that before anything below measures the page:
+  // confirmed live (repro script, forced a post-measurement size change) that
+  // node.scrollHeight read even one frame too early locks html2canvas's
+  // height/windowHeight to a stale, too-tall value, real content ends up
+  // shorter than the canvas, showing as dead space at the bottom and, since
+  // the crop's default y also comes from a pre-reflow rect, a clipped-off
+  // top too (support report, recipe screenshot, 2026-08-05). The avatar-load
+  // branch below already added a single RAF for this same reason, but only
+  // on first capture and only when the avatar wasn't already cached/complete,
+  // every other path (including scrollHeight itself, read further down) had
+  // no such guarantee.
+  // Ask for the three families explicitly first: fonts.ready only waits for
+  // what has already been requested, and a family the capturing re-render has
+  // not painted with yet is not among them. This covers the LIVE document,
+  // which is what everything measured below (scrollHeight, avatar box, knurl
+  // widths) depends on. The clone html2canvas actually renders from is a
+  // separate document with separate font loads, handled in the onclone hook
+  // further down.
+  try { await Promise.all(SHOT_FONTS.map(f => Promise.resolve(document.fonts?.load('600 64px ' + f)).catch(() => {}))); } catch (_) {}
   if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   // Draw knurl dividers imperatively, canvas elements placed by KnurlCanvas
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
@@ -876,13 +1092,51 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
     const canvas = await html2canvas(node, {
       backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
       scale: 2, useCORS: true, logging: false,
-      height: node.scrollHeight, windowHeight: node.scrollHeight,
+      // Pin the capture to scroll origin. Left alone, html2canvas reads
+      // window.pageYOffset off the LIVE page, adds it into every coordinate it
+      // measures, and scrolls its clone iframe to the same offset to
+      // compensate. That round trip only cancels out if the clone reports
+      // positions the way it assumes, and it does not here: every poster hangs
+      // in a `position: fixed` overlay, whose rects do not follow a scroll, and
+      // on iOS their reported position also settles asynchronously while the
+      // tree is being measured. Result on a device where the page can actually
+      // scroll (a browser tab with an address bar, as opposed to the installed
+      // PWA where pageYOffset is pinned at 0): everything vertical picks up a
+      // stale scroll delta, the whole card is cropped ~10px too low, and
+      // individual text runs measured at different moments land at different
+      // heights, which is the floating line tails in the support screenshots.
+      // Horizontal was always fine, because that is not the axis that scrolls.
+      // Zero here means the clone is never scrolled and nothing is added, which
+      // is also simply the correct mapping for a fixed-position subtree.
+      scrollX: 0, scrollY: 0,
+      // windowHeight only sizes the iframe the clone is laid out in, so a
+      // full-height capture never depends on how much of the node happens to
+      // be scrolled into view. The canvas HEIGHT is deliberately left to
+      // html2canvas, which takes it from the cloned node's own box: passing
+      // node.scrollHeight here (as this used to) measures the LIVE DOM but
+      // crops the CLONE, so any reflow between the two, a font resolving
+      // differently or a line wrapping one word earlier, showed up as dead
+      // space at the bottom of the export or a cut-off last row.
+      windowHeight: node.scrollHeight,
       // fitWidth: capture the node's own full width rather than whatever's
       // currently scrolled into view. Only needed by content intentionally
       // wider than the viewport (the plan poster); every other caller's
       // content is never wider than its own viewport, so this is opt-in
       // rather than applied unconditionally to node.scrollWidth for everyone.
       ...(fitWidth ? { width: node.scrollWidth, windowWidth: node.scrollWidth } : {}),
+      // Last stop before html2canvas measures anything: this runs on its
+      // iframe clone, after the clone's own fonts.ready, and html2canvas
+      // awaits whatever it returns. Both helpers are best-effort, a throw in
+      // here would reject the whole export, so neither is allowed to escape.
+      onclone: async (clonedDoc, clonedNode) => {
+        try {
+          shotFreezeAnimations(clonedDoc);
+          await shotFontsUsable(clonedDoc, SHOT_FONTS);
+          shotUnpinFixedAncestors(clonedNode);
+          shotSplitWordsForMeasurement(clonedNode);
+          shotPinTextRectsToTheirBox(clonedDoc);
+        } catch (_) { /* export with whatever the clone already has */ }
+      },
     });
     // Report the outcome so callers can confirm success or surface a failure,
     // instead of the export silently doing nothing.
@@ -3964,7 +4218,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         </div>
                       ))}
                       {fbRaw && !fbEditable && (
-                        <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, margin: '8px 2px 2px', lineHeight: 1.4 }}>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '8px 2px 2px', lineHeight: 1.4 }}>
                           Feedback locked. A newer session on this plan has already advanced autoregulation.
                         </div>
                       )}
@@ -3993,7 +4247,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                               <span style={{ fontFamily: UI.fontUi, fontSize: 13.5, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
                               {item.weightDelta < 0 && (
-                                <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                                <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>Reps missed, easing load</span>
                               )}
                             </div>
                           </div>

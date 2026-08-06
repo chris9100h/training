@@ -159,6 +159,30 @@ function fmtDayLabel(iso, opts = { weekday: 'short', day: 'numeric', month: 'sho
   if (!iso) return '';
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', opts);
 }
+// Noon-anchored YYYY-MM-DD shift (DST-safe: noon never crosses a date
+// boundary). Shared helper, was duplicated byte-identically as
+// fdShiftDate/wtShiftDate/mdShiftDate/healthShiftISO across four screens.
+function shiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return fmtISO(d);
+}
+// Local wall-clock HH:MM from a Date or epoch-ms instant. Shared helper, was
+// duplicated as fdHHMM (fasting card) and mdSnoozeHHMM (meds snooze hint).
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+// Countdown clock H:MM:SS from a millisecond span. Shared helper, was
+// duplicated as fdFmtClock (fasting card); distinct from fmtDuration below
+// (m:ss), which is the session/rest idiom.
+function fmtClock(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 // Returns the coming Monday as YYYY-MM-DD (returns today if today is Monday).
 function nextMondayISO() {
   const today = new Date();
@@ -471,6 +495,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     macro_targets: sett.macroTargets ?? null,
     macro_calc: sett.macroCalc ?? null,
     meal_windows: sett.mealWindows ?? null,
+    fasting_protocol: sett.fastingProtocol ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     show_water_tab: sett.showWaterTab ?? false,
     show_food_tab: sett.showFoodTab ?? false,
@@ -501,6 +526,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     meal_reminder_enabled: sett.mealReminderEnabled ?? false,
     meds_enabled: sett.medsEnabled ?? false,
     medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
+    daily_log_reminder_enabled: sett.dailyLogReminderEnabled ?? false,
+    daily_log_reminder_time: sett.dailyLogReminderTime ?? '19:00',
     pillbox_slots: sett.pillboxSlots ?? null,
   };
 
@@ -672,6 +699,11 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.dailyLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date,
         weight: convKg(l.weight ?? null), steps: l.steps ?? null,
+        // Body measurements are cm/%, unit-independent: deliberately NOT
+        // through convKg (only weight is unit-converted on restore).
+        waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
+        arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
+        body_fat_pct: l.bodyFatPct ?? null,
         calories: l.calories ?? null, protein: l.protein ?? null,
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
@@ -828,6 +860,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
         date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
         schedule_slot_id: l.scheduleSlotId ?? null,
+        reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
+        snoozed_until: l.snoozedUntil ?? null,
       }))
     ));
     stepsDone++;
@@ -968,7 +1002,7 @@ async function exportBackup(store, userId) {
     // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
     // deletes every zane_medication_logs row first, so exporting only the
     // windowed copy would silently drop every dose logged before the window.
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   if (allCoachingIds.length) {
@@ -1014,7 +1048,9 @@ async function exportBackup(store, userId) {
     medicationLogs: (medicationLogsRes.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
@@ -1207,7 +1243,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1274,7 +1310,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
-    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
     isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
@@ -1512,6 +1548,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     dailyLogs: (dailyLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+      armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+      bodyFatPct: l.body_fat_pct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
@@ -1596,7 +1635,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
@@ -1697,6 +1738,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         macroTargets: sett.macro_targets ?? null,
         macroCalc: sett.macro_calc ?? null,
         mealWindows: sett.meal_windows ?? null,
+        fastingProtocol: sett.fasting_protocol ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         showWaterTab: sett.show_water_tab ?? false,
         showFoodTab: sett.show_food_tab ?? false,
@@ -1722,6 +1764,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
         medsEnabled: sett.meds_enabled ?? false,
         medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
+        dailyLogReminderEnabled: sett.daily_log_reminder_enabled ?? false,
+        dailyLogReminderTime: sett.daily_log_reminder_time ?? '19:00',
         pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
       },
     nextReminderAt: sett.next_reminder_at ?? null,
@@ -2284,11 +2328,33 @@ async function syncStore(prev, next, userId) {
   }
   if (prev.medicationLogs !== next.medicationLogs) {
     const { upsert, removed } = diffCollectionById(prev.medicationLogs, next.medicationLogs);
-    if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => ({
-      id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
-      date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
-      schedule_slot_id: l.scheduleSlotId ?? null,
-    }))));
+    // prev-by-id for the snooze key decision below: a stale second device
+    // that edits a row while another device's snooze is active must not
+    // overwrite the server's current snoozed_until with its stale value.
+    const prevLogsById = new Map((prev.medicationLogs || []).map(l => [l.id, l]));
+    if (upsert.length) ops.push(_supabase.from('zane_medication_logs').upsert(upsert.map(l => {
+      // Only snoozed_until is client-authored: reminder_sent_at and
+      // reminder_count belong to the medication-reminder cron (service
+      // role), so a stale device's upsert can never roll the nudge counter
+      // back and extend the daily cap. PostgREST merge-duplicates only
+      // sets the columns present in the payload, so omitting them leaves
+      // the server's values untouched.
+      const row = { id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
+        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+        schedule_slot_id: l.scheduleSlotId ?? null };
+      // Send snoozed_until only when THIS device's value CHANGED since its
+      // last known state (set: null -> ISO, or cancel: ISO -> null). An
+      // unrelated edit on a stale device then omits the key entirely, so it
+      // can neither wipe the server's active snooze (stale null) nor
+      // overwrite a newer snooze (stale truthy value). Both sides are
+      // normalized with ?? null: locally materialized rows (mdAutoFillToday)
+      // carry snoozedUntil as undefined, which must compare equal to the
+      // loaded rows' null or the very first sync of a materialized row would
+      // send null and wipe a snooze set by another device.
+      const prevLog = prevLogsById.get(l.id);
+      if ((l.snoozedUntil ?? null) !== (prevLog?.snoozedUntil ?? null)) row.snoozed_until = l.snoozedUntil ?? null;
+      return row;
+    })));
     if (removed.length) ops.push(_supabase.from('zane_medication_logs').delete().in('id', removed.map(l => l.id)));
   }
   if (prev.medicationPlanItems !== next.medicationPlanItems) {
@@ -2382,6 +2448,9 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.rpc('sync_daily_logs_batch', { p_logs: upsert.map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
+      arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
+      body_fat_pct: l.bodyFatPct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
@@ -2454,6 +2523,7 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
+    prev.settings?.fastingProtocol     !== next.settings?.fastingProtocol     ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
@@ -2480,6 +2550,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
     prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
+    prev.settings?.dailyLogReminderEnabled  !== next.settings?.dailyLogReminderEnabled  ||
+    prev.settings?.dailyLogReminderTime     !== next.settings?.dailyLogReminderTime     ||
     JSON.stringify(prev.settings?.pillboxSlots) !== JSON.stringify(next.settings?.pillboxSlots) ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
@@ -2513,6 +2585,8 @@ async function syncStore(prev, next, userId) {
       meal_reminder_enabled: next.settings?.mealReminderEnabled ?? false,
       meds_enabled: next.settings?.medsEnabled ?? false,
       medication_reminder_enabled: next.settings?.medicationReminderEnabled ?? false,
+      daily_log_reminder_enabled: next.settings?.dailyLogReminderEnabled ?? false,
+      daily_log_reminder_time: next.settings?.dailyLogReminderTime ?? '19:00',
       pillbox_slots: next.settings?.pillboxSlots ?? null,
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
@@ -2523,6 +2597,7 @@ async function syncStore(prev, next, userId) {
       macro_targets: next.settings?.macroTargets ?? null,
       macro_calc: next.settings?.macroCalc ?? null,
       meal_windows: next.settings?.mealWindows ?? null,
+      fasting_protocol: next.settings?.fastingProtocol ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       show_water_tab: next.settings?.showWaterTab ?? false,
       show_food_tab: next.settings?.showFoodTab ?? false,
@@ -3534,13 +3609,15 @@ async function fetchFoodLogsSince(userId, sinceDateISO) {
 // Same idea as fetchFoodLogsSince above, for the Medications Inventory tab.
 async function fetchMedicationLogsSince(userId, sinceDateISO) {
   const { data, error } = await _supabase.from('zane_medication_logs')
-    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at')
+    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
   return (data || []).map(l => ({
     id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
     date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+    reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+    snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
   }));
 }
 
@@ -5813,6 +5890,36 @@ const MEAL_CATEGORY_DEFS = [
   { id: 'dinner', label: 'Dinner', defaultStart: 16 },
   { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
 ];
+// Intermittent fasting presets (migration 0249): the id is stored verbatim
+// in zane_user_settings.fasting_protocol, the hours are the timer math.
+// Lives here rather than in screens-food.jsx because two screens need it
+// now: the FastingCard and the settings editor that turns the feature on.
+// eatH 0 = long fast with no eating window: the cycle goes straight from
+// fasting to complete at the target time.
+const FD_FASTING_PRESETS = [
+  { id: '16:8', label: '16:8', fastH: 16, eatH: 8 },
+  { id: '18:6', label: '18:6', fastH: 18, eatH: 6 },
+  { id: '20:4', label: '20:4', fastH: 20, eatH: 4 },
+  { id: 'omad', label: 'OMAD', fastH: 23, eatH: 1 },
+  { id: '36h', label: '36h', fastH: 36, eatH: 0, long: true },
+  { id: '48h', label: '48h', fastH: 48, eatH: 0, long: true },
+  { id: '72h', label: '72h', fastH: 72, eatH: 0, long: true },
+  // Custom long fast: the actual hours travel in the setting id itself
+  // ('custom:96' = 96h fast), so no schema change is needed; fastH here is
+  // only the default when the user picks Custom without ever setting hours.
+  { id: 'custom', label: 'Custom', fastH: 48, eatH: 0, long: true, custom: true },
+];
+// Parses the custom fast hours out of a stored fasting_protocol id
+// ('custom:96' -> 96, anything else or out of range -> the 48h default).
+// Single source for the parse so the card, the settings stepper and the
+// phase resolver cannot drift apart.
+function fastingCustomHours(setting) {
+  if (typeof setting === 'string' && setting.startsWith('custom:')) {
+    const h = parseInt(setting.slice(7), 10);
+    if (Number.isFinite(h) && h >= 24 && h <= 168) return h;
+  }
+  return 48;
+}
 // Resolves settings.mealWindows (six ascending start hours, first always 0)
 // into the [startHour, endHour) ranges the timeline groups by. Defensive about
 // the stored value: a short, non-ascending or non-numeric array falls back to
@@ -6613,7 +6720,7 @@ async function refreshHealthLogs(userId) {
   // background window was invisible until a full reload.
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
          medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -6623,7 +6730,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ]);
@@ -6633,6 +6740,9 @@ async function refreshHealthLogs(userId) {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
+      waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+      armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+      bodyFatPct: l.body_fat_pct ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
@@ -6697,7 +6807,9 @@ async function refreshHealthLogs(userId) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null, createdAt: l.created_at,
+      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
+      snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     medicationPlanItems: (medicationPlanItemsRes?.data || []).map(it => ({
       id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id,
@@ -8976,7 +9088,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
@@ -8996,7 +9108,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,

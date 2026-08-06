@@ -6638,7 +6638,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
                 animationDuration: `${(2.9 - neg * 0.28).toFixed(2)}s`,
               } : {};
-              const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
+              // The fire gloss is tuned for dark canvases; on light/paper the
+              // bright embers read at ~2.4-2.6:1, so use darker ember tones
+              // there (theme audit 2026-08). Same pattern as the BP glucose
+              // fixed-blue series (isLightCanvasActive, screens-health.jsx).
+              const coreColor = fire
+                ? (isLightCanvasActive()
+                  ? ['#b0430f', '#9f4a0e', '#855407'][neg - 1]
+                  : ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1])
+                : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
               return (
                 <>
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden', zIndex: 3 }}>
@@ -6946,7 +6954,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
-                        color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
+                        // Done-set index as gold (accent), not goldDeep: deep
+                        // sits under 3:1 on dark for most accents (theme audit
+                        // 2026-08), this 24px box is the done marker on the
+                        // primary interaction row.
+                        color: isCurrent ? UI.gold : s.done ? UI.gold : UI.inkFaint,
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isTime ? (
@@ -6969,12 +6981,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 borderRadius: 4, padding: '2px 6px',
                               }}>{LB.techniqueRounds(s, { exName: entry.name }).badge}</span>
                               {LB.techniqueRounds(s, { exName: entry.name }).anyVaried && (
-                                <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0]?.label || entry.name}</span>
+                                <span className="num" style={{ fontSize: 9, color: UI.inkFaint }}>{s.drops[0]?.label || entry.name}</span>
                               )}
                             </div>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
-                                ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
+                                ? <span style={{ color: UI.inkFaint }}>{s.warmupPct}%</span>
                                 : isRepsOnly
                                   ? (prevSet && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps} reps` : '—')
                                   : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${isPlusLoad && prevSet.addedKg != null ? `+${prevSet.addedKg}` : prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
@@ -7259,7 +7271,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {(s.drops || []).slice(1).map((d, di) => (
                         <div key={di} style={{ padding: '4px 4px', opacity: 0.5 }}>
                           {anyVaried && (
-                            <div className="num" style={{ fontSize: 9, color: UI.inkGhost, marginBottom: 2 }}>{d.label || entry.name}</div>
+                            <div className="num" style={{ fontSize: 9, color: UI.inkFaint, marginBottom: 2 }}>{d.label || entry.name}</div>
                           )}
                           <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center' }}>
                             <div style={{
@@ -7293,7 +7305,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.goldSoft,
                           }}>↺</div>
-                          <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>myo {di + 1}</div>
+                          <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>myo {di + 1}</div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
                           </div>
@@ -8048,7 +8060,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         color: UI.gold,
                       }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
-                      <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>round {di + 1}</div>
+                      <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>round {di + 1}</div>
                       <KbCell
                         text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
                         placeholder="—"
@@ -8139,7 +8151,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
                       <div>
                         <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
-                        <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                        <span className="num" style={{ fontSize: 12, color: UI.inkFaint }}> / {myoTarget}</span>
                       </div>
                     </div>
                     <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
@@ -8202,7 +8214,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         />
                       ) : (
                         <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          <span className="num" style={{ fontSize: 15, color: UI.inkFaint }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
                         </div>
                       )}
                       <KbCell
@@ -8567,7 +8579,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {restExpired ? (
               <div style={{
                 flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500, color: UI.inkGhost,
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500, color: UI.inkFaint,
               }}>Rest is over</div>
             ) : (<>
               <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
@@ -9083,7 +9095,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
                 {item.weightDelta < 0 && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>Reps missed, easing load</span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -9094,7 +9106,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 )}
                 {item.weightDelta !== 0 && (
                   item.declined ? (
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Declined</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint }}>Declined</span>
                   ) : (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
                       {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}

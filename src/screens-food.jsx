@@ -20,12 +20,6 @@
    (source: 'recipe'), not N separate ones. */
 
 const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef: useRefFd } = React;
-
-function fdShiftDate(dateStr, deltaDays) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return LB.fmtISO(d);
-}
 // Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
 // Used by the Stats sheet to build a chart series with a bar (or gap) for
 // every day in the period, not just days that happen to have a log.
@@ -430,7 +424,7 @@ function fdReconcileShoppingTally(tally) {
 // Mode allows future-dated rows, and those belong to the projection below,
 // not the "what did I eat" tally.
 function fdShoppingHistoryTally(foodLogs, todayISO) {
-  const cutoff = fdShiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
+  const cutoff = LB.shiftDate(todayISO, -(FD_SHOPPING_ANALYSIS_DAYS - 1));
   const tally = new Map();
   (foodLogs || []).forEach(e => {
     if (e.planned || e.date < cutoff || e.date > todayISO) return;
@@ -456,7 +450,7 @@ function fdShoppingProjectionTally(store, todayISO, days) {
   const slots = activePlanId ? (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId) : [];
   if (!slots.length) return tally;
   for (let i = 0; i < days; i++) {
-    const d = fdShiftDate(todayISO, i);
+    const d = LB.shiftDate(todayISO, i);
     slots.forEach(slot => {
       if (!fdSlotMatchesDate(slot, store, d)) return;
       fdExplodeForShopping(fdMaterializeSlotEntry(slot, d)).forEach(leaf => {
@@ -937,9 +931,36 @@ function FdCheckbox({ checked, onToggle, disabled, label }) {
 
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
-  const today = LB.todayISO();
+  // `today` refreshes on a timer and on visibility return (same idiom as the
+  // Water Tracker): leaving this screen open over midnight kept "today" (and
+  // the isNow hour highlight) stale, and curDate pinned yesterday so every
+  // new pick landed on the wrong day.
+  const [today, setToday] = useStateFd(() => LB.todayISO());
+  useEffectFd(() => {
+    const tick = () => setToday(cur => { const now = LB.todayISO(); return now === cur ? cur : now; });
+    const iv = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
+  // When the real date rolls over while the screen sits on the old "today",
+  // follow it (a day the user deliberately navigated to stays put). A `date`
+  // this screen is route-pinned to (the Health tab's "view this day" deep
+  // link) is an even more deliberate pin than a day-nav click and must stay
+  // put too, even in the one case where it happened to equal "today" at the
+  // moment of linking: without this guard, that pin would silently follow
+  // the rollover exactly like an ordinary live view, the same as if the
+  // pin had never been set.
+  const prevTodayRef = useRefFd(today);
+  useEffectFd(() => {
+    const prev = prevTodayRef.current;
+    if (today !== prev) {
+      if (!date) setCurDate(d => d === prev ? today : d);
+      prevTodayRef.current = today;
+    }
+  }, [today, date]);
 
   // store.foodLogs only carries FOOD_HISTORY_WINDOW_DAYS from boot; scrolling
   // further back needs a lazy fetch (mirrors fetchSessionEntries for old
@@ -1069,7 +1090,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // the filtering, on a double-run race.
     const pending = [];
     for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
-      const date = fdShiftDate(today, i);
+      const date = LB.shiftDate(today, i);
       const markerId = `${userId}_${date}`;
       if (markedDates.has(markerId)) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
@@ -1097,6 +1118,47 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
   const [extrasOpen, setExtrasOpen] = useStateFd(false);
+  // Intermittent fasting: per-device cycle (localStorage, cooking-draft
+  // pattern), lazy-read once at mount so a reload resumes mid-fast. The
+  // protocol itself is the synced setting (store.settings.fastingProtocol).
+  const [fastingState, setFastingState] = useStateFd(fdReadFastingState);
+  const fastingProtocol = useMemoFd(
+    () => fdResolveFastingProtocol(store.settings?.fastingProtocol),
+    [store.settings?.fastingProtocol]
+  );
+  // Custom fast hours: from the stored id ('custom:96') or the 48h default,
+  // parsed by the single shared LB.fastingCustomHours (same source the
+  // settings stepper uses).
+  const customFastHours = useMemoFd(() => LB.fastingCustomHours(store.settings?.fastingProtocol), [store.settings?.fastingProtocol]);
+  const setFastingProtocol = id => {
+    const val = id === 'custom' ? `custom:${customFastHours}` : id;
+    setStore(s => ({ ...s, settings: { ...s.settings, fastingProtocol: val } }));
+  };
+  const startFast = () => {
+    const next = { fastStartedAt: new Date().toISOString(), eatStartedAt: null };
+    fdWriteFastingState(next);
+    setFastingState(next);
+  };
+  const endFast = () => {
+    if (!fastingState?.fastStartedAt) return;
+    const next = { ...fastingState, eatStartedAt: new Date().toISOString() };
+    fdWriteFastingState(next);
+    setFastingState(next);
+  };
+  const resetFast = () => {
+    fdClearFastingState();
+    setFastingState(null);
+  };
+  // Absolute eating-window boundaries for the timeline tint. Timestamp-only,
+  // so it needs no 1s tick: it changes only when the user acts. Long fasts
+  // (eatH 0) have no eating window, so no tint at all: the boundary-hour
+  // overlap test would otherwise paint the single hour the fast ended in as
+  // a window once the cycle is complete.
+  const fastingEatWin = useMemoFd(() => {
+    if (!fastingState || !fastingProtocol || fastingProtocol.eatH === 0) return null;
+    const ph = fdFastingPhase(fastingState, fastingProtocol, Date.now());
+    return ph.phase === 'idle' ? null : { eatStartMs: ph.eatStartMs, eatEndMs: ph.eatEndMs };
+  }, [fastingState, fastingProtocol]);
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
@@ -1127,6 +1189,157 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the last expand state.
   const [pickedExpanded, setPickedExpanded] = useStateFd(false);
   useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
+  // Latest staged value for the leave guard below: the guard is registered
+  // once at mount (stable window slot) but must never read a stale staged,
+  // so it reads through this ref instead of the closure.
+  const stagedRef = useRefFd(staged);
+  useEffectFd(() => { stagedRef.current = staged; }, [staged]);
+  // App's go() consults this before any navigation away from the food route
+  // (main tabs, back button, TopBar long-press home, "Set macro targets").
+  // Same "Discard picks?" wording the back button's dialog used, now on
+  // every route change so a staged batch is never dropped without asking.
+  // Unmount cleanup nulls the slot only if it is still ours, so a later
+  // screen's guard (or none) wins after this screen unmounts.
+  useEffectFd(() => {
+    const guard = async () => {
+      const n = stagedRef.current.length;
+      if (!n) return true;
+      return await confirm(`${n} picked item${n === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true });
+    };
+    window.__foodLeaveGuard = guard;
+    return () => { if (window.__foodLeaveGuard === guard) window.__foodLeaveGuard = null; };
+  }, []);
+  // The docked staged-picks bar itself (stagedPanel below): the landing
+  // target of the staged-chip flight (flyStagedChip, right below). Stays
+  // mounted for the bar's lifetime so the breathing intensity-glow never
+  // restarts and the ref never churns.
+  const stagedBarRef = useRefFd(null);
+  // The Add button in the staged bar, wrapped in a span (Btn is a function
+  // component and doesn't forward refs in React 18, so the span is the
+  // measurable/pulseable node). This is where the staged-chip flight lands;
+  // the whole bar (stagedBarRef) is the fallback if this is missing at
+  // measure time.
+  const stagedAddBtnWrapRef = useRefFd(null);
+  // Bumped on every staged-pick landing: the bar's one-shot landing beats
+  // (bar squash, Add-button absorb pulse, count pop, chevron fade, see
+  // .fd-bar-land / .fd-btn-absorb / .fd-count-pop / .fd-chevron-hide in
+  // index.html) are re-triggered via the effect below, NOT by remounting:
+  // a keyed remount of the bar wrapper restarted the breathing
+  // intensity-glow from 0% and reset the expanded picked-list's scroll on
+  // every landing, and the chevron/count/button span originally used the
+  // same key={landTick} remount trick individually, which could leave a
+  // stale <i> behind on some devices instead of cleanly swapping it
+  // (reported live, chevrons piling up after repeated stagings,
+  // audit-2026-08 N1). None of the four nodes are ever actually
+  // unmounted now, so nothing can be left behind. Pure presentational
+  // counter; the re-triggered subtrees hold no state.
+  const [landTick, setLandTick] = useStateFd(0);
+  const stagedLandRef = useRefFd(null);
+  const chevronRef = useRefFd(null);
+  const countRef = useRefFd(null);
+  // Restarts all four one-shot animations without touching their DOM
+  // subtrees: set animation to none, force a reflow so the change commits,
+  // then restore the class-driven animation. Every node this touches stays
+  // mounted for the bar's whole lifetime, only the one-shot beat replays.
+  useEffectFd(() => {
+    if (!landTick) return;
+    [stagedLandRef.current, chevronRef.current, countRef.current, stagedAddBtnWrapRef.current].forEach(el => {
+      if (!el) return;
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    });
+  }, [landTick]);
+  // The OTHER ref the flight needs: whichever Log it/Plan it/Add sheet is
+  // currently open (the quantity sheet, the recipe portions sheet, Custom
+  // item, or the Describe-a-meal review list). All four hand this same ref
+  // to their Sheet's panelRef prop (ui.jsx), so exactly one of them is ever
+  // populated at a time, matching this whole screen's "one sheet open at a
+  // time" convention. Read at the moment a staging button is tapped, so it
+  // always reflects whichever sheet that button actually lives in.
+  const flyingSheetPanelRef = useRefFd(null);
+  // Tapping Log it/Plan it/Add stages an entry and closes the sheet with no
+  // further feedback otherwise, which reads as the batch just vanishing
+  // rather than landing anywhere. This builds a small accent chip named for
+  // the item(s) just staged, positions it over the still-open sheet's title
+  // area, and flies it down into the staged bar's Add button, where the bar
+  // squashes on landing, the button absorbs the chip with a pulse, and the
+  // count pops. (An earlier version cloned the WHOLE sheet and shrank the
+  // clone, but that read as "the sheet vanished", and a cssText wipe that
+  // stripped the clone's background/border/radius turned the fold into a
+  // bare rectangle; see the fd818697 revert history. A purpose-built pill
+  // never depends on the sheet's own look and reads as "the item".)
+  //
+  // Source rect: captured synchronously at call time from
+  // flyingSheetPanelRef. The staging functions call this right after
+  // setStaged, in the same synchronous block, BEFORE the sheet-close state
+  // change commits (React 18 batches, so the panel DOM is still laid out
+  // here). No flight when no sheet is open (editing saves, every non-staging
+  // path): the ref is null then and this quietly no-ops.
+  //
+  // Only the bar measurement waits on the two nested rAFs (this app's
+  // established idiom, see the old flyToStagedBar): `staged` (whether the
+  // bar is even mounted) only reflects this tap once React re-renders and
+  // the real sheet has actually closed, which for the very first pick of a
+  // session is the difference between the bar existing at all yet or not.
+  // rAF fires after the browser has processed the pending paint for a
+  // synchronous state update made earlier in the same tick, so by the second
+  // one the bar and its Add button are mounted and measurable. The chip
+  // itself is positioned synchronously before anything paints (its size is
+  // forced via getBoundingClientRect right after append).
+  //
+  // Deliberately outside React: a document.createElement chip appended to
+  // <body>, animated with a plain CSS keyframe animation driven by custom
+  // properties (--fx/--fy/--arc, same idiom as meso-ember in index.html).
+  // Purely decorative and fire-and-forget: never blocks or delays the real
+  // confirmLogFood/confirmRecipeLog/etc. call it's layered on, and if any
+  // ref or rect is missing it quietly no-ops instead of animating into
+  // empty space.
+  function flyStagedChip(label) {
+    const panel = flyingSheetPanelRef.current;
+    if (!label || !panel) return;
+    const from = panel.getBoundingClientRect();
+    if (!from.width || !from.height) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const chip = document.createElement('div');
+    chip.className = 'fd-chip';
+    chip.textContent = label;
+    const cx = from.left + from.width / 2;
+    const cy = from.top + 12;
+    chip.style.left = cx + 'px';
+    chip.style.top = cy + 'px';
+    document.body.appendChild(chip);
+    // Never set chip.style.cssText: a whole-cssText assignment is exactly
+    // what wiped the old genie clone's background/border/radius. Every
+    // dynamic value is set as its own property. The forced layout below
+    // (getBoundingClientRect right after append) yields the chip's real
+    // size so it can be recentered on the panel's title area before
+    // anything paints.
+    const chipRect = chip.getBoundingClientRect();
+    chip.style.left = (cx - chipRect.width / 2) + 'px';
+    // Safety net; remove() on an already-removed node is a no-op.
+    setTimeout(() => chip.remove(), 850);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const target = stagedAddBtnWrapRef.current || stagedBarRef.current;
+      if (!target) { chip.remove(); return; }
+      const to = target.getBoundingClientRect();
+      if (!to.width || !to.height) { chip.remove(); return; }
+      const dx = (to.left + to.width / 2) - cx;
+      const dy = (to.top + to.height / 2) - (cy + chipRect.height / 2);
+      chip.style.setProperty('--fx', dx + 'px');
+      chip.style.setProperty('--fy', dy + 'px');
+      // Small sideways bow at the arc's midpoint (0 for a near-vertical
+      // drop); consumed by fdChipFly's 45% keyframe. Sign is a taste knob.
+      chip.style.setProperty('--arc', Math.min(12, Math.abs(dx) * 0.08) + 'px');
+      // Landing beats: bumps landTick, whose effect resets the bar/chevron/
+      // count/button animations in place so they replay from rest. The
+      // target rect above is measured BEFORE this bump on general
+      // principle, though it no longer matters for correctness now that
+      // none of these nodes remount.
+      setLandTick(t => t + 1);
+      chip.style.animation = 'fdChipFly 0.52s cubic-bezier(0.45, 0.05, 0.55, 0.95) both';
+    }));
+  }
   // Which timeline entries (by id) currently show their expanded ingredient
   // list, for a source:'recipe' entry's chevron. Per-device UI state only,
   // not persisted.
@@ -1307,7 +1520,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editUnitNewLabel, setEditUnitNewLabel] = useStateFd('');
   const [editUnitNewGrams, setEditUnitNewGrams] = useStateFd('');
 
-  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : curDate === fdShiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
   // A day that hasn't happened yet can't have anything "already eaten" on it:
   // Log it is unavailable and an edited entry can't be flipped back to logged.
   const curDateIsFuture = curDate > today;
@@ -1330,6 +1543,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
   const [entryMenu, setEntryMenu] = useStateFd(null);
+  // "Edit ingredients": the entry whose per-ingredient editor sheet is open
+  // (null = closed). Edits the entry's own frozen recipeItems snapshot in
+  // place and recomputes the entry's totals; never touches the source
+  // recipe (matching the snapshot-copy contract of confirmRecipeLog).
+  const [ingredientEditorEntry, setIngredientEditorEntry] = useStateFd(null);
+  // Working copy of that snapshot while the sheet is open. recipeItems rows
+  // have no id, so each gets a local `_k` key (stable React key + per-row
+  // edit target), stripped again on save. Rows are flat primitives, so a
+  // shallow per-row spread is already a deep copy.
+  const [ingredientItems, setIngredientItems] = useStateFd([]);
+  // Row currently in the grams sheet (null = closed), same shape as
+  // RecipeEditorScreen's editItem/editGrams pair.
+  const [ingrEditItem, setIngrEditItem] = useStateFd(null);
+  const [ingrEditGrams, setIngrEditGrams] = useStateFd('');
+  const [ingredientPickerOpen, setIngredientPickerOpen] = useStateFd(false);
   // "Split into multiple meals": an hour that stacks several items really
   // eaten at different times (a meal-prep batch), redistributed across N
   // times without retyping every item's amount. splitHour is the hour being
@@ -1823,7 +2051,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // for this, so on a day whose predecessor sits outside the boot window the
   // offer simply doesn't appear rather than firing a request nobody asked for.
   const prevDayByCategory = useMemoFd(() => {
-    const prev = fdShiftDate(curDate, -1);
+    const prev = LB.shiftDate(curDate, -1);
     const out = {};
     (store.foodLogs || []).forEach(l => {
       if (l.date !== prev || l.planned) return;
@@ -1966,7 +2194,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Unbounded both ways: backward lazy-fetches outside the boot window, forward
   // is needed for Plan Mode (plan tomorrow's meals), matching the calendar input
   // (no max) and the day-nav comment below.
-  const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
+  const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
   // patchDaily/doAdd use in screens-water.jsx. Calories are summed from each
@@ -2079,16 +2307,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const ok = await commitEntries(staged);
     if (ok) setStaged([]);
   }
-  // TopBar back: warns first if there's a staged-but-uncommitted batch, same
-  // "Discard picks?" wording FdIngredientPicker's own back/backdrop already
-  // uses, so an accidental tap here doesn't silently drop everything picked.
-  async function requestLeaveFood() {
-    if (staged.length && !await confirm(`${staged.length} picked item${staged.length === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
-    // Health is an independently-toggleable tab now, not guaranteed on: fall
-    // back to Home instead of navigating into a hidden tab.
-    go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' });
-  }
-
   // Time stamped on a newly logged entry: the timeline hour the user tapped
   // "+" on, else the current wall-clock time.
   function entryTime() {
@@ -2339,7 +2557,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   // Backdrop tap used to drop the whole picker (selection, target date,
   // mode) silently. Same "Discard picks?" wording/pattern as the staged-
-  // items guard (requestLeaveFood) and FdIngredientPicker's own; phrased
+  // items leave guard and FdIngredientPicker's own; phrased
   // mode-agnostically since closing without submitting leaves every entry
   // untouched regardless of whether Copy, Move or Delete was selected.
   async function requestCloseCopyMove() {
@@ -2962,6 +3180,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     const entry = { ...built, planned };
     setStaged(list => [...list, entry]);
+    flyStagedChip(entry.foodName);
     // Marks pendingFood cached once this resolves (see toggleFavorite's own
     // ensureFoodCached call above), so starring then logging the same food
     // in one sheet visit, in either order, only ever fires one cache
@@ -2994,6 +3213,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const entry = buildCustomEntry();
     if (!entry) return;
     setStaged(list => [...list, { ...entry, planned }]);
+    flyStagedChip(entry.foodName);
     closeCustomSheet();
     resetCustomForm();
   }
@@ -3127,8 +3347,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setMealItems(next);
   }
   // Cancel/backdrop/back on the review list: same "won't be added" dirty
-  // check requestLeaveFood uses for the main staged batch, scoped to just
-  // this not-yet-staged meal-description batch.
+  // check the staged-items leave guard uses for the main batch, scoped to
+  // just this not-yet-staged meal-description batch.
   async function requestCloseMealReview() {
     if (mealParsing) return;
     const n = mealItems?.length || 0;
@@ -3163,6 +3383,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       createdAt: now, planned,
     }));
     setStaged(list => [...list, ...entries]);
+    flyStagedChip(entries.length === 1 ? entries[0].foodName : `${entries.length} items`);
     setMealItems(null);
     clearMealDraft();
   }
@@ -3344,6 +3565,140 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       gramsStr: gramsMode ? String(entry.loggedCookedGrams) : '',
     });
   }
+
+  // ── "Edit ingredients": per-row editor for a recipe entry's own frozen
+  // snapshot (entry.recipeItems). Mirrors RecipeEditorScreen's item math
+  // (saveEditItem/editItemPreview) and its picker path, but writes back
+  // into the ENTRY (same id/date/time, totals recomputed), never the
+  // recipe. ──
+  const ingredientBaseName = useMemoFd(() => {
+    const n = ingredientEditorEntry?.foodName || '';
+    // Strips the confirmRecipeLog suffixes "(2/4)" and "(300g)"/"(75.5g)".
+    // Required for correctness, not cosmetics: openEditRecipeEntry
+    // re-derives the portion fraction from this suffix, and after an
+    // ingredient edit the snapshot IS the batch, so rescaling against the
+    // pre-edit fraction would double (or halve) the edited values on the
+    // next "Edit amount".
+    return n.replace(/\s+\([\d.]+\/\d+\)$/, '').replace(/\s+\([\d.]+g\)$/, '') || n;
+  }, [ingredientEditorEntry]);
+
+  // Live totals for the sheet header, same expressions saveIngredientEditor
+  // commits below, so the number on screen is exactly what gets saved.
+  const ingredientTotals = useMemoFd(() => {
+    const items = ingredientItems;
+    const netCarbs = !!store.settings?.netCarbs;
+    const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+    return {
+      calories: Math.round(fdRecipeItemsCalories(items, netCarbs)),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      grams: Math.round(sum('quantityG')),
+    };
+  }, [ingredientItems, store.settings?.netCarbs]);
+
+  // Seeds the working copy synchronously in the same commit as the sheet
+  // opening (React 18 batches): a useEffect backfill would paint the sheet
+  // empty for a frame (the "all removed" empty state + disabled Save),
+  // which reads as a glitch on every open.
+  function openIngredientEditor(entry) {
+    setIngredientEditorEntry(entry);
+    setIngredientItems((entry.recipeItems || []).map(ri => ({ ...ri, _k: LB.uid() })));
+    setIngrEditItem(null); setIngrEditGrams('');
+    setIngredientPickerOpen(false);
+  }
+  function closeIngredientEditor() {
+    setIngredientEditorEntry(null);
+    setIngrEditItem(null); setIngrEditGrams('');
+    setIngredientPickerOpen(false);
+  }
+
+  // Live preview as grams are typed: byte-identical logic to
+  // RecipeEditorScreen's editItemPreview, grams-only (foodName never
+  // changes here).
+  const ingrEditPreview = useMemoFd(() => {
+    const g = fdNum(ingrEditGrams);
+    if (!ingrEditItem || !(g > 0) || !(ingrEditItem.quantityG > 0)) return null;
+    const factor = g / ingrEditItem.quantityG;
+    return {
+      calories: Math.round((ingrEditItem.calories || 0) * factor),
+      protein: fdRound1((ingrEditItem.protein || 0) * factor),
+      carbs: fdRound1((ingrEditItem.carbs || 0) * factor),
+      fat: fdRound1((ingrEditItem.fat || 0) * factor),
+      sugar: ingrEditItem.sugar != null ? fdRound1(ingrEditItem.sugar * factor) : null,
+      satFat: ingrEditItem.satFat != null ? fdRound1(ingrEditItem.satFat * factor) : null,
+      sodiumMg: ingrEditItem.sodiumMg != null ? Math.round(ingrEditItem.sodiumMg * factor) : null,
+    };
+  }, [ingrEditItem, ingrEditGrams]);
+
+  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); }
+  function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); }
+  function saveIngrEdit() {
+    const g = fdNum(ingrEditGrams);
+    if (!ingrEditItem || !(g > 0)) return;
+    // Same factor math as saveEditItem when the row has a positive amount;
+    // a legacy block-merge row can carry quantityG: null (applyBlockRecipe),
+    // for those set the grams outright with no rescale (factor 1) rather
+    // than blocking the edit.
+    const old = ingrEditItem.quantityG || 0;
+    const factor = old > 0 ? g / old : 1;
+    setIngredientItems(list => list.map(i => i._k !== ingrEditItem._k ? i : {
+      ...i, quantityG: Math.round(g),
+      calories: Math.round((i.calories || 0) * factor),
+      protein: fdRound1((i.protein || 0) * factor),
+      carbs: fdRound1((i.carbs || 0) * factor),
+      fat: fdRound1((i.fat || 0) * factor),
+      fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
+      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
+      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
+      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
+    }));
+    closeIngrEdit();
+  }
+
+  // Same confirm the recipe editor uses for row removal (requestRemoveItem):
+  // this rewrites historical data, one level of safety.
+  async function requestRemoveIngredient(item) {
+    if (!await confirm(`${item.foodName} · ${item.quantityG || 0}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    setIngredientItems(list => list.filter(i => i._k !== item._k));
+  }
+  // Picker hands back finished, already-quantified rows (commitStaged); `_k`
+  // is stamped here, stripped together with `source` on save (entry
+  // recipeItems rows never carry source, unlike recipe.items).
+  function addIngredientsToEntry(newItems) {
+    setIngredientItems(list => [...list, ...newItems.map(item => ({ ...item, _k: LB.uid() }))]);
+  }
+
+  function saveIngredientEditor() {
+    const entry = ingredientEditorEntry;
+    if (!entry || !ingredientItems.length) return;
+    const netCarbs = !!store.settings?.netCarbs;
+    const sum = k => ingredientItems.reduce((a, i) => a + (i[k] || 0), 0);
+    // Explicit delete instead of `({ _k, source, ...rest })` rest-destructuring:
+    // Babel standalone's per-file `_excluded` arrays collide on one shared
+    // global (see the Btn comment in ui.jsx), and a leaked `_k` would
+    // persist into the recipe_items jsonb.
+    const recipeItems = ingredientItems.map(i => { const c = { ...i }; delete c._k; delete c.source; return c; });
+    const updated = {
+      // ...entry keeps id, date, time, createdAt, planned, recipeId,
+      // loggedTotalPortions, loggedCookedGrams, loggedCookedWeightG,
+      // templateSlotId, splitBatch, loggedUnit, foodId, brand, source
+      ...entry,
+      foodName: ingredientBaseName || entry.foodName,
+      quantityG: Math.round(sum('quantityG')),
+      calories: Math.round(fdRecipeItemsCalories(ingredientItems, netCarbs)),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      fiber: ingredientItems.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
+      sugar: ingredientItems.some(i => i.sugar != null) ? fdRound1(sum('sugar')) : null,
+      satFat: ingredientItems.some(i => i.satFat != null) ? fdRound1(sum('satFat')) : null,
+      sodiumMg: ingredientItems.some(i => i.sodiumMg != null) ? Math.round(sum('sodiumMg')) : null,
+      recipeItems,
+    };
+    setStore(s => {
+      const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? updated : l);
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+    });
+    closeIngredientEditor();
+  }
+
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
   // tapped), so the Stepper's live number always matches what gets logged.
@@ -3456,6 +3811,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setEditingEntry(null);
     } else {
       setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned, ...built }]);
+      flyStagedChip(built.foodName);
       // Cooking Mode's own draft (see startCookingMode) is done once its log
       // actually commits, whichever of Plan it/Log it got tapped: this is one
       // of the wizard's two terminal outcomes, see fdClearCookingDraft's
@@ -3636,56 +3992,89 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // back) mid-batch doesn't lose it, both (and a staged recipe, see
   // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
-    // Same breathing box-shadow as the Intensity sheet (.intensity-glow,
-    // index.html): a live batch waiting to be added is easy to forget about
-    // otherwise, the glow keeps drawing the eye back to it. Regular
-    // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
-    // glow uses), since this bar sits on the normal theme-reactive Screen
-    // background and should mute along with everything else on Paper.
-    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-      {pickedExpanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
-          {staged.map(e => (
-            <div key={e.id} style={fdDraftRow}>
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                <span style={fdEntryMeta}>
-                  {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
-                  <span style={fdMetaDivider} />
-                  <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
-                </span>
+    // .fd-bar-land: the WHOLE bar bounces once per chip landing. The beat is
+    // re-triggered by the stagedLandRef effect (set animation to none, force
+    // a reflow, restore), NOT by remounting: a keyed remount restarted the
+    // breathing glow from 0% and reset the expanded list's scroll. The
+    // wrapper exists because the bar's own .intensity-glow class owns the
+    // element's `animation` property: a second animation class on the
+    // container would override the breathing glow, and remounting the
+    // container would restart it. The wrapper is transparent; everything
+    // visible (background, border, glow, list) sits inside it, so it all
+    // moves as one box. flexShrink: 0 lives here now, the wrapper is the
+    // flex item.
+    <div ref={stagedLandRef} className="fd-bar-land" style={{ flexShrink: 0 }}>
+      {/* Same breathing box-shadow as the Intensity sheet (.intensity-glow,
+          index.html): a live batch waiting to be added is easy to forget
+          about otherwise, the glow keeps drawing the eye back to it. Regular
+          --accent-rgb (not the -raw variant the Intensity sheet's own
+          backdrop glow uses), since this bar sits on the normal
+          theme-reactive Screen background and should mute along with
+          everything else on Paper. */}
+      <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+        {pickedExpanded && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
+            {staged.map(e => (
+              <div key={e.id} style={fdDraftRow}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+                  <span style={fdEntryMeta}>
+                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    <span style={fdMetaDivider} />
+                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                  </span>
+                </div>
+                <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                </button>
               </div>
-              <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+          <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
+            {/* .fd-chevron-hide: tucks the chevron away while the bar bounces
+                (the count label scales up into its slot), fades back in as
+                the box settles. Replayed via the landTick effect above
+                (reset-in-place, same idiom as the bar wrapper), never
+                remounted. */}
+            <i ref={chevronRef} className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'} fd-chevron-hide`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+            {/* .fd-count-pop: the count pops only on a chip landing (the
+                landTick effect above replays it), never on per-item removal,
+                a remove just updates the number in place, so the label
+                doesn't balloon over the chevron (which stays visible when
+                there's no bounce). */}
+            <span ref={countRef} className="fd-count-pop" style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              Adding {staged.length} item{staged.length === 1 ? '' : 's'}
+            </span>
+            {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
+                kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
+                reads consistently with the rest of the food module. Smaller
+                (fontSize 10, same as fdEntryMeta elsewhere) and the one part
+                allowed to clip on a narrow screen, so "Adding N items" and the
+                Add button both stay fully readable no matter what. FdMacroBits
+                itself sets no font-size, it inherits this span's, same as
+                every other call site (they all sit inside an fdEntryMeta span). */}
+            <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
+              <span style={fdMetaDivider} />
+              <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
+            </span>
+          </button>
+          {/* The chip flight's landing target (stagedAddBtnWrapRef): wrapped in
+              a span because Btn is a function component and doesn't forward
+              refs in React 18. .fd-btn-absorb pulses the wrapper as the chip
+              arrives, replayed via the landTick effect above so this ref
+              stays pointed at one stable node for the bar's whole lifetime
+              instead of churning on every landing; flexShrink: 0 moved here
+              from the Btn, the span is now the flex item. */}
+          <span ref={stagedAddBtnWrapRef} className="fd-btn-absorb" style={{ flexShrink: 0 }}>
+            <Btn onClick={commitStagedEntries} style={{ padding: '8px 18px', minHeight: 34 }}>
+              Add
+            </Btn>
+          </span>
         </div>
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
-          <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
-          <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
-            Adding {staged.length} item{staged.length === 1 ? '' : 's'}
-          </span>
-          {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
-              kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
-              reads consistently with the rest of the food module. Smaller
-              (fontSize 10, same as fdEntryMeta elsewhere) and the one part
-              allowed to clip on a narrow screen, so "Adding N items" and the
-              Add button both stay fully readable no matter what. FdMacroBits
-              itself sets no font-size, it inherits this span's, same as
-              every other call site (they all sit inside an fdEntryMeta span). */}
-          <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
-            <span style={fdMetaDivider} />
-            <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
-          </span>
-        </button>
-        <Btn onClick={commitStagedEntries} style={{ flexShrink: 0, padding: '8px 18px', minHeight: 34 }}>
-          Add
-        </Btn>
       </div>
     </div>
   ) : null;
@@ -3809,7 +4198,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
       {confirmEl}
-      <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
+      {/* Back and every tab switch share one leave guard in App's go():
+          the "Discard picks?" dialog fires there when a batch is staged. */}
+      <TopBar title="Food" sub={dayLabel} onBack={() => go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' })}
         right={
           tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -3985,6 +4376,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 onSetTargets={() => go(store.settings?.showHealthTab ? { name: 'health', openMacroTargets: true } : { name: 'home' })} />
             </BracketFrame>
 
+            {/* Intermittent fasting (migration 0249): the protocol is the
+                synced setting, the running cycle is per-device localStorage
+                (cooking-draft pattern), so it survives a reload and needs no
+                sync. Hidden entirely when no protocol is picked (feature
+                off); turn it on in Settings > Health > Food. */}
+            {fastingProtocol && (
+              <FdFastingCard state={fastingState} protocol={fastingProtocol}
+                onProtocol={setFastingProtocol} onStart={startFast} onEnd={endFast} onReset={resetFast} />
+            )}
 
             {/* Sugar / saturated fat / sodium for the day (migration 0204).
                 Deliberately OUTSIDE the hero frame and folded away: they are
@@ -4096,12 +4496,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         // matching the user's own timezone, same as entryTime()/
                         // LB.nowHHMM() already do for the "log at now" default.
                         const isNow = curDate === today && h === new Date().getHours();
+                        // Eating-window tint: today's rows inside the fasting
+                        // eating window get a faint accent wash so "when can I
+                        // eat" reads off the hour list. The current hour keeps
+                        // its own accent border + tint (isNow wins). Style-only,
+                        // so drag-reorder hit targets are untouched.
+                        const eatTint = isNow || curDate !== today || !fastingEatWin ? null
+                          : fdFastingEatHourTint(fastingEatWin.eatStartMs, fastingEatWin.eatEndMs, h, curDate);
                         return (
                           <div key={h} style={{ display: 'flex', alignItems: 'center' }}>
                             <FdHourTick />
-                            <div style={{ ...fdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
+                            <div style={{ ...fdHourRow(filled, isNow), ...(eatTint ? { background: 'rgba(var(--accent-rgb),0.05)', borderColor: 'rgba(var(--accent-rgb),0.3)' } : null), flex: 1, minWidth: 0 }}>
                               <div data-reorder-ignore="true" style={fdHourLabelCol}>
-                                <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                                <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkFaint) }}>{String(h).padStart(2, '0')}</span>
                               </div>
                               {/* alignSelf: stretch (this column, and the empty-hour
                                   placeholder's flex: 1 below) makes the data-reorder-item
@@ -4507,7 +4914,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           underneath at the default tier, this sheet must render above it,
           same "bump the one that must sit on top" rule as every other
           Sheet-over-Sheet case in this file. */}
-      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)" zIndex={editingMealItemId ? 200 : 100}>
+      <Sheet open={qtySheetOpen} onClose={closeQtySheet} title={pendingFood?.name || 'Add food'} titleColor="var(--accent)" zIndex={editingMealItemId ? 200 : 100} panelRef={flyingSheetPanelRef}>
         {pendingFood && (
           <>
             {editingMealItemId && (
@@ -4595,12 +5002,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ) : planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+                {/* Always a fresh pick here (never editingEntry, the branch condition
+                    guarantees it), so this always stages: the chip flight always fires. */}
                 <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
                 {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+                {/* "Add" (fresh pick, stages) fires the chip flight; "Save" (editingEntry,
+                    an in-place update, never touches staged) does not. */}
                 <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
               </div>
             )}
@@ -4609,7 +5020,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)">
+      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -4718,7 +5129,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           adjust it (opens the quantity sheet above at zIndex 200), trash to
           drop it outright, Plan it/Log it stages every remaining row at
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
-      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)">
+      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           Tap an item to adjust its amount or numbers, remove anything that doesn't belong, or refine the whole estimate with a note.
         </div>
@@ -5108,7 +5519,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           comment for why a literal higher zIndex is unsafe here). Do not
           move this Sheet below CookingModeScreen's render call, or reorder
           either one, without re-reading that comment first. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
+      <Sheet open={!!recipeLogPrompt} onClose={requestCloseRecipeLogPrompt} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)" panelRef={flyingSheetPanelRef}
         titleRight={recipeLogPrompt && (
           // Always share the LIVE recipe. When this sheet is opened from an
           // already-logged entry (openEditRecipeEntry) the prompt holds a
@@ -5311,6 +5722,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <i className={`fa-solid fa-chevron-${meExpanded ? 'up' : 'down'}`} style={{ marginRight: 8 }} /> {meExpanded ? 'Hide ingredients' : 'Show ingredients'}
                 </Btn>
               )}
+              {meHasItems && (
+                <Btn kind="ghost" onClick={() => act(() => openIngredientEditor(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-sliders" style={{ marginRight: 8 }} /> Edit ingredients
+                </Btn>
+              )}
               {meCanPortions ? (
                 <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
                   <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit amount
@@ -5327,6 +5743,76 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           );
         })()}
       </Sheet>
+
+      {/* Per-ingredient editor for a recipe entry's own snapshot ("Edit
+          ingredients", see openIngredientEditor): grams per row (macros
+          rescale), add via the shared picker, remove rows, Save writes the
+          entry in place. The picker and the row-grams sheet are sibling
+          Sheets (the documented overlay convention): the grams sheet gets
+          zIndex 200 to sit above this one (same tier the picker's own
+          quantity step uses), the picker is zIndex 100 but rendered later
+          in document order. The confirm dialog (useConfirm, portaled to
+          body) always clears the z-100 editor sheet; row removal only ever
+          fires from the list, never from the z-200 grams sheet, so the
+          confirm can never be covered. */}
+      <Sheet open={!!ingredientEditorEntry} onClose={closeIngredientEditor} title="Edit ingredients" titleColor="var(--accent)">
+        <div style={{ marginBottom: 12 }}>
+          <FdMacroHero label="Totals" calories={ingredientTotals.calories} protein={ingredientTotals.protein} carbs={ingredientTotals.carbs} fat={ingredientTotals.fat} compact />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, textAlign: 'center' }}>
+            {ingredientTotals.grams}g raw · {ingredientItems.length} ingredient{ingredientItems.length === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '42vh', overflowY: 'auto', marginBottom: 12 }}>
+          {ingredientItems.length === 0 ? (
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 0' }}>
+              All ingredients removed. Cancel to keep the entry unchanged.
+            </div>
+          ) : fdSortIngredientsByQty(ingredientItems).map(item => (
+            <div key={item._k} style={fdEntryRow}>
+              <button onClick={() => openIngrEdit(item)} style={fdDraftMain}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  {item.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                  <span style={{ ...fdEntryName, fontSize: 12 }}>{item.foodName}</span>
+                </div>
+                <span style={fdEntryMeta}>
+                  {item.quantityG || 0}g · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
+                  <span style={fdMetaDivider} />
+                  <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
+                </span>
+              </button>
+              <button onClick={() => requestRemoveIngredient(item)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <Btn onClick={() => setIngredientPickerOpen(true)} style={{ width: '100%', marginBottom: 12 }}>
+          <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredient
+        </Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeIngredientEditor} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveIngredientEditor} disabled={!ingredientItems.length} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      {/* Row grams sheet: mirrors RecipeEditorScreen's edit sheet minus the
+          rename field and trash button (removal lives on the list rows
+          only, so the z-100 confirm portal is never covered by z-200). */}
+      <Sheet open={!!ingrEditItem} onClose={closeIngrEdit} title={ingrEditItem?.foodName || 'Amount'} titleColor="var(--accent)" zIndex={200}>
+        <Field label="Amount (g)" style={{ marginBottom: 16 }}>
+          <input value={ingrEditGrams} onChange={e => setIngrEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+        </Field>
+        {ingrEditPreview && (
+          <FdMacroPreview calories={ingrEditPreview.calories} protein={ingrEditPreview.protein} carbs={ingrEditPreview.carbs} fat={ingrEditPreview.fat}
+            sugar={ingrEditPreview.sugar} satFat={ingrEditPreview.satFat} sodiumMg={ingrEditPreview.sodiumMg} />
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeIngrEdit} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveIngrEdit} disabled={!(fdNum(ingrEditGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      <FdIngredientPicker open={ingredientPickerOpen} onClose={() => setIngredientPickerOpen(false)} onAdd={addIngredientsToEntry} store={store} />
     </Screen>
     {/* Transient toast for the last applied split OR block-recipe combine
         (see splitUndo/undoSplit), rendered the same "fixed footer sibling of
@@ -6197,7 +6683,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
                         <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
-                        <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
+                        <div className="num" style={{ fontSize: 9, color: UI.inkFaint }}>:00</div>
                       </div>
                       <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
                         <span style={fdEntryName}>
@@ -7075,9 +7561,16 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
           non-null, so if this tree were gated on `capturing` the ref would
           still be null at that exact check, same reasoning as the Food Log
           poster above it in this file). No rename affordance, no Plan-mode
-          controls: this is a static image, not another interactive surface. */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
-        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          controls: this is a static image, not another interactive surface.
+
+          Portalled to <body> for the same reason the recipe poster is (see
+          RecipeEditorScreen): this sheet opens with `animation: sheet-up`, a
+          translateY, and html2canvas clones into a fresh iframe where that
+          animation restarts from zero, so measuring happens against a moving
+          ancestor. Out here there is nothing above the poster to move. */}
+      {ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative', background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none' }}>
           {_shotGridOn && <SvgGrid />}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
             <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
@@ -7133,7 +7626,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
             </div>
           </div>
         </div>
-      </div>
+        </div>,
+        document.body
+      )}
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {stockBackfillError && inventoryList.length > 0 && (
           // Companion to the backfill fetch's catch above: a failed fetch
@@ -7419,6 +7914,114 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   );
 }
 
+// ── Recipe poster (the shareable image, RecipeEditorScreen's camera button) ──
+//
+// Self-contained by design: it does not reuse FdMacroHero, Bezel, FdMacroBits
+// or FdIngredientBadge, and it styles everything through plain objects rather
+// than the .display/.micro/.num classes, so the exported card can be tuned
+// without touching how those read anywhere else in the app.
+//
+// The type IS the app's, though. This briefly ran on system fonts while the
+// export bug was still being hunted, on the theory that the clone html2canvas
+// measures in could be laying out in a fallback while the canvas painted the
+// real family. It could not: the actual cause was an animated ancestor (see
+// shotFreezeAnimations in screens-lib.jsx), and captureNodeAsPng now waits for
+// the clone's fonts by comparing a rendered probe against the live document,
+// so the card is back on Big Shoulders Display / Inter / JetBrains Mono like
+// every other surface.
+const RCP_UI = UI.fontUi;
+const RCP_MONO = UI.fontNum;
+// Mirrors the .display class (see index.html): same family, weight and tracking.
+const rcpTitle = { fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' };
+// Mirrors .micro; the accent variant below bumps the weight the way .micro-gold does.
+const rcpMicro = { fontFamily: RCP_UI, fontSize: 9, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: UI.inkFaint };
+const rcpNum = { fontFamily: RCP_MONO, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' };
+const RCP_MACRO_LABELS = [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']];
+
+function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, logo, logoStyle, grid }) {
+  return (
+    // Same sheet geometry as the Plan poster, at the width the Food Log and
+    // Shopping List posters use. Asymmetric padding on purpose: the card opens
+    // on a full-width gold hairline, which needs room above it to read as a
+    // rule rather than a cropped edge, and it ends on an ingredient row that
+    // already carries its own padding, so the image should stop just past it.
+    <div ref={captureRef} style={{
+      padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
+      background: UI.bg, fontFamily: RCP_UI, color: UI.ink, textShadow: 'none',
+    }}>
+      {/* The live CSS grid never survives html2canvas, so redraw it with an
+          SVG pattern instead when the grid toggle is on (see SvgGrid). */}
+      {grid && <SvgGrid />}
+      {/* Watermark: centered, faint, full poster. Needs its own stacking
+          context below the real content, hence the zIndex:1 sibling. */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src={logo} data-shot-avatar="1" style={logoStyle} />
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ ...rcpTitle, fontSize: 26, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name.trim() || 'Recipe'}
+          </div>
+          <div style={{ ...rcpMicro, fontWeight: 600, color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
+        </div>
+
+        <BracketFrame gold style={{ padding: 22, marginTop: 18, textAlign: 'center' }}>
+          <div style={{ ...rcpMicro, letterSpacing: '0.08em', fontSize: 15, fontWeight: 700, color: UI.gold, marginBottom: 6 }}>Whole batch</div>
+          <div style={{ ...rcpNum, fontSize: 42, fontWeight: 300, color: UI.gold, lineHeight: 1.1 }}>
+            {Math.round(totals.calories || 0)}<span style={{ fontFamily: RCP_UI, fontSize: 15, fontWeight: 400, color: UI.inkFaint }}> kcal</span>
+          </div>
+          <div style={{ ...rcpNum, fontSize: 13, fontWeight: 700, marginTop: 10 }}>
+            {RCP_MACRO_LABELS.map(([k, label], i) => (
+              <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: i ? 14 : 0 }}>{label} {Math.round(totals[k] || 0)}g</span>
+            ))}
+          </div>
+        </BracketFrame>
+
+        <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 16 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+        <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 14, marginBottom: 12 }}>Ingredients · prep order</div>
+
+        {items.map((i, idx) => {
+          const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+          return (
+            // Translucent fill rather than fdEntryRow's opaque one, so the
+            // watermark reads through the cards instead of only in the gaps.
+            <div key={i.id} style={{
+              background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, padding: '10px 12px', marginBottom: 6, overflow: 'hidden',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                <span style={{
+                  ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
+                  display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
+                  background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
+                }}>{idx + 1}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
+                  <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
+                    {i.quantityG}g<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
+                    {RCP_MACRO_LABELS.map(([k, label]) => (
+                      <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* Prep note: a shared card is exactly the "someone else is
+                  cooking this" case the note exists for. */}
+              {i.note && (
+                <div style={{ marginTop: 8, paddingTop: 7, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                  <span style={{ fontSize: 11, color: UI.inkSoft, lineHeight: 1.45 }}>{String(i.note)}</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Circular position badge (1, 2, 3, ...) reflecting an ingredient's place in
 // the recipe's prep order (array order). Shared by the ingredient list above
 // and Cooking Mode's one-at-a-time hero card below, so the same number means
@@ -7666,113 +8269,76 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             </button>
           </div>
         } />
-      <div ref={captureRef} style={{
-        padding: capturing ? '20px 22px 24px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
-        display: 'flex', flexDirection: 'column', gap: 16, position: 'relative',
-        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
+      {/* Poster tree, built to the Plan poster's shape (screens-schedule.jsx):
+          a dedicated full-screen scroll container, one fixed-width sheet
+          inside it, always mounted and only ever hidden via display:none.
+          Never conditionally rendered on `capturing` itself: captureNodeAsPng
+          only flips capturing to true AFTER checking captureRef.current is
+          non-null, so a tree gated on `capturing` would still be unmounted at
+          that exact check. That dedicated container is also what
+          captureNodeAsPng expects, since it expands captureRef's own
+          parentElement around the capture.
+
+          Portalled to <body> rather than left in this screen, which is the one
+          thing the working posters had and this one did not. Session detail,
+          plan, food log and water all export from a plain tab Screen. The two
+          that came out wrong, this one and the Shopping List, are the two that
+          live in a full-screen sheet: `position: fixed` plus
+          `animation: sheet-up`, i.e. a translateY on an ancestor, which is
+          exactly the axis every reported artifact was on. html2canvas clones
+          the document into a fresh iframe where that animation starts over
+          from zero, and it measures the crop, then every box, then every text
+          run against an ancestor that is still moving. Out here the poster's
+          ancestry is just <body>, so there is nothing above it to move,
+          transform or scroll. It inherits nothing from the sheet either, which
+          is fine: RecipePoster sets its own font, colour and background. */}
+      {ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+          <RecipePoster captureRef={captureRef} name={name} items={items} portions={portions} totals={totals} netCarbs={netCarbs}
+            logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
+        </div>,
+        document.body
+      )}
+
+      <div style={{
+        padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)',
+        display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         {confirmEl}
 
-        {/* CSS grid texture never survives html2canvas, SvgGrid replaces it
-            for the export, same as SessionDetailScreen/SessionCompareScreen. */}
-        {capturing && _shotGridOn && <SvgGrid />}
-        {/* Screenshot background watermark, centered, faint, full document. */}
-        {capturing && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
-          </div>
-        )}
-
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {capturing ? (
-          <div style={{ marginBottom: -4 }}>
-            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div className="display" style={{ fontSize: 26 }}>{name.trim() || 'Recipe'}</div>
-              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
-            </div>
-            <div className="knurl" />
-          </div>
-        ) : (
-          <Field label="Name">
-            <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
-          </Field>
-        )}
+        <Field label="Name">
+          <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
+        </Field>
 
         <FdMacroHero label="Whole batch" calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
 
-        {capturing ? (
-          <div className="micro" style={{ textAlign: 'center' }}>{portions} portion{portions === 1 ? '' : 's'}</div>
-        ) : (
-          <div>
-            <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
-            </div>
+        <div>
+          <div className="micro" style={{ marginBottom: 10, textAlign: 'center' }}>Portions</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
           </div>
-        )}
+        </div>
 
         {/* Optional: unlocks logging this recipe by grams of the finished
             dish instead of only by portions, useful for batch cooking where
             weighing out a serving is more natural than a portion fraction
             (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
             Never auto-filled from the ingredient total below: cooking loses
-            or gains water weight, so the two numbers are rarely the same.
-            Editing chrome, not part of the shareable card: hidden in screenshot mode. */}
-        {!capturing && (
-          <Field label="Cooked weight (g), optional">
-            <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
-              placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
-              Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
-            </div>
-          </Field>
-        )}
+            or gains water weight, so the two numbers are rarely the same. */}
+        <Field label="Cooked weight (g), optional">
+          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+            placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
+            Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
+          </div>
+        </Field>
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
           {items.length === 0 ? (
-            !capturing && (
-              <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
-                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
-              </Btn>
-            )
-          ) : capturing ? (
-            // Plain read-only rows for the shareable card: no drag handle,
-            // no edit/note/delete affordances, nothing interactive to show.
-            // fdEntryRow's normal background is opaque UI.bgInset, translucent
-            // here (no backdrop-filter, that silently no-ops under html2canvas
-            // same as the CSS grid does) so the centered watermark bleeds
-            // through the cards instead of sitting hidden behind them.
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map((i, idx) => (
-                <div key={i.id} style={{ ...fdEntryRow, background: 'rgba(var(--bg-rgb),0.5)', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                    <FdIngredientBadge n={idx + 1} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={fdEntryName}>{i.foodName}</div>
-                      <div style={fdEntryMeta}>
-                        {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
-                        <span style={fdMetaDivider} />
-                        <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                      </div>
-                    </div>
-                  </div>
-                  {/* Prep note, same inline style as RecipeShareSheet's own
-                      preview: a shared card is exactly the "someone else is
-                      cooking this" case that note exists for, whoever it's
-                      shared with gets the same prep guidance, not just a
-                      bare ingredient list. */}
-                  {i.note && (
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 6, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                      <i className="fa-solid fa-note-sticky" style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{String(i.note)}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
+            </Btn>
           ) : (
             // Array order is the deliberate prep order (the order to add
             // ingredients while cooking, see Cooking Mode below), so this list
@@ -7804,8 +8370,6 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
               ))}
             </ReorderList>
           )}
-        </div>
-
         </div>
       </div>
 
@@ -7888,6 +8452,71 @@ function fdWriteCookingDraft(draft) {
 }
 function fdClearCookingDraft() {
   try { localStorage.removeItem('logbook-cooking-draft'); } catch (_) {}
+}
+
+// ── Intermittent fasting: per-device cycle state (never synced) ────────────
+// Mirror of the cooking draft: timestamps are absolute ISO strings, so the
+// phase is always derived from (now - start), never an incrementing counter,
+// and a reload or app kill cannot desync the timer. Shape:
+// { fastStartedAt: ISO|null, eatStartedAt: ISO|null }; both null = idle
+// (written state never stores that, idle = key absent, cleared on Reset).
+function fdReadFastingState() {
+  try {
+    const raw = localStorage.getItem('logbook-fasting-state');
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    const fastStartedAt = typeof s?.fastStartedAt === 'string' ? s.fastStartedAt : null;
+    const eatStartedAt = typeof s?.eatStartedAt === 'string' ? s.eatStartedAt : null;
+    return fastStartedAt ? { fastStartedAt, eatStartedAt } : null;
+  } catch (_) { return null; }
+}
+function fdWriteFastingState(state) {
+  try { localStorage.setItem('logbook-fasting-state', JSON.stringify(state)); } catch (_) {}
+}
+function fdClearFastingState() {
+  try { localStorage.removeItem('logbook-fasting-state'); } catch (_) {}
+}
+
+// Pure phase derivation. state is fdReadFastingState's shape, protocol one of
+// LB.FD_FASTING_PRESETS, nowMs epoch ms. No eatStartedAt yet = the eating
+// window auto-opens at fastStartedAt + fastH; "End fast" sets it earlier.
+// eatStartMs/eatEndMs are absolute boundaries the countdown and the timeline
+// tint both read, so they are derived once here.
+function fdFastingPhase(state, protocol, nowMs) {
+  if (!state || !protocol) return { phase: 'idle' };
+  const fastStartMs = Date.parse(state.fastStartedAt);
+  if (!Number.isFinite(fastStartMs)) return { phase: 'idle' };
+  const plannedEatMs = fastStartMs + protocol.fastH * 3600 * 1000;
+  const rawEatMs = state.eatStartedAt ? Date.parse(state.eatStartedAt) : NaN;
+  const eatStartMs = Number.isFinite(rawEatMs) ? rawEatMs : plannedEatMs;
+  const eatEndMs = eatStartMs + protocol.eatH * 3600 * 1000;
+  if (nowMs < eatStartMs) return { phase: 'fasting', fastStartMs, eatStartMs, eatEndMs };
+  if (nowMs < eatEndMs)  return { phase: 'eating',  fastStartMs, eatStartMs, eatEndMs };
+  return { phase: 'complete', fastStartMs, eatStartMs, eatEndMs };
+}
+// Does today's wall-clock hour slot h (0-23) fall inside the eating window?
+// Absolute-overlap test, not hour-of-start math: a window that crosses
+// midnight (fast started yesterday, or a late OMAD) still tints the correct
+// hours of today. Slot is [hh:00, hh+1:00) local time, matching how the
+// timeline and isNow already think in local wall-clock hours.
+function fdFastingEatHourTint(eatStartMs, eatEndMs, h, dateStr) {
+  const slotStart = new Date(dateStr + 'T' + String(h).padStart(2, '0') + ':00:00').getTime();
+  return eatStartMs < slotStart + 3600 * 1000 && eatEndMs > slotStart;
+}
+// Resolves the stored fasting_protocol setting into a preset object. The
+// custom long fast keeps its hours in the id itself ('custom:96'), so the
+// base 'custom' preset is just the 48h default until the user sets hours.
+// Time/countdown formatting lives in LB.fmtHHMM / LB.fmtClock (shared with
+// the meds snooze hint), not in this file.
+function fdResolveFastingProtocol(setting) {
+  if (!setting) return null;
+  const base = LB.FD_FASTING_PRESETS.find(p => p.id === setting);
+  if (base) return base;
+  if (typeof setting === 'string' && setting.startsWith('custom:')) {
+    const h = LB.fastingCustomHours(setting);
+    return { id: 'custom', label: `Custom ${h}h`, fastH: h, eatH: 0, long: true, custom: true };
+  }
+  return null;
 }
 
 // Diff between the wizard's final working items and the recipe's own
@@ -8514,13 +9143,13 @@ const FD_PICKER_TABS = [
 // not a hit, not a gap in the data.
 function FdStatsBody({ store }) {
   const [period, setPeriod] = useStateFd(30);
-  const [from, setFrom] = useStateFd(fdShiftDate(LB.todayISO(), -29));
+  const [from, setFrom] = useStateFd(LB.shiftDate(LB.todayISO(), -29));
   const [to, setTo] = useStateFd(LB.todayISO());
   const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
 
   const range = useMemoFd(() => {
     if (period === 'custom') return (from > to) ? { from: to, to: from } : { from, to };
-    return { from: fdShiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
+    return { from: LB.shiftDate(LB.todayISO(), -(period - 1)), to: LB.todayISO() };
   }, [period, from, to]);
 
   const s = useMemoFd(() => {
@@ -9354,6 +9983,75 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
     </div>
   );
 }
+
+// Live fasting card. The 1s tick is this leaf's own state, so the countdown
+// re-renders only here, never the whole FoodScreen. The protocol seg writes
+// the synced setting; the cycle itself stays in localStorage via the
+// handlers FoodScreen passes in. Compact on purpose: one countdown line,
+// one sub-line, two seg rows (daily rhythms + long fasts), one action.
+function FdFastingCard({ state, protocol, onProtocol, onStart, onEnd, onReset }) {
+  const [, tick] = useStateFd(0);
+  const nowMs = Date.now();
+  const ph = fdFastingPhase(state, protocol, nowMs);
+  // The 1s tick only runs while a countdown is actually live (fasting or
+  // eating phase): idle and complete render static text, so a permanently
+  // open Food tab with no active fast would otherwise re-render this card
+  // ~86k times a day for nothing.
+  const live = ph.phase === 'fasting' || ph.phase === 'eating';
+  useEffectFd(() => {
+    if (!live) return;
+    const t = setInterval(() => tick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+  // eatH 0 = long fast, no eating window: the cycle ends at the target time
+  // and the texts drop the window vocabulary.
+  const isLong = protocol.eatH === 0;
+  const main = ph.phase === 'fasting' ? `Fasting · ${LB.fmtClock(ph.eatStartMs - nowMs)} left`
+    : ph.phase === 'eating' ? `Eating · ${LB.fmtClock(ph.eatEndMs - nowMs)} left`
+    : ph.phase === 'complete' ? (isLong ? `Complete · ${protocol.label} fast done` : 'Complete · Start your next fast')
+    : 'Ready to fast';
+  const sub = ph.phase === 'fasting'
+    ? (isLong
+      // LB.fmtISO yields the LOCAL calendar date, never the UTC one (which is
+      // off by one day for fasts ending near local midnight).
+      ? `Target ${LB.fmtDayLabel(LB.fmtISO(new Date(ph.eatStartMs)), { day: 'numeric', month: 'short' })} · ${LB.fmtHHMM(ph.eatStartMs)}`
+      : `Eating window opens at ${LB.fmtHHMM(ph.eatStartMs)}`)
+    : ph.phase === 'eating' ? `Eating window ends at ${LB.fmtHHMM(ph.eatEndMs)}`
+    : ph.phase === 'complete' ? 'Tap Start fast to begin the next one'
+    : 'Tap Start fast after your last meal';
+  const segRow = (list, caption) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {caption && <div className="micro" style={{ color: UI.inkFaint }}>{caption}</div>}
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+        {list.map(p => (
+          <button key={p.id} onClick={() => onProtocol(p.id)} style={fdSegBtn(protocol.id === p.id)}>{p.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 6, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span className="micro" style={{ color: 'var(--accent)' }}>Fasting · {protocol.label}</span>
+        {state?.fastStartedAt && (
+          <button onClick={onReset} aria-label="Reset fasting cycle" style={fdIconBtn(24)}>
+            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10 }} />
+          </button>
+        )}
+      </div>
+      <div className="num" style={{ fontSize: 26, lineHeight: 1.1, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>{main}</div>
+      <div className="micro" style={{ textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>{sub}</div>
+      {segRow(LB.FD_FASTING_PRESETS.filter(p => !p.long), null)}
+      {segRow(LB.FD_FASTING_PRESETS.filter(p => p.long), 'Long fast')}
+      {ph.phase === 'fasting' ? (
+        <Btn onClick={onEnd} style={{ width: '100%' }}>{isLong ? 'Break fast' : 'End fast'}</Btn>
+      ) : ph.phase === 'idle' || ph.phase === 'complete' ? (
+        <Btn onClick={onStart} style={{ width: '100%' }}>Start fast</Btn>
+      ) : null}
+    </div>
+  );
+}
+
 // Plan Mode projection: still-to-eat macros vs. the full logged+planned
 // projection, each in its own centered column. Sits under the real totals as
 // a lighter, dashed-topped table so it reads as a forecast, not part of the
@@ -9389,7 +10087,7 @@ function FdProjectionLine({ macros, goalCalories, adherence }) {
           property of the full projection, not of one column. */}
       {adherence != null && (
         <div style={{ marginTop: 8, textAlign: 'center', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>
-          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkGhost }}> / {goalCalories} kcal</span>{' · '}</>}
+          {goalCalories != null && <>{Math.round(macros.calories.total)}<span style={{ color: UI.inkFaint }}> / {goalCalories} kcal</span>{' · '}</>}
           <span style={{ fontWeight: 700, color: fdAdherenceColor(adherence) }}>{adherence}%</span>
         </div>
       )}
@@ -9799,7 +10497,7 @@ function FdExtrasRow({ sugar, satFat, sodiumMg, style }) {
 function FdMacroGhosts({ protein, carbs, fat, size = 12, style }) {
   const cell = (letter, v) => (
     <span className="num" style={{ fontSize: size, fontWeight: 600, color: UI.inkSoft }}>
-      <span style={{ color: UI.inkGhost, fontSize: 10 }}>{letter}</span> {Math.round(v || 0)}g
+      <span style={{ color: UI.inkFaint, fontSize: 10 }}>{letter}</span> {Math.round(v || 0)}g
     </span>
   );
   return (
