@@ -8501,6 +8501,9 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     onSave({ name: trimmed, items: finalItems, portions, cookedWeightG: fdNum(cookedWeightG) });
   }
   const canSave = !!(name.trim() && items.length);
+  // Run list for the step layout below (badge ordinals, rail, and the
+  // instruction field that renders under each run's last row).
+  const steps = fdBuildSteps(items);
 
   // Same html2canvas flow as SessionDetailScreen/SessionCompareScreen's own
   // takeScreenshot. The watermark here is a full-page centered background
@@ -8613,12 +8616,24 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             // the plan editor's own item list (screens-schedule.jsx).
             <ReorderList onReorder={reorderItems} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {items.map((i, idx) => {
-                // A step starts at a row whose stepId differs from its
-                // predecessor's; that row hosts the instruction field.
+                // Step membership is read top-down: a step starts at a row
+                // whose stepId differs from its predecessor's (that row
+                // carries the toggle), and ends at the row before the next
+                // step start (or the list end). The instruction field sits
+                // under the step's LAST row, so the eye reads the step's
+                // ingredients first and the instruction second, the order
+                // you actually prep them. The stored stepLabel stays on the
+                // run's head item (fdBuildSteps' label contract), the field
+                // below just renders and edits it from the run's tail.
                 const isStepHead = !!i.stepId && (idx === 0 || items[idx - 1].stepId !== i.stepId);
+                const isStepLast = !!i.stepId && (idx === items.length - 1 || items[idx + 1].stepId !== i.stepId);
+                const stepHeadItem = isStepLast ? items[steps.find(s => s.startIdx + s.count - 1 === idx)?.startIdx ?? idx] : null;
                 return (
                   <div key={i.id} data-reorder-item="true" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={fdEntryRow}>
+                    {/* Accent rail on every member of a step makes the
+                        grouping legible at a glance, not just via the badge
+                        numbers; ungrouped rows keep fdEntryRow as-is. */}
+                    <div style={i.stepId ? { ...fdEntryRow, borderLeft: '2px solid var(--accent)' } : fdEntryRow}>
                       <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
                       <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
                         <i className="fa-solid fa-list-ol" style={{ fontSize: 11, color: isStepHead ? 'var(--accent)' : UI.inkFaint }} />
@@ -8642,12 +8657,15 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                         <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                       </button>
                     </div>
-                    {isStepHead && (
-                      // Rides along with its row when dragged (it lives in
-                      // the data-reorder-item wrapper, not the row itself),
-                      // and the drag engine ignores it as a drag source.
+                    {isStepLast && stepHeadItem && (
+                      // Reads and writes the run head's stored stepLabel
+                      // (the label contract lives there; only the editor
+                      // positions the field at the run's tail). Rides along
+                      // with its row when dragged (it lives in the
+                      // data-reorder-item wrapper, not the row itself), and
+                      // the drag engine ignores it as a drag source.
                       <div data-reorder-ignore="true" style={{ paddingLeft: 66, paddingRight: 8, marginTop: -2 }}>
-                        <input value={i.stepLabel || ''} onChange={e => setStepLabel(i.id, e.target.value)} type="text"
+                        <input value={stepHeadItem.stepLabel || ''} onChange={e => setStepLabel(stepHeadItem.id, e.target.value)} type="text"
                           placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
                       </div>
                     )}
