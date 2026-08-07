@@ -136,6 +136,68 @@ function fdScaleEntry(e, scale) {
 function fdSortIngredientsByQty(items) {
   return [...(items || [])].sort((a, b) => (b.quantityG || 0) - (a.quantityG || 0));
 }
+// Scales one recipe item by the same factor on every field, mirroring
+// saveEditItem's math (macros round to one decimal, null stays null: "source
+// does not report it" must not become 0). Two deliberate divergences from
+// that sheet, both to keep the exploded rows consistent with every OTHER
+// kcal surface in this file:
+// - calories is recomputed from the scaled macros with the CURRENT netCarbs
+//   setting (LB.caloriesFromMacros), never scaled from the stored field:
+//   the Recipes-tab row, the editor's batch hero, Cooking Mode and the
+//   log-time snapshot all derive kcal from macros, so scaling the stored
+//   value would make the explode sheet visibly disagree with the row above
+//   it whenever that field is stale (netCarbs toggled after staging,
+//   hand-typed calories on a custom item, share-adopted rows).
+// - a weight-bearing ingredient floors at 1g instead of rounding to 0g:
+//   a 0g row would stage fine but then be un-rescalable, saveEditItem
+//   requires quantityG > 0 and would silently no-op forever on it.
+function fdScaleRecipeItem(i, factor, netCarbs) {
+  const protein = fdRound1((i.protein || 0) * factor);
+  const carbs = fdRound1((i.carbs || 0) * factor);
+  const fat = fdRound1((i.fat || 0) * factor);
+  const fiber = i.fiber != null ? fdRound1(i.fiber * factor) : null;
+  return {
+    ...i,
+    quantityG: i.quantityG > 0 ? Math.max(1, Math.round((i.quantityG || 0) * factor)) : Math.round((i.quantityG || 0) * factor),
+    calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
+    protein, carbs, fat, fiber,
+    sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
+    satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
+    sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
+  };
+}
+// "Add a recipe to a recipe": flattens one recipe into its ingredient rows,
+// each scaled by `factor` (chosen portions / recipe.portions, or chosen
+// grams / cookedWeightG). An item that is itself a recipe (source 'recipe'
+// with a recipeId) is exploded one level deeper, scaled relative to its own
+// raw ingredient grams, so the sub-recipe contributes its parts, not a
+// single anonymous row. Defensive today: no writer of recipe.items currently
+// puts recipeId on an item (the block-fold copies only source), so that
+// branch is reachable only if one ever does; a source:'recipe' item without
+// a resolvable recipeId falls through to the plain scaled leaf, correctly.
+// seenIds is a path-based cycle guard: a recipe containing itself (directly
+// or transitively) can never recurse forever, but the SAME sub-recipe
+// referenced from two different parents is still exploded both times, the
+// guard copies per recursion level instead of blacklisting globally.
+function fdExplodeRecipeItems(recipe, factor, foodRecipes, seenIds, netCarbs) {
+  const out = [];
+  (recipe.items || []).forEach(i => {
+    if (i.source === 'recipe' && i.recipeId && !(seenIds || new Set()).has(i.recipeId)) {
+      const sub = (foodRecipes || []).find(r => r.id === i.recipeId);
+      if (sub && (sub.items || []).length) {
+        const subRawGrams = sub.items.reduce((a, si) => a + (si.quantityG || 0), 0);
+        if (subRawGrams > 0) {
+          const seen = new Set(seenIds || []);
+          seen.add(i.recipeId);
+          out.push(...fdExplodeRecipeItems(sub, ((i.quantityG || 0) * factor) / subRawGrams, foodRecipes, seen, netCarbs));
+          return;
+        }
+      }
+    }
+    out.push(fdScaleRecipeItem(i, factor, netCarbs));
+  });
+  return out;
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -8138,9 +8200,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // FdIngredientPicker only ever hands back a finished, already-quantified
   // batch (its own "Add N ingredients" button), never a single item.
   // originalFoodName is stamped here, once, so a later rename (see editName
-  // above) has something fixed to revert to.
+  // above) has something fixed to revert to. `|| item.foodName` lets an
+  // exploded sub-recipe ingredient (confirmExplodeRecipe) keep the true
+  // original name it carried inside its own recipe, instead of stamping its
+  // possibly already-renamed foodName as if it were the original.
   function addItems(newItems) {
-    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.foodName }))]);
+    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.originalFoodName || item.foodName }))]);
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
@@ -8417,7 +8482,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
         </div>
       </Sheet>
 
-      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItems} store={store} />
+      {/* showRecipes enables the picker's Recipes tab, which explodes a whole
+          other recipe into scaled ingredient rows (see fdExplodeRecipeItems);
+          excludeRecipeId keeps this very recipe out of that list, a recipe
+          cannot include itself. The Log-tab and Cooking Mode call sites pass
+          neither and keep the tab hidden. */}
+      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItems} store={store} showRecipes excludeRecipeId={recipe?.id} />
     </Screen>
   );
 }
@@ -9285,7 +9355,12 @@ function FdStatsBody({ store }) {
 // stages a second row, recipes have no dedup rule (e.g. "2 eggs" as two
 // separate 1-egg picks is fine). Correcting an already-committed ingredient
 // afterwards is RecipeEditorScreen's own per-row edit, not this sheet's job.
-function FdIngredientPicker({ open, onClose, onAdd, store }) {
+// showRecipes (RecipeEditorScreen only, see its call site): adds a "Recipes"
+// tab that lets a whole existing recipe be added as ingredients, exploded
+// into its scaled rows by fdExplodeRecipeItems (never as a single opaque
+// row). excludeRecipeId keeps the recipe currently being edited out of that
+// list, a recipe cannot include itself.
+function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeRecipeId }) {
   const [confirmEl, confirm] = useConfirm();
   const [pickTab, setPickTab] = useStateFd('search');
   const [query, setQuery] = useStateFd('');
@@ -9309,6 +9384,14 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   const [qtyG, setQtyG] = useStateFd('');
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
+  // The recipe currently being exploded into ingredients (Recipes tab), or
+  // null while browsing. Same Portions/Grams two-mode shape as FoodScreen's
+  // recipeLogPrompt, so the amount dialed here means exactly what it means
+  // when logging that recipe directly.
+  const [explodeRecipe, setExplodeRecipe] = useStateFd(null);
+  const [explodeMode, setExplodeMode] = useStateFd('portions');
+  const [explodePortions, setExplodePortions] = useStateFd(1);
+  const [explodeGramsStr, setExplodeGramsStr] = useStateFd('');
   // Same All/Zane/OFF/USDA filter the main Search tab has, shown only once a
   // search has run (see the template picker for the same reasoning).
   const [pickSource, setPickSource] = useStateFd(null);
@@ -9327,6 +9410,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
+    setExplodeRecipe(null); setExplodeMode('portions'); setExplodePortions(1); setExplodeGramsStr('');
     setScanPickerOpen(false); setScanOpen(false); setLabelScanning(false); setLabelError(null);
   }, [open]);
 
@@ -9517,6 +9601,101 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setStaged(list => list.filter(i => i.tempId !== tempId));
   }
 
+  // ── Recipes tab: explode an existing recipe into its ingredient rows ──
+  // Alphabetical like favoritesSorted; the recipe currently being edited
+  // (excludeRecipeId) and empty recipes are filtered out, there is nothing
+  // to explode in either.
+  const recipesSorted = useMemoFd(() => (store.foodRecipes || [])
+    .filter(r => r.id !== excludeRecipeId && (r.items || []).length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name)), [store.foodRecipes, excludeRecipeId]);
+  function openExplodeRecipe(r) {
+    setExplodeRecipe(r);
+    setExplodeMode('portions');
+    setExplodePortions(1);
+    setExplodeGramsStr('');
+  }
+  function closeExplodeSheet() {
+    setExplodeRecipe(null); setExplodeMode('portions'); setExplodePortions(1); setExplodeGramsStr('');
+  }
+  // Carries the current amount across when the Portions/Grams toggle flips,
+  // same two-way conversion recipeLogPrompt uses (fdGramsToPortions /
+  // fdPortionsToGrams).
+  function onExplodeModeChange(id) {
+    if (!explodeRecipe || explodeMode === id) return;
+    if (id === 'grams') {
+      setExplodeGramsStr(String(Math.max(0, Math.round(fdPortionsToGrams(explodePortions, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1)))));
+    } else {
+      setExplodePortions(Math.max(0.5, Math.round(fdGramsToPortions(fdNum(explodeGramsStr) || 0, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1) * 2) / 2));
+    }
+    setExplodeMode(id);
+  }
+  // The scaling factor the whole sub-recipe is exploded with, or null while
+  // no valid amount is dialed in (guards the 0g phantom-entry class).
+  const explodeFactor = useMemoFd(() => {
+    if (!explodeRecipe) return null;
+    if (explodeMode === 'grams') {
+      const g = fdNum(explodeGramsStr);
+      return g > 0 && explodeRecipe.cookedWeightG > 0 ? g / explodeRecipe.cookedWeightG : null;
+    }
+    return explodePortions > 0 ? explodePortions / (explodeRecipe.portions || 1) : null;
+  }, [explodeRecipe, explodeMode, explodePortions, explodeGramsStr]);
+  const explodePreview = useMemoFd(() => {
+    if (!explodeRecipe || !explodeFactor) return null;
+    const exploded = fdExplodeRecipeItems(explodeRecipe, explodeFactor, store.foodRecipes, null, !!store.settings?.netCarbs);
+    return {
+      count: exploded.length,
+      // Sum of the per-row rounded calories fdScaleRecipeItem stores, i.e.
+      // EXACTLY what the Picked header (stagedTotals) shows the moment these
+      // rows are staged: a round-of-sum preview here would disagree with
+      // that header by up to ~0.5 kcal per ingredient right in the middle
+      // of the flow (round-of-sum vs sum-of-rounds). Within +-1 of the
+      // round-of-sum figures on the Recipes-tab row and the editor's batch
+      // hero, the app's documented rounding tolerance for this class.
+      calories: Math.round(exploded.reduce((a, i) => a + (i.calories || 0), 0)),
+    };
+  }, [explodeRecipe, explodeFactor, store.foodRecipes]);
+  // "Add N ingredients" on the explode sheet: the exploded rows join staged
+  // like any other pick, so the batch totals above and the commit contract
+  // below need zero changes. Food rows only get ensureFoodCached fired for
+  // foodIds this account has never logged, favorited or already tracked
+  // here (the explode might have come from a share-adopted recipe whose
+  // foods were never cached locally). Everything else is skipped: a recipe
+  // built in this editor had every ingredient cached at pick time
+  // (confirmStageItem), and each cache call is a full edge-function round
+  // trip that decrements the shared daily food_lookup quota even on a
+  // cache hit, so firing it for every row would burn the quota on no-ops.
+  function confirmExplodeRecipe() {
+    if (!explodeRecipe || !explodeFactor) return;
+    const exploded = fdExplodeRecipeItems(explodeRecipe, explodeFactor, store.foodRecipes, null, !!store.settings?.netCarbs);
+    if (!exploded.length) return;
+    setStaged(list => [...list, ...exploded.map(i => {
+      const row = {
+        tempId: LB.uid(),
+        foodId: i.foodId ?? null, foodName: i.foodName, brand: i.brand ?? null, source: i.source ?? null,
+        quantityG: i.quantityG || 0, calories: i.calories || 0, protein: i.protein || 0, carbs: i.carbs || 0, fat: i.fat || 0,
+        fiber: i.fiber ?? null, sugar: i.sugar ?? null, satFat: i.satFat ?? null, sodiumMg: i.sodiumMg ?? null,
+      };
+      if (i.originalFoodName != null) row.originalFoodName = i.originalFoodName;
+      if (i.note != null) row.note = i.note;
+      return row;
+    })]);
+    // "Safely cached" evidence, same proxy the favorites cache-repair effect
+    // uses: a foodId that ever made it into foodLogs or foodFavorites was
+    // cached by the flow that wrote it. Deduped so the same foodId appearing
+    // in several exploded rows triggers exactly one cache call, if any.
+    const knownCached = new Set([
+      ...(store.foodLogs || []).map(l => l.foodId).filter(Boolean),
+      ...(store.foodFavorites || []).map(f => f.foodId).filter(Boolean),
+    ]);
+    const seenIds = new Set();
+    exploded.forEach(i => {
+      if (!i.foodId || !i.source || !i.foodId.startsWith(i.source + ':') || knownCached.has(i.foodId) || seenIds.has(i.foodId)) return;
+      seenIds.add(i.foodId);
+      ensureFoodCached({ source: i.source, sourceId: i.foodId.slice(i.source.length + 1), fromCache: false });
+    });
+    closeExplodeSheet();
+  }
+
   const recentPicks = useMemoFd(() => {
     // Sort by (date, time) first, exactly like recentFoodsAll: store.foodLogs
     // is not in date order (a backdated entry gets prepended), so the
@@ -9587,7 +9766,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       <Sheet open={open} onClose={requestClosePicker} title="Add ingredients" titleColor="var(--accent)">
         {confirmEl}
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 12 }}>
-          {FD_PICKER_TABS.map(t => (
+          {(showRecipes ? [...FD_PICKER_TABS, { id: 'recipes', label: 'Recipes' }] : FD_PICKER_TABS).map(t => (
             <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
           ))}
         </div>
@@ -9738,6 +9917,27 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
           )
         )}
 
+        {pickTab === 'recipes' && (
+          recipesSorted.length === 0 ? (
+            <div style={fdEmptyHint}>No other recipes yet. Build one in the editor and it will show up here.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+              {recipesSorted.map(r => (
+                <button key={r.id} onClick={() => openExplodeRecipe(r)} style={fdResultRow}>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={fdEntryName}>{r.name}</div>
+                    <div style={fdEntryMeta}>{(r.items || []).length} ingredients · {r.portions || 1} {r.portions === 1 ? 'portion' : 'portions'}</div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="num" style={{ fontSize: 12, color: UI.warn }}>{fdRecipeItemsCalories(r.items, !!store.settings?.netCarbs)} kcal</div>
+                    <div style={fdEntryMeta}>whole batch</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        )}
+
         {staged.length > 0 && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             <Bezel style={{ marginBottom: 10 }}>Picked ({staged.length})</Bezel>
@@ -9804,6 +10004,55 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             </div>
           </>
         )}
+      </Sheet>
+
+      {/* ── Explode sheet (Recipes tab): how much of the chosen recipe gets
+          unfolded into its ingredient rows. Same Portions/Grams toggle shape
+          as FoodScreen's recipeLogPrompt, including the cross-unit carry
+          (onExplodeModeChange) and the free-typed grams field with its
+          0g-guard (explodeFactor goes null). Sibling Sheet at zIndex 200,
+          same as the quantity step above. ── */}
+      <Sheet open={!!explodeRecipe} onClose={closeExplodeSheet} title={explodeRecipe?.name || 'Add recipe'} titleColor="var(--accent)" zIndex={200}>
+        {explodeRecipe && (() => {
+          const gramsCapable = explodeRecipe.cookedWeightG > 0;
+          const gramsModeOn = gramsCapable && explodeMode === 'grams';
+          return (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+              How much of {explodeRecipe.name}? Its ingredients are added individually, scaled to this amount.
+            </div>
+            {gramsCapable && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+                {[['portions', 'Portions'], ['grams', 'Grams']].map(([id, label]) => (
+                  <button key={id} onClick={() => onExplodeModeChange(id)} style={fdSegBtn(explodeMode === id)}>{label}</button>
+                ))}
+              </div>
+            )}
+            {gramsModeOn ? (
+              <Field label="Amount (g)" style={{ marginBottom: 20 }}>
+                <input value={explodeGramsStr} onChange={e => setExplodeGramsStr(fdDecimalFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                <Stepper value={explodePortions} step={0.5} min={0.5}
+                  suffix={explodePortions === 1 ? ' portion' : ' portions'}
+                  onChange={v => setExplodePortions(Math.max(0.5, Math.round(v * 2) / 2))} big />
+              </div>
+            )}
+            {explodePreview && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
+                <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{explodePreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{explodePreview.count} ingredient{explodePreview.count === 1 ? '' : 's'} added</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={closeExplodeSheet} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={confirmExplodeRecipe} disabled={!explodeFactor} style={{ flex: 2 }}>Add {explodePreview ? `${explodePreview.count} ingredient${explodePreview.count === 1 ? '' : 's'}` : 'ingredients'}</Btn>
+            </div>
+          </>
+          );
+        })()}
       </Sheet>
 
       {/* ── Barcode vs. label picker (opened by the search row's scan
