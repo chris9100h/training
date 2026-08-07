@@ -37,6 +37,28 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor
   );
 }
 
+// Shared look for the two week-overlay buttons (Deload / Cleanup) that sit
+// side by side under the active plan's day strip. Dashed and muted while idle,
+// solid and accent-tinted while that overlay is running. Both labels stay one
+// word so the pair fits a phone width; what each one actually does is spelled
+// out in the confirm/sheet the tap opens, not on the button.
+// The pair has to survive a 320px screen, where the outer 22px screen padding
+// plus the card's own 22px leaves ~112px per button. A full "CLEANUP · 3D"
+// wants a bit more than that, so the label truncates with an ellipsis instead
+// of being clipped mid-glyph; every width from ~375px up shows it whole.
+function overlayBtnStyle(active) {
+  return {
+    flex: 1, minWidth: 0, padding: '10px 6px', borderRadius: 6, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    background: active ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+    border: `1px ${active ? 'solid' : 'dashed'} ${active ? UI.goldSoft : UI.hairStrong}`,
+    color: active ? UI.gold : UI.inkSoft,
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+  };
+}
+const overlayBtnLabelStyle = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
 const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 
 // A plan flagged weekday (mode === 'weekday') can still surface a day with no
@@ -92,11 +114,13 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
       if (!await confirm('End the deload week and return to normal training?', { title: 'End deload', ok: 'End deload' })) return;
       await LB.endDeload(userId, store, setStore);
     } else {
-      if (store.statusMode) {
-        if (!await confirm(`This will end your ${store.statusMode} status. Start a deload week instead?`, { title: 'Start deload', ok: 'Start deload' })) return;
-      } else if (!await confirm('Train your normal plan at ~50% load for one cycle. Weights pre-fill light and this week is excluded from progression. Start now?', { title: 'Start deload week', ok: 'Start deload' })) {
-        return;
-      }
+      // The button only says "Deload" now, so the explanation lives here and
+      // has to show on BOTH paths, not just when no other status is running.
+      const what = 'Train your normal plan at ~50% load for one cycle. Weights pre-fill light and the week is excluded from progression.';
+      const msg = store.statusMode
+        ? `This will end your ${store.statusMode} status. ${what} Start it?`
+        : `${what} Start now?`;
+      if (!await confirm(msg, { title: 'Start deload week', ok: 'Start deload' })) return;
       await LB.startDeload(userId, store, setStore);
     }
   };
@@ -379,32 +403,24 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   );
                 })}
               </div>
-              <button onClick={toggleDeload} style={{
-                  width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  background: isDeload ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                  border: `1px ${isDeload ? 'solid' : 'dashed'} ${isDeload ? UI.goldSoft : UI.hairStrong}`,
-                  color: isDeload ? UI.gold : UI.inkSoft,
-                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-                }}>
-                  <i className={`fa-solid ${isDeload ? 'fa-arrow-rotate-left' : 'fa-battery-quarter'}`} style={{ fontSize: 12 }} />
-                  {isDeload
-                    ? (deloadRemaining != null ? `Deload active · ${deloadRemaining}d left · End` : 'Deload active · End')
-                    : 'Start deload week'}
+              {/* An active overlay reads from the fill + the reversed icon, and
+                  adds its days left where there is a countdown to show (flex
+                  plans end by session count, so they have none). Tapping an
+                  active one ends it, which the confirm spells out. */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button onClick={toggleDeload} style={overlayBtnStyle(isDeload)}>
+                  <i className={`fa-solid ${isDeload ? 'fa-arrow-rotate-left' : 'fa-battery-quarter'}`} style={{ fontSize: 12, flexShrink: 0 }} />
+                  <span style={overlayBtnLabelStyle}>
+                    {isDeload && deloadRemaining != null ? `Deload · ${deloadRemaining}d` : 'Deload'}
+                  </span>
                 </button>
-              <button onClick={toggleCleanup} style={{
-                  width: '100%', marginTop: 8, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  background: isCleanup ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                  border: `1px ${isCleanup ? 'solid' : 'dashed'} ${isCleanup ? UI.goldSoft : UI.hairStrong}`,
-                  color: isCleanup ? UI.gold : UI.inkSoft,
-                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-                }}>
-                  <i className={`fa-solid ${isCleanup ? 'fa-arrow-rotate-left' : 'fa-broom'}`} style={{ fontSize: 12 }} />
-                  {isCleanup
-                    ? (cleanupRemaining != null ? `Cleanup active · ${cleanupRemaining}d left · End` : 'Cleanup active · End')
-                    : 'Start cleanup week'}
+                <button onClick={toggleCleanup} style={overlayBtnStyle(isCleanup)}>
+                  <i className={`fa-solid ${isCleanup ? 'fa-arrow-rotate-left' : 'fa-broom'}`} style={{ fontSize: 12, flexShrink: 0 }} />
+                  <span style={overlayBtnLabelStyle}>
+                    {isCleanup && cleanupRemaining != null ? `Cleanup · ${cleanupRemaining}d` : 'Cleanup'}
+                  </span>
                 </button>
+              </div>
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
