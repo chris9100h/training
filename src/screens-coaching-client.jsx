@@ -133,8 +133,13 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
                 {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : clientStore.statusMode === 'cleanup' ? 'CLEANUP' : 'VACATION'}
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
-                  const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
                   const dateStr = since.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }).toUpperCase();
+                  // A cleanup week is pinned to the client's next cycle start,
+                  // so before that day there is no "since" and no day count:
+                  // the elapsed-days math would read 0d (or negative) while the
+                  // label claimed they were already in it.
+                  if (clientStore.statusMode === 'cleanup' && !LB.cleanupStarted(clientStore)) return ` → ${dateStr}`;
+                  const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
                   return ` · SINCE ${dateStr} (${days}d)`;
                 })()}
               </span>
@@ -835,8 +840,15 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                 const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : p.mode === 'cleanup' ? 'Cleanup' : 'Vacation';
                 const startDate = new Date(p.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
                 const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
+                // An open period that has not started yet (a cleanup pinned to
+                // the client's next cycle) has run for no days at all: the
+                // elapsed-days math would otherwise count backwards from a
+                // future start and print 0d or a negative.
+                const notStarted = !p.endedAt && p.mode === 'cleanup'
+                  && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt });
                 const days = p.endedAt
                   ? Math.round((new Date(p.endedAt) - new Date(p.startedAt)) / 86400000) + 1
+                  : notStarted ? 0
                   : Math.floor((Date.now() - new Date(p.startedAt).getTime()) / 86400000) + 1;
                 return (
                   <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
@@ -844,7 +856,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                     <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: !p.endedAt ? UI.ink : UI.inkSoft }}>{modeLabel}</span>
                       <span style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint, marginLeft: 8 }}>
-                        {startDate} → {endDate || 'ongoing'}
+                        {startDate} → {endDate || (p.mode === 'cleanup' && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt }) ? 'upcoming' : 'ongoing')}
                       </span>
                     </div>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{days}d</span>

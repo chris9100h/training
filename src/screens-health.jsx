@@ -4852,7 +4852,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
               {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : store.statusMode === 'cleanup' ? 'Cleanup' : 'Vacation'}
-              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}` : ''}
+              {/* "Since" only once it has actually begun. A cleanup week is
+                  activated ahead of time and pinned to the next cycle start, so
+                  on the days before it starts this used to read "Since 8 Aug"
+                  on the 7th, dating a status that had not begun. */}
+              {store.statusModeSince ? (
+                store.statusMode === 'cleanup' && !LB.cleanupStarted(store)
+                  ? ` → ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+                  : ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+              ) : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
           </div>

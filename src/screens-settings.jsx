@@ -2617,7 +2617,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
                           {isActive
-                            ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
+                            // A cleanup period is opened when it is activated but
+                            // dated to the next cycle start, so an open one whose
+                            // start is still ahead is upcoming, not running.
+                            ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>
+                                {p.mode === 'cleanup' && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt }) ? 'upcoming' : 'ongoing'}
+                              </span>
                             : <input type="date" value={LB.fmtISO(new Date(p.endedAt))} min={LB.fmtISO(new Date(p.startedAt))} max={todayStr}
                                 onChange={e => e.target.value && updatePeriod(p.id, { endedAt: LB.parseDate(e.target.value).toISOString() })}
                                 style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />

@@ -128,6 +128,10 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
   const [statusMap, setStatusMap] = useStateC({});
+  // Carried alongside the mode because a cleanup week is activated ahead of
+  // time and pinned to the client's next cycle start: without the date the
+  // card would announce a status the client has not entered yet.
+  const [statusSinceMap, setStatusSinceMap] = useStateC({});
   const [checkinMap, setCheckinMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
@@ -142,10 +146,14 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
     const poll = () => {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
-          const lm = {}, sm = {};
-          statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; if (r.statusMode) sm[r.clientId] = r.statusMode; });
+          const lm = {}, sm = {}, ssm = {};
+          statusData.forEach(r => {
+            lm[r.clientId] = r.inProgressSessionId;
+            if (r.statusMode) { sm[r.clientId] = r.statusMode; ssm[r.clientId] = r.statusModeSince ?? null; }
+          });
           setLiveMap(lm);
           setStatusMap(sm);
+          setStatusSinceMap(ssm);
           const cm = {};
           checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
           setCheckinMap(cm);
@@ -314,6 +322,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientStatusMode = statusMap[c.clientId] || null;
+            const clientStatusSince = statusSinceMap[c.clientId] || null;
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
             const checkinAt = c.id in checkinMap ? checkinMap[c.id] : undefined;
             const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinAt === null;
@@ -326,6 +335,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
                 client={c}
                 inProgress={inProgress}
                 statusMode={clientStatusMode}
+                statusModeSince={clientStatusSince}
                 unreadCount={clientUnread}
                 checkinDue={checkinDue}
                 checkinNew={checkinNew}
@@ -341,7 +351,18 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
+function CoachingTabClientCard({ client, inProgress, statusMode, statusModeSince, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
+  // A cleanup week is queued at activation but only begins on the client's next
+  // cycle start, so until that day it must read as upcoming, not as the status
+  // they are currently in. Only cleanup: the other modes all start immediately.
+  const statusPending = statusMode === 'cleanup' && !LB.cleanupStarted({ statusMode, statusModeSince });
+  const statusLabel = statusMode === 'sick' ? 'SICK'
+    : statusMode === 'deload' ? 'DELOAD'
+    : statusMode === 'cleanup' ? 'CLEANUP'
+    : 'VACATION';
+  const statusSinceDay = statusModeSince
+    ? new Date(statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }).toUpperCase()
+    : null;
   const isPending = client.status === 'pending';
   const [requested, setRequested] = useStateC(false);
   const [checkinDismissed, setCheckinDismissed] = useStateC(false);
@@ -404,7 +425,9 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
         ) : statusMode ? (
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : statusMode === 'deload' ? 'DELOAD' : statusMode === 'cleanup' ? 'CLEANUP' : 'VACATION'}</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>
+            {statusPending && statusSinceDay ? `${statusLabel} → ${statusSinceDay}` : statusLabel}
+          </div>
         ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (
