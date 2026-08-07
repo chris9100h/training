@@ -5192,21 +5192,22 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.isMesoSessionEditable(asDeload, [asDeload], meso), false);
   });
 
-  test('applyMesoFeedbackEdit: ctx.isCleanup keeps a low-pump edit off the swap counter', () => {
-    // The live handler suppresses the counter for a cleanup week (a flat pump on a
-    // reduced load proves nothing). Editing the same answer afterwards must not let
-    // it back in, or three cleanup sessions still reach the "swap this lift" advice.
+  test('applyMesoFeedbackEdit: a low-pump edit counts toward the swap hint, cleanup included', () => {
+    // A cleanup week is NOT exempt here: the reduced load tends to improve the pump
+    // (better mind-muscle connection), so a flat pump during one is a stronger hint
+    // that the exercise is a poor fit, not a weaker one. ctx carries no cleanup flag.
     const msOf = () => ({ deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: {} });
     const rawOf = () => ({
       answers: { soreness: {}, volume: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', pumpLowApplied: false, contrib: {} } } },
       negOwner: {}, frozen: false, dayId: 'd0',
     });
     const edit = { type: 'joint', subject: 'e1', answer: 'none', pump: 'low' };
-    const normal = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false });
-    assert.strictEqual(normal.mesoState.pumpLowCounts.e1, 1, 'control: a normal session counts it');
-    const cleanup = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false, isCleanup: true });
-    assert.strictEqual(cleanup.mesoState.pumpLowCounts.e1, undefined, 'a cleanup session does not');
-    assert.strictEqual(cleanup.raw.answers.joint.e1.pump, 'low', 'the answer itself is still recorded');
+    const out = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.pumpLowCounts.e1, 1);
+    assert.strictEqual(out.raw.answers.joint.e1.pump, 'low');
+    // Idempotent: re-applying the same edit must not double-count.
+    const again = LB.applyMesoFeedbackEdit(out.mesoState, out.raw, edit, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(again.mesoState.pumpLowCounts.e1, 1);
   });
 
 

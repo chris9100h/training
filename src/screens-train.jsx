@@ -3717,13 +3717,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(exId); else mesoPumpOkRef.current.delete(exId);
       // Low-pump swap counter, per exId (was per muscle, attributed to the first lift).
       // Idempotent diff so an edit applies only its own delta.
-      // A cleanup week never advances it: the load is deliberately cut, so a flat
-      // pump is the expected outcome, not evidence that the exercise stopped
-      // working. Three cleanup sessions would otherwise be enough to trigger the
-      // "swap this lift" advice off nothing but the reduction. Folded into the
-      // flag itself (not just the increment) so a later edit of the same answer
-      // diffs against what was actually applied.
-      const pumpLowApplied = pump === 'low' && !isCleanupSession;
+      // A cleanup week counts here like any other, deliberately: a reduced load
+      // does not flatten the pump, it usually improves it (lighter weight, better
+      // mind-muscle connection). So a flat pump DURING a cleanup week is a
+      // stronger signal that the exercise is a poor fit than the same answer on a
+      // heavy day, not a weaker one. Suppressing it would throw away the best
+      // data points the swap hint has.
+      const pumpLowApplied = pump === 'low';
       const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (record.pumpLowApplied ? 1 : 0);
       record.pumpLowApplied = pumpLowApplied;
       if (pumpLowDiff !== 0) {

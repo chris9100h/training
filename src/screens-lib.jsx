@@ -3546,7 +3546,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const lm = landmarks[m];
       if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
     });
-    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles, isCleanup: !!s.isCleanup };
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
     const earnInputs = fbEarnInputs();
     // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
     // reasoning as the readiness branch above, #3): a background multi-device sync may

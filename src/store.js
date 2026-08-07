@@ -7729,19 +7729,13 @@ function _commitContribInto(deltas, negOwner, prevContrib, questionType, newCont
 // A 'joint' edit is the per-exercise feedback: it can carry answer (joint) plus weight
 // and pump (both per exId now). A 'volume' edit is the per-muscle workload answer only.
 // `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
-// `ctx` = { dayId, loadOnly, atCeilingMuscles, isCleanup }. Touches
+// `ctx` = { dayId, loadOnly, atCeilingMuscles }. Touches
 // deltas/growthCounts/pumpLowCounts/jointFlags + the answer record + negOwner;
 // weight boosts are re-earned separately (reearnMesoBoostsFromAnswers) since they
 // also need the objective rep outcome. Pure: returns { mesoState, raw }.
 function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   const dayId = ctx.dayId;
   const loadOnly = !!ctx.loadOnly;
-  // Mirrors the live handler (handleJointAnswer, screens-train.jsx): a cleanup
-  // week never advances the low-pump swap counter, a flat pump on a deliberately
-  // reduced load is the expected outcome. Without it, editing the pump answer of
-  // a cleanup session afterwards would let the counter back in through the side
-  // door, and the "swap this lift" advice would fire off nothing but the cut.
-  const isCleanup = !!ctx.isCleanup;
   const frozen = !!(raw && raw.frozen);
   const deltas = { ...(mesoState.deltas || {}) };
   let growthCounts = { ...(mesoState.growthCounts || {}) };
@@ -7812,7 +7806,7 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       // lift). Idempotent diff so an edit applies only its own delta. The old
       // volume === 'just_right' confound guard is dropped: pump is per exercise now and
       // is answered before the muscle's workload answer, so it cannot read it here.
-      const pumpLowApplied = edit.pump === 'low' && !isCleanup;
+      const pumpLowApplied = edit.pump === 'low';
       const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
       rec.pumpLowApplied = pumpLowApplied;
       if (pumpLowDiff !== 0) pumpLowCounts[exId] = Math.max(0, (pumpLowCounts[exId] || 0) + pumpLowDiff);
