@@ -8257,53 +8257,79 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
         <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 16 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
         <div style={{ ...rcpMicro, textAlign: 'center', marginTop: 14, marginBottom: 12 }}>Ingredients · prep order</div>
 
-        {items.map((i, idx) => {
-          const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
-          const stepHead = steps.find(s => s.startIdx === idx);
-          return (
-            // Translucent fill rather than fdEntryRow's opaque one, so the
-            // watermark reads through the cards instead of only in the gaps.
-            // A step member carries the same left accent hairline the
-            // training side uses for superset groups: the step grouping
-            // reads at a glance in the screenshot, not just via the header
-            // above the run's first member.
-            <div key={i.id} style={{
-              background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
-              ...(i.stepId ? { borderLeft: '2px solid rgba(var(--accent-rgb),0.45)' } : null),
-              borderRadius: 6, padding: '10px 12px', marginBottom: 6, overflow: 'hidden',
-            }}>
-              {stepHead && (
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                  <span style={{ ...rcpMicro, color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
-                  {stepHead.label && <span style={{ ...rcpMicro, color: UI.inkSoft }}>{stepHead.label}</span>}
-                </div>
-              )}
-              <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                <span style={{
-                  ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
-                  display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
-                  background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
-                }}>{fdStepOrdinal(items, idx)}</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
-                  <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
-                    {i.quantityG}g<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
-                    {RCP_MACRO_LABELS.map(([k, label]) => (
-                      <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
-                    ))}
+        {(() => {
+          // A step renders as a rail container: one continuous left accent
+          // hairline running from the first to the last member, the same
+          // treatment the training side gives superset groups (the line
+          // bridges the gaps between the member cards, it does not break
+          // per card). Ungrouped rows stay plain cards. The "Step N"
+          // header sits above the run's first member, inside the rail.
+          const card = (idx, marginBottom) => {
+            const i = items[idx];
+            const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+            const stepHead = steps.find(s => s.startIdx === idx);
+            return (
+              // Translucent fill rather than fdEntryRow's opaque one, so the
+              // watermark reads through the cards instead of only in the gaps.
+              <div key={i.id} style={{
+                background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
+                borderRadius: 6, padding: '10px 12px', overflow: 'hidden',
+                ...(marginBottom ? { marginBottom: 6 } : null),
+              }}>
+                {stepHead && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                    <span style={{ ...rcpMicro, color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
+                    {stepHead.label && <span style={{ ...rcpMicro, color: UI.inkSoft }}>{stepHead.label}</span>}
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                  <span style={{
+                    ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
+                    display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
+                    background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
+                  }}>{fdStepOrdinal(items, idx)}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
+                    <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
+                      {i.quantityG}g<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
+                      {RCP_MACRO_LABELS.map(([k, label]) => (
+                        <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
+                      ))}
+                    </div>
                   </div>
                 </div>
+                {/* Prep note: a shared card is exactly the "someone else is
+                    cooking this" case the note exists for. */}
+                {i.note && (
+                  <div style={{ marginTop: 8, paddingTop: 7, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                    <span style={{ fontSize: 11, color: UI.inkSoft, lineHeight: 1.45 }}>{String(i.note)}</span>
+                  </div>
+                )}
               </div>
-              {/* Prep note: a shared card is exactly the "someone else is
-                  cooking this" case the note exists for. */}
-              {i.note && (
-                <div style={{ marginTop: 8, paddingTop: 7, paddingLeft: 30, borderTop: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                  <span style={{ fontSize: 11, color: UI.inkSoft, lineHeight: 1.45 }}>{String(i.note)}</span>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          };
+          const blocks = [];
+          let k = 0;
+          while (k < items.length) {
+            const it = items[k];
+            const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
+            if (!isHead) { blocks.push(card(k, true)); k++; continue; }
+            const run = steps.find(s => s.startIdx === k);
+            const count = run ? run.count : 1;
+            const members = [];
+            for (let m = k; m < k + count; m++) members.push(card(m, false));
+            blocks.push(
+              <div key={`step-rail-${it.id}`} style={{
+                borderLeft: '2px solid rgba(var(--accent-rgb),0.45)', paddingLeft: 10,
+                display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6,
+              }}>
+                {members}
+              </div>
+            );
+            k += count;
+          }
+          return blocks;
+        })()}
       </div>
     </div>
   );
