@@ -1561,6 +1561,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // statusMode alone is not enough to label the strip: between activating and
   // that day the plan still trains at full load and must still read that way.
   const cleanupShowing = LB.cleanupStarted(store);
+  // A cleanup that is activated but pinned to a future cycle start needs to say
+  // so up here, next to the meso/auto chips: the plan otherwise looks completely
+  // untouched for the rest of the current cycle and the Plan tab is the only
+  // place that knows something is queued. Same DD.MM format and same muted
+  // "not running yet" styling as the pending meso badge below.
+  const cleanupPendingDay = (store.statusMode === 'cleanup' && !cleanupShowing && store.statusModeSince)
+    ? (() => {
+        const d = new Date(store.statusModeSince);
+        return isNaN(d) ? null : `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })()
+    : null;
 
   const periodLabel = useMemo(() => {
     if (LB.is531Plan(sch)) {
@@ -3064,6 +3075,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
+            {/* Wrapper so a queued cleanup can sit alongside whichever chip the
+                plan type renders below (bounded meso, or cycle label + AUTO),
+                wrapping to its own line when the pair gets too wide. */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
             {sch.mesocycle_weeks ? (() => {
               // A deload following the meso is a recovery week, show DELOAD, not
               // the (now-frozen, possibly beyond-failure) meso RIR target.
@@ -3141,6 +3156,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 )}
               </div>
             )}
+            {cleanupPendingDay && weekOffset === 0 && (
+              <span title="Your cleanup week is queued for the start of the next cycle. Until then everything trains at full load." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
+                Cleanup · starts {cleanupPendingDay}
+              </span>
+            )}
+            </div>
           </div>
           {!isFlex && (
             <button onClick={goForward} disabled={weekOffset >= 1} style={{
