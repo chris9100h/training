@@ -1701,7 +1701,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // ONCE instead of re-spreading and re-sorting the whole history per entry
     // (was O(entries x n log n), the single heaviest computation on Home).
     return [...store.sessions]
-      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload)
+      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload && !x.isCleanup)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   }, [doneSession, store.sessions]);
 
@@ -3282,10 +3282,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
-              {selectedDayStatusMode === 'sick' ? 'SICK.' : selectedDayStatusMode === 'vacation' ? 'AWAY.' : 'RECOVER.'}
+              {selectedDayStatusMode === 'sick' ? 'SICK.' : selectedDayStatusMode === 'vacation' ? 'AWAY.' : selectedDayStatusMode === 'cleanup' ? 'CLEANUP.' : 'RECOVER.'}
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
-              {selectedDayStatusMode === 'sick' ? 'Rest up. Training can still be logged.' : selectedDayStatusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : 'Recovery is part of the plan.'}
+              {selectedDayStatusMode === 'sick' ? 'Rest up. Training can still be logged.' : selectedDayStatusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : selectedDayStatusMode === 'cleanup' ? 'Lighter loads, sharper technique.' : 'Recovery is part of the plan.'}
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>

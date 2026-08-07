@@ -1403,6 +1403,7 @@ AS $function$
     AND e.ex_id IS NOT NULL
     AND s.ended IS NOT NULL
     AND NOT s.is_deload
+    AND NOT s.is_cleanup
     AND ex.movement_type IS DISTINCT FROM 'assisted'
     AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
     AND COALESCE(

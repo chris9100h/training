@@ -1040,7 +1040,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // deload sessions, exclude them (same guard as fetchSeedEntries) so a
         // deload load never becomes the "last time"/best/comparison baseline.
         const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
-        const filtered = (rows || []).filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId));
+        // Same for cleanup sessions, on both counts. Locally known ones are
+        // dropped by id; while a cleanup is running its own sessions are also
+        // windowed out by `ended` exactly as fetchSeedEntries does, so a second
+        // cleanup session on a device with no local history for this exercise
+        // can't fall back to the first one's already-reduced load.
+        const cleanupIds = new Set((store.sessions || []).filter(s => s.isCleanup).map(s => s.id));
+        const cleanupSince = store.statusMode === 'cleanup' ? (store.statusModeSince ?? null) : null;
+        const filtered = (rows || []).filter(r => r.sessionId !== session.id
+          && !deloadIds.has(r.sessionId) && !cleanupIds.has(r.sessionId)
+          && !(cleanupSince != null && r.ended != null && r.ended >= cleanupSince));
         // best e1RM across all fetched sessions for this day type
         let best = 0;
         for (const r of filtered) {
@@ -1259,11 +1268,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Cleanup week, per-exercise opt-out: flip one lift between the reduced load
   // and its full one without ending the cleanup for everything else. Rescales
-  // what is already on screen (warm-ups included, done sets included) rather
-  // than re-seeding, so a set the user already logged stays consistent with the
-  // rest of the exercise. Keyed by exId, matching the map buildSeedSets reads,
-  // so an exercise programmed twice in one day flips both of its slots together
-  // instead of leaving the second one contradicting the chip.
+  // the pending sets (warm-ups included) rather than re-seeding, so the rest of
+  // the exercise stays consistent. Keyed by exId, matching the map
+  // buildSeedSets reads, so an exercise programmed twice in one day flips both
+  // of its slots together instead of leaving the second contradicting the chip.
+  //
+  // Already-completed sets are deliberately left alone. Rescaling them would
+  // rewrite what the user actually lifted: tick three sets at 80, tap Full, and
+  // the history would claim 100. That number then feeds volume, e1RM and (once
+  // the cleanup ends) the next week's seed base. The toggle changes what is
+  // still to come, never what was logged.
+  //
+  // Intensity-technique rounds carry their own per-round loads in st.drops, and
+  // st.kg is only a mirror of the first round (see finishDropSet), so they have
+  // to move together or the row would render 80/70/60 while volume counts 100.
+  //
   // The 2.5 rounding is not perfectly reversible (102.5 -> 82 -> 82.5), which is
   // the same granularity every other seeded load carries; the user can adjust.
   const toggleCleanupOptOut = (exId) => {
@@ -1271,12 +1290,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wasOptedOut = !!session.cleanupOptOuts?.[exId];
     // Opting out divides the reduction back out, opting back in re-applies it.
     const scale = wasOptedOut ? f : 1 / f;
+    const rescale = (kg) => kg == null ? kg : Math.round((kg * scale) / 2.5) * 2.5;
     updateSession(sess => ({
       ...sess,
       cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
       entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
         ...e,
-        sets: e.sets.map(st => st.kg == null ? st : { ...st, kg: Math.round((st.kg * scale) / 2.5) * 2.5 }),
+        sets: e.sets.map(st => (st.done || st.kg == null) ? st : {
+          ...st,
+          kg: rescale(st.kg),
+          ...(Array.isArray(st.drops) && st.drops.length
+            ? { drops: st.drops.map(d => ({ ...d, kg: rescale(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: rescale(d.stretch.kg) } } : {}) })) }
+            : {}),
+        }),
       }),
     }));
   };
@@ -2384,7 +2410,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
       const entries = sealDoneSets(sess.entries);
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(store.statusMode === 'cleanup' ? { isCleanup: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(isCleanupSession ? { isCleanup: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => {
@@ -2497,7 +2523,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         entries: sealDoneSets(session.entries),
         ended: new Date().toISOString(),
         isDeload: store.statusMode === 'deload',
-        isCleanup: store.statusMode === 'cleanup',
+        isCleanup: isCleanupSession,
         signalWeight: deriveSignalWeight(),
         mesoRecap: recap || session.mesoRecap,
       };
@@ -3457,8 +3483,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // after the component body has. The one exception is mesoPartials, evaluated
   // inline during render further up, which inlines its own check for that
   // reason (see there).
-  const isCleanupSession = store.statusMode === 'cleanup' || session.isCleanup;
-  const isCleanupReduced = (exId) => isCleanupSession && !session.cleanupOptOuts?.[exId];
+  // Keyed to whether this session's loads were actually SEEDED under the
+  // cleanup, not just to the live status: starting a cleanup from the Plan tab
+  // in the middle of an already-running session must not retroactively claim
+  // its full-load sets were reduced (the opt-out chip would then offer to
+  // "restore" them and multiply real logged weights by 1/f).
+  const startedUnderCleanup = store.statusMode === 'cleanup'
+    && session.startedAt != null && store.statusModeSince != null
+    && session.startedAt >= store.statusModeSince;
+  const isCleanupSession = !!session.isCleanup || startedUnderCleanup;
+  // Does the reduction apply to this exercise at all? Mirrors buildSeedSets'
+  // own exemptions, plus the one it never sees: a 5/3/1 main lift is seeded
+  // straight off its Training Max in buildSessionEntries and never reaches
+  // buildSeedSets, so its wave is already at full prescription. Offering the
+  // chip there would let a tap inflate a correct 100/115/130 wave to
+  // 125/142.5/162.5 while the panel underneath still shows the real numbers.
+  const cleanupApplies = (exId) => {
+    if (!exId) return false;
+    const ex = store.exercises?.find(x => x.id === exId);
+    if (!ex) return false;
+    if (ex.movement_type === 'cardio' || LB.isAssisted(ex)) return false;
+    if (ex.equipment === 'bodyweight') return false;
+    if (LB.exerciseLogMode(ex) !== 'weight') return false; // time / reps-only / checkbox carry no load
+    if (LB.is531MainLift(store, exId, session.dayId)) return false;
+    return true;
+  };
+  const isCleanupReduced = (exId) => isCleanupSession && cleanupApplies(exId) && !session.cleanupOptOuts?.[exId];
   // Clamped the same way buildSeedSets clamps it, so the badge and the chip
   // can never claim a reduction the seeds didn't actually apply.
   const cleanupPct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
@@ -6446,14 +6496,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
-          {/* Cleanup week, per-exercise opt-out. Only for lifts the reduction
-              actually applies to: bodyweight, assisted, time-based, reps-only
-              and cardio items are all exempt in buildSeedSets, so offering the
-              toggle there would promise a rescale that never happens.
+          {/* Cleanup week, per-exercise opt-out. cleanupApplies is the single
+              source of truth for "was this lift actually reduced" (see there),
+              so the chip can never appear on an exercise whose loads the
+              cleanup never touched.
               Radius 4, not the 2 the neighbouring Pills use at this size: this
               one is tappable, and the scale's line is interactive-or-not. */}
-          {isCleanupSession && !isCardio && !isNoWeightReps && !isAssistedEx
-            && exercise?.equipment !== 'bodyweight' && logMode !== 'time' && (
+          {isCleanupSession && cleanupApplies(entry.exId) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
               <button
                 onClick={() => toggleCleanupOptOut(entry.exId)}
@@ -6734,8 +6783,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // (beyond failure), matching the red/ember RIR watermark. Working sets
           // only, not warm-ups or deload. Also fires on the 5/3/1 week-3 top
           // single (heroHell531), the heaviest, most intense rep of the cycle.
-          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
-            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
+          // isCleanupSession joins the deload gate on both lines below:
+          // mesoPartials is forced to 0 during a cleanup week, so without it the
+          // watermark would still promise "+N partials" (and smoulder for them)
+          // while completeSet attaches none.
+          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession && !isCleanupSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && !isCleanupSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
               // further past failure (negative RIR) it goes, at -3 it's fully

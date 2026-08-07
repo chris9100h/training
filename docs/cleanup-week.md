@@ -1,6 +1,13 @@
 # Cleanup Week: Implementierungsplan (v2, korrigiert)
 
-> Status: **geplant, nicht implementiert** (2026-08-07). v2 ersetzt den ersten Entwurf komplett: der wurde gegen den echten Code adversarial verifiziert, hatte einen Blocker (fehlende Constraint-Migration) und hielt sein eigenes Kernversprechen ("keine Overreach-/Stagnations-Flags") nicht vollständig ein. Diese Fassung behebt beides. Umsetzung erfolgt später.
+> Status: **implementiert** (2026-08-07, Migration 0251). v2 ersetzte den ersten Entwurf komplett: der wurde gegen den echten Code adversarial verifiziert, hatte einen Blocker (fehlende Constraint-Migration) und hielt sein eigenes Kernversprechen ("keine Overreach-/Stagnations-Flags") nicht vollständig ein.
+>
+> **Abweichungen, die sich erst bei der Umsetzung gezeigt haben** (eine zweite adversariale Review gegen den fertigen Code, Details in `docs/internals.md`):
+> 1. **5/3/1-Hauptlifte brauchen eine eigene Exemption.** Sie werden von `buildSessionEntries` direkt aus der Training Max geseedet und sehen `buildSeedSets` nie, sind also nie reduziert. Der Opt-out-Chip hätte dort angeboten, eine bereits vollwertige Wave „wiederherzustellen". Alle Exemptions liegen jetzt in einem `cleanupApplies(exId)`-Helper.
+> 2. **Der Opt-out-Chip fasst `done`-Sets nicht mehr an** (Abschnitt 6 wollte pauschal alle skalieren). Bereits geloggte Sets umzuschreiben verfälscht, was der Nutzer real gehoben hat, und wandert über Volumen/e1RM in die Seed-Basis der Folgewoche. Dafür werden jetzt die Runden-Gewichte in `st.drops`/`stretch` mitskaliert, die sonst gegen das gespiegelte `st.kg` auseinanderlaufen.
+> 3. **`isCleanupSession` hängt am Seed-Zeitpunkt, nicht am Live-Status**, sonst macht ein Cleanup-Start mitten in einer laufenden Session den Chip zur Gewichtsfalle.
+> 4. **Drei Server-/Remote-Pfade brauchten denselben Ausschluss**, die der Plan nicht auf dem Schirm hatte: die RPC `get_exercise_best_e1rm` (harter PR-Floor, exakt der Bug aus Migration 0239), `remoteLast`/`remoteBestE1rmRef` in `screens-train.jsx` und der Cron `auto-close-sessions`.
+> 5. Der Test für `dsPreviousSessionForDay` entfällt (Funktion ist nicht exportiert, und nur fürs Testen zu exportieren wäre der falsche Tausch). Die Entscheidung steht stattdessen als expliziter „nicht wegoptimieren"-Kommentar an der Funktion.
 
 ## Context
 

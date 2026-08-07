@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
     for (const sess of sessions) {
       // User settings
       const settRes = await dbFetch(
-        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id`
+        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id,status_mode`
       );
       // Same non-2xx-reply hazard as sessRes above (an error OBJECT, not the
       // malformed-body fallback): left unchecked, `sett` silently resolves to
@@ -153,7 +153,14 @@ Deno.serve(async (req) => {
         const closeResp = await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
           method: 'PATCH',
           headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}) }),
+          // Stamp is_cleanup the way the in-app finish does (migration 0251).
+          // The app normally sets it; a session closed here never ran that
+          // code, and an unflagged cleanup session is worse than an unflagged
+          // deload one: it keeps signal_weight 'full' by design, so it would
+          // feed detectStall and the PR baselines with its deliberately
+          // reduced loads and report a stall on a lift that was only ever
+          // meant to be light.
+          body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}), ...(sett?.status_mode === 'cleanup' ? { is_cleanup: true } : {}) }),
         });
         // Unlike the three read queries above, this write was never checked:
         // a transient non-2xx here (still `ok`-checkable, dbFetch never

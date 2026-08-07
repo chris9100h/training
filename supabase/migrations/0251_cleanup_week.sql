@@ -41,3 +41,42 @@ ALTER TABLE zane_status_periods
 ALTER TABLE zane_status_periods
   ADD CONSTRAINT zane_status_periods_mode_check
     CHECK (mode IN ('sick', 'vacation', 'deload', 'cleanup'));
+
+-- get_exercise_best_e1rm feeds store.exerciseBests, which bestE1rmForExercise
+-- uses as a hard FLOOR and screens-lib.jsx's isPR uses as the PR bar. The
+-- client-side is_cleanup skip therefore only covers the locally-loaded half:
+-- without the same exclusion here, a high-rep set at a deliberately reduced
+-- cleanup load (80 kg x 20 estimates higher than 100 kg x 8) would raise the
+-- aggregate permanently and silently swallow a later, genuine PR.
+--
+-- Exactly the bug migration 0239 fixed for deload; this extends that fix to
+-- the cleanup week rather than re-learning it. Body is 0239's verbatim, with
+-- `AND NOT s.is_cleanup` added next to its deload sibling.
+CREATE OR REPLACE FUNCTION public.get_exercise_best_e1rm(p_user_id uuid DEFAULT NULL)
+ RETURNS TABLE(ex_id text, best_e1rm double precision)
+ LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
+AS $function$
+  WITH uid AS (SELECT COALESCE(p_user_id, auth.uid()) AS id)
+  SELECT e.ex_id,
+    MAX(st.kg * (1 + (
+      CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
+           THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
+           ELSE st.reps END
+    )::numeric / 30.0))::float AS best_e1rm
+  FROM zane_session_entries e
+  JOIN zane_sets st ON st.entry_id = e.id
+  JOIN zane_sessions s ON s.id = e.session_id
+  LEFT JOIN zane_exercises ex ON ex.id = e.ex_id AND ex.user_id = e.user_id
+  WHERE e.user_id = (SELECT id FROM uid)
+    AND e.ex_id IS NOT NULL
+    AND s.ended IS NOT NULL
+    AND NOT s.is_deload
+    AND NOT s.is_cleanup
+    AND ex.movement_type IS DISTINCT FROM 'assisted'
+    AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
+    AND COALESCE(
+      CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
+           THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
+           ELSE st.reps END, 0) > 0
+  GROUP BY e.ex_id;
+$function$;

@@ -128,9 +128,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {/* Sick / vacation status banner */}
           {clientStore.statusMode && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--overlay-tint)', borderBottom: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : clientStore.statusMode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
-                {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : 'VACATION'}
+                {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : clientStore.statusMode === 'cleanup' ? 'CLEANUP' : 'VACATION'}
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
                   const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
@@ -831,8 +831,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
             <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px', paddingLeft: 2 }}>SICK & VACATION</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {sorted.map((p, i) => {
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
-                const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : 'Vacation';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : p.mode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach';
+                const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : p.mode === 'cleanup' ? 'Cleanup' : 'Vacation';
                 const startDate = new Date(p.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
                 const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
                 const days = p.endedAt
