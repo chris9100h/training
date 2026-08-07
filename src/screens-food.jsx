@@ -6332,9 +6332,14 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
             {/* steps/ordinals computed once for the whole list, not per row:
                 this used to rebuild fdBuildSteps(items) from scratch inside
                 the map, twice per step row (audit-2026-08 O8). */}
-            {(() => { const shareSteps = fdBuildSteps(items); const shareOrdinals = fdStepOrdinals(items); const shareStepByStart = new Map(shareSteps.map(s => [s.startIdx, s])); return items.map((i, idx) => {
-              const stepHead = shareStepByStart.get(idx);
-              return (
+            {(() => {
+              const shareSteps = fdBuildSteps(items);
+              const shareOrdinals = fdStepOrdinals(items);
+              const shareStepByStart = new Map(shareSteps.map(s => [s.startIdx, s]));
+              const card = (idx) => {
+                const i = items[idx];
+                const stepHead = shareStepByStart.get(idx);
+                return (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 {stepHead && (
                   // Steps are prep guidance, same "someone else cooks this"
@@ -6362,8 +6367,39 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                   </div>
                 )}
               </div>
-              );
-            }); })()}
+                );
+              };
+              // A step renders as a rail container: one continuous left accent
+              // hairline from the first to the last member, bridging the gaps
+              // between the cards, the same treatment the poster and the
+              // training side's superset groups use. Without it the "Step N"
+              // header sat alone on the run's head card and every later member
+              // read as a loose, unrelated ingredient (the recipient could not
+              // tell where the step ended). Ungrouped rows stay plain cards.
+              // The parent's flex gap spaces the blocks, so neither the cards
+              // nor the rail carry a margin of their own.
+              const blocks = [];
+              let k = 0;
+              while (k < items.length) {
+                const it = items[k];
+                const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
+                if (!isHead) { blocks.push(card(k)); k++; continue; }
+                const run = shareStepByStart.get(k);
+                const count = run ? run.count : 1;
+                const members = [];
+                for (let m = k; m < k + count; m++) members.push(card(m));
+                blocks.push(
+                  <div key={`share-step-${k}`} style={{
+                    borderLeft: '2px solid rgba(var(--accent-rgb),0.45)', paddingLeft: 10,
+                    display: 'flex', flexDirection: 'column', gap: 6,
+                  }}>
+                    {members}
+                  </div>
+                );
+                k += count;
+              }
+              return blocks;
+            })()}
           </div>
           <FdMacroPreview calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
           {added ? (
