@@ -3341,15 +3341,12 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
   // is purely so a non-admin never even sees an affordance that would 409.
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   const today = LB.todayISO();
-  const trueYesterday = LB.shiftDate(today, -1);
-  // The date-strip defaults to today, so following selectedDate straight
-  // through would turn "open Health, tap Generate" (one tap, the original
-  // and by far most common flow, generates for yesterday) into "navigate the
-  // strip to yesterday first, then generate", a regression a user caught
-  // immediately. Defaulting the untouched (strip-on-today) case back to true
-  // yesterday keeps that one-tap flow; navigating the strip to any OTHER day
-  // still follows it, that's the actual new capability.
-  const date = selectedDate === today ? trueYesterday : selectedDate;
+  // Always the day BEFORE whichever day the strip is on, uniformly, not the
+  // strip's own day: the strip selects "which vantage point", the card is
+  // always that vantage point's own "yesterday". Strip on today -> real
+  // yesterday (the original one-tap flow, unchanged). Strip on yesterday ->
+  // the day before that. And so on, however far back the strip goes.
+  const date = LB.shiftDate(selectedDate, -1);
   const daysAgo = Math.round((new Date(today + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
   const label = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : LB.fmtDayLabel(date, { weekday: 'short', day: 'numeric', month: 'short' });
   const log = (store.dailyLogs || []).find(l => l.date === date) || null;
