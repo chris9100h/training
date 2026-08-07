@@ -9025,24 +9025,19 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // Keeps the active chip centered in the strip as currentIdx moves, same
   // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
   // without it the strip only scrolls by hand and the active chip silently
-  // runs off-screen on a longer ingredient list. With steps the chips are
-  // per step (data-step-idx, active = curStepIdx), without them per
-  // ingredient (data-chip-idx, active = currentIdx); the query picks the
-  // matching set, so a stepped recipe centers its step chip, an unstepped
-  // one behaves exactly as before. deps deliberately exclude `items` (a new
-  // array identity on every amount keystroke, note save or swap would
-  // re-run the centering and yank a manually scrolled strip back to the
-  // active chip); the effect reads the fresh items via its closure and only
-  // re-runs when the position or the step structure changes.
+  // runs off-screen on a longer ingredient list. Both chip modes below
+  // (overview with step markers, step-focus with only the step's members)
+  // tag their ingredient chips data-chip-idx={i}, so one query covers both.
+  // deps deliberately exclude `items` (a new array identity on every amount
+  // keystroke, note save or swap would re-run the centering and yank a
+  // manually scrolled strip back to the active chip); the effect reads the
+  // fresh items via its closure and only re-runs when the position or the
+  // step structure changes.
   const chipRowRef = useRefFd(null);
   useEffectFd(() => {
     const row = chipRowRef.current;
     if (!row || step !== 'ingredients') return;
-    const stepsNow = fdBuildSteps(items);
-    const q = stepsNow.length
-      ? `[data-step-idx="${stepsNow.findIndex(s => currentIdx >= s.startIdx && currentIdx < s.startIdx + s.count)}"]`
-      : `[data-chip-idx="${currentIdx}"]`;
-    const chip = row.querySelector(q);
+    const chip = row.querySelector(`[data-chip-idx="${currentIdx}"]`);
     if (!chip) return;
     row.scrollLeft = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
   }, [currentIdx, step, hasSteps, curStepIdx]);
@@ -9394,24 +9389,44 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
           </span>
         </div>
 
-        {/* Chip row, tap a chip to jump. With steps: one chip per step
-            (labeled by its instruction, else its first ingredient), jump
-            lands on the step's first item. Without: one chip per
-            ingredient, exactly as before. */}
+        {/* Chip row, tap a chip to jump. Overview mode (all ingredients,
+            with a "Step n" marker chip before each step's first member):
+            the row always shows the whole recipe, so a long cook keeps its
+            orientation; tapping a step marker jumps to that step's first
+            member. Step-focus mode (while currentIdx stands inside a step):
+            only that step's members, so the chips mirror the step card
+            above instead of flooding the strip with the whole recipe.
+            Leaving the step returns to the overview. Recipes without steps
+            keep the plain all-ingredients row, exactly as before. */}
         <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {hasSteps
-            ? steps.map((s, si) => (
-                <button key={s.stepId} data-step-idx={si} onClick={() => goToIndex(s.startIdx)} style={{
+          {hasSteps && curStepIdx >= 0 ? (
+            items.slice(steps[curStepIdx].startIdx, steps[curStepIdx].startIdx + steps[curStepIdx].count).map((it, j) => {
+              const realIdx = steps[curStepIdx].startIdx + j;
+              return (
+                <button key={it.id} data-chip-idx={realIdx} onClick={() => goToIndex(realIdx)} style={{
                   flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
-                  border: `var(--hair-width) solid ${si === curStepIdx ? 'var(--accent)' : UI.hairStrong}`,
-                  background: si === curStepIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  border: `var(--hair-width) solid ${realIdx === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
+                  background: realIdx === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                   fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
-                  color: si === curStepIdx ? 'var(--accent)' : UI.inkFaint,
+                  color: realIdx === currentIdx ? 'var(--accent)' : UI.inkFaint,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                }}>{s.label || items[s.startIdx].foodName}</button>
-              ))
-            : items.map((it, i) => (
+                }}>{it.foodName}</button>
+              );
+            })
+          ) : (
+            items.map((it, i) => {
+              const isStepStart = !!it.stepId && (i === 0 || items[i - 1].stepId !== it.stepId);
+              return [
+                isStepStart ? (
+                  <button key={`step-${it.id}`} onClick={() => goToIndex(i)} style={{
+                    flexShrink: 0, padding: '5px 11px 4px', borderRadius: 4,
+                    border: `var(--hair-width) solid rgba(var(--accent-rgb),0.5)`,
+                    background: 'rgba(var(--accent-rgb),0.06)',
+                    fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 700,
+                    color: 'var(--accent)', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>Step {fdStepOrdinal(items, i)}</button>
+                ) : null,
                 <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
                   flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
                   border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
@@ -9420,8 +9435,10 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
                   color: i === currentIdx ? 'var(--accent)' : UI.inkFaint,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                }}>{it.foodName}</button>
-              ))}
+                }}>{it.foodName}</button>,
+              ];
+            })
+          )}
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
