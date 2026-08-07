@@ -5192,6 +5192,34 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.isMesoSessionEditable(asDeload, [asDeload], meso), false);
   });
 
+  test('deriveSignalWeight: a readiness-only probe ignores a pinned signalWeight', () => {
+    // How computeMesoGains' cutSignal and screens-lib's oldCut re-derive the cut
+    // gate for a cleanup session: the STORED signalWeight is pinned 'full' for
+    // detectOverreach, so the cut has to be read off the readiness answer alone.
+    const pinned = { readiness: 'rough', signalWeight: 'full', isCleanup: true };
+    assert.strictEqual(LB.deriveSignalWeight(pinned, false), 'full', 'the stored field still wins for the detector');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: pinned.readiness }, false), 'discounted',
+      'stripping it exposes the rough day the cut must honour');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'reentry' }, false), 'discounted');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'fresh' }, false), 'full');
+  });
+
+  test('recomputeMesoRepMissCut: a cleanup session re-arms its cut on a rough -> normal edit', () => {
+    // The readiness edit of a pinned cleanup session must hand the readiness-derived
+    // pair to the recompute, not the pinned 'full' twice: the latter is a same-side
+    // no-op and would silently swallow the correction.
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const session = { readiness: 'rough', signalWeight: 'full', isCleanup: true };
+    const oldCut = LB.deriveSignalWeight({ readiness: session.readiness }, false);
+    const newCut = LB.deriveSignalWeight({ readiness: 'normal' }, false);
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, oldCut, newCut);
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5, 'the cut lands once the rough answer is withdrawn');
+    const noop = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'full');
+    assert.strictEqual(noop, ms, 'control: passing the pinned value on both sides does nothing');
+  });
+
   test('applyMesoFeedbackEdit: a low-pump edit counts toward the swap hint, cleanup included', () => {
     // A cleanup week is NOT exempt here: the reduced load tends to improve the pump
     // (better mind-muscle connection), so a flat pump during one is a stronger hint

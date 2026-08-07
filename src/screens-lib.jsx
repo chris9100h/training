@@ -3474,15 +3474,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
       // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
       // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
-      // deload ended mid-session scored 'full' live, so oldSignal must re-derive too,
+      // deload ended mid-session scored 'full' live, so oldCut must re-derive too,
       // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
       // are never deload (isMesoSessionEditable excludes them). #D
-      const oldSignal = LB.deriveSignalWeight(s, !!s.isDeload);
-      // A cleanup session is pinned 'full' whatever the readiness says (mirrors
-      // chooseReadiness in screens-train.jsx): 'discounted' would drop it out of
-      // detectOverreach's exposure chain, so its reduced loads would never move
-      // the detector's baseline and the rebuild would read as a regression.
-      const newSignal = s.isCleanup ? 'full' : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
+      // Two values, not one, and only on a cleanup session do they differ.
+      // STORED: a cleanup session is pinned 'full' whatever the readiness says
+      // (mirrors chooseReadiness in screens-train.jsx), because 'discounted' would
+      // drop it out of detectOverreach's exposure chain and its reduced loads
+      // would then never move the detector's baseline, so the rebuild would read
+      // as a regression.
+      // CUT: the rep-miss cut still has to follow the lifter's own answer, exactly
+      // as computeMesoGains does with its cutSignal. Feeding the pinned 'full' to
+      // recomputeMesoRepMissCut on both sides would make every readiness edit on a
+      // cleanup session a same-side no-op, so a rough -> normal correction would
+      // never re-arm the cut it was meant to re-arm.
+      const oldCut = s.isCleanup
+        ? LB.deriveSignalWeight({ readiness: s.readiness }, false)
+        : LB.deriveSignalWeight(s, !!s.isDeload);
+      const newCut = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      const newSignal = s.isCleanup ? 'full' : newCut;
       const earnInputs = fbEarnInputs();
       const repMissBase = fbRaw.repMissBase || null;
       const groups = fbGroupsForStore(fbRaw.answers);
@@ -3493,8 +3503,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // and writing it back wholesale would revert those concurrent fields. #3
       setStore(st => {
         const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
-        // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
-        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldSignal, newSignal);
+        // 1. Recompute the CUT for the readiness flip (no-op on a same-side edit).
+        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldCut, newCut);
         // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
         //    reearn preserves a re-armed cut and drops a frozen one.
         const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);

@@ -867,12 +867,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // sessions never get), so the flow would only persist dead, unremovable data.
     // Skip it entirely off-autoreg.
     if (!LB.mesoActive(rSch)) return;
-    // A cleanup week is asked exactly like any other week: skipping the prompts
-    // would blind the feedback engine for a full rotation (no set deltas, no
-    // re-earned weight boosts, an empty recap). What a cleanup session must NOT
-    // do is carry a discounted signalWeight, so the ANSWER is recorded while the
-    // weight stays pinned to 'full' (chooseReadiness below, and the resumed
-    // branch via reentryActive). See docs/internals.md, "Cleanup Week".
+    // A cleanup week is asked exactly like any other week. The one thing a cleanup
+    // session must not do is carry a discounted signalWeight (it has to stay a
+    // full-signal exposure so detectOverreach's baseline drops with the reduced
+    // loads), so the ANSWER is recorded verbatim while the stored weight is pinned
+    // 'full' here and in chooseReadiness. Nothing is lost by the pin: computeMesoGains
+    // reads the readiness answer directly for the cut (cutSignal there). See
+    // docs/internals.md, "Cleanup Week".
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
     // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
     // longer than the threshold just ended and we are still inside the first
@@ -881,11 +882,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // session in the ramp window keeps the protective discount instead of a flat
     // 'normal'/'full' it could never correct. Deload sessions keep 'none'.
     const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
-    // Cleanup is excluded alongside deload, but for its own reason: the ramp's
-    // whole effect is a 'discounted' signalWeight, which a cleanup session must
-    // never carry (it has to stay a full-signal exposure so detectOverreach's
-    // baseline drops with the reduced loads). The prompt itself still opens.
-    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload && !isCleanupSession;
+    // Cleanup is NOT excluded here (only deload is): a lifter coming back from a
+    // long break during a cleanup week gets the same eased-in default as in any
+    // other week. Only the STORED signalWeight is pinned below, the 'reentry'
+    // readiness itself is kept and computeMesoGains reads it for the cut.
+    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload;
     if (anyDone) {
       // Resumed session (a working set is already logged): the readiness moment has
       // passed, but the soreness / joint prompts are now gated on readiness != null,
@@ -894,7 +895,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       updateSession(s => ({
         ...s,
         readiness: reentryActive ? 'reentry' : 'normal',
-        signalWeight: isMesoDeloadSession ? 'none' : (reentryActive ? 'discounted' : 'full'),
+        // isCleanupSession pins 'full' ahead of the ramp for the same reason
+        // chooseReadiness does: the exposure chain, not the lifter's answer.
+        signalWeight: isMesoDeloadSession ? 'none' : (isCleanupSession ? 'full' : (reentryActive ? 'discounted' : 'full')),
       }));
       return;
     }
@@ -3084,11 +3087,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
-  // (isMesoDeloadSession/isCleanupSession are declared further down, so inline
-  // both checks here to avoid a temporal-dead-zone reference.)
+  // Only a deload sits this out; a cleanup week runs the RIR wave as prescribed,
+  // it just runs it on a reduced load. (isMesoDeloadSession is declared further
+  // down, so inline the check here to avoid a temporal-dead-zone reference.)
   const mesoPartials = (mesoRirVal != null
-    && !(store.statusMode === 'deload' || session.isDeload)
-    && !(store.statusMode === 'cleanup' || session.isCleanup)) ? Math.max(0, -mesoRirVal) : 0;
+    && !(store.statusMode === 'deload' || session.isDeload)) ? Math.max(0, -mesoRirVal) : 0;
   const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
@@ -3480,8 +3483,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Cleanup week (migration 0251), the deload overlay's sibling. Two different
   // scopes, deliberately not one flag:
   //  - isCleanupSession is session-wide: is this session part of a cleanup week
-  //    at all. Gates the things decided once per session (recovery quizzes,
-  //    earn/cut, the header badge).
+  //    at all. Drives the things decided once per session (the header badge, the
+  //    isCleanup finish stamp, the pinned signalWeight and its cutSignal).
+  //    NOT a general "sit out autoregulation" switch, the week runs the normal
+  //    feedback loop, see docs/internals.md.
   //  - isCleanupReduced is per exercise: is THIS lift actually running reduced.
   //    The user can opt a single lift back to full load from its header, and
   //    from that moment its loads are comparable to history again, so the
@@ -4085,6 +4090,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // stays 'full' throughout so detectOverreach keeps counting it as an
     // exposure and its own comparison baseline drops with the loads.
     const skipEarnCut = signalWeight === 'none';
+    // The cut gate reads this instead of signalWeight. On a cleanup session the
+    // stored signalWeight is pinned 'full' (the detector contract above), so it
+    // can no longer tell a rough day from a normal one, and without this a
+    // "Rough" answer would stop protecting against the rep-miss cut the way it
+    // does in every other week. Re-derive from the readiness answer alone by
+    // handing deriveSignalWeight an object with no signalWeight on it.
+    const cutSignal = isCleanupSession
+      ? LB.deriveSignalWeight({ readiness: session.readiness }, isMesoDeloadSession)
+      : signalWeight;
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
@@ -4144,12 +4158,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut
       // (spec 4.3). Leaving the block unentered keeps repMissCounts untouched.
-      // A cleanup session is 'full' by design (see skipEarnCut above) and DOES
-      // earn, but the cut stays frozen for it: missing reps at a deliberately
-      // reduced load says nothing about the working weight being too heavy, and
-      // a cut there would eat into the base the rebuild climbs back from. The
-      // freeze is one-directional, it can never withhold a gain.
-      if (signalWeight === 'full' && !skipEarnCut && !isCleanupSession && !streakSeen.has(key)) {
+      // A cleanup week cuts like any other: missing the rep floor even at a
+      // deliberately reduced load is exactly the evidence the cut exists for.
+      // cutSignal, not signalWeight, so a rough cleanup day still protects.
+      if (cutSignal === 'full' && !skipEarnCut && !streakSeen.has(key)) {
         streakSeen.add(key);
         if (earlyMiss) {
           const n = (repMissCounts[key] || 0) + 1;
@@ -4211,8 +4223,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       weightBoosts: newWeightBoosts,
       weightBoostDeclines: newWeightBoostDeclines,
       // Freeze the miss streak for anything but a full session (discounted and
-      // none both leave it as-is), plus cleanup weeks, matching the streak guard above.
-      repMissCounts: (signalWeight !== 'full' || skipEarnCut || isCleanupSession) ? (mesoState.repMissCounts || {}) : repMissCounts,
+      // none both leave it as-is), matching the streak guard above (cutSignal there too).
+      repMissCounts: (cutSignal !== 'full' || skipEarnCut) ? (mesoState.repMissCounts || {}) : repMissCounts,
     };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
@@ -5889,7 +5901,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // 'discounted' would drop it out of detectOverreach's exposure chain, and
     // then the reduced loads would never move the detector's own baseline down,
     // so the rebuild weeks after the cleanup would read as a regression. The
-    // readiness ANSWER is still stored verbatim for the recap.
+    // readiness ANSWER is still stored verbatim, and computeMesoGains reads it
+    // back off the session (cutSignal) so a rough cleanup day protects against
+    // the rep-miss cut exactly as it would in any other week.
     const signalWeight = isMesoDeloadSession
       ? 'none'
       : isCleanupSession
@@ -6801,12 +6815,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // (beyond failure), matching the red/ember RIR watermark. Working sets
           // only, not warm-ups or deload. Also fires on the 5/3/1 week-3 top
           // single (heroHell531), the heaviest, most intense rep of the cycle.
-          // isCleanupSession joins the deload gate on both lines below:
-          // mesoPartials is forced to 0 during a cleanup week, so without it the
-          // watermark would still promise "+N partials" (and smoulder for them)
-          // while completeSet attaches none.
-          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession && !isCleanupSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
-            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && !isCleanupSession && (() => {
+          // Only isMesoDeloadSession gates this. A cleanup week keeps the wave:
+          // mesoPartials is live there too, so the watermark's "+N partials"
+          // promise matches what completeSet actually attaches.
+          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
               // further past failure (negative RIR) it goes, at -3 it's fully

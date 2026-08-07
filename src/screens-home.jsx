@@ -2209,7 +2209,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
     const todayStr = LB.todayISO();
     const justFinished = (store?.sessions || []).some(
-      s => s.ended && s.date?.slice(0, 10) === todayStr && !s.isDeload && !s.isCleanup,
+      s => s.ended && s.date?.slice(0, 10) === todayStr && !s.isDeload,
     );
     if (!justFinished) return;
 
@@ -2223,12 +2223,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const anchorTS = store?.deloadPromptDismissedAt ? new Date(store.deloadPromptDismissedAt) : new Date(0);
       const spw = sch.sessions_per_week || 3;
       const goal = spw * 8;
-      // Cleanup sessions don't count toward the 8-block nudge either: the week
-      // is a planned step back, not one of the 8 normal blocks that earn a
-      // deload. (Only the flex path can filter this way, the weekday/cycle
-      // paths below are calendar-based and count elapsed time, not sessions.)
+      // Cleanup sessions DO count here: a cleanup week is a normal training week
+      // at a reduced load, not a break. Only deloads (no training stimulus at
+      // all) are dropped. (Only the flex path can filter this way, the
+      // weekday/cycle paths below are calendar-based and count elapsed time.)
       const count = (store.sessions || []).filter(
-        s => s.ended && !s.isDeload && !s.isCleanup && new Date(s.ended) >= anchorTS,
+        s => s.ended && !s.isDeload && new Date(s.ended) >= anchorTS,
       ).length;
       if (count > 0 && count % goal === 0) {
         shouldPrompt = true;
