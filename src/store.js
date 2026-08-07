@@ -6781,29 +6781,46 @@ async function endDeload(userId, store, setStore) {
 // them. The length rules are identical, so these four reuse deloadPlanDays /
 // deloadFlexGoal rather than cloning them.
 
+// Whole CALENDAR days from the day `sinceISO` fell on to the day `now` falls
+// on, both in local time. Deliberately not a (now - since) / 86400000 floor:
+// that anchors the window to the clock TIME of activation, so a cleanup begun
+// on day 1 at 20:00 was still running the next cycle's day 1 until 20:00, and
+// a session trained that morning seeded reduced even though the overlay was
+// supposed to be over. Counting days instead makes the window flip at local
+// midnight, so "one cycle" ends exactly when the next one starts. Noon
+// anchoring is the same DST-safe idiom the rest of this file uses for date
+// differences (a 23- or 25-hour day never rounds to the wrong day from noon).
+function calendarDaysSince(sinceISO, now = new Date()) {
+  const a = new Date(sinceISO); if (isNaN(a)) return 0;
+  a.setHours(12, 0, 0, 0);
+  const b = new Date(now); b.setHours(12, 0, 0, 0);
+  return Math.round((b - a) / 86400000);
+}
+
 // True once the active cleanup has run its course (one cycle / week elapsed,
 // or, for flex, the weekly session goal of cleanup sessions has been logged).
-// Mirrors deloadElapsed; checked on the home screen for the auto-end.
+// Checked on the home screen for the auto-end.
 function cleanupElapsed(store, now = new Date()) {
   if (store.statusMode !== 'cleanup' || !store.statusModeSince) return false;
   const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
-  const since = new Date(store.statusModeSince);
   if (sch && isFlexPlan(sch)) {
+    const since = new Date(store.statusModeSince);
     const done = (store.sessions || []).filter(s => s.ended && s.isCleanup && new Date(s.ended) >= since).length;
     return done >= deloadFlexGoal(sch);
   }
   const days = deloadPlanDays(store) || 7;
-  const elapsed = Math.floor((now - since) / 86400000);
-  return elapsed >= days;
+  return calendarDaysSince(store.statusModeSince, now) >= days;
 }
 
-// Days remaining in the current cleanup (null for flex, counts sessions, not days).
+// Days remaining in the current cleanup (null for flex, counts sessions, not
+// days). Same calendar-day basis as cleanupElapsed so the "Nd left" label and
+// the auto-end can never disagree about which day the week ends on.
 function cleanupDaysRemaining(store, now = new Date()) {
   if (store.statusMode !== 'cleanup' || !store.statusModeSince) return null;
   const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
   if (sch && isFlexPlan(sch)) return null;
   const days = deloadPlanDays(store) || 7;
-  const elapsed = Math.max(0, Math.floor((now - new Date(store.statusModeSince)) / 86400000));
+  const elapsed = Math.max(0, calendarDaysSince(store.statusModeSince, now));
   return Math.max(0, days - elapsed);
 }
 

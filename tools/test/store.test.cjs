@@ -5065,20 +5065,41 @@ async function testAsync(name, fn) {
   });
 
   // Auto-end. deloadPlanDays falls back to 7 without a matching schedule.
-  const cleanupClock = (sinceISO) => ({ statusMode: 'cleanup', statusModeSince: sinceISO, schedules: [], sessions: [] });
-  test('cleanupElapsed: false before the week is up, true after', () => {
-    const since = '2026-06-01T00:00:00Z';
-    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-05T00:00:00Z')), false);
-    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T00:00:00Z')), true);
+  // Local-time literals (no trailing Z) throughout: the window is counted in
+  // calendar days, so a UTC instant would land on a different local date (and
+  // flip these assertions) depending on the timezone the tests run in.
+  const cleanupClock = (sinceLocal) => ({ statusMode: 'cleanup', statusModeSince: sinceLocal, schedules: [], sessions: [] });
+  test('cleanupElapsed: false before the week is up, true on the day it completes', () => {
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-05T09:00:00')), false);
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T09:00:00')), true);
+  });
+  test('cleanupElapsed: the window flips at midnight, not at the activation time', () => {
+    // Regression: counted as 24h units from the activation moment, a cleanup
+    // started at 20:00 was still active all through the final day's morning,
+    // so the first session of the cycle that should already be back to normal
+    // still seeded reduced. Same calendar day, hours earlier, must be over.
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T06:00:00')), true);
+    // ...and the day before is still genuinely inside the window.
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-07T23:59:00')), false);
   });
   test('cleanupElapsed: false when no cleanup is running at all', () => {
     assert.strictEqual(LB.cleanupElapsed({ statusMode: null, statusModeSince: null }), false);
-    assert.strictEqual(LB.cleanupElapsed({ statusMode: 'deload', statusModeSince: '2026-06-01T00:00:00Z' }), false);
+    assert.strictEqual(LB.cleanupElapsed({ statusMode: 'deload', statusModeSince: '2026-06-01T00:00:00' }), false);
   });
   test('cleanupDaysRemaining: counts down and clamps at 0', () => {
-    const since = '2026-06-01T00:00:00Z';
-    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-03T00:00:00Z')), 5);
-    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-20T00:00:00Z')), 0);
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-03T09:00:00')), 5);
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-20T09:00:00')), 0);
+  });
+  test('cleanupDaysRemaining: agrees with cleanupElapsed on the final day', () => {
+    // The label must not still promise a day left on the morning the overlay
+    // ends (the two used to run off separately-rounded arithmetic).
+    const since = '2026-06-01T20:00:00';
+    const end = new Date('2026-06-08T06:00:00');
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), end), 0);
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), end), true);
   });
 
   // The autoreg exclusions. All of these need an explicit !isCleanup because a
