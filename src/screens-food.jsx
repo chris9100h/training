@@ -1815,9 +1815,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // shallow per-row spread is already a deep copy.
   const [ingredientItems, setIngredientItems] = useStateFd([]);
   // Row currently in the grams sheet (null = closed), same shape as
-  // RecipeEditorScreen's editItem/editGrams pair.
+  // RecipeEditorScreen's editItem/editGrams pair, including the unit
+  // re-entry toggle (ingrEditCountMode/Str) for snapshot rows that carry
+  // loggedUnit.
   const [ingrEditItem, setIngrEditItem] = useStateFd(null);
   const [ingrEditGrams, setIngrEditGrams] = useStateFd('');
+  const [ingrEditCountMode, setIngrEditCountMode] = useStateFd(false);
+  const [ingrEditCountStr, setIngrEditCountStr] = useStateFd('');
   const [ingredientPickerOpen, setIngredientPickerOpen] = useStateFd(false);
   // "Split into multiple meals": an hour that stacks several items really
   // eaten at different times (a meal-prep batch), redistributed across N
@@ -2094,6 +2098,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
       protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
       sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
+      loggedUnit: e.loggedUnit != null ? { label: e.loggedUnit.label, grams: Number(e.loggedUnit.grams) } : null,
     }));
     const merged = {
       id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
@@ -2125,6 +2130,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
               quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
               fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
+              loggedUnit: e.loggedUnit != null ? { label: e.loggedUnit.label, grams: Number(e.loggedUnit.grams) } : null,
             })),
             portions: 1, createdAt: now, updatedAt: now,
           }, ...(s.foodRecipes || [])]
@@ -3882,10 +3888,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Live preview as grams are typed: byte-identical logic to
-  // RecipeEditorScreen's editItemPreview, grams-only (foodName never
-  // changes here).
+  // RecipeEditorScreen's editItemPreview (foodName never changes here),
+  // with the same unit re-entry toggle for snapshot rows that carry a
+  // loggedUnit.
+  const ingrEditUnit = ingrEditItem && ingrEditItem.loggedUnit && ingrEditItem.loggedUnit.grams > 0 ? ingrEditItem.loggedUnit : null;
+  const ingrEditEffectiveGrams = (() => {
+    if (!ingrEditUnit) return fdNum(ingrEditGrams) || 0;
+    return ingrEditCountMode ? (fdNum(ingrEditCountStr) || 0) * ingrEditUnit.grams : (fdNum(ingrEditGrams) || 0);
+  })();
+  function onIngrEditUnitMode(id) {
+    if (!ingrEditUnit) return;
+    if (id === 'count') {
+      const g = fdNum(ingrEditGrams) || 0;
+      setIngrEditCountStr(g > 0 ? String(Math.round((g / ingrEditUnit.grams) * 10) / 10) : '');
+    } else {
+      const c = fdNum(ingrEditCountStr) || 0;
+      setIngrEditGrams(c > 0 ? String(Math.round(c * ingrEditUnit.grams)) : '');
+    }
+    setIngrEditCountMode(id === 'count');
+  }
   const ingrEditPreview = useMemoFd(() => {
-    const g = fdNum(ingrEditGrams);
+    const g = ingrEditEffectiveGrams;
     if (!ingrEditItem || !(g > 0) || !(ingrEditItem.quantityG > 0)) return null;
     const factor = g / ingrEditItem.quantityG;
     return {
@@ -3897,12 +3920,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       satFat: ingrEditItem.satFat != null ? fdRound1(ingrEditItem.satFat * factor) : null,
       sodiumMg: ingrEditItem.sodiumMg != null ? Math.round(ingrEditItem.sodiumMg * factor) : null,
     };
-  }, [ingrEditItem, ingrEditGrams]);
+  }, [ingrEditItem, ingrEditGrams, ingrEditCountMode, ingrEditCountStr]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); }
-  function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); }
+  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); setIngrEditCountMode(false); setIngrEditCountStr(''); }
+  function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); setIngrEditCountMode(false); setIngrEditCountStr(''); }
   function saveIngrEdit() {
-    const g = fdNum(ingrEditGrams);
+    const g = ingrEditEffectiveGrams;
     if (!ingrEditItem || !(g > 0)) return;
     // Same factor math as saveEditItem when the row has a positive amount;
     // a legacy block-merge row can carry quantityG: null (applyBlockRecipe),
@@ -4016,6 +4039,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
       satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
       sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
+      // The unit the ingredient was picked in, frozen like foodId/brand
+      // (pure identity, never rescaled): the timeline's expanded ingredient
+      // view shows "248g (4 pcs)" from it. Absent on older entries, which
+      // stay plain grams.
+      loggedUnit: i.loggedUnit != null ? { label: i.loggedUnit.label, grams: Number(i.loggedUnit.grams) } : null,
     }));
     const built = {
       foodId: null,
@@ -4852,7 +4880,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                                 <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
                                                 <span style={fdEntryMeta}>
-                                                  {ri.quantityG}g · <span className="num" style={{ color: UI.warn }}>{ri.calories} kcal</span>
+                                                  {ri.quantityG}g{fdUnitCountLabel(ri) && <span> ({fdUnitCountLabel(ri)})</span>} · <span className="num" style={{ color: UI.warn }}>{ri.calories} kcal</span>
                                                   <span style={fdMetaDivider} />
                                                   <FdMacroBits protein={ri.protein} carbs={ri.carbs} fat={ri.fat} />
                                                 </span>
@@ -6069,8 +6097,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           rename field and trash button (removal lives on the list rows
           only, so the z-100 confirm portal is never covered by z-200). */}
       <Sheet open={!!ingrEditItem} onClose={closeIngrEdit} title={ingrEditItem?.foodName || 'Amount'} titleColor="var(--accent)" zIndex={200}>
-        <Field label="Amount (g)" style={{ marginBottom: 16 }}>
-          <input value={ingrEditGrams} onChange={e => setIngrEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+        {ingrEditUnit && (
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+            <button onClick={() => onIngrEditUnitMode('grams')} style={fdSegBtn(!ingrEditCountMode)}>Grams</button>
+            <button onClick={() => onIngrEditUnitMode('count')} style={fdSegBtn(ingrEditCountMode)}>{ingrEditUnit.label}</button>
+          </div>
+        )}
+        <Field label={ingrEditUnit && ingrEditCountMode ? `Count (${ingrEditUnit.label})` : 'Amount (g)'} style={{ marginBottom: 16 }}>
+          <input
+            value={ingrEditUnit && ingrEditCountMode ? ingrEditCountStr : ingrEditGrams}
+            onChange={e => ingrEditUnit && ingrEditCountMode ? setIngrEditCountStr(fdDecimalFilter(e.target.value)) : setIngrEditGrams(fdDecimalFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder={ingrEditUnit && ingrEditCountMode ? 'count' : 'g'} style={fdInputStyle} />
         </Field>
         {ingrEditPreview && (
           <FdMacroPreview calories={ingrEditPreview.calories} protein={ingrEditPreview.protein} carbs={ingrEditPreview.carbs} fat={ingrEditPreview.fat}
@@ -6078,7 +6115,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeIngrEdit} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={saveIngrEdit} disabled={!(fdNum(ingrEditGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+          <Btn onClick={saveIngrEdit} disabled={!(ingrEditEffectiveGrams > 0)} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
@@ -6803,6 +6840,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         sugar: i.sugar != null ? fdRound1(i.sugar * scale) : null,
         satFat: i.satFat != null ? fdRound1(i.satFat * scale) : null,
         sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * scale) : null,
+        loggedUnit: i.loggedUnit != null ? { label: i.loggedUnit.label, grams: Number(i.loggedUnit.grams) } : null,
       }));
       return {
         foodId: null,
@@ -8378,6 +8416,10 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [editItem, setEditItem] = useStateFd(null);
   const [editGrams, setEditGrams] = useStateFd('');
+  // Unit re-entry for the edit sheet: false = grams input, true = count of
+  // the item's loggedUnit (only offered when the item has one).
+  const [editCountMode, setEditCountMode] = useStateFd(false);
+  const [editCountStr, setEditCountStr] = useStateFd('');
   // Display name only (items[i].foodName): renaming here never touches
   // zane_foods or foodId, it's a per-recipe snapshot already, see the
   // comment on the "Edit ingredient" Sheet below. Followers reading a
@@ -8542,8 +8584,8 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   function setStepLabel(id, value) {
     setItems(list => list.map(i => (i.id !== id ? i : { ...i, stepLabel: value ? value : null })));
   }
-  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); }
-  function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); }
+  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); setEditCountMode(false); setEditCountStr(''); }
+  function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); setEditCountMode(false); setEditCountStr(''); }
   function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
   function closeNoteItem() { setNoteItem(null); setNoteText(''); }
   function saveNote() {
@@ -8557,8 +8599,29 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // what Save will write. Without this the sheet was just a bare grams
   // input, no way to tell how much of an ingredient to dial in for a target
   // without saving blind and checking the row after.
+  // An ingredient picked in a unit (loggedUnit, e.g. "4 pcs" of a 62g wrap)
+  // can be re-edited in that unit again: a Grams/{label} toggle swaps the
+  // input, the count converts through the unit's grams exactly like the
+  // picker's own quantity sheet does. grams stays the canonical stored
+  // value in both modes, the count is derived and re-derived.
+  const editUnit = editItem && editItem.loggedUnit && editItem.loggedUnit.grams > 0 ? editItem.loggedUnit : null;
+  const editEffectiveGrams = (() => {
+    if (!editUnit) return fdNum(editGrams) || 0;
+    return editCountMode ? (fdNum(editCountStr) || 0) * editUnit.grams : (fdNum(editGrams) || 0);
+  })();
+  function onEditUnitMode(id) {
+    if (!editUnit) return;
+    if (id === 'count') {
+      const g = fdNum(editGrams) || 0;
+      setEditCountStr(g > 0 ? String(Math.round((g / editUnit.grams) * 10) / 10) : '');
+    } else {
+      const c = fdNum(editCountStr) || 0;
+      setEditGrams(c > 0 ? String(Math.round(c * editUnit.grams)) : '');
+    }
+    setEditCountMode(id === 'count');
+  }
   const editItemPreview = useMemoFd(() => {
-    const g = fdNum(editGrams);
+    const g = editEffectiveGrams;
     if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return null;
     const factor = g / editItem.quantityG;
     return {
@@ -8570,12 +8633,13 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
       satFat: editItem.satFat != null ? fdRound1(editItem.satFat * factor) : null,
       sodiumMg: editItem.sodiumMg != null ? Math.round(editItem.sodiumMg * factor) : null,
     };
-  }, [editItem, editGrams]);
+  }, [editItem, editGrams, editCountMode, editCountStr]); // eslint-disable-line react-hooks/exhaustive-deps
   // Rescales every field on the item by the same factor (newGrams/oldGrams)
   // rather than re-deriving per-100g rates: mathematically identical, one
-  // fewer intermediate step.
+  // fewer intermediate step. In count mode the effective grams are the
+  // count times the unit's grams; loggedUnit itself is never scaled.
   function saveEditItem() {
-    const g = fdNum(editGrams);
+    const g = editEffectiveGrams;
     if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return;
     // A cleared field reverts to the original name rather than blocking
     // Save, same trimmed-empty-means-default rule as the shopping list's
@@ -8835,8 +8899,17 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
         <Field label="Name" style={{ marginBottom: 16 }}>
           <TextInput value={editName} onChange={setEditName} placeholder={editItem?.originalFoodName || editItem?.foodName} />
         </Field>
-        <Field label="Amount (g)" style={{ marginBottom: 16 }}>
-          <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+        {editUnit && (
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+            <button onClick={() => onEditUnitMode('grams')} style={fdSegBtn(!editCountMode)}>Grams</button>
+            <button onClick={() => onEditUnitMode('count')} style={fdSegBtn(editCountMode)}>{editUnit.label}</button>
+          </div>
+        )}
+        <Field label={editUnit && editCountMode ? `Count (${editUnit.label})` : 'Amount (g)'} style={{ marginBottom: 16 }}>
+          <input
+            value={editUnit && editCountMode ? editCountStr : editGrams}
+            onChange={e => editUnit && editCountMode ? setEditCountStr(fdDecimalFilter(e.target.value)) : setEditGrams(fdDecimalFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder={editUnit && editCountMode ? 'count' : 'g'} style={fdInputStyle} />
         </Field>
         {editItemPreview && (
           <FdMacroPreview calories={editItemPreview.calories} protein={editItemPreview.protein} carbs={editItemPreview.carbs} fat={editItemPreview.fat}
@@ -8847,7 +8920,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
           </button>
           <Btn kind="ghost" onClick={closeEditItem} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+          <Btn onClick={saveEditItem} disabled={!(editEffectiveGrams > 0)} style={{ flex: 2 }}>Save</Btn>
         </div>
       </Sheet>
 
