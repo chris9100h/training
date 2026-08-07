@@ -867,6 +867,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // sessions never get), so the flow would only persist dead, unremovable data.
     // Skip it entirely off-autoreg.
     if (!LB.mesoActive(rSch)) return;
+    // A cleanup week sits out autoregulation entirely, so it does not get asked
+    // either. Stamped rather than left null so nothing downstream reads it as
+    // "not answered yet", and stamped 'full' on purpose: a cleanup session has
+    // to stay a full-signal exposure so detectOverreach's own baseline drops
+    // with the reduced loads (see the cleanup notes in docs/internals.md). A
+    // 'rough' answer would have made it 'discounted' and dropped the session
+    // out of that chain, which is exactly what the design set out to avoid.
+    if (isCleanupSession) {
+      updateSession(s => ({ ...s, readiness: 'normal', signalWeight: 'full' }));
+      return;
+    }
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
     // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
     // longer than the threshold just ended and we are still inside the first
@@ -875,7 +886,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // session in the ramp window keeps the protective discount instead of a flat
     // 'normal'/'full' it could never correct. Deload sessions keep 'none'.
     const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
-    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload;
+    // Cleanup is excluded alongside deload: the ramp's whole effect is a
+    // 'discounted' signalWeight, which a cleanup session must never carry.
+    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload && !isCleanupSession;
     if (anyDone) {
       // Resumed session (a working set is already logged): the readiness moment has
       // passed, but the soreness / joint prompts are now gated on readiness != null,
@@ -5874,9 +5887,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Deload always stays 'none' (no earn, no cut). Rough and the re-entry ramp both
   // discount the session (keep earn, skip the rep-miss cut). Fresh / Normal are full.
   const chooseReadiness = (readiness) => {
+    // A cleanup session never reaches this (the prompt is skipped for it), but
+    // pin 'full' anyway so a future change that reopens the sheet cannot
+    // silently discount the session out of the overreach exposure chain.
     const signalWeight = isMesoDeloadSession
       ? 'none'
-      : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
+      : isCleanupSession
+        ? 'full'
+        : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
     updateSession(s => ({ ...s, readiness, signalWeight }));
     setReadinessOpen(false);
     setReadinessReentry(false);
