@@ -323,11 +323,23 @@ Deno.serve(async (req) => {
   // ago" boundaries the server can't know precisely; the client's own
   // AiSummaryCard (screens-health.jsx) only ever offers 1-3 days back, this
   // is a backstop, not the primary gate. An unparseable date makes
-  // daysBetween return NaN, which isNaN() below also rejects.
+  // daysBetween return NaN, which isNaN() below also rejects. Computed from
+  // UTC on purpose, this bound has no reason to know the caller's timezone.
   const todayUTC = new Date().toISOString().slice(0, 10);
   const dayDiff = daysBetween(date, todayUTC);
   if (isNaN(dayDiff) || Math.abs(dayDiff) > 3) return jsonResponse({ error: 'invalid date' }, 400);
-  const dayPhrase = dayPhraseFor(dayDiff);
+  // dayPhrase drives what the model is TOLD to call this day, which the
+  // caller then reads back on screen (the button/header already say
+  // "yesterday" or a specific date), so it has to agree with the caller's
+  // own local calendar day, not the server's UTC one. payload.daysAgo
+  // (LB.buildDailySummaryPayload, src/store.js) is exactly that: computed
+  // client-side from the caller's local "today". Trusted only for phrasing,
+  // never for the validity bound above, this only affects text shown back to
+  // the same account that sent it, nothing security-relevant rides on it. A
+  // caller that omits it (an older client, or a direct API call) falls back
+  // to the server's own UTC-based dayDiff, unchanged from before.
+  const clientDaysAgo = Number.isInteger(payload?.daysAgo) ? payload.daysAgo : null;
+  const dayPhrase = dayPhraseFor(clientDaysAgo != null && clientDaysAgo >= 0 && clientDaysAgo <= 10 ? clientDaysAgo : dayDiff);
   if (payloadIsEmpty(payload)) return jsonResponse({ error: 'Nothing logged that day, nothing to summarize.' }, 400);
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';

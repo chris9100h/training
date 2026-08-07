@@ -7001,8 +7001,18 @@ function buildDailySummaryPayload(store, dateISO) {
     .filter(s => s.ended && (s.date || '').slice(0, 10) === dateISO)
     .map(s => dsTrainingEntryForSession(store, s, dateISO));
   const cardio = dsCardioForDay(store, dateISO);
+  // Client-local day count: the server independently computes its own
+  // dayDiff from UTC purely as a sanity bound (see ai-daily-summary), but
+  // the LABEL it puts in the prompt ("yesterday" vs "N days ago") uses this
+  // value when present, since only the client actually knows the caller's
+  // local calendar day. Without it, a caller ahead of or behind UTC during
+  // the hours their local day and UTC's day disagree gets a mislabeled
+  // summary (the button said "yesterday", the generated text says "that
+  // day" or "2 days ago") even though nothing was actually wrong.
+  const daysAgo = Math.round((new Date(todayISO() + 'T12:00:00') - new Date(dateISO + 'T12:00:00')) / 86400000);
   return {
     date: dateISO,
+    daysAgo,
     weight: log?.weight ?? null,
     weightTrend,
     goal: store.settings?.macroCalc?.goal ?? null,

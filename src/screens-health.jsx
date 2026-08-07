@@ -3333,6 +3333,14 @@ function hlHasLogContent(l) {
 // would resolve server-side to the COACH's own identity, not the client's,
 // and silently write into the wrong account's row rather than erroring
 // loudly, so the affordance simply must not exist there.
+// key={selectedDate} at both call sites remounts this on every date-strip
+// navigation, so busy/error (below) always start fresh for whichever day is
+// now showing instead of carrying a stale spinner or error over from a day
+// the user has since browsed away from. A request still in flight at that
+// point keeps running (setStore below is the parent's, unaffected by this
+// component unmounting) and still saves correctly if it succeeds; its own
+// setBusy/setError calls land on the now-discarded instance and are dropped,
+// same as any React 18 state update on an unmounted component.
 function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, readOnly = false }) {
   const [busy, setBusy] = useStateH(false);
   const [error, setError] = useStateH(null);
@@ -3381,7 +3389,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
         <div>
           {headline && <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 6 }}>{headline}</div>}
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{body}</div>
-          {isAdmin && !readOnly && (
+          {isAdmin && !readOnly && daysAgo >= 1 && daysAgo <= 3 && (
             <div style={{ marginTop: 10 }}>
               <Btn kind="ghost" onClick={generate} disabled={busy} style={{ padding: '6px 14px', fontSize: 11 }}>
                 <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{busy ? 'Retrying…' : 'Retry'}
@@ -4713,7 +4721,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
-    aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
+    aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
     // as a whole, see fullWidthCardIds.
@@ -5038,7 +5046,7 @@ function HealthClientLogs({ clientStore }) {
     // Read-only: no Generate button here at all, a coach's own tap would
     // resolve server-side to the COACH's own identity, not the client's, see
     // AiSummaryCard's own comment.
-    aiSummary: <AiSummaryCard dragHandle={handle} store={clientStore || {}} selectedDate={selectedDate} readOnly />,
+    aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={clientStore || {}} selectedDate={selectedDate} readOnly />,
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
         {adherenceCard}

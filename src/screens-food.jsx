@@ -180,14 +180,21 @@ function fdScaleRecipeItem(i, factor, netCarbs) {
 // referenced from two different parents is still exploded both times, the
 // guard copies per recursion level instead of blacklisting globally.
 function fdExplodeRecipeItems(recipe, factor, foodRecipes, seenIds, netCarbs) {
+  // Seed the current recipe's own id: without this, a direct self-reference
+  // (an item whose recipeId points back at `recipe` itself) isn't caught
+  // until one extra, already-duplicating recursion level, since the guard
+  // otherwise only ever gains an id right before recursing INTO it as a
+  // child, never for the recipe passed in as the current call's own
+  // subject (audit-2026-08 O7).
+  const seenHere = recipe.id ? new Set([...(seenIds || []), recipe.id]) : (seenIds || new Set());
   const out = [];
   (recipe.items || []).forEach(i => {
-    if (i.source === 'recipe' && i.recipeId && !(seenIds || new Set()).has(i.recipeId)) {
+    if (i.source === 'recipe' && i.recipeId && !seenHere.has(i.recipeId)) {
       const sub = (foodRecipes || []).find(r => r.id === i.recipeId);
       if (sub && (sub.items || []).length) {
         const subRawGrams = sub.items.reduce((a, si) => a + (si.quantityG || 0), 0);
         if (subRawGrams > 0) {
-          const seen = new Set(seenIds || []);
+          const seen = new Set(seenHere);
           seen.add(i.recipeId);
           out.push(...fdExplodeRecipeItems(sub, ((i.quantityG || 0) * factor) / subRawGrams, foodRecipes, seen, netCarbs));
           return;
@@ -218,22 +225,24 @@ function fdBuildSteps(items) {
   });
   return steps;
 }
-// The badge number an item shows: without steps exactly today's idx + 1;
-// with steps the step ordinal, where every ungrouped item counts as its own
-// implicit number, so [Paprika, Zwiebel, Zucchini | Salz | Wasser] with a
-// step on the first run renders 1,1,1,2,3. Shared by the editor list, the
-// poster and Cooking Mode's hero card, so the same number always means the
-// same thing.
-function fdStepOrdinal(items, idx) {
-  const steps = fdBuildSteps(items);
-  if (!steps.length) return idx + 1;
+// The badge number an item shows: without steps exactly idx + 1; with steps
+// the step ordinal, where every ungrouped item counts as its own implicit
+// number, so [Paprika, Zwiebel, Zucchini | Salz | Wasser] with a step on the
+// first run renders 1,1,1,2,3. Shared by the editor list, the poster and
+// Cooking Mode's hero card, so the same number always means the same thing.
+// Returns the ordinal for every index at once in a single O(n) pass: every
+// call site needs it for more than one row, so callers build this once per
+// render and index into it, instead of a per-row fdStepOrdinal(items, idx)
+// each independently rebuilding fdBuildSteps and recounting from 0
+// (audit-2026-08 O8).
+function fdStepOrdinals(items) {
+  const out = [];
   let n = 0;
-  for (let i = 0; i <= idx; i++) {
-    const it = items[i];
-    if (!it.stepId) { n++; continue; }
-    if (i === 0 || items[i - 1].stepId !== it.stepId) n++; // run start
-  }
-  return n;
+  (items || []).forEach((it, i) => {
+    if (!it.stepId || i === 0 || items[i - 1].stepId !== it.stepId) n++;
+    out.push(n);
+  });
+  return out;
 }
 // Keeps the step invariants after any mutation (the contract every mutation
 // site relies on):
@@ -252,13 +261,22 @@ function fdStepOrdinal(items, idx) {
 // "start a step here").
 function fdNormalizeSteps(items) {
   const list = (items || []).map(i => ({ ...i }));
-  // Pass 1: label placement within each run.
+  // Pass 1: label placement within each run. Walks backward from `it`'s own
+  // immediate predecessor to find ITS run's head, not a forward search from
+  // the array start: a stepId can (transiently, exactly the corrupted-legacy
+  // data this whole function exists to repair) be shared by two disjoint
+  // runs, and a forward findIndex would land on the first matching head
+  // anywhere earlier in the array, moving this label onto an unrelated run
+  // instead of its own (audit-2026-08 O3). `head` starts at i-1, which
+  // !isHead already guarantees shares it.stepId, so it's always a valid,
+  // same-run position.
   list.forEach((it, i) => {
     if (!it.stepId) return;
     const isHead = i === 0 || list[i - 1].stepId !== it.stepId;
     if (!isHead && it.stepLabel != null) {
-      const head = list.findIndex((x, k) => k < i && x.stepId === it.stepId && (k === 0 || list[k - 1].stepId !== x.stepId));
-      if (head >= 0 && list[head].stepLabel == null) { list[head].stepLabel = it.stepLabel; }
+      let head = i - 1;
+      while (head > 0 && list[head - 1].stepId === it.stepId) head--;
+      if (list[head].stepLabel == null) { list[head].stepLabel = it.stepLabel; }
       delete it.stepLabel;
     }
   });
@@ -394,8 +412,14 @@ function fdUnitCountLabel(item) {
   const u = item?.loggedUnit;
   if (!u || !(u.grams > 0)) return null;
   const n = (item.quantityG || 0) / u.grams;
-  if (n <= 0) return null;
-  return `${Math.round(n * 10) / 10} ${u.label}`;
+  // Guard on the ROUNDED (displayed) value, not the raw ratio: a small
+  // positive ratio that rounds down to 0.0 (a heavily scaled-down ingredient
+  // against a large unit, e.g. 1g of a 500g loaf) would otherwise still pass
+  // and render the nonsensical "0 loaf" next to a nonzero gram amount
+  // (audit-2026-08 O5).
+  const rounded = Math.round(n * 10) / 10;
+  if (rounded <= 0) return null;
+  return `${rounded} ${u.label}`;
 }
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
@@ -3892,10 +3916,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // with the same unit re-entry toggle for snapshot rows that carry a
   // loggedUnit.
   const ingrEditUnit = ingrEditItem && ingrEditItem.loggedUnit && ingrEditItem.loggedUnit.grams > 0 ? ingrEditItem.loggedUnit : null;
-  const ingrEditEffectiveGrams = (() => {
-    if (!ingrEditUnit) return fdNum(ingrEditGrams) || 0;
-    return ingrEditCountMode ? (fdNum(ingrEditCountStr) || 0) * ingrEditUnit.grams : (fdNum(ingrEditGrams) || 0);
-  })();
+  const ingrEditEffectiveGrams = !ingrEditUnit ? (fdNum(ingrEditGrams) || 0)
+    : ingrEditCountMode ? (fdNum(ingrEditCountStr) || 0) * ingrEditUnit.grams : (fdNum(ingrEditGrams) || 0);
   function onIngrEditUnitMode(id) {
     if (!ingrEditUnit) return;
     if (id === 'count') {
@@ -3903,7 +3925,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setIngrEditCountStr(g > 0 ? String(Math.round((g / ingrEditUnit.grams) * 10) / 10) : '');
     } else {
       const c = fdNum(ingrEditCountStr) || 0;
-      setIngrEditGrams(c > 0 ? String(Math.round(c * ingrEditUnit.grams)) : '');
+      // fdRound1 (nearest 0.1g), matching the picker's own quantity sheet
+      // (selectQtyUnit): this used to be Math.round (nearest whole gram),
+      // silently less precise than the count<->grams conversion everywhere
+      // else in the app for the exact same operation (audit-2026-08 O11).
+      setIngrEditGrams(c > 0 ? String(fdRound1(c * ingrEditUnit.grams)) : '');
     }
     setIngrEditCountMode(id === 'count');
   }
@@ -3911,16 +3937,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const g = ingrEditEffectiveGrams;
     if (!ingrEditItem || !(g > 0) || !(ingrEditItem.quantityG > 0)) return null;
     const factor = g / ingrEditItem.quantityG;
+    const protein = fdRound1((ingrEditItem.protein || 0) * factor);
+    const carbs = fdRound1((ingrEditItem.carbs || 0) * factor);
+    const fat = fdRound1((ingrEditItem.fat || 0) * factor);
+    const fiber = ingrEditItem.fiber != null ? fdRound1(ingrEditItem.fiber * factor) : null;
     return {
-      calories: Math.round((ingrEditItem.calories || 0) * factor),
-      protein: fdRound1((ingrEditItem.protein || 0) * factor),
-      carbs: fdRound1((ingrEditItem.carbs || 0) * factor),
-      fat: fdRound1((ingrEditItem.fat || 0) * factor),
+      // Derived from macros, not the stored calories scaled directly, same
+      // reasoning and precedent as RecipeEditorScreen's editItemPreview
+      // (audit-2026-08 O10).
+      calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, store.settings?.netCarbs ? fiber : null) || 0),
+      protein, carbs, fat,
       sugar: ingrEditItem.sugar != null ? fdRound1(ingrEditItem.sugar * factor) : null,
       satFat: ingrEditItem.satFat != null ? fdRound1(ingrEditItem.satFat * factor) : null,
       sodiumMg: ingrEditItem.sodiumMg != null ? Math.round(ingrEditItem.sodiumMg * factor) : null,
     };
-  }, [ingrEditItem, ingrEditGrams, ingrEditCountMode, ingrEditCountStr]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ingrEditItem, ingrEditGrams, ingrEditCountMode, ingrEditCountStr, store.settings?.netCarbs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); setIngrEditCountMode(false); setIngrEditCountStr(''); }
   function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); setIngrEditCountMode(false); setIngrEditCountStr(''); }
@@ -3933,16 +3964,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // than blocking the edit.
     const old = ingrEditItem.quantityG || 0;
     const factor = old > 0 ? g / old : 1;
+    // fdScaleRecipeItem instead of a separate inline copy of the same
+    // formula, same reasoning as RecipeEditorScreen's saveEditItem
+    // (audit-2026-08 O9): derives kcal from macros instead of scaling the
+    // stored value directly. quantityG is still set outright from the typed
+    // g afterward, not the factor-derived value fdScaleRecipeItem returns:
+    // this is direct user gram entry, not a recipe-wide rescale, and must
+    // keep working for the legacy factor-1 case above.
     setIngredientItems(list => list.map(i => i._k !== ingrEditItem._k ? i : {
-      ...i, quantityG: Math.round(g),
-      calories: Math.round((i.calories || 0) * factor),
-      protein: fdRound1((i.protein || 0) * factor),
-      carbs: fdRound1((i.carbs || 0) * factor),
-      fat: fdRound1((i.fat || 0) * factor),
-      fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
-      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
-      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
-      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
+      ...fdScaleRecipeItem(i, factor, !!store.settings?.netCarbs), quantityG: Math.round(g),
     }));
     closeIngrEdit();
   }
@@ -6073,7 +6103,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <span style={{ ...fdEntryName, fontSize: 12 }}>{item.foodName}</span>
                 </div>
                 <span style={fdEntryMeta}>
-                  {item.quantityG || 0}g · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
+                  {item.quantityG || 0}g{fdUnitCountLabel(item) && <span> ({fdUnitCountLabel(item)})</span>} · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
                   <span style={fdMetaDivider} />
                   <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
                 </span>
@@ -6222,7 +6252,15 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
       const copy = {
         id: LB.uid(), name,
         portions: parseInt(recipe.portions, 10) > 0 ? parseInt(recipe.portions, 10) : 1,
-        items: items.map(i => ({
+        // fdNormalizeSteps re-validates the run-uniqueness/label-placement
+        // invariants on the adopted array, same as the editor's and Cooking
+        // Mode's own open effects do for a saved recipe: the share payload
+        // is another user's jsonb, untrusted the same way stepId/stepLabel
+        // already are a few lines below, and this is the one path that
+        // otherwise persisted step data straight through without the
+        // self-heal pass every other entry point relies on (audit-2026-08
+        // O6).
+        items: fdNormalizeSteps(items.map(i => ({
           id: LB.uid(),
           foodId: typeof i.foodId === 'string' ? i.foodId : null,
           foodName: String(i.foodName || 'Item'),
@@ -6256,7 +6294,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           // its "248g (4 pcs)" display on the adopter's side too.
           loggedUnit: i.loggedUnit != null && i.loggedUnit.grams > 0 && typeof i.loggedUnit.label === 'string'
             ? { label: i.loggedUnit.label, grams: Number(i.loggedUnit.grams) } : null,
-        })),
+        }))),
         createdAt: now, updatedAt: now,
       };
       return { ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] };
@@ -6291,8 +6329,11 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
               at-a-glance views elsewhere (timeline detail, meal-plan block
               preview) that aren't about following along step by step. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {items.map((i, idx) => {
-              const stepHead = fdBuildSteps(items).find(s => s.startIdx === idx);
+            {/* steps/ordinals computed once for the whole list, not per row:
+                this used to rebuild fdBuildSteps(items) from scratch inside
+                the map, twice per step row (audit-2026-08 O8). */}
+            {(() => { const shareSteps = fdBuildSteps(items); const shareOrdinals = fdStepOrdinals(items); return items.map((i, idx) => {
+              const stepHead = shareSteps.find(s => s.startIdx === idx);
               return (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 {stepHead && (
@@ -6300,7 +6341,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                   // case the notes below exist for: the recipient sees the
                   // grouping before they adopt.
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, paddingBottom: 4, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', fontFamily: UI.fontUi, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', fontFamily: UI.fontUi, flexShrink: 0 }}>Step {shareOrdinals[idx]}</span>
                     {stepHead.label && <span style={{ fontSize: 10, color: UI.inkSoft, fontFamily: UI.fontUi }}>{stepHead.label}</span>}
                   </div>
                 )}
@@ -6322,7 +6363,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                 )}
               </div>
               );
-            })}
+            }); })()}
           </div>
           <FdMacroPreview calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
           {added ? (
@@ -8270,6 +8311,12 @@ const RCP_MACRO_LABELS = [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']];
 
 function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, logo, logoStyle, grid }) {
   const steps = fdBuildSteps(items);
+  // ordinals/stepByStart turn card()'s per-item work from an O(n) rebuild +
+  // O(steps) linear scan (fdStepOrdinal, steps.find) into O(1) lookups; card()
+  // runs once per item via the while-loop below, so this used to be O(n^2)
+  // for the whole poster (audit-2026-08 O8).
+  const ordinals = fdStepOrdinals(items);
+  const stepByStart = new Map(steps.map(s => [s.startIdx, s]));
   return (
     // Same sheet geometry as the Plan poster, at the width the Food Log and
     // Shopping List posters use. Asymmetric padding on purpose: the card opens
@@ -8324,7 +8371,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
             const i = items[idx];
             const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
             const unitLabel = fdUnitCountLabel(i);
-            const stepHead = steps.find(s => s.startIdx === idx);
+            const stepHead = stepByStart.get(idx);
             return (
               // Translucent fill rather than fdEntryRow's opaque one, so the
               // watermark reads through the cards instead of only in the gaps.
@@ -8335,7 +8382,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
               }}>
                 {stepHead && (
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
-                    <span style={{ ...rcpMicro, color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
+                    <span style={{ ...rcpMicro, color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>Step {ordinals[idx]}</span>
                     {stepHead.label && <span style={{ ...rcpMicro, color: UI.inkSoft }}>{stepHead.label}</span>}
                   </div>
                 )}
@@ -8344,7 +8391,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
                     ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
                     display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
                     background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
-                  }}>{fdStepOrdinal(items, idx)}</span>
+                  }}>{ordinals[idx]}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
                     <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
@@ -8523,17 +8570,20 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // An incoming row that already carries a stepId (an exploded sub-recipe,
     // whose steps confirmExplodeRecipe remapped to fresh uids) keeps it: its
     // runs stay intact and can never merge into a parent step. A plain row
-    // inherits the step of the row directly BEFORE it in the new list: the
-    // parent's last row when the batch starts plain, the exploded block's
-    // tail when it follows one. Never the parent's last row when an
-    // exploded block sits in between: that would stamp a non-adjacent id
-    // and the saved recipe would remap it into a phantom unlabeled step.
-    // Appending can never orphan or split a run, so no normalize pass is
-    // needed.
+    // inherits the step of the row directly BEFORE it, but only when that
+    // predecessor is ALSO one of the just-added rows (k > list.length, not
+    // k > 0): the exploded block's tail continuing into a plain pick that
+    // follows it in the same batch is the one real case this exists for.
+    // Never the parent's pre-existing last row, even when the batch starts
+    // plain: an ordinary Search-tab add (unrelated to any step) would
+    // otherwise silently join whatever step the recipe's last row happened
+    // to already be in, with no toggle, drag, or confirmation from the user
+    // (audit-2026-08 O2). Appending can never orphan or split a run, so no
+    // normalize pass is needed.
     setItems(list => {
       const next = [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.originalFoodName || item.foodName }))];
       for (let k = list.length; k < next.length; k++) {
-        if (next[k].stepId == null && k > 0) {
+        if (next[k].stepId == null && k > list.length) {
           const prev = next[k - 1];
           if (prev && prev.stepId) next[k] = { ...next[k], stepId: prev.stepId };
         }
@@ -8605,10 +8655,8 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // picker's own quantity sheet does. grams stays the canonical stored
   // value in both modes, the count is derived and re-derived.
   const editUnit = editItem && editItem.loggedUnit && editItem.loggedUnit.grams > 0 ? editItem.loggedUnit : null;
-  const editEffectiveGrams = (() => {
-    if (!editUnit) return fdNum(editGrams) || 0;
-    return editCountMode ? (fdNum(editCountStr) || 0) * editUnit.grams : (fdNum(editGrams) || 0);
-  })();
+  const editEffectiveGrams = !editUnit ? (fdNum(editGrams) || 0)
+    : editCountMode ? (fdNum(editCountStr) || 0) * editUnit.grams : (fdNum(editGrams) || 0);
   function onEditUnitMode(id) {
     if (!editUnit) return;
     if (id === 'count') {
@@ -8616,7 +8664,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
       setEditCountStr(g > 0 ? String(Math.round((g / editUnit.grams) * 10) / 10) : '');
     } else {
       const c = fdNum(editCountStr) || 0;
-      setEditGrams(c > 0 ? String(Math.round(c * editUnit.grams)) : '');
+      // fdRound1 (nearest 0.1g), matching the picker's own quantity sheet
+      // (selectQtyUnit) and FoodScreen's onIngrEditUnitMode: this used to be
+      // Math.round (nearest whole gram), silently less precise than the
+      // count<->grams conversion everywhere else for the same operation
+      // (audit-2026-08 O11).
+      setEditGrams(c > 0 ? String(fdRound1(c * editUnit.grams)) : '');
     }
     setEditCountMode(id === 'count');
   }
@@ -8624,16 +8677,23 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     const g = editEffectiveGrams;
     if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return null;
     const factor = g / editItem.quantityG;
+    const protein = fdRound1((editItem.protein || 0) * factor);
+    const carbs = fdRound1((editItem.carbs || 0) * factor);
+    const fat = fdRound1((editItem.fat || 0) * factor);
+    const fiber = editItem.fiber != null ? fdRound1(editItem.fiber * factor) : null;
     return {
-      calories: Math.round((editItem.calories || 0) * factor),
-      protein: fdRound1((editItem.protein || 0) * factor),
-      carbs: fdRound1((editItem.carbs || 0) * factor),
-      fat: fdRound1((editItem.fat || 0) * factor),
+      // Derived from macros, not the stored calories scaled directly: every
+      // other kcal surface in this feature (Recipes-tab row, batch hero,
+      // Cooking Mode, the log-time snapshot, and now Save itself via
+      // fdScaleRecipeItem) already does this so the preview can't disagree
+      // with what Save actually produces (audit-2026-08 O10).
+      calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, store.settings?.netCarbs ? fiber : null) || 0),
+      protein, carbs, fat,
       sugar: editItem.sugar != null ? fdRound1(editItem.sugar * factor) : null,
       satFat: editItem.satFat != null ? fdRound1(editItem.satFat * factor) : null,
       sodiumMg: editItem.sodiumMg != null ? Math.round(editItem.sodiumMg * factor) : null,
     };
-  }, [editItem, editGrams, editCountMode, editCountStr]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editItem, editGrams, editCountMode, editCountStr, store.settings?.netCarbs]); // eslint-disable-line react-hooks/exhaustive-deps
   // Rescales every field on the item by the same factor (newGrams/oldGrams)
   // rather than re-deriving per-100g rates: mathematically identical, one
   // fewer intermediate step. In count mode the effective grams are the
@@ -8646,16 +8706,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // own name override (saveEdit above in ShoppingListScreen).
     const finalName = editName.trim() || editItem.originalFoodName || editItem.foodName;
     const factor = g / editItem.quantityG;
+    // fdScaleRecipeItem instead of a separate inline copy of the same
+    // formula: this is exactly the 0g-floor / derive-kcal-from-macros bug
+    // class it was written to prevent (audit-2026-08 O9), and this call
+    // site never adopted either fix.
     setItems(list => list.map(i => i.id !== editItem.id ? i : {
-      ...i, quantityG: Math.round(g), foodName: finalName,
-      calories: Math.round((i.calories || 0) * factor),
-      protein: fdRound1((i.protein || 0) * factor),
-      carbs: fdRound1((i.carbs || 0) * factor),
-      fat: fdRound1((i.fat || 0) * factor),
-      fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
-      sugar: i.sugar != null ? fdRound1(i.sugar * factor) : null,
-      satFat: i.satFat != null ? fdRound1(i.satFat * factor) : null,
-      sodiumMg: i.sodiumMg != null ? Math.round(i.sodiumMg * factor) : null,
+      ...fdScaleRecipeItem(i, factor, !!store.settings?.netCarbs), foodName: finalName,
     }));
     closeEditItem();
   }
@@ -8683,6 +8739,9 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // Run list for the step layout below (badge ordinals, rail, and the
   // instruction field that renders under each run's last row).
   const steps = fdBuildSteps(items);
+  // One O(n) pass shared by every row's badge instead of each row calling
+  // fdStepOrdinal (rebuild + recount) on its own (audit-2026-08 O8).
+  const ordinals = fdStepOrdinals(items);
 
   // Same html2canvas flow as SessionDetailScreen/SessionCompareScreen's own
   // takeScreenshot. The watermark here is a full-page centered background
@@ -8823,7 +8882,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                         <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
                           <i className="fa-solid fa-list-ol" style={{ fontSize: 11, color: isStepHead ? 'var(--accent)' : UI.inkFaint }} />
                         </button>
-                        <FdIngredientBadge n={fdStepOrdinal(items, idx)} />
+                        <FdIngredientBadge n={ordinals[idx]} />
                         <button onClick={() => openEditItem(it)} style={fdDraftMain}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             {it.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
@@ -8845,13 +8904,14 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                     </div>
                   );
                 };
+                const stepByStart = new Map(steps.map(s => [s.startIdx, s]));
                 const blocks = [];
                 let k = 0;
                 while (k < items.length) {
                   const it = items[k];
                   const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
                   if (!isHead) { blocks.push(renderRow(k)); k++; continue; }
-                  const run = steps.find(s => s.startIdx === k);
+                  const run = stepByStart.get(k);
                   const count = run ? run.count : 1;
                   const members = [];
                   for (let m = k; m < k + count; m++) members.push(renderRow(m));
@@ -8863,7 +8923,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                       display: 'flex', flexDirection: 'column', gap: 6,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 2px 2px' }}>
-                        <span className="micro-gold">Step {fdStepOrdinal(items, k)}</span>
+                        <span className="micro-gold">Step {ordinals[k]}</span>
                         {count === 1 && (
                           <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Drag more ingredients in</span>
                         )}
@@ -9136,6 +9196,9 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // below, which uses hasSteps/curStepIdx as its deps. curStepIdx is -1
   // while currentIdx sits in an ungrouped stretch of a mixed recipe.
   const steps = fdBuildSteps(items);
+  // Shared by the chip-row overview below (one badge per item) instead of
+  // each chip calling fdStepOrdinal on its own (audit-2026-08 O8).
+  const ordinals = fdStepOrdinals(items);
   const hasSteps = steps.length > 0;
   const curStepIdx = hasSteps ? steps.findIndex(s => currentIdx >= s.startIdx && currentIdx < s.startIdx + s.count) : -1;
   // Whether the current item is the last member of its step: the footer
@@ -9145,7 +9208,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // The counter's total when steps exist: the badge ordinal of the last
   // item, which counts ungrouped items as their own implicit numbers, so
   // "Step 03/05" always matches the badge shown on the hero card.
-  const totalStepCount = items.length ? fdStepOrdinal(items, items.length - 1) : 0;
+  const totalStepCount = ordinals.length ? ordinals[ordinals.length - 1] : 0;
   // Keeps the active chip centered in the strip as currentIdx moves, same
   // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
   // without it the strip only scrolls by hand and the active chip silently
@@ -9433,6 +9496,11 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
       sugar: picked.sugar != null ? fdRound1(picked.sugar * factor) : null,
       satFat: picked.satFat != null ? fdRound1(picked.satFat * factor) : null,
       sodiumMg: picked.sodiumMg != null ? Math.round(picked.sodiumMg * factor) : null,
+      // The old loggedUnit describes the OLD food (its own grams-per-unit),
+      // never carries over to a swap; picked's own unit choice (if the swap
+      // picker's own quantity sheet was used in a unit) replaces it instead
+      // of being silently dropped (audit-2026-08 O4).
+      loggedUnit: picked.loggedUnit ?? null,
       note: null,
     };
     const swappedItemId = curItem.id;
@@ -9503,7 +9571,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
           <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
             {hasSteps ? (
               <>
-                {String(fdStepOrdinal(items, currentIdx)).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(totalStepCount).padStart(2, '0')}
+                {String(ordinals[currentIdx]).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(totalStepCount).padStart(2, '0')}
               </>
             ) : (
               <>
@@ -9549,7 +9617,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
                     background: 'rgba(var(--accent-rgb),0.06)',
                     fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 700,
                     color: 'var(--accent)', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                  }}>Step {fdStepOrdinal(items, i)}</button>
+                  }}>Step {ordinals[i]}</button>
                 ) : null,
                 <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
                   flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
@@ -9567,7 +9635,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <FdIngredientBadge n={fdStepOrdinal(items, currentIdx)} size={34} />
+            <FdIngredientBadge n={ordinals[currentIdx]} size={34} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span className="display" style={{
                 display: 'block',
@@ -9594,7 +9662,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             const s = steps[curStepIdx];
             return (
               <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
-                <div className="micro-gold" style={{ marginBottom: 4 }}>Step {fdStepOrdinal(items, currentIdx)}</div>
+                <div className="micro-gold" style={{ marginBottom: 4 }}>Step {ordinals[currentIdx]}</div>
                 {s.label && <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1.4, whiteSpace: 'pre-wrap', marginBottom: s.count > 1 ? 6 : 0 }}>{s.label}</div>}
                 {s.count > 1 && (
                   <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
@@ -10212,7 +10280,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       // hero, the app's documented rounding tolerance for this class.
       calories: Math.round(exploded.reduce((a, i) => a + (i.calories || 0), 0)),
     };
-  }, [explodeRecipe, explodeFactor, store.foodRecipes]);
+  }, [explodeRecipe, explodeFactor, store.foodRecipes, store.settings?.netCarbs]);
   // "Add N ingredients" on the explode sheet: the exploded rows join staged
   // like any other pick, so the batch totals above and the commit contract
   // below need zero changes. Food rows only get ensureFoodCached fired for
