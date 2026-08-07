@@ -250,50 +250,13 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
       {newPlanPicker && <NewPlanPickerModal onClose={() => setNewPlanPicker(false)} go={go} />}
       {cleanupSheet && (
         <MiniSheet title="Cleanup week" onClose={() => setCleanupSheet(false)}>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 12 }}>
-            Train your normal plan with lighter weights for one full cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: the cycle after builds back up from them. You can put any single exercise back on full load while training.
-          </div>
-          {/* The single most surprising thing about this button, so it gets its
-              own line rather than a clause buried in the paragraph above: it
-              does NOT start today. A cleanup covers a whole cycle, so it waits
-              for the next one to begin and leaves the rest of this one at full
-              load. */}
-          <div style={{
-            fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.gold, marginBottom: 18,
-            background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.goldSoft}`,
-            borderRadius: 6, padding: '8px 10px',
-          }}>
-            <i className="fa-solid fa-calendar-day" style={{ marginRight: 7 }} />
-            {cleanupStartISO
-              ? <>Starts <strong>{fmtStartDay(new Date(cleanupStartISO))}</strong>, the first day of your next cycle. The rest of this one still trains at full load.</>
-              : <>Starts right away and runs for one full rotation.</>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
-            <span className="label" style={{ color: UI.inkFaint }}>Reduce by</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <button onClick={() => setCleanupDraftPct(p => Math.max(10, p - 5))}
-                disabled={cleanupDraftPct <= 10}
-                aria-label="Less reduction"
-                style={{
-                  width: 34, height: 34, borderRadius: 4, cursor: cleanupDraftPct <= 10 ? 'default' : 'pointer',
-                  border: `1px solid ${UI.hairStrong}`, background: 'transparent',
-                  color: cleanupDraftPct <= 10 ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
-                }}>−</button>
-              <span className="num" style={{ fontSize: 22, color: UI.gold, minWidth: 58, textAlign: 'center' }}>{cleanupDraftPct}%</span>
-              <button onClick={() => setCleanupDraftPct(p => Math.min(30, p + 5))}
-                disabled={cleanupDraftPct >= 30}
-                aria-label="More reduction"
-                style={{
-                  width: 34, height: 34, borderRadius: 4, cursor: cleanupDraftPct >= 30 ? 'default' : 'pointer',
-                  border: `1px solid ${UI.hairStrong}`, background: 'transparent',
-                  color: cleanupDraftPct >= 30 ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
-                }}>+</button>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={() => setCleanupSheet(false)} style={{ flex: 1 }}>Cancel</Btn>
-            <Btn onClick={startCleanupWithPct} style={{ flex: 1 }}>Start</Btn>
-          </div>
+          <CleanupStartBody
+            percent={cleanupDraftPct}
+            onPercent={setCleanupDraftPct}
+            startLabel={cleanupStartISO ? fmtStartDay(new Date(cleanupStartISO)) : null}
+            onCancel={() => setCleanupSheet(false)}
+            onStart={startCleanupWithPct}
+          />
         </MiniSheet>
       )}
       <SubTabBar

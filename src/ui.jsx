@@ -695,6 +695,60 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
   );
 }
 
+// ─── CleanupStartBody ───────────────────────────────────────────────
+// Contents of the "start a cleanup week" prompt, shared by the Plan tab and
+// the day log so the two entry points cannot describe the same feature
+// differently. Rendered INSIDE whichever sheet the calling screen already
+// uses (MiniSheet there, Sheet here), rather than bringing its own, so
+// neither screen's existing sheet behaviour changes.
+// Presentational on purpose: the caller owns the percentage state, resolves
+// the start day and performs the start, which keeps this file free of store
+// and LB logic like the rest of ui.jsx.
+function CleanupStartBody({ percent, onPercent, startLabel, onCancel, onStart }) {
+  const stepBtn = (delta, disabled, label, glyph) => (
+    <button onClick={() => onPercent(Math.min(30, Math.max(10, percent + delta)))}
+      disabled={disabled} aria-label={label}
+      style={{
+        width: 34, height: 34, borderRadius: 4, cursor: disabled ? 'default' : 'pointer',
+        border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+        color: disabled ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
+      }}>{glyph}</button>
+  );
+  return (
+    <>
+      <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 12 }}>
+        Train your normal plan with lighter weights for one full cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: the cycle after builds back up from them. You can put any single exercise back on full load while training.
+      </div>
+      {/* The single most surprising thing about this, so it gets its own line
+          rather than a clause buried in the paragraph above: it does NOT start
+          today. A cleanup covers a whole cycle, so it waits for the next one to
+          begin and leaves the rest of this one at full load. */}
+      <div style={{
+        fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.gold, marginBottom: 18,
+        background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.goldSoft}`,
+        borderRadius: 6, padding: '8px 10px',
+      }}>
+        <i className="fa-solid fa-calendar-day" style={{ marginRight: 7 }} />
+        {startLabel
+          ? <>Starts <strong>{startLabel}</strong>, the first day of your next cycle. The rest of this one still trains at full load.</>
+          : <>Starts right away and runs for one full rotation.</>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
+        <span className="label" style={{ color: UI.inkFaint }}>Reduce by</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {stepBtn(-5, percent <= 10, 'Less reduction', '−')}
+          <span className="num" style={{ fontSize: 22, color: UI.gold, minWidth: 58, textAlign: 'center' }}>{percent}%</span>
+          {stepBtn(5, percent >= 30, 'More reduction', '+')}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={onCancel} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={onStart} style={{ flex: 1 }}>Start</Btn>
+      </div>
+    </>
+  );
+}
+
 // ─── Pill ───────────────────────────────────────────────────────────
 // Always 9px (the border-radius scale's own micro-badge threshold, see
 // CLAUDE.md), so the radius itself follows that scale's "interactive or

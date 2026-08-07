@@ -1045,23 +1045,51 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   // reduction, so both go through their LB start/end functions rather than
   // onSetStatus. The wording mirrors the Plan tab's own buttons so the two
   // entry points cannot drift apart.
+  // Every pick in the status row confirms first: the buttons are icon-only, so
+  // a mistap has no label to catch it, and switching away from a status ends
+  // whatever was running. Named in prose here so the prompts can say which one.
+  const statusName = (m) => m === 'sick' ? 'sick day' : m === 'vacation' ? 'vacation'
+    : m === 'deload' ? 'deload week' : m === 'cleanup' ? 'cleanup week' : 'normal training';
+  const pickPlainStatus = async (mode) => {
+    const backdate = date < todayISO ? date : null;
+    const current = dayMode;
+    // Leaving an overlay runs its own end function so the coaching thread gets
+    // the closing note; that path does its own confirm.
+    if (mode === null && (store.statusMode === 'deload' || store.statusMode === 'cleanup') && date === todayISO) { endOverlayStatus(); return; }
+    const ends = current ? ` This will end your ${statusName(current)}.` : '';
+    const msg = mode === null
+      ? `Set status to normal.${ends}`
+      : `Mark this day as ${statusName(mode)}.${ends}`;
+    if (!await confirm(msg, { title: mode === null ? 'Back to normal' : `Set ${statusName(mode)}`, ok: 'Set' })) return;
+    onSetStatus(mode, backdate);
+  };
+
+  // Cleanup opens the same sheet the Plan tab uses (CleanupStartBody, ui.jsx),
+  // so the reduction can be picked here too rather than silently reusing
+  // whatever was chosen last.
+  const [cleanupSheet, setCleanupSheet] = useStateH(false);
+  const [cleanupDraftPct, setCleanupDraftPct] = useStateH(20);
+  const cleanupStartISO = LB.nextCleanupStartISO(store);
   const startOverlayStatus = async (mode) => {
-    const lead = store.statusMode ? `This will end your ${store.statusMode} status. ` : '';
+    const lead = store.statusMode ? `This will end your ${statusName(store.statusMode)}. ` : '';
     if (mode === 'cleanup') {
-      const pct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
-      const startISO = LB.nextCleanupStartISO(store);
-      const when = startISO
-        ? `Starts ${new Date(startISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}, the first day of your next cycle, and the rest of this one still trains at full load.`
-        : 'Starts right away and runs for one full rotation.';
-      if (!await confirm(`${lead}Train your normal plan at ${100 - pct}% load for one full cycle, then build back up from there. ${when}`,
-        { title: 'Start cleanup week', ok: 'Start cleanup' })) return;
-      // Re-resolved after the confirm: the dialog can sit open across midnight.
-      await LB.startCleanup(userId, store, setStore, LB.nextCleanupStartISO(store));
+      if (store.statusMode && !await confirm(`${lead}Start a cleanup week instead?`,
+        { title: 'Start cleanup', ok: 'Continue' })) return;
+      setCleanupDraftPct(Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20))));
+      setCleanupSheet(true);
       return;
     }
     if (!await confirm(`${lead}Train your normal plan at ~50% load for one cycle. Weights pre-fill light and the week is excluded from progression. Start now?`,
       { title: 'Start deload week', ok: 'Start deload' })) return;
     await LB.startDeload(userId, store, setStore);
+  };
+  const startCleanupWithPct = async () => {
+    const pct = Math.min(30, Math.max(10, Math.round(cleanupDraftPct)));
+    setCleanupSheet(false);
+    setStore(s => ({ ...s, settings: { ...s.settings, cleanupPercent: pct } }));
+    // Re-resolved here rather than reusing the render-time value: the sheet can
+    // sit open across midnight, which would move the boundary.
+    await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore, LB.nextCleanupStartISO(store));
   };
   const endOverlayStatus = async () => {
     const isCleanup = store.statusMode === 'cleanup';
@@ -1538,12 +1566,9 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button key={String(mode)} aria-label={label} title={disabled ? `${label} can only be started for today` : label}
                   disabled={disabled}
                   onClick={() => {
-                    if (disabled) return;
-                    if (overlay) { if (!active) startOverlayStatus(mode); return; }
-                    // Leaving an overlay runs its own end function so the
-                    // coaching thread gets the closing note too.
-                    if (mode === null && (store.statusMode === 'deload' || store.statusMode === 'cleanup') && date === todayISO) { endOverlayStatus(); return; }
-                    onSetStatus(mode, date < todayISO ? date : null);
+                    if (disabled || active) return;
+                    if (overlay) { startOverlayStatus(mode); return; }
+                    pickPlainStatus(mode);
                   }} style={{
                   flex: 1, padding: '14px 4px', cursor: disabled ? 'default' : 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
@@ -2002,6 +2027,19 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
       </div>
+      {/* Outside the scrolling section on purpose: Sheet positions itself fixed
+          and is not portaled, so nesting it inside a scroll container invites
+          clipping. zIndex above this screen's own 100, the same bump the other
+          sheets stacked on top of a full-page screen use. */}
+      <Sheet open={cleanupSheet} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
+        <CleanupStartBody
+          percent={cleanupDraftPct}
+          onPercent={setCleanupDraftPct}
+          startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
+          onCancel={() => setCleanupSheet(false)}
+          onStart={startCleanupWithPct}
+        />
+      </Sheet>
     </Screen>
   );
 }
