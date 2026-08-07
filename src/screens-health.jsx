@@ -3341,6 +3341,19 @@ function hlHasLogContent(l) {
 // component unmounting) and still saves correctly if it succeeds; its own
 // setBusy/setError calls land on the now-discarded instance and are dropped,
 // same as any React 18 state update on an unmounted component.
+//
+// aiSummaryInFlightDates: module-level, NOT component state, exactly because
+// of that remount. A plain useState(false) busy flag has no memory across a
+// fresh mount, so navigating away mid-request and back to the SAME date
+// before it resolves showed an idle, clickable button again, letting a
+// second generate() fire for that date. For a regular user the server's own
+// atomic claim (ai-daily-summary) still stops any real double-write, just
+// surfaces a spurious "Already generated" error; for admin, the claim AND
+// quota check are both intentionally skipped, so a double-fire meant two
+// real model calls racing the final upsert. Read at render (inFlight below)
+// so a remounted instance immediately shows the correct state instead of
+// only the instance that actually started the request knowing about it.
+const aiSummaryInFlightDates = new Set();
 function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, readOnly = false }) {
   const [busy, setBusy] = useStateH(false);
   const [error, setError] = useStateH(null);
@@ -3360,11 +3373,18 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
   const log = (store.dailyLogs || []).find(l => l.date === date) || null;
   const isEmpty = LB.dailySummaryDayIsEmpty(store, date);
   const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');
+  // See aiSummaryInFlightDates above: local busy still drives the instant
+  // disable/label on the tap that actually started the request, this only
+  // adds the cross-remount case on top of it.
+  const inFlight = busy || aiSummaryInFlightDates.has(date);
 
   async function generate() {
+    if (aiSummaryInFlightDates.has(date)) return;
+    aiSummaryInFlightDates.add(date);
     setBusy(true);
     setError(null);
     const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, date));
+    aiSummaryInFlightDates.delete(date);
     setBusy(false);
     if (!res.ok) { setError(res.error || 'Could not generate summary. Try again.'); return; }
     setStore(s => {
@@ -3391,8 +3411,8 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{body}</div>
           {isAdmin && !readOnly && daysAgo >= 1 && daysAgo <= 3 && (
             <div style={{ marginTop: 10 }}>
-              <Btn kind="ghost" onClick={generate} disabled={busy} style={{ padding: '6px 14px', fontSize: 11 }}>
-                <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{busy ? 'Retrying…' : 'Retry'}
+              <Btn kind="ghost" onClick={generate} disabled={inFlight} style={{ padding: '6px 14px', fontSize: 11 }}>
+                <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{inFlight ? 'Retrying…' : 'Retry'}
               </Btn>
               {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
             </div>
@@ -3410,8 +3430,8 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged that day.</div>
       ) : (
         <div>
-          <Btn onClick={generate} disabled={busy} style={{ width: '100%' }}>
-            {busy ? 'Generating…' : `Get ${daysAgo === 1 ? 'yesterday' : label}'s AI summary`}
+          <Btn onClick={generate} disabled={inFlight} style={{ width: '100%' }}>
+            {inFlight ? 'Generating…' : `Get ${daysAgo === 1 ? 'yesterday' : label}'s AI summary`}
           </Btn>
           {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
         </div>

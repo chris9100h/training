@@ -6332,8 +6332,8 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
             {/* steps/ordinals computed once for the whole list, not per row:
                 this used to rebuild fdBuildSteps(items) from scratch inside
                 the map, twice per step row (audit-2026-08 O8). */}
-            {(() => { const shareSteps = fdBuildSteps(items); const shareOrdinals = fdStepOrdinals(items); return items.map((i, idx) => {
-              const stepHead = shareSteps.find(s => s.startIdx === idx);
+            {(() => { const shareSteps = fdBuildSteps(items); const shareOrdinals = fdStepOrdinals(items); const shareStepByStart = new Map(shareSteps.map(s => [s.startIdx, s])); return items.map((i, idx) => {
+              const stepHead = shareStepByStart.get(idx);
               return (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
                 {stepHead && (
@@ -8418,7 +8418,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
             const it = items[k];
             const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
             if (!isHead) { blocks.push(card(k, true)); k++; continue; }
-            const run = steps.find(s => s.startIdx === k);
+            const run = stepByStart.get(k);
             const count = run ? run.count : 1;
             const members = [];
             for (let m = k; m < k + count; m++) members.push(card(m, false));
@@ -8709,9 +8709,15 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // fdScaleRecipeItem instead of a separate inline copy of the same
     // formula: this is exactly the 0g-floor / derive-kcal-from-macros bug
     // class it was written to prevent (audit-2026-08 O9), and this call
-    // site never adopted either fix.
+    // site never adopted either fix. quantityG is still set outright from g
+    // afterward, not the factor-derived value fdScaleRecipeItem returns:
+    // factor = g / editItem.quantityG makes i.quantityG * factor a
+    // floating-point round trip through editItem.quantityG that is not
+    // guaranteed to land back on exactly g (verified: it silently doesn't
+    // for some .5g inputs), where g is already the exact value the user
+    // typed and Save should honor precisely (audit-2026-08 O12).
     setItems(list => list.map(i => i.id !== editItem.id ? i : {
-      ...fdScaleRecipeItem(i, factor, !!store.settings?.netCarbs), foodName: finalName,
+      ...fdScaleRecipeItem(i, factor, !!store.settings?.netCarbs), foodName: finalName, quantityG: Math.round(g),
     }));
     closeEditItem();
   }
