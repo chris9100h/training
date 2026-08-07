@@ -61,6 +61,7 @@ const PHOTO_ASSETS = [
   BASE + '/Background/Brettski.PNG',
   BASE + '/Background/IMG_6950.png',
   BASE + '/Background/Diane.PNG',
+  BASE + '/Background/JClow.png',
   BASE + '/Background/index.json',
 ];
 
