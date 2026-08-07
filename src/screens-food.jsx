@@ -198,6 +198,104 @@ function fdExplodeRecipeItems(recipe, factor, foodRecipes, seenIds, netCarbs) {
   });
   return out;
 }
+// ── Cooking steps: consecutive ingredients bundled into numbered prep
+// steps, each with an optional shared instruction (the supersetGroup idea
+// from the training side applied to recipe items). A step is a maximal run
+// of consecutive items sharing a stepId; the instruction text (stepLabel)
+// lives on the run's first item only, an invariant fdNormalizeSteps keeps.
+// ──
+// Builds the run list: [{ stepId, label, startIdx, count }], one pass.
+// Runs of length 1 are included: a lone run is a legitimate step (explicitly
+// toggled, or a run shrunk to one member), with or without a label.
+function fdBuildSteps(items) {
+  const steps = [];
+  (items || []).forEach((it, i) => {
+    if (!it.stepId) return;
+    if (i > 0 && items[i - 1].stepId === it.stepId) return; // mid-run
+    let j = i + 1;
+    while (j < items.length && items[j].stepId === it.stepId) j++;
+    steps.push({ stepId: it.stepId, label: it.stepLabel || null, startIdx: i, count: j - i });
+  });
+  return steps;
+}
+// The badge number an item shows: without steps exactly today's idx + 1;
+// with steps the step ordinal, where every ungrouped item counts as its own
+// implicit number, so [Paprika, Zwiebel, Zucchini | Salz | Wasser] with a
+// step on the first run renders 1,1,1,2,3. Shared by the editor list, the
+// poster and Cooking Mode's hero card, so the same number always means the
+// same thing.
+function fdStepOrdinal(items, idx) {
+  const steps = fdBuildSteps(items);
+  if (!steps.length) return idx + 1;
+  let n = 0;
+  for (let i = 0; i <= idx; i++) {
+    const it = items[i];
+    if (!it.stepId) { n++; continue; }
+    if (i === 0 || items[i - 1].stepId !== it.stepId) n++; // run start
+  }
+  return n;
+}
+// Keeps the step invariants after any mutation (the contract every mutation
+// site relies on):
+// 1. Label on head only: within a run, every member except the first loses
+//    stepLabel; if the head lacks one but a later member carries it (only
+//    transiently possible after an in-run drag), the text moves to the head.
+// 2. Run uniqueness: no two runs in the array share a stepId. A drag that
+//    splits a run (an ungrouped row pulled into a labeled run, a member
+//    pulled out) would otherwise leave two runs with the same id, which
+//    breaks the toggle-off by-id matching and the Cooking Mode chip keys;
+//    the first run keeps the id, every later occurrence is remapped to a
+//    fresh uid.
+// Single-member runs are always legitimate, with or without a label: they
+// arise from an explicit toggle or a split, never from stale remnants, so
+// they are never stripped (stripping them silently undid a user's explicit
+// "start a step here").
+function fdNormalizeSteps(items) {
+  const list = (items || []).map(i => ({ ...i }));
+  // Pass 1: label placement within each run.
+  list.forEach((it, i) => {
+    if (!it.stepId) return;
+    const isHead = i === 0 || list[i - 1].stepId !== it.stepId;
+    if (!isHead && it.stepLabel != null) {
+      const head = list.findIndex((x, k) => k < i && x.stepId === it.stepId && (k === 0 || list[k - 1].stepId !== x.stepId));
+      if (head >= 0 && list[head].stepLabel == null) { list[head].stepLabel = it.stepLabel; }
+      delete it.stepLabel;
+    }
+  });
+  // Pass 2: remap every run that reuses an already-seen stepId. isHead is
+  // computed against the ORIGINAL ids (snapshot taken before this pass),
+  // never against the array being mutated: a remapped head would otherwise
+  // make its successor compare unequal to it and look like a new head,
+  // shredding a multi-member colliding run into per-member singletons
+  // instead of one remapped run.
+  const origIds = list.map(it => it.stepId || null);
+  const seen = new Set();
+  const remap = {};
+  list.forEach((it, i) => {
+    if (!it.stepId) return;
+    const isHead = i === 0 || origIds[i - 1] !== origIds[i];
+    if (!isHead) { it.stepId = remap[origIds[i]] || it.stepId; return; }
+    if (seen.has(origIds[i])) {
+      remap[origIds[i]] = LB.uid();
+      it.stepId = remap[origIds[i]];
+      return;
+    }
+    seen.add(origIds[i]);
+  });
+  return list;
+}
+// Label rescue: before a run head that carries the instruction is moved or
+// removed, transfer its stepLabel to the run's next member so the step
+// keeps its text. No-op unless `from` is a labeled head of a multi-member
+// run. Call BEFORE the mutation; the caller then normalizes.
+function fdTransferStepLabel(items, from) {
+  const it = items[from];
+  if (!it || !it.stepId || it.stepLabel == null) return items;
+  if (from > 0 && items[from - 1].stepId === it.stepId) return items; // not a head
+  const nextIdx = items.findIndex((x, k) => k > from && x.stepId === it.stepId);
+  if (nextIdx < 0) return items; // last member, text dies with the run
+  return items.map((x, k) => k === nextIdx ? { ...x, stepLabel: it.stepLabel } : k === from ? { ...x, stepLabel: null } : x);
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -3474,9 +3572,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function duplicateRecipe(recipe) {
     if (!await confirm(recipe.name, { title: 'Duplicate recipe?', ok: 'Duplicate' })) return;
     const now = new Date().toISOString();
+    // stepIds remapped to fresh uids per copy, same gidMap pattern as the
+    // training side's superset groups: step runs are adjacency-based within
+    // one items array, but two recipes sharing an id would make an exploded
+    // or dragged-together layout merge their runs into one.
+    const stepMap = {};
     const copy = {
       ...recipe, id: LB.uid(), name: recipe.name + ' (Copy)',
-      items: (recipe.items || []).map(i => ({ ...i, id: LB.uid() })),
+      items: (recipe.items || []).map(i => {
+        const next = { ...i, id: LB.uid() };
+        if (i.stepId) { stepMap[i.stepId] = stepMap[i.stepId] || LB.uid(); next.stepId = stepMap[i.stepId]; }
+        return next;
+      }),
       createdAt: now, updatedAt: now,
     };
     setStore(s => ({ ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] }));
@@ -6001,6 +6108,12 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           // the first place (e.g. so a partner cooks it the same way), keep
           // them through the adopt whitelist same as every other field here.
           note: i.note != null ? String(i.note) : null,
+          // Cooking steps are prep guidance in the same sense as note: the
+          // sharer's step grouping and instruction should survive the share.
+          // stepIds are only ever compared within one items array, so they
+          // cross the boundary verbatim; duplicate/explode remap them.
+          stepId: i.stepId != null ? String(i.stepId) : null,
+          stepLabel: i.stepLabel != null ? String(i.stepLabel) : null,
         })),
         createdAt: now, updatedAt: now,
       };
@@ -6036,8 +6149,19 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
               at-a-glance views elsewhere (timeline detail, meal-plan block
               preview) that aren't about following along step by step. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
-            {items.map((i, idx) => (
+            {items.map((i, idx) => {
+              const stepHead = fdBuildSteps(items).find(s => s.startIdx === idx);
+              return (
               <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
+                {stepHead && (
+                  // Steps are prep guidance, same "someone else cooks this"
+                  // case the notes below exist for: the recipient sees the
+                  // grouping before they adopt.
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, paddingBottom: 4, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', fontFamily: UI.fontUi, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
+                    {stepHead.label && <span style={{ fontSize: 10, color: UI.inkSoft, fontFamily: UI.fontUi }}>{stepHead.label}</span>}
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
@@ -6055,7 +6179,8 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <FdMacroPreview calories={totals.calories} protein={totals.protein} carbs={totals.carbs} fat={totals.fat} />
           {added ? (
@@ -8001,6 +8126,7 @@ const rcpNum = { fontFamily: RCP_MONO, fontVariantNumeric: 'tabular-nums', lette
 const RCP_MACRO_LABELS = [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']];
 
 function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, logo, logoStyle, grid }) {
+  const steps = fdBuildSteps(items);
   return (
     // Same sheet geometry as the Plan poster, at the width the Food Log and
     // Shopping List posters use. Asymmetric padding on purpose: the card opens
@@ -8046,6 +8172,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
 
         {items.map((i, idx) => {
           const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+          const stepHead = steps.find(s => s.startIdx === idx);
           return (
             // Translucent fill rather than fdEntryRow's opaque one, so the
             // watermark reads through the cards instead of only in the gaps.
@@ -8053,12 +8180,18 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
               background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
               borderRadius: 6, padding: '10px 12px', marginBottom: 6, overflow: 'hidden',
             }}>
+              {stepHead && (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: `var(--hair-width) dashed ${UI.hairStrong}` }}>
+                  <span style={{ ...rcpMicro, color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>Step {fdStepOrdinal(items, idx)}</span>
+                  {stepHead.label && <span style={{ ...rcpMicro, color: UI.inkSoft }}>{stepHead.label}</span>}
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'flex-start' }}>
                 <span style={{
                   ...rcpNum, flexShrink: 0, width: 20, height: 20, borderRadius: 999, marginRight: 10,
                   display: 'inline-block', textAlign: 'center', lineHeight: '20px', fontSize: 10, fontWeight: 700,
                   background: 'rgba(var(--accent-rgb),0.18)', color: 'var(--accent)',
-                }}>{idx + 1}</span>
+                }}>{fdStepOrdinal(items, idx)}</span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
                   <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
@@ -8167,7 +8300,10 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // been kept. `|| i.foodName` only ever fires on a still-missing field,
     // so a real originalFoodName from a previous backfill or a normal add
     // is never clobbered on a later re-open.
-    const it = (recipe?.items || []).map(i => ({ ...i, id: i.id || LB.uid(), originalFoodName: i.originalFoodName || i.foodName }));
+    // fdNormalizeSteps: a saved recipe can carry step remnants from before a
+    // step feature shipped or from an interrupted drag, this pass guarantees
+    // the head-only/connected invariants the editor renders under.
+    const it = fdNormalizeSteps((recipe?.items || []).map(i => ({ ...i, id: i.id || LB.uid(), originalFoodName: i.originalFoodName || i.foodName })));
     const p = recipe?.portions || 1;
     const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
     setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
@@ -8205,10 +8341,36 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // original name it carried inside its own recipe, instead of stamping its
   // possibly already-renamed foodName as if it were the original.
   function addItems(newItems) {
-    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.originalFoodName || item.foodName }))]);
+    // An incoming row that already carries a stepId (an exploded sub-recipe,
+    // whose steps confirmExplodeRecipe remapped to fresh uids) keeps it: its
+    // runs stay intact and can never merge into a parent step. A plain row
+    // inherits the step of the row directly BEFORE it in the new list: the
+    // parent's last row when the batch starts plain, the exploded block's
+    // tail when it follows one. Never the parent's last row when an
+    // exploded block sits in between: that would stamp a non-adjacent id
+    // and the saved recipe would remap it into a phantom unlabeled step.
+    // Appending can never orphan or split a run, so no normalize pass is
+    // needed.
+    setItems(list => {
+      const next = [...list, ...newItems.map(item => ({ id: LB.uid(), ...item, originalFoodName: item.originalFoodName || item.foodName }))];
+      for (let k = list.length; k < next.length; k++) {
+        if (next[k].stepId == null && k > 0) {
+          const prev = next[k - 1];
+          if (prev && prev.stepId) next[k] = { ...next[k], stepId: prev.stepId };
+        }
+      }
+      return next;
+    });
   }
   function removeItem(id) {
-    setItems(list => list.filter(i => i.id !== id));
+    // Label rescue first: if the removed row is a labeled run head, the
+    // step's instruction moves to the run's next member before the row
+    // disappears, then the orphan/head invariants are re-established.
+    setItems(list => {
+      const from = list.findIndex(i => i.id === id);
+      const after = from >= 0 ? fdTransferStepLabel(list, from).filter(i => i.id !== id) : list.filter(i => i.id !== id);
+      return fdNormalizeSteps(after);
+    });
   }
   // The row's own trash icon goes through the same confirm removeEditItem
   // already shows: one action, one level of safety, no matter which of the two
@@ -8219,15 +8381,51 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   }
   // Array order IS the deliberate prep order now (see the ingredient list
   // below and Cooking Mode further down): a plain splice-to-new-position,
-  // no macro recalculation, only position changes.
+  // no macro recalculation, only position changes. Step invariants are
+  // re-established after the move: a labeled run head dragged out of its
+  // run hands the instruction to the run's new head (fdTransferStepLabel),
+  // orphaned ids and misplaced labels are cleaned up (fdNormalizeSteps).
   function reorderItems(from, to) {
     if (from === to) return;
     setItems(list => {
-      const next = [...list];
+      const rescued = fdTransferStepLabel(list, from);
+      const next = [...rescued];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
-      return next;
+      return fdNormalizeSteps(next);
     });
+  }
+  // Step-start toggle on a row, three cases (see the helpers above for the
+  // run semantics fdBuildSteps relies on):
+  // - ungrouped row: mark-and-following, this row and every following
+  //   ungrouped row up to the next already-marked row join one fresh step
+  // - mid-run member: split, this row through the run's end gets a fresh
+  //   step id (the old head keeps the label, the new step starts without)
+  // - run head or lone member: toggle off, the whole run loses its step
+  //   id and label, all members become ungrouped again
+  function toggleStepStart(idx) {
+    setItems(list => {
+      const it = list[idx];
+      if (!it) return list;
+      if (it.stepId) {
+        const isHead = idx === 0 || list[idx - 1].stepId !== it.stepId;
+        if (isHead) {
+          return list.map(x => (x.stepId === it.stepId ? { ...x, stepId: null, stepLabel: null } : x));
+        }
+        const fresh = LB.uid();
+        return list.map((x, k) => (k >= idx && x.stepId === it.stepId ? { ...x, stepId: fresh, stepLabel: null } : x));
+      }
+      const fresh = LB.uid();
+      const nextMark = list.findIndex((x, k) => k >= idx && !!x.stepId);
+      const end = nextMark < 0 ? list.length : nextMark;
+      return list.map((x, k) => (k >= idx && k < end ? { ...x, stepId: fresh } : x));
+    });
+  }
+  // Live instruction text on the step's head row. Raw text while typing
+  // (trimmed at save); clearing the field back to null only removes the
+  // instruction, the step membership itself is removed by the toggle only.
+  function setStepLabel(id, value) {
+    setItems(list => list.map(i => (i.id !== id ? i : { ...i, stepLabel: value ? value : null })));
   }
   function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); }
@@ -8296,7 +8494,11 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     const ok = await confirm(<RecipeSaveRecap name={trimmed} portions={portions} totals={totals} />,
       { title: recipe ? 'Save recipe?' : 'Add recipe?', ok: recipe ? 'Save' : 'Add' });
     if (!ok) return;
-    onSave({ name: trimmed, items, portions, cookedWeightG: fdNum(cookedWeightG) });
+    // Final step pass: trim instruction text (empty -> null), then
+    // re-establish the head-only/connected invariants one last time, so
+    // nothing stale (an orphaned id from a late edit) reaches the store.
+    const finalItems = fdNormalizeSteps(items.map(i => i.stepLabel != null ? { ...i, stepLabel: String(i.stepLabel).trim() || null } : i));
+    onSave({ name: trimmed, items: finalItems, portions, cookedWeightG: fdNum(cookedWeightG) });
   }
   const canSave = !!(name.trim() && items.length);
 
@@ -8410,29 +8612,48 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             // renders items as-is, drag the grip to reorder, same engine as
             // the plan editor's own item list (screens-schedule.jsx).
             <ReorderList onReorder={reorderItems} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map((i, idx) => (
-                <div key={i.id} data-reorder-item="true" style={fdEntryRow}>
-                  <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
-                  <FdIngredientBadge n={idx + 1} />
-                  <button onClick={() => openEditItem(i)} style={fdDraftMain}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                      {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
-                      <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+              {items.map((i, idx) => {
+                // A step starts at a row whose stepId differs from its
+                // predecessor's; that row hosts the instruction field.
+                const isStepHead = !!i.stepId && (idx === 0 || items[idx - 1].stepId !== i.stepId);
+                return (
+                  <div key={i.id} data-reorder-item="true" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={fdEntryRow}>
+                      <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
+                      <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-list-ol" style={{ fontSize: 11, color: isStepHead ? 'var(--accent)' : UI.inkFaint }} />
+                      </button>
+                      <FdIngredientBadge n={fdStepOrdinal(items, idx)} />
+                      <button onClick={() => openEditItem(i)} style={fdDraftMain}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                          <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                        </div>
+                        <span style={fdEntryMeta}>
+                          {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
+                          <span style={fdMetaDivider} />
+                          <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
+                        </span>
+                      </button>
+                      <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
+                      </button>
+                      <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                      </button>
                     </div>
-                    <span style={fdEntryMeta}>
-                      {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
-                      <span style={fdMetaDivider} />
-                      <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                    </span>
-                  </button>
-                  <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
-                    <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
-                  </button>
-                  <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                  </button>
-                </div>
-              ))}
+                    {isStepHead && (
+                      // Rides along with its row when dragged (it lives in
+                      // the data-reorder-item wrapper, not the row itself),
+                      // and the drag engine ignores it as a drag source.
+                      <div data-reorder-ignore="true" style={{ paddingLeft: 66, paddingRight: 8, marginTop: -2 }}>
+                        <input value={i.stepLabel || ''} onChange={e => setStepLabel(i.id, e.target.value)} type="text"
+                          placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </ReorderList>
           )}
         </div>
@@ -8674,18 +8895,46 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // no need to track WHICH item is being edited, only the draft text.
   const [noteEditorOpen, setNoteEditorOpen] = useStateFd(false);
   const [noteDraft, setNoteDraft] = useStateFd('');
+  // Step navigation, all derived from the run structure (fdBuildSteps), so
+  // currentIdx stays item-based and every step change is just a label or
+  // chip change, never a stored index. Declared before the centering effect
+  // below, which uses hasSteps/curStepIdx as its deps. curStepIdx is -1
+  // while currentIdx sits in an ungrouped stretch of a mixed recipe.
+  const steps = fdBuildSteps(items);
+  const hasSteps = steps.length > 0;
+  const curStepIdx = hasSteps ? steps.findIndex(s => currentIdx >= s.startIdx && currentIdx < s.startIdx + s.count) : -1;
+  // Whether the current item is the last member of its step: the footer
+  // switches to "Next step ->" there (the actual next-index jump stays
+  // item-based in handleNext).
+  const isLastOfStep = hasSteps && curStepIdx >= 0 && steps[curStepIdx].startIdx + steps[curStepIdx].count - 1 === currentIdx;
+  // The counter's total when steps exist: the badge ordinal of the last
+  // item, which counts ungrouped items as their own implicit numbers, so
+  // "Step 03/05" always matches the badge shown on the hero card.
+  const totalStepCount = items.length ? fdStepOrdinal(items, items.length - 1) : 0;
   // Keeps the active chip centered in the strip as currentIdx moves, same
   // scrollLeft-centering idea as training's own chip row (screens-train.jsx),
   // without it the strip only scrolls by hand and the active chip silently
-  // runs off-screen on a longer ingredient list.
+  // runs off-screen on a longer ingredient list. With steps the chips are
+  // per step (data-step-idx, active = curStepIdx), without them per
+  // ingredient (data-chip-idx, active = currentIdx); the query picks the
+  // matching set, so a stepped recipe centers its step chip, an unstepped
+  // one behaves exactly as before. deps deliberately exclude `items` (a new
+  // array identity on every amount keystroke, note save or swap would
+  // re-run the centering and yank a manually scrolled strip back to the
+  // active chip); the effect reads the fresh items via its closure and only
+  // re-runs when the position or the step structure changes.
   const chipRowRef = useRefFd(null);
   useEffectFd(() => {
     const row = chipRowRef.current;
     if (!row || step !== 'ingredients') return;
-    const chip = row.querySelector(`[data-chip-idx="${currentIdx}"]`);
+    const stepsNow = fdBuildSteps(items);
+    const q = stepsNow.length
+      ? `[data-step-idx="${stepsNow.findIndex(s => currentIdx >= s.startIdx && currentIdx < s.startIdx + s.count)}"]`
+      : `[data-chip-idx="${currentIdx}"]`;
+    const chip = row.querySelector(q);
     if (!chip) return;
     row.scrollLeft = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
-  }, [currentIdx, step]);
+  }, [currentIdx, step, hasSteps, curStepIdx]);
   const [diffOpen, setDiffOpen] = useStateFd(false);
   const [diffList, setDiffList] = useStateFd([]);
   // Whether this open resumed a saved draft (vs. a from-scratch cook):
@@ -8711,11 +8960,15 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
 
   useEffectFd(() => {
     if (!open) return;
-    const idsFilled = (recipe?.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+    // fdNormalizeSteps on both sources: the saved recipe and a resumed
+    // draft (localStorage, older sessions) could carry step remnants from
+    // before the invariants held, and the wizard derives its step
+    // navigation from the run structure.
+    const idsFilled = fdNormalizeSteps((recipe?.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() })));
     originalItemsRef.current = idsFilled.map(i => ({ ...i }));
     let initItems, initIdx, initStep, initCookedWeightG, initSwapEvents;
     if (draft) {
-      initItems = (draft.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() }));
+      initItems = fdNormalizeSteps((draft.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() })));
       initIdx = Math.max(0, Math.min(draft.currentIdx || 0, initItems.length - 1));
       initStep = draft.step === 'cookedWeight' ? 'cookedWeight' : 'ingredients';
       initCookedWeightG = draft.cookedWeightG || '';
@@ -8893,7 +9146,9 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     if (!await confirm(`${curItem.foodName} · ${curItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     dirtyRef.current = true;
     const removedId = curItem.id;
-    const next = items.filter((_, i) => i !== currentIdx);
+    // Label rescue before the removal (a removed labeled run head hands its
+    // instruction to the run's next member), then the step invariants.
+    const next = fdNormalizeSteps(fdTransferStepLabel(items, currentIdx).filter((_, i) => i !== currentIdx));
     setItems(next);
     // Drop any swap event recorded for the removed slot: it no longer
     // exists in the final list, so fdComputeCookingDiff below should just
@@ -8916,9 +9171,13 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
       return;
     }
     dirtyRef.current = true;
-    const withIds = newItems.map(it => ({ id: LB.uid(), ...it }));
+    // New rows join the step currently being cooked (the current item's
+    // stepId), so inserting mid-run never splits the run into two; the
+    // spread order puts stepId AFTER ...it so an incoming row can never
+    // override the join with a stale id of its own.
+    const withIds = newItems.map(it => ({ ...it, id: LB.uid(), stepId: items[currentIdx]?.stepId || null }));
     const insertAt = currentIdx + 1;
-    const next = [...items.slice(0, insertAt), ...withIds, ...items.slice(insertAt)];
+    const next = fdNormalizeSteps([...items.slice(0, insertAt), ...withIds, ...items.slice(insertAt)]);
     setItems(next);
     goToIndex(insertAt, next);
     setPickerOpen(false);
@@ -9010,30 +9269,53 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
 
       {step === 'ingredients' && curItem && (<>
         <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span className="micro-gold">Ingredients</span>
+          <span className="micro-gold">{hasSteps ? 'Steps' : 'Ingredients'}</span>
           <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
-            {String(currentIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(items.length).padStart(2, '0')}
+            {hasSteps ? (
+              <>
+                {String(fdStepOrdinal(items, currentIdx)).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(totalStepCount).padStart(2, '0')}
+              </>
+            ) : (
+              <>
+                {String(currentIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(items.length).padStart(2, '0')}
+              </>
+            )}
           </span>
         </div>
 
-        {/* Chip row, tap a chip to jump straight to that ingredient. */}
+        {/* Chip row, tap a chip to jump. With steps: one chip per step
+            (labeled by its instruction, else its first ingredient), jump
+            lands on the step's first item. Without: one chip per
+            ingredient, exactly as before. */}
         <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {items.map((it, i) => (
-            <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
-              flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
-              border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
-              background: i === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-              fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
-              color: i === currentIdx ? 'var(--accent)' : UI.inkFaint,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-            }}>{it.foodName}</button>
-          ))}
+          {hasSteps
+            ? steps.map((s, si) => (
+                <button key={s.stepId} data-step-idx={si} onClick={() => goToIndex(s.startIdx)} style={{
+                  flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
+                  border: `var(--hair-width) solid ${si === curStepIdx ? 'var(--accent)' : UI.hairStrong}`,
+                  background: si === curStepIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
+                  color: si === curStepIdx ? 'var(--accent)' : UI.inkFaint,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                }}>{s.label || items[s.startIdx].foodName}</button>
+              ))
+            : items.map((it, i) => (
+                <button key={it.id} data-chip-idx={i} onClick={() => goToIndex(i)} style={{
+                  flexShrink: 0, maxWidth: 110, padding: '5px 11px 4px', borderRadius: 4,
+                  border: `var(--hair-width) solid ${i === currentIdx ? 'var(--accent)' : UI.hairStrong}`,
+                  background: i === currentIdx ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
+                  color: i === currentIdx ? 'var(--accent)' : UI.inkFaint,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                }}>{it.foodName}</button>
+              ))}
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <FdIngredientBadge n={currentIdx + 1} size={34} />
+            <FdIngredientBadge n={fdStepOrdinal(items, currentIdx)} size={34} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span className="display" style={{
                 display: 'block',
@@ -9049,6 +9331,27 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
               )}
             </div>
           </div>
+
+          {/* The step card: what this whole run of ingredients is for, shown
+              once per step (same accent-tinted treatment as the per-
+              ingredient note card below). The member names make the grouping
+              legible while the hero only shows one ingredient at a time;
+              omitted for single-ingredient steps, where the name below
+              already says it all. */}
+          {hasSteps && curStepIdx >= 0 && (() => {
+            const s = steps[curStepIdx];
+            return (
+              <div style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '12px 14px' }}>
+                <div className="micro-gold" style={{ marginBottom: 4 }}>Step {fdStepOrdinal(items, currentIdx)}</div>
+                {s.label && <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1.4, whiteSpace: 'pre-wrap', marginBottom: s.count > 1 ? 6 : 0 }}>{s.label}</div>}
+                {s.count > 1 && (
+                  <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+                    {items.slice(s.startIdx, s.startIdx + s.count).map(it => it.foodName).join(' · ')}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Whole batch: the more consequential number while stepping
               through ingredients (does this dish still hit target?), starts
@@ -9130,7 +9433,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
         </button>
         {step === 'ingredients' ? (
           <Btn onClick={handleNext} style={{ flex: 1, minHeight: 44 }}>
-            {currentIdx === items.length - 1 ? 'Weigh it →' : 'Next ingredient →'}
+            {currentIdx === items.length - 1 ? 'Weigh it →' : (isLastOfStep ? 'Next step →' : 'Next ingredient →')}
           </Btn>
         ) : (
           <Btn onClick={handleFinishIngredients} style={{ flex: 1, minHeight: 44 }}>Finish →</Btn>
@@ -9668,6 +9971,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
     if (!explodeRecipe || !explodeFactor) return;
     const exploded = fdExplodeRecipeItems(explodeRecipe, explodeFactor, store.foodRecipes, null, !!store.settings?.netCarbs);
     if (!exploded.length) return;
+    // The sub-recipe's steps survive the flatten (fdScaleRecipeItem spread
+    // carries the fields), with stepIds remapped to fresh uids so a sub-step
+    // run can never merge into a parent run that happens to share an id.
+    const stepMap = {};
     setStaged(list => [...list, ...exploded.map(i => {
       const row = {
         tempId: LB.uid(),
@@ -9677,6 +9984,8 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       };
       if (i.originalFoodName != null) row.originalFoodName = i.originalFoodName;
       if (i.note != null) row.note = i.note;
+      if (i.stepId != null) { stepMap[i.stepId] = stepMap[i.stepId] || LB.uid(); row.stepId = stepMap[i.stepId]; }
+      if (i.stepLabel != null) row.stepLabel = i.stepLabel;
       return row;
     })]);
     // "Safely cached" evidence, same proxy the favorites cache-repair effect
