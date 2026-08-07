@@ -867,17 +867,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // sessions never get), so the flow would only persist dead, unremovable data.
     // Skip it entirely off-autoreg.
     if (!LB.mesoActive(rSch)) return;
-    // A cleanup week sits out autoregulation entirely, so it does not get asked
-    // either. Stamped rather than left null so nothing downstream reads it as
-    // "not answered yet", and stamped 'full' on purpose: a cleanup session has
-    // to stay a full-signal exposure so detectOverreach's own baseline drops
-    // with the reduced loads (see the cleanup notes in docs/internals.md). A
-    // 'rough' answer would have made it 'discounted' and dropped the session
-    // out of that chain, which is exactly what the design set out to avoid.
-    if (isCleanupSession) {
-      updateSession(s => ({ ...s, readiness: 'normal', signalWeight: 'full' }));
-      return;
-    }
+    // A cleanup week is asked exactly like any other week: skipping the prompts
+    // would blind the feedback engine for a full rotation (no set deltas, no
+    // re-earned weight boosts, an empty recap). What a cleanup session must NOT
+    // do is carry a discounted signalWeight, so the ANSWER is recorded while the
+    // weight stays pinned to 'full' (chooseReadiness below, and the resumed
+    // branch via reentryActive). See docs/internals.md, "Cleanup Week".
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
     // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
     // longer than the threshold just ended and we are still inside the first
@@ -886,8 +881,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // session in the ramp window keeps the protective discount instead of a flat
     // 'normal'/'full' it could never correct. Deload sessions keep 'none'.
     const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
-    // Cleanup is excluded alongside deload: the ramp's whole effect is a
-    // 'discounted' signalWeight, which a cleanup session must never carry.
+    // Cleanup is excluded alongside deload, but for its own reason: the ramp's
+    // whole effect is a 'discounted' signalWeight, which a cleanup session must
+    // never carry (it has to stay a full-signal exposure so detectOverreach's
+    // baseline drops with the reduced loads). The prompt itself still opens.
     const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload && !isCleanupSession;
     if (anyDone) {
       // Resumed session (a working set is already logged): the readiness moment has
@@ -3720,7 +3717,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(exId); else mesoPumpOkRef.current.delete(exId);
       // Low-pump swap counter, per exId (was per muscle, attributed to the first lift).
       // Idempotent diff so an edit applies only its own delta.
-      const pumpLowApplied = pump === 'low';
+      // A cleanup week never advances it: the load is deliberately cut, so a flat
+      // pump is the expected outcome, not evidence that the exercise stopped
+      // working. Three cleanup sessions would otherwise be enough to trigger the
+      // "swap this lift" advice off nothing but the reduction. Folded into the
+      // flag itself (not just the increment) so a later edit of the same answer
+      // diffs against what was actually applied.
+      const pumpLowApplied = pump === 'low' && !isCleanupSession;
       const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (record.pumpLowApplied ? 1 : 0);
       record.pumpLowApplied = pumpLowApplied;
       if (pumpLowDiff !== 0) {
@@ -4073,20 +4076,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
     // may still EARN a weight boost. 'full' = normal.
     const signalWeight = deriveSignalWeight();
-    // A cleanup week sits out earn/cut entirely, but it cannot get there the way
-    // a deload does. A deload is signalWeight 'none', which already short-
-    // circuits everything below; a cleanup session must stay 'full' so
-    // detectOverreach keeps counting it as an exposure and its own comparison
-    // baseline drops along with the loads (otherwise the rebuild weeks read as
-    // an e1RM regression). So the exclusion rides on this separate flag, and
-    // every place that keys off signalWeight === 'none' for the deload case
-    // needs the cleanup case spelled out next to it.
-    // What is deliberately NOT gated: the block-completion bookkeeping at the
-    // end of this function (completions/pendingMeso2/flush). A deload can only
-    // ever start after a block has closed, so skipping that for a deload is
-    // safe; a cleanup week is user-initiated and can land on the session that
-    // completes the block, which would otherwise leave the block stuck open.
-    const skipEarnCut = signalWeight === 'none' || isCleanupSession;
+    // Only a deload ('none') sits out earn/cut. A cleanup week explicitly does
+    // NOT: it is asked the same questions and its answers move the same ledger,
+    // otherwise the block would spend a whole rotation with frozen set counts
+    // and, worse, every boost keyed to a cleanup day would be dropped by
+    // reearnMesoWeightBoosts (which replaces this session's keys wholesale) and
+    // the rebuild would start from a vetoed, frozen weight. A cleanup session
+    // stays 'full' throughout so detectOverreach keeps counting it as an
+    // exposure and its own comparison baseline drops with the loads.
+    const skipEarnCut = signalWeight === 'none';
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
@@ -4146,10 +4144,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut
       // (spec 4.3). Leaving the block unentered keeps repMissCounts untouched.
-      // A cleanup session is 'full' by design (see skipEarnCut above) but must
-      // freeze the streak just the same: missing reps at a deliberately reduced
-      // load says nothing about the working weight being too heavy.
-      if (signalWeight === 'full' && !skipEarnCut && !streakSeen.has(key)) {
+      // A cleanup session is 'full' by design (see skipEarnCut above) and DOES
+      // earn, but the cut stays frozen for it: missing reps at a deliberately
+      // reduced load says nothing about the working weight being too heavy, and
+      // a cut there would eat into the base the rebuild climbs back from. The
+      // freeze is one-directional, it can never withhold a gain.
+      if (signalWeight === 'full' && !skipEarnCut && !isCleanupSession && !streakSeen.has(key)) {
         streakSeen.add(key);
         if (earlyMiss) {
           const n = (repMissCounts[key] || 0) + 1;
@@ -4169,10 +4169,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
 
       if (!allHit) continue;
-      // No boost can be earned off a deliberately reduced load. In practice the
-      // per-exercise gates below would already block it (a cleanup session is
-      // never asked the joint/pump/weight questions, so their refs stay empty),
-      // but leaning on that would make this correct only by accident.
       if (skipEarnCut) continue;
       // Joint, pump and weight-feel are all per exId now. Mirrors LB.reearnMesoBoostsFromAnswers
       // exactly, including the muscle-less exemption: an untagged exercise with no
@@ -4197,9 +4193,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state, already contains all feedback deltas from this session.
-    // EARN persist: a 'none' session (deload) or a cleanup session keeps the old
-    // map untouched. 'discounted' falls through and CAN still earn a boost (a PR
-    // on a tired day is real, spec 4.3); 'full' is the normal re-earn.
+    // EARN persist: only a 'none' session (deload) keeps the old map untouched.
+    // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
+    // is real, spec 4.3); 'full' is the normal re-earn, cleanup weeks included.
     const sessionKeys = session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId);
     const newWeightBoosts = skipEarnCut
       ? (mesoState.weightBoosts || {})
@@ -4215,8 +4211,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       weightBoosts: newWeightBoosts,
       weightBoostDeclines: newWeightBoostDeclines,
       // Freeze the miss streak for anything but a full session (discounted and
-      // none both leave it as-is), matching the streak guard above.
-      repMissCounts: (signalWeight !== 'full' || skipEarnCut) ? (mesoState.repMissCounts || {}) : repMissCounts,
+      // none both leave it as-is), plus cleanup weeks, matching the streak guard above.
+      repMissCounts: (signalWeight !== 'full' || skipEarnCut || isCleanupSession) ? (mesoState.repMissCounts || {}) : repMissCounts,
     };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
@@ -4252,13 +4248,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
-    // isCleanupSession gates this (and the joint trigger below) for the same
-    // reason isMesoDeloadSession does, and it has to be gated HERE rather than
-    // at finish: handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer
-    // commit real deltas into mesoState the moment they are answered, so the
-    // finish-time earn/cut guard never sees them. A cleanup week is a planned
-    // step back, not a recovery signal to autoregulate against.
-    if (!mesoState || !entry || isCardio || isMesoDeloadSession || isCleanupSession) return;
+    // A deload gates out here (it collects no feedback at all); a cleanup week
+    // deliberately does NOT. Its loads are cut, but the recovery signal the
+    // question actually asks about ("was this muscle still sore when you got
+    // here") is real either way, and silencing it for a whole rotation would
+    // leave the block with a week of frozen set counts and an empty recap.
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period, meso not yet started
     if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
@@ -4325,8 +4320,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
-    // See the soreness trigger above for why cleanup is gated here.
-    if (!mesoState || !entry || isCardio || isMesoDeloadSession || isCleanupSession) return;
+    // Asked in a cleanup week too, see the soreness trigger above. The weight-feel
+    // answer is the honest one for a reduced load ("Too light"), and that is the
+    // point: it is what carries the rebuild instead of freezing the boost.
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period, meso not yet started
     // A second exercise becoming eligible while another's sheet is still open
@@ -5887,9 +5884,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Deload always stays 'none' (no earn, no cut). Rough and the re-entry ramp both
   // discount the session (keep earn, skip the rep-miss cut). Fresh / Normal are full.
   const chooseReadiness = (readiness) => {
-    // A cleanup session never reaches this (the prompt is skipped for it), but
-    // pin 'full' anyway so a future change that reopens the sheet cannot
-    // silently discount the session out of the overreach exposure chain.
+    // A cleanup session IS asked (it feeds the same earn/cut ledger as any other
+    // week), but its signalWeight is pinned to 'full' no matter what was picked:
+    // 'discounted' would drop it out of detectOverreach's exposure chain, and
+    // then the reduced loads would never move the detector's own baseline down,
+    // so the rebuild weeks after the cleanup would read as a regression. The
+    // readiness ANSWER is still stored verbatim for the recap.
     const signalWeight = isMesoDeloadSession
       ? 'none'
       : isCleanupSession

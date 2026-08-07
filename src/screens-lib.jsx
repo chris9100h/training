@@ -3478,7 +3478,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
       // are never deload (isMesoSessionEditable excludes them). #D
       const oldSignal = LB.deriveSignalWeight(s, !!s.isDeload);
-      const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      // A cleanup session is pinned 'full' whatever the readiness says (mirrors
+      // chooseReadiness in screens-train.jsx): 'discounted' would drop it out of
+      // detectOverreach's exposure chain, so its reduced loads would never move
+      // the detector's baseline and the rebuild would read as a regression.
+      const newSignal = s.isCleanup ? 'full' : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
       const earnInputs = fbEarnInputs();
       const repMissBase = fbRaw.repMissBase || null;
       const groups = fbGroupsForStore(fbRaw.answers);
@@ -3542,7 +3546,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const lm = landmarks[m];
       if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
     });
-    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles, isCleanup: !!s.isCleanup };
     const earnInputs = fbEarnInputs();
     // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
     // reasoning as the readiness branch above, #3): a background multi-device sync may

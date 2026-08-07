@@ -7678,13 +7678,12 @@ function mesoGateSetsFromAnswers(answers, loadOnly) {
 // (sessions finished before the feature shipped lack them) and blocks while a
 // session for the plan is in progress (it would flush over the edit). Pure.
 function isMesoSessionEditable(session, allSessions, mesoState) {
-  // isCleanup is excluded for the same reason as isDeload, and for one more:
-  // applyMesoFeedbackEdit writes straight into mesoState.deltas/growthCounts,
-  // which is exactly the earn/cut path a cleanup week is meant to sit out. A
-  // cleanup session collects no feedback (the live quizzes are gated off), so
-  // this normally has nothing to act on, but the guard keeps that from becoming
-  // load-bearing if the recap ever carries data again.
-  if (!session || !mesoState || !session.ended || session.isDeload || session.isCleanup) return false;
+  // isCleanup is NOT excluded here, unlike isDeload: a cleanup session is asked
+  // the same questions and its answers move the same deltas/growthCounts, so its
+  // recap has to stay correctable like any other session's. What the edit must
+  // not do is flip its signalWeight to 'discounted', and the readiness branch in
+  // screens-lib.jsx pins that separately.
+  if (!session || !mesoState || !session.ended || session.isDeload) return false;
   if (!session.mesoRecap || !session.mesoRecap.raw || !session.mesoRecap.raw.answers) return false;
   if (mesoState.startedAt && (session.ended || '') < mesoState.startedAt) return false;
   const sid = session.scheduleId;
@@ -7730,13 +7729,19 @@ function _commitContribInto(deltas, negOwner, prevContrib, questionType, newCont
 // A 'joint' edit is the per-exercise feedback: it can carry answer (joint) plus weight
 // and pump (both per exId now). A 'volume' edit is the per-muscle workload answer only.
 // `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
-// `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
-// + the answer record + negOwner; weight boosts are re-earned separately
-// (reearnMesoBoostsFromAnswers) since they also need the objective rep outcome.
-// Pure: returns { mesoState, raw }.
+// `ctx` = { dayId, loadOnly, atCeilingMuscles, isCleanup }. Touches
+// deltas/growthCounts/pumpLowCounts/jointFlags + the answer record + negOwner;
+// weight boosts are re-earned separately (reearnMesoBoostsFromAnswers) since they
+// also need the objective rep outcome. Pure: returns { mesoState, raw }.
 function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   const dayId = ctx.dayId;
   const loadOnly = !!ctx.loadOnly;
+  // Mirrors the live handler (handleJointAnswer, screens-train.jsx): a cleanup
+  // week never advances the low-pump swap counter, a flat pump on a deliberately
+  // reduced load is the expected outcome. Without it, editing the pump answer of
+  // a cleanup session afterwards would let the counter back in through the side
+  // door, and the "swap this lift" advice would fire off nothing but the cut.
+  const isCleanup = !!ctx.isCleanup;
   const frozen = !!(raw && raw.frozen);
   const deltas = { ...(mesoState.deltas || {}) };
   let growthCounts = { ...(mesoState.growthCounts || {}) };
@@ -7807,7 +7812,7 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       // lift). Idempotent diff so an edit applies only its own delta. The old
       // volume === 'just_right' confound guard is dropped: pump is per exercise now and
       // is answered before the muscle's workload answer, so it cannot read it here.
-      const pumpLowApplied = edit.pump === 'low';
+      const pumpLowApplied = edit.pump === 'low' && !isCleanup;
       const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
       rec.pumpLowApplied = pumpLowApplied;
       if (pumpLowDiff !== 0) pumpLowCounts[exId] = Math.max(0, (pumpLowCounts[exId] || 0) + pumpLowDiff);

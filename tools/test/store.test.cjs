@@ -5178,13 +5178,35 @@ async function testAsync(name, fn) {
       'the same sessions flagged cleanup must not');
   });
 
-  test('isMesoSessionEditable: a cleanup session is never editable', () => {
+  test('isMesoSessionEditable: a cleanup session stays editable (a deload does not)', () => {
+    // A cleanup week is asked the same questions as any other week, so its recap
+    // carries real answers and has to stay correctable. Only a deload, which
+    // collects nothing at all, is locked out.
     const meso = { id: 'm1', scheduleId: 'p1', startedAt: '2026-06-01T00:00:00Z' };
     const base = { id: 's1', scheduleId: 'p1', ended: '2026-06-09T10:00:00Z',
       mesoRecap: { raw: { answers: {} } } };
     assert.strictEqual(LB.isMesoSessionEditable(base, [base], meso), true);
     const asCleanup = { ...base, isCleanup: true };
-    assert.strictEqual(LB.isMesoSessionEditable(asCleanup, [asCleanup], meso), false);
+    assert.strictEqual(LB.isMesoSessionEditable(asCleanup, [asCleanup], meso), true);
+    const asDeload = { ...base, isDeload: true };
+    assert.strictEqual(LB.isMesoSessionEditable(asDeload, [asDeload], meso), false);
+  });
+
+  test('applyMesoFeedbackEdit: ctx.isCleanup keeps a low-pump edit off the swap counter', () => {
+    // The live handler suppresses the counter for a cleanup week (a flat pump on a
+    // reduced load proves nothing). Editing the same answer afterwards must not let
+    // it back in, or three cleanup sessions still reach the "swap this lift" advice.
+    const msOf = () => ({ deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: {} });
+    const rawOf = () => ({
+      answers: { soreness: {}, volume: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', pumpLowApplied: false, contrib: {} } } },
+      negOwner: {}, frozen: false, dayId: 'd0',
+    });
+    const edit = { type: 'joint', subject: 'e1', answer: 'none', pump: 'low' };
+    const normal = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(normal.mesoState.pumpLowCounts.e1, 1, 'control: a normal session counts it');
+    const cleanup = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false, isCleanup: true });
+    assert.strictEqual(cleanup.mesoState.pumpLowCounts.e1, undefined, 'a cleanup session does not');
+    assert.strictEqual(cleanup.raw.answers.joint.e1.pump, 'low', 'the answer itself is still recorded');
   });
 
 
