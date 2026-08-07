@@ -8642,63 +8642,90 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             // renders items as-is, drag the grip to reorder, same engine as
             // the plan editor's own item list (screens-schedule.jsx).
             <ReorderList onReorder={reorderItems} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {items.map((i, idx) => {
-                // Step membership is read top-down: a step starts at a row
-                // whose stepId differs from its predecessor's (that row
-                // carries the toggle), and ends at the row before the next
-                // step start (or the list end). The instruction field sits
-                // under the step's LAST row, so the eye reads the step's
-                // ingredients first and the instruction second, the order
-                // you actually prep them. The stored stepLabel stays on the
-                // run's head item (fdBuildSteps' label contract), the field
-                // below just renders and edits it from the run's tail.
-                const isStepHead = !!i.stepId && (idx === 0 || items[idx - 1].stepId !== i.stepId);
-                const isStepLast = !!i.stepId && (idx === items.length - 1 || items[idx + 1].stepId !== i.stepId);
-                const stepHeadItem = isStepLast ? items[steps.find(s => s.startIdx + s.count - 1 === idx)?.startIdx ?? idx] : null;
-                return (
-                  <div key={i.id} data-reorder-item="true" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {/* Accent rail on every member of a step makes the
-                        grouping legible at a glance, not just via the badge
-                        numbers; ungrouped rows keep fdEntryRow as-is. */}
-                    <div style={i.stepId ? { ...fdEntryRow, borderLeft: '2px solid var(--accent)' } : fdEntryRow}>
-                      <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
-                      <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
-                        <i className="fa-solid fa-list-ol" style={{ fontSize: 11, color: isStepHead ? 'var(--accent)' : UI.inkFaint }} />
-                      </button>
-                      <FdIngredientBadge n={fdStepOrdinal(items, idx)} />
-                      <button onClick={() => openEditItem(i)} style={fdDraftMain}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          {i.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
-                          <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                        </div>
-                        <span style={fdEntryMeta}>
-                          {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
-                          <span style={fdMetaDivider} />
-                          <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
-                        </span>
-                      </button>
-                      <button data-reorder-ignore="true" onClick={() => openNoteItem(i)} aria-label={i.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
-                        <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: i.note ? 'var(--accent)' : UI.inkFaint }} />
-                      </button>
-                      <button data-reorder-ignore="true" onClick={() => requestRemoveItem(i)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                        <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                      </button>
-                    </div>
-                    {isStepLast && stepHeadItem && (
-                      // Reads and writes the run head's stored stepLabel
-                      // (the label contract lives there; only the editor
-                      // positions the field at the run's tail). Rides along
-                      // with its row when dragged (it lives in the
-                      // data-reorder-item wrapper, not the row itself), and
-                      // the drag engine ignores it as a drag source.
-                      <div data-reorder-ignore="true" style={{ paddingLeft: 66, paddingRight: 8, marginTop: -2 }}>
-                        <input value={stepHeadItem.stepLabel || ''} onChange={e => setStepLabel(stepHeadItem.id, e.target.value)} type="text"
-                          placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
+              {(() => {
+                // A step renders as a sub-card: an accent-bordered container
+                // holding its rows, with a "Step N" header and, while it
+                // only has one member, a hint that more ingredients get
+                // dragged in. The rows inside stay individual
+                // data-reorder-item elements (the drag engine's hit-testing
+                // is rect-based and finds nested items), so dropping a row
+                // anywhere inside the card - before the first member,
+                // between two, after the last - lands adjacent to a member
+                // and fdReorderWithSteps joins it to the run. The stored
+                // stepLabel lives on the run's head item (fdBuildSteps'
+                // label contract); the instruction field renders under the
+                // run's LAST row, reading and editing it from the tail.
+                const renderRow = (idx) => {
+                  const it = items[idx];
+                  const isStepHead = !!it.stepId && (idx === 0 || items[idx - 1].stepId !== it.stepId);
+                  const isStepLast = !!it.stepId && (idx === items.length - 1 || items[idx + 1].stepId !== it.stepId);
+                  const stepHeadItem = isStepLast ? items[steps.find(s => s.startIdx + s.count - 1 === idx)?.startIdx ?? idx] : null;
+                  return (
+                    <div key={it.id} data-reorder-item="true" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={fdEntryRow}>
+                        <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
+                        <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
+                          <i className="fa-solid fa-list-ol" style={{ fontSize: 11, color: isStepHead ? 'var(--accent)' : UI.inkFaint }} />
+                        </button>
+                        <FdIngredientBadge n={fdStepOrdinal(items, idx)} />
+                        <button onClick={() => openEditItem(it)} style={fdDraftMain}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            {it.foodId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} title="In the shared food database" />}
+                            <span style={{ ...fdEntryName, fontSize: 12 }}>{it.foodName}</span>
+                          </div>
+                          <span style={fdEntryMeta}>
+                            {it.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(it.protein, it.carbs, it.fat, netCarbs ? it.fiber : null) || 0)} kcal</span>
+                            <span style={fdMetaDivider} />
+                            <FdMacroBits protein={it.protein} carbs={it.carbs} fat={it.fat} />
+                          </span>
+                        </button>
+                        <button data-reorder-ignore="true" onClick={() => openNoteItem(it)} aria-label={it.note ? 'Edit note' : 'Add note'} style={fdInlineDeleteBtn}>
+                          <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: it.note ? 'var(--accent)' : UI.inkFaint }} />
+                        </button>
+                        <button data-reorder-ignore="true" onClick={() => requestRemoveItem(it)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                          <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                        </button>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                      {isStepLast && stepHeadItem && (
+                        // Rides along with its row when dragged (it lives in
+                        // the data-reorder-item wrapper, not the row itself),
+                        // and the drag engine ignores it as a drag source.
+                        <div data-reorder-ignore="true" style={{ paddingLeft: 8, paddingRight: 8 }}>
+                          <input value={stepHeadItem.stepLabel || ''} onChange={e => setStepLabel(stepHeadItem.id, e.target.value)} type="text"
+                            placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+                const blocks = [];
+                let k = 0;
+                while (k < items.length) {
+                  const it = items[k];
+                  const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
+                  if (!isHead) { blocks.push(renderRow(k)); k++; continue; }
+                  const run = steps.find(s => s.startIdx === k);
+                  const members = [];
+                  for (let m = k; m < k + (run ? run.count : 1); m++) members.push(renderRow(m));
+                  blocks.push(
+                    <div key={`step-card-${it.id}`} style={{
+                      border: `var(--hair-width) solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6,
+                      padding: '6px 8px 8px', background: 'rgba(var(--accent-rgb),0.04)',
+                      display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 2px 2px' }}>
+                        <span className="micro-gold">Step {fdStepOrdinal(items, k)}</span>
+                        {run && run.count === 1 && (
+                          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Drag more ingredients in</span>
+                        )}
+                      </div>
+                      {members}
+                    </div>
+                  );
+                  k += run ? run.count : 1;
+                }
+                return blocks;
+              })()}
             </ReorderList>
           )}
         </div>
