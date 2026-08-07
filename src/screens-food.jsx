@@ -323,33 +323,65 @@ function fdToggleStepStart(items, idx) {
 // cross a run boundary):
 // - an ungrouped row dropped directly next to a step run (before its first
 //   member, after its last, or between two members) joins it: it takes the
-//   neighbor's stepId and the rail appears
+//   neighbor's stepId and the rail appears. This also covers the
+//   instruction-box drop where the row already sits right after the step
+//   (from === to): the engine filters real moves, so an equal pair only
+//   arrives via the box translation, and the explicit drop onto the box
+//   joins the row without any movement.
 // - a member dropped away from its run (no same-id neighbor left) leaves
 //   the step again and becomes ungrouped, unless it carries the step's
-//   instruction, which makes it its own one-ingredient step
+//   instruction, which makes it its own one-ingredient step; if it lands
+//   next to a DIFFERENT run, the join below absorbs it there
 // Dropping a member directly next to its own run (or between two members)
 // keeps it a member; two neighbors with different stepIds resolve to the
 // predecessor. The label rescue (fdTransferStepLabel) runs first so a
 // dragged-out labeled head hands the instruction to its run before leaving.
 function fdReorderWithSteps(items, from, to) {
-  if (from === to) return items;
   const rescued = fdTransferStepLabel(items, from);
   const next = [...rescued];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
-  const prev = to > 0 ? next[to - 1] : null;
-  const succ = to < next.length - 1 ? next[to + 1] : null;
+  // splice clamps an out-of-range insert index to the array length, so the
+  // moved row's actual position can be less than `to` (a move from an
+  // early position to the very end); prev/succ and the write-back must use
+  // that real position, never the raw `to`, or a late write would extend
+  // the array with a duplicate row.
+  const placedAt = Math.min(to, next.length - 1);
+  const prev = placedAt > 0 ? next[placedAt - 1] : null;
+  const succ = placedAt < next.length - 1 ? next[placedAt + 1] : null;
   let adjusted = moved;
   if (moved.stepId) {
     const linked = (prev && prev.stepId === moved.stepId) || (succ && succ.stepId === moved.stepId);
     if (!linked && moved.stepLabel == null) adjusted = { ...moved, stepId: null, stepLabel: null };
-  } else if (prev && prev.stepId) {
-    adjusted = { ...moved, stepId: prev.stepId };
-  } else if (succ && succ.stepId) {
-    adjusted = { ...moved, stepId: succ.stepId };
   }
-  next[to] = adjusted;
+  if (adjusted.stepId == null) {
+    if (prev && prev.stepId) adjusted = { ...adjusted, stepId: prev.stepId };
+    else if (succ && succ.stepId) adjusted = { ...adjusted, stepId: succ.stepId };
+  }
+  next[placedAt] = adjusted;
   return fdNormalizeSteps(next);
+}
+// Maps the drag engine's item indices back to array positions. The engine
+// counts every data-reorder-item element: one per ingredient row PLUS one
+// instruction-box slot per step's last row (the box is a drop target: it
+// renders under the step's last member and doubles as the "drop into this
+// step" zone, so a 1-member step has a whole box to aim at instead of a
+// thin strip around its single row). A row maps to its own array index; a
+// box slot maps to "right after the step it belongs to" (run end + 1), so
+// dropping onto the box lands the row inside that step via the adjacency
+// rule in fdReorderWithSteps. from can never be a box (boxes carry
+// data-reorder-ignore), the clamp is defensive.
+function fdEngineToArray(list, from, to) {
+  const pos = [];
+  list.forEach((it, i) => {
+    pos.push(i);
+    const isStepLast = !!it.stepId && (i === list.length - 1 || list[i + 1].stepId !== it.stepId);
+    if (isStepLast) pos.push(i + 1);
+  });
+  return {
+    from: pos[from] != null ? Math.min(pos[from], list.length - 1) : list.length - 1,
+    to: pos[to] != null ? pos[to] : list.length,
+  };
 }
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
@@ -8438,9 +8470,15 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // below and Cooking Mode further down): fdReorderWithSteps is a plain
   // splice-to-new-position plus the drag-in/drag-out step semantics on the
   // moved row (dropping a row next to a step joins it, dropping a member
-  // away from its run ungroups it), no macro recalculation.
+  // away from its run ungroups it), no macro recalculation. The engine
+  // indices are translated through fdEngineToArray first, because a step's
+  // instruction box is its own drop slot in the DOM (see the card render
+  // below), one engine item per row plus one per step box.
   function reorderItems(from, to) {
-    setItems(list => fdReorderWithSteps(list, from, to));
+    setItems(list => {
+      const t = fdEngineToArray(list, from, to);
+      return fdReorderWithSteps(list, t.from, t.to);
+    });
   }
   // Step-start toggle, see fdToggleStepStart for the three cases. The
   // toggle only ever starts a step on THIS row; further members are added
@@ -8649,19 +8687,22 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                 // dragged in. The rows inside stay individual
                 // data-reorder-item elements (the drag engine's hit-testing
                 // is rect-based and finds nested items), so dropping a row
-                // anywhere inside the card - before the first member,
-                // between two, after the last - lands adjacent to a member
-                // and fdReorderWithSteps joins it to the run. The stored
-                // stepLabel lives on the run's head item (fdBuildSteps'
-                // label contract); the instruction field renders under the
-                // run's LAST row, reading and editing it from the tail.
+                // between two members lands adjacent and fdReorderWithSteps
+                // joins it to the run. Under the run's LAST row the
+                // instruction box doubles as a dedicated drop slot: it is
+                // its own data-reorder-item (but data-reorder-ignore as a
+                // drag source), so the whole box is a target that maps to
+                // "right after the step" (fdEngineToArray), giving a
+                // 1-member step a full box to aim at instead of a thin
+                // strip around its single row. The stored stepLabel lives
+                // on the run's head item (fdBuildSteps' label contract);
+                // the field renders here at the run's tail, reading and
+                // editing it from there.
                 const renderRow = (idx) => {
                   const it = items[idx];
                   const isStepHead = !!it.stepId && (idx === 0 || items[idx - 1].stepId !== it.stepId);
-                  const isStepLast = !!it.stepId && (idx === items.length - 1 || items[idx + 1].stepId !== it.stepId);
-                  const stepHeadItem = isStepLast ? items[steps.find(s => s.startIdx + s.count - 1 === idx)?.startIdx ?? idx] : null;
                   return (
-                    <div key={it.id} data-reorder-item="true" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div key={it.id} data-reorder-item="true">
                       <div style={fdEntryRow}>
                         <DragHandle style={{ marginLeft: -8, marginRight: -4 }} />
                         <button data-reorder-ignore="true" onClick={() => toggleStepStart(idx)} aria-label={isStepHead ? 'Remove step start' : 'Start a step here'} style={fdInlineDeleteBtn}>
@@ -8686,15 +8727,6 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                           <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
                         </button>
                       </div>
-                      {isStepLast && stepHeadItem && (
-                        // Rides along with its row when dragged (it lives in
-                        // the data-reorder-item wrapper, not the row itself),
-                        // and the drag engine ignores it as a drag source.
-                        <div data-reorder-ignore="true" style={{ paddingLeft: 8, paddingRight: 8 }}>
-                          <input value={stepHeadItem.stepLabel || ''} onChange={e => setStepLabel(stepHeadItem.id, e.target.value)} type="text"
-                            placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
-                        </div>
-                      )}
                     </div>
                   );
                 };
@@ -8705,24 +8737,31 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                   const isHead = !!it.stepId && (k === 0 || items[k - 1].stepId !== it.stepId);
                   if (!isHead) { blocks.push(renderRow(k)); k++; continue; }
                   const run = steps.find(s => s.startIdx === k);
+                  const count = run ? run.count : 1;
                   const members = [];
-                  for (let m = k; m < k + (run ? run.count : 1); m++) members.push(renderRow(m));
+                  for (let m = k; m < k + count; m++) members.push(renderRow(m));
+                  const headItem = items[k];
                   blocks.push(
-                    <div key={`step-card-${it.id}`} style={{
+                    <div key={`step-card-${headItem.id}`} style={{
                       border: `var(--hair-width) solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6,
                       padding: '6px 8px 8px', background: 'rgba(var(--accent-rgb),0.04)',
                       display: 'flex', flexDirection: 'column', gap: 6,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 2px 2px' }}>
                         <span className="micro-gold">Step {fdStepOrdinal(items, k)}</span>
-                        {run && run.count === 1 && (
+                        {count === 1 && (
                           <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Drag more ingredients in</span>
                         )}
                       </div>
                       {members}
+                      <div key={`step-box-${headItem.id}`} data-reorder-item="true" data-reorder-ignore="true"
+                        style={{ border: '1px dashed rgba(var(--accent-rgb),0.45)', borderRadius: 4, padding: 4, background: 'rgba(var(--accent-rgb),0.03)' }}>
+                        <input value={headItem.stepLabel || ''} onChange={e => setStepLabel(headItem.id, e.target.value)} type="text"
+                          placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
+                      </div>
                     </div>
                   );
-                  k += run ? run.count : 1;
+                  k += count;
                 }
                 return blocks;
               })()}
