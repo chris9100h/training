@@ -22,6 +22,19 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.713',
+    date: '2026-08-07',
+    title: 'Cleanup weeks, cook-along steps, and recipes inside recipes 🧹',
+    items: [
+      "🧹 Back after a break, or just tired of ugly reps? Start a Cleanup Week from the Plan tab: weights pre-fill 10 to 30% lighter for one cycle (20% by default). Unlike a deload, next week builds back up from those numbers. Tap an exercise's chip to put that one back on full load, and nothing that week counts as a decline or a missed rep.",
+      "👩‍🍳 Recipes can be cooked in steps. Drag ingredients into a numbered step in the editor, add an instruction, and Cooking Mode walks you through it with a Step 2/5 counter. Recipes without steps behave exactly as before.",
+      "🥘 Put a recipe inside a recipe. The ingredient picker has a Recipes tab: pick one and it drops in as scaled ingredient rows you can still tweak. It's a copy, not a link, so editing the original later won't rewrite your new recipe.",
+      "🔢 Units stick to your ingredients. Add 4 wraps instead of 248 grams and rows read \"248g (4 pcs)\" everywhere, from the editor to the poster. Rescale and the count follows.",
+      "🤖 The daily summary follows the day you're looking at. Browse back on the Health tab and you get that day's summary, not always yesterday's. Works up to three days back.",
+      "🚪 The front door works again. After the hosting move, the app could greet you with \"Safari can't open the page\" instead of, well, opening. Fixed.",
+    ],
+  },
+  {
     id: 'v2.707',
     date: '2026-08-06',
     title: 'One very busy day: measurements, fasting, and food that lands 🚀',
