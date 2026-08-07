@@ -3158,7 +3158,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             )}
             {cleanupPendingDay && weekOffset === 0 && (
               <span title="Your cleanup week is queued for the start of the next cycle. Until then everything trains at full load." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
-                Cleanup · starts {cleanupPendingDay}
+                Cleanup → {cleanupPendingDay}
               </span>
             )}
             </div>
