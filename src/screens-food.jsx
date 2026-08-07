@@ -8490,6 +8490,18 @@ function FdIngredientBadge({ n, size = 20 }) {
   );
 }
 
+// Size a textarea to its content, so a long value wraps into view instead of
+// scrolling out of sight. Used by the step instruction field, which sits inline
+// in the ingredient list where a fixed-height box would clip the very text the
+// field exists to show. Called once via ref (covers an already-saved value on
+// mount) and on every edit. Setting height to 'auto' first is what lets the box
+// SHRINK again after a deletion, scrollHeight alone only ever grows.
+function fdAutoGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
@@ -8973,8 +8985,16 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                       {members}
                       <div key={`step-box-${headItem.id}`} data-reorder-item="true" data-reorder-ignore="true"
                         style={{ border: '1px dashed rgba(var(--accent-rgb),0.45)', borderRadius: 4, padding: 4, background: 'rgba(var(--accent-rgb),0.03)' }}>
-                        <input value={headItem.stepLabel || ''} onChange={e => setStepLabel(headItem.id, e.target.value)} type="text"
-                          placeholder="Step instruction, e.g. cut everything and put it in a bowl" style={fdInputStyle} />
+                        {/* A textarea, not an input: an instruction longer than
+                            the box is exactly the normal case here, and a
+                            single-line input scrolls it out of sight with no
+                            hint that there is more. Auto-grown so the whole
+                            text stays visible without a scrollbar or a resize
+                            handle to discover. */}
+                        <textarea value={headItem.stepLabel || ''} onChange={e => { fdAutoGrow(e.target); setStepLabel(headItem.id, e.target.value); }}
+                          ref={fdAutoGrow} rows={1}
+                          placeholder="Step instruction, e.g. cut everything and put it in a bowl"
+                          style={{ ...fdInputStyle, resize: 'none', overflow: 'hidden', lineHeight: 1.4 }} />
                       </div>
                     </div>
                   );
