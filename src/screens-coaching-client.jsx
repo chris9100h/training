@@ -715,7 +715,16 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                   const last = seedRef ?? LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, seedRef, item.repsMax || null, item.progressionOffset ?? null, occ);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
-                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
+                  // Both overrides are passed explicitly for the same reason:
+                  // without them buildSeedSets falls back to the window globals,
+                  // which hold the COACH's own deload/cleanup state, not the
+                  // client's. optOuts stays null here because those live on the
+                  // client's in-progress session, which a preview never has.
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg,
+                    clientStore.statusMode === 'deload',
+                    clientStore.statusMode === 'cleanup'
+                      ? { percent: clientStore.settings?.cleanupPercent ?? 20, optOuts: null, sinceISO: clientStore.statusModeSince ?? null }
+                      : false);
                   // Reps-only / bodyweight / checkbox exercises seed with kg==null
                   // but a real rep prescription; count them as having data so the
                   // sheet shows the seeds instead of "First time, no weight data".

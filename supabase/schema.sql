@@ -147,6 +147,7 @@ CREATE TABLE public.zane_sessions (
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
   is_deload boolean NOT NULL DEFAULT false,
+  is_cleanup boolean NOT NULL DEFAULT false,  -- 0251: cleanup week, see docs/database.md
   meso_recap jsonb,
   readiness text,
   signal_weight text,
@@ -336,7 +337,8 @@ CREATE TABLE public.zane_user_settings (
   daily_log_reminder_time text NOT NULL DEFAULT '19:00'::text,
   daily_log_reminder_last_date text,
   pillbox_slots jsonb,
-  fasting_protocol text  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
+  fasting_protocol text,  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
+  cleanup_percent integer NOT NULL DEFAULT 20  -- 0251: cleanup week load reduction in percent (UI clamps 10-30)
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -475,6 +477,9 @@ ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_user_id_fkey FOREIGN KEY
 
 ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_pkey PRIMARY KEY (user_id);
 ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+-- Migration 0109 added this alongside the zane_status_periods.mode check; it
+-- was missing from this snapshot until 0251 widened both for 'cleanup'.
+ALTER TABLE public.zane_user_settings ADD CONSTRAINT zane_user_settings_status_mode_check CHECK ((status_mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text, 'cleanup'::text])));
 
 ALTER TABLE public.zane_pushover_active ADD CONSTRAINT pushover_active_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_push_subscriptions ADD CONSTRAINT push_subscriptions_pkey PRIMARY KEY (id);
@@ -2201,7 +2206,7 @@ AS $function$
   WHERE zane_meso_states.updated_at < EXCLUDED.updated_at;
 $function$;
 
--- ── Status periods (migration 0083; deload mode added 0108) ─────────────────────
+-- ── Status periods (migration 0083; deload mode 0108, cleanup mode 0251) ───────
 -- Historical log of sick/vacation/deload periods (ended_at NULL = active). Mirror
 -- of zane_user_settings.status_mode/status_mode_since (that's the fast current
 -- cache; this table is the full history for the stats "Missed Workouts" cards).
@@ -2209,7 +2214,7 @@ $function$;
 CREATE TABLE zane_status_periods (
   id         text        PRIMARY KEY,
   user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  mode       text        NOT NULL CHECK (mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text])),
+  mode       text        NOT NULL CHECK (mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text, 'cleanup'::text])),
   started_at timestamptz NOT NULL,
   ended_at   timestamptz
 );

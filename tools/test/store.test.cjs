@@ -11,6 +11,10 @@ let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
 const rpcLog = []; // records every rpc(name, args) call
+// The sandbox's own `window`, exposed so a test can set the globals store.js
+// reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
+// is a different object entirely, setting that one has no effect in here.
+let storeWindow = null;
 
 function loadStore() {
   const code = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
@@ -39,6 +43,7 @@ function loadStore() {
     const src = fs.readFileSync(path.join(__dirname, '../../', f), 'utf8');
     new Function('window', src)(sandbox.window);
   }
+  storeWindow = sandbox.window;
   return sandbox.window.LB;
 }
 
@@ -4951,6 +4956,174 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
     assert.strictEqual(seeded[0].kg, 100);
     assert.strictEqual(seeded[0].addedKg, undefined);
+  });
+
+  // ── Cleanup week (migration 0251) ────────────────────────────────────────
+  // The deload overlay's sibling: same reduction mechanics, opposite relation
+  // to the progression chain (the reduced loads stay in it).
+  const cleanupStore = {
+    exercises: [
+      { id: 'bar', name: 'Barbell Row', equipment: 'barbell' },
+      { id: 'dip', name: 'Assisted Dip', equipment: 'machine', movement_type: 'assisted' },
+      { id: 'bw',  name: 'Pull-up', equipment: 'bodyweight' },
+    ],
+    settings: {},
+  };
+  const cleanupLast = (kg) => ({ entry: { sets: [{ warmup: false, kg, reps: 8, done: true }] } });
+
+  test('buildSeedSets: cleanup reduces by the configured percent, on the 2.5 grid', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup rounds to the 2.5 grid like a deload does', () => {
+    // 97.5 * 0.8 = 78 -> 77.5 on the grid.
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(97.5), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 77.5);
+  });
+  test('buildSeedSets: cleanup reduces the LAST load, not the progression suggestion', () => {
+    // Same trap the deload path guards: 100 kg with a +5 suggestion must seed
+    // 80, not 84. Mirrors the deload comment on the baseKg line.
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100),
+      { kg: 105, reps: 8 }, false, cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup percent is clamped to 10-30 either way', () => {
+    const tooLow = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 5 });
+    assert.strictEqual(tooLow[0].kg, 90, '5% clamps up to 10%');
+    const tooHigh = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 40 });
+    assert.strictEqual(tooHigh[0].kg, 70, '40% clamps down to 30%');
+  });
+  test('buildSeedSets: an opted-out exercise seeds its full load', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20, optOuts: { bar: true } });
+    assert.strictEqual(seeded[0].kg, 100);
+  });
+  test('buildSeedSets: an opt-out on ANOTHER exercise does not leak across', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20, optOuts: { dip: true } });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup leaves assisted loads alone (reducing them makes it harder)', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'dip', reps: 8 }, cleanupLast(-40), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, -40);
+  });
+  test('buildSeedSets: cleanup leaves a bodyweight seed alone', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, 80, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: deload still wins over a cleanup config', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, true, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 50);
+  });
+  test('buildSeedSets: cleanupOpts false means "not in a cleanup", not "use the global"', () => {
+    // What a coach preview passes for a client who isn't in a cleanup. If this
+    // read as null the viewer's own window.__CLEANUP would leak into the seeds.
+    storeWindow.__CLEANUP = { percent: 30 };
+    try {
+      const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+        cleanupStore, null, null, false);
+      assert.strictEqual(seeded[0].kg, 100);
+      const viaGlobal = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+        cleanupStore, null, null, null);
+      assert.strictEqual(viaGlobal[0].kg, 70, 'null still falls back to the global');
+    } finally { delete storeWindow.__CLEANUP; }
+  });
+
+  // Compounding guard: while a cleanup runs, its own sessions are hidden from
+  // the seed history so session 2 doesn't seed off session 1's reduced load.
+  const cleanupWindowState = {
+    statusMode: 'cleanup',
+    statusModeSince: '2026-06-10T00:00:00Z',
+    sessions: [
+      { id: 'pre', ended: '2026-06-09T11:00:00Z', startedAt: '2026-06-09T10:00:00Z', dayId: 'd1',
+        entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 8, done: true }] }] },
+      { id: 'in',  ended: '2026-06-11T11:00:00Z', startedAt: '2026-06-11T10:00:00Z', dayId: 'd1',
+        entries: [{ exId: 'e1', sets: [{ kg: 80, reps: 8, done: true }] }] },
+    ],
+  };
+  test('recentSessionsForExercise: an active cleanup hides its own sessions', () => {
+    const rows = LB.recentSessionsForExercise(cleanupWindowState, 'e1', 'd1');
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].session.id, 'pre');
+  });
+  test('recentSessionsForExercise: once the cleanup ends they are the new baseline', () => {
+    const after = { ...cleanupWindowState, statusMode: null, statusModeSince: null };
+    const rows = LB.recentSessionsForExercise(after, 'e1', 'd1');
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].session.id, 'in', 'newest first, the cleanup session leads');
+  });
+  test('recentSessionsForExercise: a session started before the cleanup still counts', () => {
+    const rows = LB.recentSessionsForExercise(cleanupWindowState, 'e1', 'd1');
+    assert.ok(rows.some(r => r.session.id === 'pre'));
+  });
+
+  // Auto-end. deloadPlanDays falls back to 7 without a matching schedule.
+  const cleanupClock = (sinceISO) => ({ statusMode: 'cleanup', statusModeSince: sinceISO, schedules: [], sessions: [] });
+  test('cleanupElapsed: false before the week is up, true after', () => {
+    const since = '2026-06-01T00:00:00Z';
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-05T00:00:00Z')), false);
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T00:00:00Z')), true);
+  });
+  test('cleanupElapsed: false when no cleanup is running at all', () => {
+    assert.strictEqual(LB.cleanupElapsed({ statusMode: null, statusModeSince: null }), false);
+    assert.strictEqual(LB.cleanupElapsed({ statusMode: 'deload', statusModeSince: '2026-06-01T00:00:00Z' }), false);
+  });
+  test('cleanupDaysRemaining: counts down and clamps at 0', () => {
+    const since = '2026-06-01T00:00:00Z';
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-03T00:00:00Z')), 5);
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-20T00:00:00Z')), 0);
+  });
+
+  // The autoreg exclusions. All of these need an explicit !isCleanup because a
+  // cleanup session keeps signalWeight 'full' on purpose (see detectStall).
+  const cleanupHistory = (flag) => ({
+    exerciseBests: {},
+    sessions: [{ id: 's1', ended: '2026-06-09T10:00:00Z', dayId: 'd1', ...flag,
+      entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true, timeSec: 60 }] }] }],
+  });
+  test('bestE1rmForExercise: a cleanup session is not a PR baseline', () => {
+    assert.ok(LB.bestE1rmForExercise(cleanupHistory({}), 'e1') > 0);
+    assert.strictEqual(LB.bestE1rmForExercise(cleanupHistory({ isCleanup: true }), 'e1'), 0);
+  });
+  test('bestAssistLoad: a cleanup session is not a PR baseline', () => {
+    assert.strictEqual(LB.bestAssistLoad(cleanupHistory({}), 'e1'), 100);
+    assert.strictEqual(LB.bestAssistLoad(cleanupHistory({ isCleanup: true }), 'e1'), null);
+  });
+  test('bestTimeForExercise: a cleanup session is not a PR baseline', () => {
+    assert.strictEqual(LB.bestTimeForExercise(cleanupHistory({}), 'e1'), 60);
+    assert.strictEqual(LB.bestTimeForExercise(cleanupHistory({ isCleanup: true }), 'e1'), null);
+  });
+
+  test('detectStall: cleanup sessions are excluded from the e1RM series', () => {
+    // Four flat sessions would stall; flagging them all cleanup empties the
+    // series instead, so nothing can read as a stall.
+    const flatSessions = (flag) => [1, 2, 3, 4].map(i => ({
+      id: `s${i}`, ended: `2026-06-0${i}T10:00:00Z`, scheduleId: 'p1', dayId: 'd1',
+      signalWeight: 'full', ...flag,
+      entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true }] }],
+    }));
+    const muscleOf = () => 'back';
+    const opts = { planId: 'p1', dayId: 'd1', exName: 'Row' };
+    assert.strictEqual(LB.detectStall(flatSessions({}), 'e1', muscleOf, opts).stalled, true,
+      'control: flat full-signal sessions do stall');
+    assert.strictEqual(LB.detectStall(flatSessions({ isCleanup: true }), 'e1', muscleOf, opts).stalled, false,
+      'the same sessions flagged cleanup must not');
+  });
+
+  test('isMesoSessionEditable: a cleanup session is never editable', () => {
+    const meso = { id: 'm1', scheduleId: 'p1', startedAt: '2026-06-01T00:00:00Z' };
+    const base = { id: 's1', scheduleId: 'p1', ended: '2026-06-09T10:00:00Z',
+      mesoRecap: { raw: { answers: {} } } };
+    assert.strictEqual(LB.isMesoSessionEditable(base, [base], meso), true);
+    const asCleanup = { ...base, isCleanup: true };
+    assert.strictEqual(LB.isMesoSessionEditable(asCleanup, [asCleanup], meso), false);
   });
 
 

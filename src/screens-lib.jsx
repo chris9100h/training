@@ -2917,6 +2917,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>CLEANUP</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
                           {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
@@ -3186,13 +3187,13 @@ const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
 // Sessions eligible for comparison against `s`: same dayId, ended, excluding
-// itself, newest first. Deload sessions excluded for the same reason as
-// prevEntryMap below (artificially light, not a fair comparison baseline).
-// Shared by the Compare button (SessionDetailScreen) and the session picker
-// (SessionCompareScreen).
+// itself, newest first. Deload and cleanup sessions excluded for the same
+// reason as prevEntryMap below (artificially light, not a fair comparison
+// baseline). Shared by the Compare button (SessionDetailScreen) and the session
+// picker (SessionCompareScreen).
 function sameDaySessions(sessions, s) {
   return sessions
-    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload)
+    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 }
 
@@ -3643,7 +3644,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // 5/3/1 day still compares against the plain most-recent session below.
       const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
       const prev = cyclePrev || store.sessions
-        .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
+        .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
         .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
       map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
@@ -3652,7 +3653,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   }, [store.sessions, store.schedules, s]);
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);
@@ -3708,7 +3709,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // trained that exercise, isPR below tells the two cases apart per exercise
     // via its own fallback rather than a blanket flag, see there.
     const prMap = {};
-    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
+    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload && !x.isCleanup).forEach(sess => {
       sess.entries.forEach(e => e.sets.forEach(st => {
         const val = prValueOf(st, e.exId);
         if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
@@ -3808,7 +3809,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // session that set new records (fewer sets, a lighter secondary exercise,
   // ...), so leading with the count keeps that from reading as a step back.
   const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
-  const showVol = volDelta != null && !s.isDeload;
+  // A cleanup session's volume is down by design, same as a deload's, so the
+  // delta is suppressed there too rather than reading as a step back.
+  const showVol = volDelta != null && !s.isDeload && !s.isCleanup;
 
   const muscleGroups = [...new Set(
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
@@ -3849,6 +3852,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             {s.dayName}
             {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
             {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>CLEANUP</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3924,6 +3928,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
                   {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
                   {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>CLEANUP</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -5763,6 +5768,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
         <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
           {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
           {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
+          {cmp.isCleanup && <span style={{ color: UI.inkFaint }}> · compared session was a cleanup week</span>}
         </div>
 
         {capturing ? <KnurlCanvas /> : <div className="knurl" />}

@@ -506,6 +506,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     temp_unit: sett.tempUnit ?? null,
     hidden_health_cards: sett.hiddenHealthCards ?? null,
     fever_threshold_c: sett.feverThresholdC ?? 38,
+    cleanup_percent: sett.cleanupPercent ?? 20,
     watermark_opacity: sett.watermarkOpacity ?? null,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
@@ -1208,7 +1209,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight, cycle_pos')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -1517,6 +1518,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_bonus     ? { isBonus:     true } : {}),
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
+        ...(s.is_cleanup   ? { isCleanup:   true } : {}),
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
@@ -1747,6 +1749,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tempUnit: sett.temp_unit ?? null,
         hiddenHealthCards: normalizeHiddenHealthCards(sett.hidden_health_cards),
         feverThresholdC: sett.fever_threshold_c ?? 38,
+        cleanupPercent: sett.cleanup_percent ?? 20,
         watermarkOpacity: sett.watermark_opacity ?? null,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
@@ -2012,8 +2015,13 @@ function sessionToRow(s, userId) {
   // (saveToLocal/mergeSessions), same treatment as currentExIdx/restStart/
   // restDuration below. Leaving it in `rest` would spread an unknown column
   // into the upsert and fail the whole write.
+  // cleanupOptOuts is local-only for the same reason and by the same mechanism:
+  // it only rescales what the CURRENT session displays, so losing it on another
+  // device costs nothing. Its session-level sibling isCleanup DOES have a
+  // column (migration 0251), since that one drives PR/regression baselines
+  // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, progressionBumps, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -2021,6 +2029,7 @@ function sessionToRow(s, userId) {
   row.is_bonus = !!isBonus;
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
+  row.is_cleanup = !!isCleanup;
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;
@@ -2528,6 +2537,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
     prev.settings?.feverThresholdC        !== next.settings?.feverThresholdC        ||
+    prev.settings?.cleanupPercent         !== next.settings?.cleanupPercent         ||
     prev.settings?.watermarkOpacity       !== next.settings?.watermarkOpacity       ||
     JSON.stringify(prev.settings?.hiddenHealthCards) !== JSON.stringify(next.settings?.hiddenHealthCards) ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
@@ -2605,6 +2615,7 @@ async function syncStore(prev, next, userId) {
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       temp_unit: next.settings?.tempUnit ?? null,
       fever_threshold_c: next.settings?.feverThresholdC ?? 38,
+      cleanup_percent: next.settings?.cleanupPercent ?? 20,
       watermark_opacity: next.settings?.watermarkOpacity ?? null,
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
@@ -2933,7 +2944,9 @@ function isDecline(curr, prev) {
 function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    // isCleanup joins isDeload here (and in the two mirrors below): a cleanup
+    // week's loads are deliberately reduced, so they are not a PR baseline.
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -2956,7 +2969,7 @@ function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null)
 function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
   let best = null;
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -2975,7 +2988,7 @@ function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
 function bestTimeForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = null;
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -3251,7 +3264,7 @@ function buildTimeSeedSets(it, last) {
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
-function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null) {
+function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null, cleanupOpts = null) {
   // Time-based exercises have no weight/rep progression: seed target durations
   // instead. This is the path the in-session exercise swap takes; the normal
   // session-start builders branch to buildTimeSeedSets themselves.
@@ -3267,11 +3280,36 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   const deloadActive = deloadOverride != null
     ? deloadOverride === true
     : (typeof window !== 'undefined' && window.__DELOAD === true);
+  // Cleanup week (migration 0251): same overlay idea, but a user-set reduction
+  // instead of a deload's fixed half, and opt-out-able per exercise mid-session.
+  // Unlike __DELOAD this global is an OBJECT ({ percent, sinceISO } | null), not
+  // a boolean, so it can carry the percentage: test it for null, never === true.
+  // cleanupOpts overrides it for the same reason deloadOverride exists (a coach
+  // previewing a client's seeds must see the CLIENT's cleanup, not their own).
+  // Three states, and the difference matters: omitted/null falls back to the
+  // global, an object IS the subject's cleanup, and `false` means "this subject
+  // is explicitly NOT in a cleanup". A caller previewing someone else has to
+  // pass false rather than null for the negative case, or the viewer's own
+  // global leaks into the subject's seeds.
+  const cleanupCfg = cleanupOpts == null
+    ? (typeof window !== 'undefined' && window.__CLEANUP != null ? window.__CLEANUP : null)
+    : (cleanupOpts || null);
   // Assisted exercises store a negative load, so halving it would REDUCE the
   // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
   const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
   const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
-  const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
+  // Same exemptions as deload, plus this exercise's own opt-out: the user can
+  // flip a single lift back to full load from the exercise header without
+  // ending the cleanup week for everything else.
+  const cleanup = !deload && cleanupCfg != null && bodyweightKg == null && !isAssistedEx
+    && !(cleanupCfg.optOuts && cleanupCfg.optOuts[it.exId]);
+  // Clamped here rather than trusting the caller: the value round-trips through
+  // the DB and a backup restore, so a hand-edited row can't seed a 90% cut.
+  const cleanupFactor = cleanup
+    ? (100 - Math.min(30, Math.max(10, Math.round(cleanupCfg.percent ?? 20)))) / 100
+    : null;
+  const factor = deload ? 0.5 : cleanupFactor;
+  const dl = (kg) => (factor != null && kg != null) ? Math.round((kg * factor) / 2.5) * 2.5 : kg;
 
   // A plus_load exercise seeds the load that was on the BELT, not last session's
   // total: bodyweight may have moved since, and repeating a stale total would
@@ -3300,7 +3338,8 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
       // During a deload, halve the ACTUAL last-session weight (prev.kg), not the
       // progression-suggested next weight. Without this, a 100 kg lift with a
       // +5 kg suggestion would seed 52.5 kg instead of the correct 50 kg.
-      const baseKg = deload && prev?.kg != null ? prev.kg : suggestion.kg;
+      // A cleanup week reduces off the same base for the same reason.
+      const baseKg = (deload || cleanup) && prev?.kg != null ? prev.kg : suggestion.kg;
       const seedReps = targetReps ?? suggestion.reps;
       return isUni
         ? { kg: dl(baseKg), repsL: seedReps, repsR: seedReps, done: false }
@@ -3343,9 +3382,22 @@ function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
 // Deload sessions are excluded so a deliberately light week never seeds the next
 // session's weights or skews progression/regression.
+//
+// Cleanup weeks are the deliberate opposite: their reduced loads DO seed the
+// next session (that is the whole point, the week after builds back up from
+// them), so isCleanup is NOT filtered out here. What must not happen is
+// compounding WITHIN the week: session 2 seeding off session 1's already-reduced
+// load would stack 0.8 x 0.8. buildSeedSets only ever sees sets, never the
+// session they came from, so the guard has to live here: while a cleanup is
+// active, sessions started since it began are hidden from the seed history, and
+// every cleanup session therefore seeds from the same full pre-cleanup base with
+// the factor applied exactly once. The moment the cleanup ends, the filter stops
+// applying and those same sessions become the new base.
 function recentSessionsForExercise(state, exId, dayId = null, limit = 3, occ = 0) {
+  const cleanupSince = state.statusMode === 'cleanup' ? (state.statusModeSince ?? null) : null;
   const sessions = (state.sessions || [])
     .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
+    .filter(s => !(cleanupSince != null && s.startedAt != null && s.startedAt >= cleanupSince))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const hasData = (e) => (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null);
@@ -3449,8 +3501,15 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
       // the server RPC doesn't know about is_deload and may return them. Guard by
       // checking server rows against locally-known deload session ids.
       const deloadIds = new Set((state.sessions || []).filter(s => s.isDeload).map(s => s.id));
+      // Same for the in-cleanup window (see recentSessionsForExercise): the
+      // server half of the merge has to hide the same sessions the local half
+      // does, or a cleanup session that already synced would come back through
+      // this door and compound the reduction. Matched on `ended` rather than
+      // `started_at` because get_exercise_history doesn't return the latter.
+      const cleanupSince = state.statusMode === 'cleanup' ? (state.statusModeSince ?? null) : null;
       const merged = [...local];
       for (const row of rows) {
+        if (cleanupSince != null && row.ended != null && row.ended >= cleanupSince) continue;
         if (!merged.some(m => m.sessionId === row.sessionId) && !deloadIds.has(row.sessionId)) merged.push(row);
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
@@ -4703,6 +4762,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // never has it: carry the cached value forward the same way, otherwise a
       // reload right after answering the toast would silently forget it.
       ...(mem.progressionBumps ? { progressionBumps: mem.progressionBumps } : {}),
+      // cleanupOptOuts is local-only for the same reason (see sessionToRow), so
+      // carry it forward too: without this, a reload mid-cleanup-session would
+      // forget which exercises the user had switched back to full load and the
+      // per-exercise chip would flip back to showing them as reduced.
+      ...(mem.cleanupOptOuts ? { cleanupOptOuts: mem.cleanupOptOuts } : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -6709,6 +6773,94 @@ async function endDeload(userId, store, setStore) {
   }
 }
 
+// ─── CLEANUP WEEK ───────────────────────────────────────────────────────────
+// Overlay sibling of the deload block above (migration 0251). Same lifecycle
+// (start / auto-end / end), different intent: a deload is recovery and drops
+// out of the progression chain, a cleanup week is a deliberate technique
+// rebuild whose reduced loads STAY in the chain so the next week climbs from
+// them. The length rules are identical, so these four reuse deloadPlanDays /
+// deloadFlexGoal rather than cloning them.
+
+// True once the active cleanup has run its course (one cycle / week elapsed,
+// or, for flex, the weekly session goal of cleanup sessions has been logged).
+// Mirrors deloadElapsed; checked on the home screen for the auto-end.
+function cleanupElapsed(store, now = new Date()) {
+  if (store.statusMode !== 'cleanup' || !store.statusModeSince) return false;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  const since = new Date(store.statusModeSince);
+  if (sch && isFlexPlan(sch)) {
+    const done = (store.sessions || []).filter(s => s.ended && s.isCleanup && new Date(s.ended) >= since).length;
+    return done >= deloadFlexGoal(sch);
+  }
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.floor((now - since) / 86400000);
+  return elapsed >= days;
+}
+
+// Days remaining in the current cleanup (null for flex, counts sessions, not days).
+function cleanupDaysRemaining(store, now = new Date()) {
+  if (store.statusMode !== 'cleanup' || !store.statusModeSince) return null;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (sch && isFlexPlan(sch)) return null;
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.max(0, Math.floor((now - new Date(store.statusModeSince)) / 86400000));
+  return Math.max(0, days - elapsed);
+}
+
+// Start a cleanup week: switch status mode to 'cleanup' and open a status
+// period. Same optimistic-write-plus-rollback shape as startDeload, and the
+// same reason for it (statusPeriods has no syncStore retry path).
+async function startCleanup(userId, store, setStore) {
+  const startedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
+  setStore(s => ({
+    ...s, statusMode: 'cleanup', statusModeSince: startedAt,
+    statusPeriods: [{ id: '_pending', mode: 'cleanup', startedAt, endedAt: null },
+      ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: startedAt })],
+  }));
+  try { await openStatusPeriod(userId, 'cleanup', startedAt); }
+  catch (e) {
+    console.error('startCleanup: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not start cleanup week. Please try again.');
+    return;
+  }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      const pct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
+      await addCoachingNote(coachingId, 'general', null, null, `Status: Cleanup week, training at ${100 - pct}% to rebuild technique.`, userId, threadId);
+    } catch (_) {}
+  }
+}
+
+// End a cleanup week: close the status period at `now` so today onward is
+// normal again. From here the cleanup sessions become the new seed baseline.
+async function endCleanup(userId, store, setStore) {
+  if (store.statusMode !== 'cleanup') return;
+  const endedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: endedAt } : p),
+  }));
+  try { await closeStatusPeriod(userId, endedAt); }
+  catch (e) {
+    console.error('endCleanup: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not end cleanup week. Please try again.');
+    return;
+  }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Cleanup week finished, building back up.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   // Medications (migration 0218/0221) mirrors the exact SELECT/mapping
@@ -6912,6 +7064,13 @@ function dsCardioForDay(store, dateISO) {
 // baseline for the same reason recentSessionsForExercise excludes them (a
 // deliberately light week is not a fair progress reference); a dayId-less
 // (freestyle) session has nothing of the same shape to compare against.
+//
+// Cleanup weeks are deliberately NOT excluded here, unlike almost everywhere
+// else isCleanup appears. A cleanup week's loads stay in the progression chain
+// (that is the point: the next week builds up from them), so comparing the
+// rebuild days against the pre-cleanup session instead would report the whole
+// rebuild as one long drop rather than the climb it actually is. Don't "fix"
+// this by adding !s.isCleanup to match the neighbouring filters.
 function dsPreviousSessionForDay(store, dayId, dateISO, excludeSessionId) {
   if (!dayId) return null;
   return (store.sessions || [])
@@ -7448,7 +7607,13 @@ function mesoGateSetsFromAnswers(answers, loadOnly) {
 // (sessions finished before the feature shipped lack them) and blocks while a
 // session for the plan is in progress (it would flush over the edit). Pure.
 function isMesoSessionEditable(session, allSessions, mesoState) {
-  if (!session || !mesoState || !session.ended || session.isDeload) return false;
+  // isCleanup is excluded for the same reason as isDeload, and for one more:
+  // applyMesoFeedbackEdit writes straight into mesoState.deltas/growthCounts,
+  // which is exactly the earn/cut path a cleanup week is meant to sit out. A
+  // cleanup session collects no feedback (the live quizzes are gated off), so
+  // this normally has nothing to act on, but the guard keeps that from becoming
+  // load-bearing if the recap ever carries data again.
+  if (!session || !mesoState || !session.ended || session.isDeload || session.isCleanup) return false;
   if (!session.mesoRecap || !session.mesoRecap.raw || !session.mesoRecap.raw.answers) return false;
   if (mesoState.startedAt && (session.ended || '') < mesoState.startedAt) return false;
   const sid = session.scheduleId;
@@ -8667,8 +8832,14 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   // Full-signal exposures of this exercise, newest-first (mirror detectOverreach's
   // filter: ended && !isDeload && this plan && signalWeight full). Build the best
   // e1RM per session over completed weighted working sets, effReps for unilateral.
+  // !isCleanup is a SEPARATE condition from the signalWeight check, not a
+  // duplicate of it: a cleanup session deliberately keeps signalWeight 'full'
+  // (so detectOverreach's own baseline moves down with the reduced loads and
+  // the rebuild weeks don't read as a regression), which means signalWeight
+  // cannot distinguish it here. Without this the flat, deliberately reduced
+  // e1RM of a cleanup week would read as a stall and suggest swapping the lift.
   const qualifying = (sessions || [])
-    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
+    .filter(s => s && s.ended && !s.isDeload && !s.isCleanup && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const series = [];
   for (const s of qualifying) {
@@ -9107,6 +9278,7 @@ window.LB = {
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
+  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining,
   loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,

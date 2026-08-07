@@ -1841,6 +1841,14 @@ function App() {
   // Deload overlay flag, buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';
 
+  // Cleanup-week overlay (migration 0251). Deliberately an OBJECT rather than a
+  // boolean like __DELOAD: the reduction is user-set, and buildSeedSets also
+  // needs sinceISO to window the seed history so the week doesn't compound its
+  // own reduction. Consumers test it for null, never === true.
+  window.__CLEANUP = store?.statusMode === 'cleanup'
+    ? { percent: store?.settings?.cleanupPercent ?? 20, sinceISO: store?.statusModeSince ?? null }
+    : null;
+
   // Two layout variants: the iPad sidebar layout (only on tab routes) and the
   // full-bleed layout (everything else). Navigating between a tab route and a
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.

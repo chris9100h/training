@@ -1213,8 +1213,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // isDeloadSession guard): showing the "≥X reps · next weight" hint anyway
     // would promise an unlock that can never actually fire. The 5/3/1 built-in
     // week 4 counts too: assistance items run through this hint while the same
-    // deload gate blocks their unlock.
+    // deload gate blocks their unlock. A cleanup week reduces the same way, but
+    // only for the lifts that are actually still reduced (an opted-out one is
+    // back on full load and progresses normally).
     if (store.statusMode === 'deload' || session.isDeload || is531DeloadSession) return null;
+    if (entry && isCleanupReduced(entry.exId)) return null;
     const perSet = entry?.plannedRepsPerSet;
     // On a Meso/autoreg plan, mirror mesoEarnTarget exactly, the mechanism
     // that actually grants the bump every session via computeMesoGains:
@@ -1251,6 +1254,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({
       ...s,
       sessions: s.sessions.map(x => x.id === session.id ? fn(x) : x),
+    }));
+  };
+
+  // Cleanup week, per-exercise opt-out: flip one lift between the reduced load
+  // and its full one without ending the cleanup for everything else. Rescales
+  // what is already on screen (warm-ups included, done sets included) rather
+  // than re-seeding, so a set the user already logged stays consistent with the
+  // rest of the exercise. Keyed by exId, matching the map buildSeedSets reads,
+  // so an exercise programmed twice in one day flips both of its slots together
+  // instead of leaving the second one contradicting the chip.
+  // The 2.5 rounding is not perfectly reversible (102.5 -> 82 -> 82.5), which is
+  // the same granularity every other seeded load carries; the user can adjust.
+  const toggleCleanupOptOut = (exId) => {
+    const f = (100 - cleanupPct) / 100;
+    const wasOptedOut = !!session.cleanupOptOuts?.[exId];
+    // Opting out divides the reduction back out, opting back in re-applies it.
+    const scale = wasOptedOut ? f : 1 / f;
+    updateSession(sess => ({
+      ...sess,
+      cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
+      entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
+        ...e,
+        sets: e.sets.map(st => st.kg == null ? st : { ...st, kg: Math.round((st.kg * scale) / 2.5) * 2.5 }),
+      }),
     }));
   };
 
@@ -1542,8 +1569,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Weight: increment-based (calibrated per equipment config).
     // When both are off we show a combined message.
     // Skipped during deload, loads are intentionally reduced, comparisons
-    // against the pre-deload reference would always fire as "too low".
-    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
+    // against the pre-deload reference would always fire as "too low". Same for
+    // a cleanup week, per exercise (an opted-out lift is back at full load and
+    // should be checked normally again).
+    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload || is531DeloadSession
+      || (!!entry && isCleanupReduced(entry.exId));
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
@@ -1672,8 +1702,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // During a deload the loads are deliberately light, suppress all
     // progression/PR/improvement/regression overlays so a planned easy week
-    // never reads as a jump or a decline. Includes the 5/3/1 built-in week 4.
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
+    // never reads as a jump or a decline. Includes the 5/3/1 built-in week 4,
+    // and a cleanup week for the exercises still running reduced.
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession
+      || (!!entry && isCleanupReduced(entry.exId));
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
@@ -1783,7 +1815,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // passed through as-is (not reconstructed) so isImprovement/isDecline see
   // exactly what they always did. Returns overlayHoldMs for finishSetNavigation.
   const flashOverlayForCompletedSet = (targetIdx, firstSet) => {
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession
+      || (!!entry && isCleanupReduced(entry.exId));
     let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
       const prevWS = lastEntrySets.filter(s => !s.warmup);
@@ -2351,7 +2384,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
       const entries = sealDoneSets(sess.entries);
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(store.statusMode === 'cleanup' ? { isCleanup: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => {
@@ -2464,6 +2497,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         entries: sealDoneSets(session.entries),
         ended: new Date().toISOString(),
         isDeload: store.statusMode === 'deload',
+        isCleanup: store.statusMode === 'cleanup',
         signalWeight: deriveSignalWeight(),
         mesoRecap: recap || session.mesoRecap,
       };
@@ -3014,9 +3048,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
-  // (isMesoDeloadSession is declared further down, so inline the deload check
-  // here to avoid a temporal-dead-zone reference.)
-  const mesoPartials = (mesoRirVal != null && !(store.statusMode === 'deload' || session.isDeload)) ? Math.max(0, -mesoRirVal) : 0;
+  // (isMesoDeloadSession/isCleanupSession are declared further down, so inline
+  // both checks here to avoid a temporal-dead-zone reference.)
+  const mesoPartials = (mesoRirVal != null
+    && !(store.statusMode === 'deload' || session.isDeload)
+    && !(store.statusMode === 'cleanup' || session.isCleanup)) ? Math.max(0, -mesoRirVal) : 0;
   const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
@@ -3405,6 +3441,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // letting another question claim it. See commitContrib.
   const mesoNegativeDeltaKeysRef = useRefT(mesoAskedInitRef.current.negOwner);
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
+  // Cleanup week (migration 0251), the deload overlay's sibling. Two different
+  // scopes, deliberately not one flag:
+  //  - isCleanupSession is session-wide: is this session part of a cleanup week
+  //    at all. Gates the things decided once per session (recovery quizzes,
+  //    earn/cut, the header badge).
+  //  - isCleanupReduced is per exercise: is THIS lift actually running reduced.
+  //    The user can opt a single lift back to full load from its header, and
+  //    from that moment its loads are comparable to history again, so the
+  //    outlier / PR / regression suppressions must stop applying to it. Using
+  //    the session-wide flag for those would keep an opted-out lift silently
+  //    unjudged for the rest of the session.
+  // Both are declared here (next to their deload counterpart) and read from
+  // function bodies defined textually earlier, which is fine: those only run
+  // after the component body has. The one exception is mesoPartials, evaluated
+  // inline during render further up, which inlines its own check for that
+  // reason (see there).
+  const isCleanupSession = store.statusMode === 'cleanup' || session.isCleanup;
+  const isCleanupReduced = (exId) => isCleanupSession && !session.cleanupOptOuts?.[exId];
+  // Clamped the same way buildSeedSets clamps it, so the badge and the chip
+  // can never claim a reduction the seeds didn't actually apply.
+  const cleanupPct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
   // Autoreg v2 P0 signal-hygiene: how much this session counts toward autoreg learning.
   // Delegates to the shared pure LB.deriveSignalWeight so the live finish and the post-hoc
   // readiness edit (screens-lib.jsx) score a session identically. Hoisted fn so the
@@ -3953,6 +4010,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
     // may still EARN a weight boost. 'full' = normal.
     const signalWeight = deriveSignalWeight();
+    // A cleanup week sits out earn/cut entirely, but it cannot get there the way
+    // a deload does. A deload is signalWeight 'none', which already short-
+    // circuits everything below; a cleanup session must stay 'full' so
+    // detectOverreach keeps counting it as an exposure and its own comparison
+    // baseline drops along with the loads (otherwise the rebuild weeks read as
+    // an e1RM regression). So the exclusion rides on this separate flag, and
+    // every place that keys off signalWeight === 'none' for the deload case
+    // needs the cleanup case spelled out next to it.
+    // What is deliberately NOT gated: the block-completion bookkeeping at the
+    // end of this function (completions/pendingMeso2/flush). A deload can only
+    // ever start after a block has closed, so skipping that for a deload is
+    // safe; a cleanup week is user-initiated and can land on the session that
+    // completes the block, which would otherwise leave the block stuck open.
+    const skipEarnCut = signalWeight === 'none' || isCleanupSession;
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
@@ -4012,7 +4083,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut
       // (spec 4.3). Leaving the block unentered keeps repMissCounts untouched.
-      if (signalWeight === 'full' && !streakSeen.has(key)) {
+      // A cleanup session is 'full' by design (see skipEarnCut above) but must
+      // freeze the streak just the same: missing reps at a deliberately reduced
+      // load says nothing about the working weight being too heavy.
+      if (signalWeight === 'full' && !skipEarnCut && !streakSeen.has(key)) {
         streakSeen.add(key);
         if (earlyMiss) {
           const n = (repMissCounts[key] || 0) + 1;
@@ -4032,6 +4106,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
 
       if (!allHit) continue;
+      // No boost can be earned off a deliberately reduced load. In practice the
+      // per-exercise gates below would already block it (a cleanup session is
+      // never asked the joint/pump/weight questions, so their refs stay empty),
+      // but leaning on that would make this correct only by accident.
+      if (skipEarnCut) continue;
       // Joint, pump and weight-feel are all per exId now. Mirrors LB.reearnMesoBoostsFromAnswers
       // exactly, including the muscle-less exemption: an untagged exercise with no
       // per-exercise pump/weight answer and no muscle fallback earns on reps + joint alone.
@@ -4055,17 +4134,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state, already contains all feedback deltas from this session.
-    // EARN persist: only a 'none' session (deload) keeps the old map untouched.
-    // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
-    // is real, spec 4.3); 'full' is the normal re-earn.
+    // EARN persist: a 'none' session (deload) or a cleanup session keeps the old
+    // map untouched. 'discounted' falls through and CAN still earn a boost (a PR
+    // on a tired day is real, spec 4.3); 'full' is the normal re-earn.
     const sessionKeys = session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId);
-    const newWeightBoosts = signalWeight === 'none'
+    const newWeightBoosts = skipEarnCut
       ? (mesoState.weightBoosts || {})
       : LB.reearnMesoWeightBoosts(mesoState.weightBoosts, sessionKeys, weightBoostMap);
     // Declines are per-session-instance: a key being re-earned/re-evaluated this
     // session must start undeclined again, same deload guard as weightBoosts above
     // (a deload session collects no feedback, so it must not clear declines either).
-    const newWeightBoostDeclines = signalWeight === 'none'
+    const newWeightBoostDeclines = skipEarnCut
       ? (mesoState.weightBoostDeclines || {})
       : LB.clearMesoWeightBoostDeclines(mesoState.weightBoostDeclines, sessionKeys);
     const withBoosts = {
@@ -4074,7 +4153,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       weightBoostDeclines: newWeightBoostDeclines,
       // Freeze the miss streak for anything but a full session (discounted and
       // none both leave it as-is), matching the streak guard above.
-      repMissCounts: signalWeight !== 'full' ? (mesoState.repMissCounts || {}) : repMissCounts,
+      repMissCounts: (signalWeight !== 'full' || skipEarnCut) ? (mesoState.repMissCounts || {}) : repMissCounts,
     };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
@@ -4110,7 +4189,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
-    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    // isCleanupSession gates this (and the joint trigger below) for the same
+    // reason isMesoDeloadSession does, and it has to be gated HERE rather than
+    // at finish: handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer
+    // commit real deltas into mesoState the moment they are answered, so the
+    // finish-time earn/cut guard never sees them. A cleanup week is a planned
+    // step back, not a recovery signal to autoregulate against.
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession || isCleanupSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period, meso not yet started
     if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
@@ -4177,7 +4262,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
-    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    // See the soreness trigger above for why cleanup is gated here.
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession || isCleanupSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period, meso not yet started
     // A second exercise becoming eligible while another's sheet is still open
@@ -6251,6 +6337,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
+          {isCleanupSession && (
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `var(--hair-width) solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>CLEANUP · {100 - cleanupPct}%</span>
+          )}
           {mesoState && mesoWeek != null && mesoState.weeks != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
               {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
@@ -6355,6 +6444,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {exercise?.category && <Pill gold>{exercise.category}</Pill>}
               {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
+            </div>
+          )}
+          {/* Cleanup week, per-exercise opt-out. Only for lifts the reduction
+              actually applies to: bodyweight, assisted, time-based, reps-only
+              and cardio items are all exempt in buildSeedSets, so offering the
+              toggle there would promise a rescale that never happens.
+              Radius 4, not the 2 the neighbouring Pills use at this size: this
+              one is tappable, and the scale's line is interactive-or-not. */}
+          {isCleanupSession && !isCardio && !isNoWeightReps && !isAssistedEx
+            && exercise?.equipment !== 'bodyweight' && logMode !== 'time' && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <button
+                onClick={() => toggleCleanupOptOut(entry.exId)}
+                aria-pressed={!!session.cleanupOptOuts?.[entry.exId]}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
+                  fontSize: 9, letterSpacing: '0.14em', fontFamily: UI.fontUi,
+                  fontWeight: 600, textTransform: 'uppercase',
+                  WebkitTapHighlightColor: 'transparent',
+                  background: isCleanupReduced(entry.exId) ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  color: isCleanupReduced(entry.exId) ? UI.gold : UI.inkSoft,
+                  border: `1px solid ${isCleanupReduced(entry.exId) ? UI.goldSoft : UI.hairStrong}`,
+                }}>
+                <i className="fa-solid fa-broom" style={{ fontSize: 9 }} />
+                {isCleanupReduced(entry.exId) ? `${100 - cleanupPct}%` : 'Full'}
+              </button>
             </div>
           )}
           {/* 5/3/1 wave for this main lift: the prescribed sets off the Training

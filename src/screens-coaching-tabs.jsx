@@ -393,7 +393,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         )}
         {statusMode && !inProgress && !showCheckinNew && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: UI.inkGhost, border: '2px solid var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <i className={`fa-solid ${statusMode === 'sick' ? 'fa-bed-pulse' : statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 5, color: UI.bg }} />
+            <i className={`fa-solid ${statusMode === 'sick' ? 'fa-bed-pulse' : statusMode === 'deload' ? 'fa-arrow-trend-down' : statusMode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach'}`} style={{ fontSize: 5, color: UI.bg }} />
           </div>
         )}
       </div>
@@ -404,7 +404,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
         ) : statusMode ? (
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : statusMode === 'deload' ? 'DELOAD' : 'VACATION'}</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : statusMode === 'deload' ? 'DELOAD' : statusMode === 'cleanup' ? 'CLEANUP' : 'VACATION'}</div>
         ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (

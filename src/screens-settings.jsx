@@ -2599,8 +2599,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               {visible.map((p, i) => {
                 const isActive = !p.endedAt;
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
-                const label = p.mode === 'sick' ? 'SICK' : p.mode === 'deload' ? 'DELOAD' : 'VACATION';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : p.mode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach';
+                const label = p.mode === 'sick' ? 'SICK' : p.mode === 'deload' ? 'DELOAD' : p.mode === 'cleanup' ? 'CLEANUP' : 'VACATION';
                 return (
                   <div key={p.id}>
                     {i > 0 && <div className="knurl" />}

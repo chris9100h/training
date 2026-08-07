@@ -101,6 +101,34 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
     }
   };
 
+  const isCleanup = store.statusMode === 'cleanup';
+  const cleanupRemaining = isCleanup ? LB.cleanupDaysRemaining(store) : null;
+  // Draft percentage for the start sheet, seeded from the stored setting so the
+  // next cleanup starts where the last one left off.
+  const [cleanupSheet, setCleanupSheet] = useStateS(false);
+  const [cleanupDraftPct, setCleanupDraftPct] = useStateS(20);
+  const toggleCleanup = async (e) => {
+    e.stopPropagation();
+    if (isCleanup) {
+      if (!await confirm('End the cleanup week and return to normal training?', { title: 'End cleanup', ok: 'End cleanup' })) return;
+      await LB.endCleanup(userId, store, setStore);
+      return;
+    }
+    if (store.statusMode) {
+      if (!await confirm(`This will end your ${store.statusMode} status. Start a cleanup week instead?`, { title: 'Start cleanup', ok: 'Continue' })) return;
+    }
+    setCleanupDraftPct(Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20))));
+    setCleanupSheet(true);
+  };
+  const startCleanupWithPct = async () => {
+    const pct = Math.min(30, Math.max(10, Math.round(cleanupDraftPct)));
+    setCleanupSheet(false);
+    // Written before the status flips so the very first seed already reads the
+    // chosen percentage (syncStore diffs it out to the settings row from here).
+    setStore(s => ({ ...s, settings: { ...s.settings, cleanupPercent: pct } }));
+    await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore);
+  };
+
   const importPlan = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -178,6 +206,39 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         }
       />
       {newPlanPicker && <NewPlanPickerModal onClose={() => setNewPlanPicker(false)} go={go} />}
+      {cleanupSheet && (
+        <MiniSheet title="Cleanup week" onClose={() => setCleanupSheet(false)}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 18 }}>
+            Train your normal plan with lighter weights for one cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: next week builds back up from them. You can put any single exercise back on full load while training.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
+            <span className="label" style={{ color: UI.inkFaint }}>Reduce by</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <button onClick={() => setCleanupDraftPct(p => Math.max(10, p - 5))}
+                disabled={cleanupDraftPct <= 10}
+                aria-label="Less reduction"
+                style={{
+                  width: 34, height: 34, borderRadius: 4, cursor: cleanupDraftPct <= 10 ? 'default' : 'pointer',
+                  border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+                  color: cleanupDraftPct <= 10 ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
+                }}>−</button>
+              <span className="num" style={{ fontSize: 22, color: UI.gold, minWidth: 58, textAlign: 'center' }}>{cleanupDraftPct}%</span>
+              <button onClick={() => setCleanupDraftPct(p => Math.min(30, p + 5))}
+                disabled={cleanupDraftPct >= 30}
+                aria-label="More reduction"
+                style={{
+                  width: 34, height: 34, borderRadius: 4, cursor: cleanupDraftPct >= 30 ? 'default' : 'pointer',
+                  border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+                  color: cleanupDraftPct >= 30 ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
+                }}>+</button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => setCleanupSheet(false)} style={{ flex: 1 }}>Cancel</Btn>
+            <Btn onClick={startCleanupWithPct} style={{ flex: 1 }}>Start</Btn>
+          </div>
+        </MiniSheet>
+      )}
       <SubTabBar
         tabs={[
           { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
@@ -330,6 +391,19 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {isDeload
                     ? (deloadRemaining != null ? `Deload active · ${deloadRemaining}d left · End` : 'Deload active · End')
                     : 'Start deload week'}
+                </button>
+              <button onClick={toggleCleanup} style={{
+                  width: '100%', marginTop: 8, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  background: isCleanup ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  border: `1px ${isCleanup ? 'solid' : 'dashed'} ${isCleanup ? UI.goldSoft : UI.hairStrong}`,
+                  color: isCleanup ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}>
+                  <i className={`fa-solid ${isCleanup ? 'fa-arrow-rotate-left' : 'fa-broom'}`} style={{ fontSize: 12 }} />
+                  {isCleanup
+                    ? (cleanupRemaining != null ? `Cleanup active · ${cleanupRemaining}d left · End` : 'Cleanup active · End')
+                    : 'Start cleanup week'}
                 </button>
             </BracketFrame>
           ) : (
