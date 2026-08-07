@@ -3323,36 +3323,44 @@ function hlHasLogContent(l) {
 }
 
 // ─── AI Daily Summary card ──────────────────────────────────────────────────
-// User-triggered (button, never automatic) once-a-day AI read on yesterday's
-// tracked data. readOnly (the coach view) renders no button at all: a
-// coach's own tap would resolve server-side to the COACH's own identity, not
-// the client's, and silently write into the wrong account's row rather than
-// erroring loudly, so the affordance simply must not exist there.
-function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }) {
+// User-triggered (button, never automatic) AI read on a tracked day, for
+// whichever day is selected in the Health tab's date-strip (selectedDate),
+// not hardcoded to yesterday: browsing the strip now browses summaries too.
+// The server (ai-daily-summary) independently caps how far back a request
+// can go (its own "today" +/- 3 days), daysAgo's [1,3] range below mirrors
+// that with a little slack for timezone skew between client and server.
+// readOnly (the coach view) renders no button at all: a coach's own tap
+// would resolve server-side to the COACH's own identity, not the client's,
+// and silently write into the wrong account's row rather than erroring
+// loudly, so the affordance simply must not exist there.
+function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, readOnly = false }) {
   const [busy, setBusy] = useStateH(false);
   const [error, setError] = useStateH(null);
   // Same admin identity as Settings/Feature Map: gates the Retry button below,
   // the server independently enforces the same bypass (ai-daily-summary), this
   // is purely so a non-admin never even sees an affordance that would 409.
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const yesterday = LB.shiftDate(LB.todayISO(), -1);
-  const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
-  const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
+  const today = LB.todayISO();
+  const date = selectedDate;
+  const daysAgo = Math.round((new Date(today + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
+  const label = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : LB.fmtDayLabel(date, { weekday: 'short', day: 'numeric', month: 'short' });
+  const log = (store.dailyLogs || []).find(l => l.date === date) || null;
+  const isEmpty = LB.dailySummaryDayIsEmpty(store, date);
   const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');
 
   async function generate() {
     setBusy(true);
     setError(null);
-    const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, yesterday));
+    const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, date));
     setBusy(false);
     if (!res.ok) { setError(res.error || 'Could not generate summary. Try again.'); return; }
     setStore(s => {
-      const exists = (s.dailyLogs || []).some(l => l.date === yesterday);
+      const exists = (s.dailyLogs || []).some(l => l.date === date);
       return {
         ...s,
         dailyLogs: exists
-          ? s.dailyLogs.map(l => l.date === yesterday ? { ...l, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt } : l)
-          : [...(s.dailyLogs || []), { id: LB.uid(), date: yesterday, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt }],
+          ? s.dailyLogs.map(l => l.date === date ? { ...l, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt } : l)
+          : [...(s.dailyLogs || []), { id: LB.uid(), date, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt }],
       };
     });
   }
@@ -3361,7 +3369,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
     <Card style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Yesterday's Summary</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{label}'s Summary</span>
         <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 12, color: UI.inkFaint }} />
       </div>
       {log?.aiSummaryGeneratedAt ? (
@@ -3377,14 +3385,20 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
             </div>
           )}
         </div>
+      ) : daysAgo < 0 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing to summarize yet.</div>
+      ) : daysAgo === 0 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>That day isn't over yet, check back tomorrow.</div>
+      ) : daysAgo > 3 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Summaries are only available for the last few days.</div>
       ) : readOnly ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Not generated yet.</div>
       ) : isEmpty ? (
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged yesterday.</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged that day.</div>
       ) : (
         <div>
           <Btn onClick={generate} disabled={busy} style={{ width: '100%' }}>
-            {busy ? 'Generating…' : 'Get yesterday\'s AI summary'}
+            {busy ? 'Generating…' : `Get ${daysAgo === 1 ? 'yesterday' : label}'s AI summary`}
           </Btn>
           {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
         </div>
@@ -4694,7 +4708,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
-    aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} />,
+    aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
     // as a whole, see fullWidthCardIds.
@@ -5019,7 +5033,7 @@ function HealthClientLogs({ clientStore }) {
     // Read-only: no Generate button here at all, a coach's own tap would
     // resolve server-side to the COACH's own identity, not the client's, see
     // AiSummaryCard's own comment.
-    aiSummary: <AiSummaryCard dragHandle={handle} store={clientStore || {}} readOnly />,
+    aiSummary: <AiSummaryCard dragHandle={handle} store={clientStore || {}} selectedDate={selectedDate} readOnly />,
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
         {adherenceCard}

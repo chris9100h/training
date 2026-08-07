@@ -1,13 +1,15 @@
-// Yesterday's AI Health Summary for the Health tab's AiSummaryCard. User-
-// triggered only (never a cron/push), once per day per user: the client only
-// shows the "Generate" button on a day zane_daily_logs.ai_summary_generated_at
+// AI Health Summary for the Health tab's AiSummaryCard, for whichever day the
+// card's caller sends (originally always "yesterday", now whichever day the
+// Health tab's date-strip has selected, see AiSummaryCard in
+// screens-health.jsx). User-triggered only (never a cron/push): the client
+// only shows the "Generate" button on a day zane_daily_logs.ai_summary_generated_at
 // is still null, and this function re-checks that same gate server-side (a
 // client-only gate is trivially bypassed by calling this endpoint directly).
 //
 // Unlike the label scanner, this is plain text in, plain text out, no vision,
 // no strict JSON: a model instructed to "keep it casual" can and does malform
 // JSON, so the contract here is a simple two-part text format instead (see
-// SYSTEM_PROMPT). All the day's numbers/trends, including the training
+// buildSystemPrompt). All the day's numbers/trends, including the training
 // section's totals and its comparison to the last session of the same
 // dayId, are assembled CLIENT-SIDE (LB.buildDailySummaryPayload,
 // already-loaded store data, no extra fetch) and handed to the model
@@ -18,8 +20,8 @@
 // (LB.dsExerciseHighlights) rather than a full per-exercise breakdown: an
 // earlier version handed over the complete set-by-set list on the theory
 // that two short lists are easy reading, but in practice the model walked
-// through every exercise in turn no matter how firmly SYSTEM_PROMPT told it
-// not to. Capping the data itself is what actually holds.
+// through every exercise in turn no matter how firmly the system prompt told
+// it not to. Capping the data itself is what actually holds.
 //
 // Qwen writes the summary, for the cost; Claude is the automatic fallback if
 // Qwen itself is unreachable, same PRIMARY_PROVIDER/FALLBACK_PROVIDER +
@@ -55,7 +57,13 @@ const FALLBACK_PROVIDER = 'claude';
 
 const LABELS = { tag: 'ai-daily-summary', feature: 'AI summaries', subject: 'summary writer' };
 
-const SYSTEM_PROMPT = `You are a knowledgeable, opinionated fitness coach giving yesterday's daily debrief. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about yesterday, so always call it "yesterday", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
+// dayPhrase: "yesterday" for the by-far-most-common case (dayDiff === 1,
+// see dayPhraseFor below), otherwise "N days ago". Used both as the label
+// the model is told to call the day AND everywhere the prompt itself refers
+// to it, so an older day (the Health tab's date-strip can browse back
+// further than yesterday) never gets narrated as "yesterday" when it wasn't.
+function buildSystemPrompt(dayPhrase: string): string {
+  return `You are a knowledgeable, opinionated fitness coach giving a daily debrief for ${dayPhrase}. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about ${dayPhrase}, so always refer to it as "${dayPhrase}", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
 
 If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression. A modest difference in total volume or load versus the last time this same session was done, in either direction, and the same for any single highlighted movement, is normal on its own and not something to comment on: heavier weight for fewer reps lowers total volume even on a session that was genuinely harder and better, lighter weight for more reps raises it, neither means anything by itself. Only bring up a volume or load comparison at all when the difference is large AND paired with another concrete signal that something is actually off, such as a reported bad feel or working sets themselves dropping sharply; otherwise leave it out of your response entirely rather than reassuring the user about a number that was never a problem.
 
@@ -77,6 +85,18 @@ Output EXACTLY two parts and nothing else:
 1. A short headline that states your actual verdict on the day, not just a topic label, no more than 8 words, no ending punctuation.
 2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your verdict in the first paragraph, use the next paragraph for the specifics that actually back it up (training, nutrition, whatever mattered), and only add a third if there's a genuine tip or forward-looking note, a light day does not need to be padded out to three.
 Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
+}
+
+// "yesterday" for the by-far-most-common case (dayDiff === 1), "N days ago"
+// for anything further back the Health tab's date-strip lets you browse to.
+// "that day" is a defensive fallback only, the client never actually sends
+// dayDiff <= 0 (see AiSummaryCard's own daysAgo gating), it just keeps the
+// prompt coherent instead of saying "0 days ago" if it ever somehow did.
+function dayPhraseFor(dayDiff: number): string {
+  if (dayDiff === 1) return 'yesterday';
+  if (dayDiff > 1) return `${dayDiff} days ago`;
+  return 'that day';
+}
 
 // First-half-average vs second-half-average, NOT first-vs-last: a single
 // noisy weigh-in on either end of the window (water, timing) would otherwise
@@ -112,14 +132,14 @@ function daysBetween(earlierISO: string, laterISO: string): number {
 // before this payload was ever built, a full itemized list here just
 // invited Claude to walk through every exercise in turn regardless of what
 // the prompt said not to do, capping the data itself is what actually holds.
-function buildTrainingLines(training: any[], dateISO: string): string[] {
+function buildTrainingLines(training: any[], dateISO: string, dayPhrase: string): string[] {
   if (!Array.isArray(training) || !training.length) return [];
   // Capped the same way foodItems/note further down are: any authenticated
   // user can call this endpoint directly with an oversized body, bypassing
   // the UI's naturally-bounded payload (a real day has 0-1 sessions, rarely
   // 2), which would otherwise drive Anthropic cost/latency for free.
   const capped = training.slice(0, 10);
-  const lines: string[] = ['', 'Training logged YESTERDAY:'];
+  const lines: string[] = ['', `Training logged ${dayPhrase.toUpperCase()}:`];
   for (const s of capped) {
     const label = s.dayName || 'Freestyle session';
     const bits = [`${s.doneSets ?? '?'} working sets`, `~${s.volumeKg ?? '?'}kg total volume`];
@@ -129,7 +149,7 @@ function buildTrainingLines(training: any[], dateISO: string): string[] {
     if (s.comparison) {
       const days = daysBetween(s.comparison.date, dateISO);
       const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
-      lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs yesterday)` : ''}.`);
+      lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs ${dayPhrase})` : ''}.`);
     } else {
       lines.push(`  No previous "${label}" session on record to compare against.`);
     }
@@ -156,11 +176,11 @@ function fmtCardioEntry(c: Record<string, any>): string {
   return `${c.type || 'Cardio'}${when}: ${detail}${noteText}`;
 }
 
-function buildCardioLines(cardio: any[]): string[] {
+function buildCardioLines(cardio: any[], dayPhrase: string): string[] {
   if (!Array.isArray(cardio) || !cardio.length) return [];
   // Same reasoning as buildTrainingLines' cap above.
   const capped = cardio.slice(0, 10);
-  const lines: string[] = ['', 'Cardio logged YESTERDAY:'];
+  const lines: string[] = ['', `Cardio logged ${dayPhrase.toUpperCase()}:`];
   for (const c of capped) lines.push(`- ${fmtCardioEntry(c)}`);
   return lines;
 }
@@ -188,13 +208,13 @@ function fmtGoal(goal: unknown): string | null {
   return null;
 }
 
-function buildUserPrompt(p: Record<string, any>): string {
-  const lines: string[] = [`One user's health-tracking data for YESTERDAY (${p.date}):`, ''];
+function buildUserPrompt(p: Record<string, any>, dayPhrase: string): string {
+  const lines: string[] = [`One user's health-tracking data for ${dayPhrase.toUpperCase()} (${p.date}):`, ''];
   const weight = num(p.weight);
   if (weight != null) {
     lines.push(`Weight: ${weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
     // Directly beneath the trend line, only shown alongside it: the trend is
-    // only ever interpreted relative to this, see SYSTEM_PROMPT's explicit
+    // only ever interpreted relative to this, see buildSystemPrompt's explicit
     // instruction never to default to "down is good" or "up is good" on
     // its own.
     const goalText = fmtGoal(p.goal);
@@ -235,8 +255,8 @@ function buildUserPrompt(p: Record<string, any>): string {
     lines.push(`Body temperature: ${p.bodyTemp.slice(0, 30).map((t: any) => `${t.valueC}°C`).join(', ')}`);
   }
   if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
-  lines.push(...buildTrainingLines(p.training, p.date));
-  lines.push(...buildCardioLines(p.cardio));
+  lines.push(...buildTrainingLines(p.training, p.date, dayPhrase));
+  lines.push(...buildCardioLines(p.cardio, dayPhrase));
   lines.push('', 'Write the headline + paragraph as instructed.');
   return lines.join('\n');
 }
@@ -295,16 +315,19 @@ Deno.serve(async (req) => {
   const payload = await req.json().catch(() => ({}));
   const date = typeof payload?.date === 'string' ? payload.date : '';
   if (!date) return jsonResponse({ error: 'missing date' }, 400);
-  // Loose sanity bound, not a strict "must be exactly yesterday" check: exact
-  // "yesterday" is inherently client-timezone-dependent, the server can't
-  // know the user's local timezone precisely. This is only a backstop
-  // against a badly wrong client clock or a future client regression, since
-  // the prompt below unconditionally tells the model to treat this date as
-  // yesterday (see SYSTEM_PROMPT and buildUserPrompt). An unparseable date
-  // makes daysBetween return NaN, which isNaN() below also rejects.
+  // Loose sanity bound: this used to gate a hardcoded "must be exactly
+  // yesterday" prompt, now the prompt itself adapts to whichever day this is
+  // (dayPhrase below), so the real job here is just rejecting a badly wrong
+  // client clock or a future client regression, not enforcing a specific day.
+  // +/-3 days leaves slack for client-timezone-dependent "yesterday"/"N days
+  // ago" boundaries the server can't know precisely; the client's own
+  // AiSummaryCard (screens-health.jsx) only ever offers 1-3 days back, this
+  // is a backstop, not the primary gate. An unparseable date makes
+  // daysBetween return NaN, which isNaN() below also rejects.
   const todayUTC = new Date().toISOString().slice(0, 10);
   const dayDiff = daysBetween(date, todayUTC);
   if (isNaN(dayDiff) || Math.abs(dayDiff) > 3) return jsonResponse({ error: 'invalid date' }, 400);
+  const dayPhrase = dayPhraseFor(dayDiff);
   if (payloadIsEmpty(payload)) return jsonResponse({ error: 'Nothing logged that day, nothing to summarize.' }, 400);
 
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -425,8 +448,8 @@ Deno.serve(async (req) => {
   }
 
   const modelCall = {
-    system: SYSTEM_PROMPT,
-    userText: buildUserPrompt(payload),
+    system: buildSystemPrompt(dayPhrase),
+    userText: buildUserPrompt(payload, dayPhrase),
     maxTokens: 500,
     reasoningBudget: null,
   };
