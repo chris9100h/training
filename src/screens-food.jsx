@@ -383,6 +383,20 @@ function fdEngineToArray(list, from, to) {
     to: pos[to] != null ? pos[to] : list.length,
   };
 }
+// The unit-count suffix a recipe item displays, e.g. "4 pcs" for 248g of a
+// 62g unit: derived from the item's loggedUnit (the exact unit it was
+// picked in, same { label, grams } shape zane_food_logs.logged_unit uses),
+// count = quantityG / grams rounded to one decimal. null when the item
+// carries no unit, so a grams-picked ingredient stays plain "248g"; the
+// count is always derived live, so rescaling an item in the editor (or an
+// exploded sub-recipe row) re-derives it instead of storing a stale count.
+function fdUnitCountLabel(item) {
+  const u = item?.loggedUnit;
+  if (!u || !(u.grams > 0)) return null;
+  const n = (item.quantityG || 0) / u.grams;
+  if (n <= 0) return null;
+  return `${Math.round(n * 10) / 10} ${u.label}`;
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -6201,6 +6215,10 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
           // cross the boundary verbatim; duplicate/explode remap them.
           stepId: i.stepId != null ? String(i.stepId) : null,
           stepLabel: i.stepLabel != null ? String(i.stepLabel) : null,
+          // The unit the ingredient was picked in, so a shared recipe keeps
+          // its "248g (4 pcs)" display on the adopter's side too.
+          loggedUnit: i.loggedUnit != null && i.loggedUnit.grams > 0 && typeof i.loggedUnit.label === 'string'
+            ? { label: i.loggedUnit.label, grams: Number(i.loggedUnit.grams) } : null,
         })),
         createdAt: now, updatedAt: now,
       };
@@ -6252,7 +6270,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
-                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g</div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)}g{fdUnitCountLabel(i) && <span> ({fdUnitCountLabel(i)})</span>}</div>
                   </div>
                   <span className="num" style={{ fontSize: 11, color: UI.warn, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0)} kcal</span>
                 </div>
@@ -8267,6 +8285,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
           const card = (idx, marginBottom) => {
             const i = items[idx];
             const kcal = Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0);
+            const unitLabel = fdUnitCountLabel(i);
             const stepHead = steps.find(s => s.startIdx === idx);
             return (
               // Translucent fill rather than fdEntryRow's opaque one, so the
@@ -8291,7 +8310,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
                     <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
-                      {i.quantityG}g<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
+                      {i.quantityG}g{unitLabel && <span style={{ color: UI.inkSoft }}> ({unitLabel})</span>}<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
                       {RCP_MACRO_LABELS.map(([k, label]) => (
                         <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
                       ))}
@@ -8732,6 +8751,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                 const renderRow = (idx) => {
                   const it = items[idx];
                   const isStepHead = !!it.stepId && (idx === 0 || items[idx - 1].stepId !== it.stepId);
+                  const unitLabel = fdUnitCountLabel(it);
                   return (
                     <div key={it.id} data-reorder-item="true">
                       <div style={fdEntryRow}>
@@ -8746,7 +8766,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                             <span style={{ ...fdEntryName, fontSize: 12 }}>{it.foodName}</span>
                           </div>
                           <span style={fdEntryMeta}>
-                            {it.quantityG}g · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(it.protein, it.carbs, it.fat, netCarbs ? it.fiber : null) || 0)} kcal</span>
+                            {it.quantityG}g{unitLabel && <span> ({unitLabel})</span>} · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(it.protein, it.carbs, it.fat, netCarbs ? it.fiber : null) || 0)} kcal</span>
                             <span style={fdMetaDivider} />
                             <FdMacroBits protein={it.protein} carbs={it.carbs} fat={it.fat} />
                           </span>
@@ -9526,7 +9546,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             </div>
           )}
 
-          <Field label="Amount (g)">
+          <Field label={fdUnitCountLabel(curItem) ? `Amount (g) · ${fdUnitCountLabel(curItem)}` : 'Amount (g)'}>
             <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
 
@@ -10055,6 +10075,10 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
+      // The exact unit this ingredient was picked in ({ label, grams }, same
+      // shape as zane_food_logs.logged_unit), so the recipe displays "248g
+      // (4 pcs)" instead of a bare gram number; null for a grams-pick.
+      loggedUnit: qtyUnitIdx != null ? (qtyItem.units?.[qtyUnitIdx] || null) : null,
     }]);
     ensureFoodCached(qtyItem);
     closeQtySheet();
@@ -10143,6 +10167,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       };
       if (i.originalFoodName != null) row.originalFoodName = i.originalFoodName;
       if (i.note != null) row.note = i.note;
+      if (i.loggedUnit != null) row.loggedUnit = i.loggedUnit;
       if (i.stepId != null) { stepMap[i.stepId] = stepMap[i.stepId] || LB.uid(); row.stepId = stepMap[i.stepId]; }
       if (i.stepLabel != null) row.stepLabel = i.stepLabel;
       return row;
