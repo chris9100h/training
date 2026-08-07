@@ -1038,6 +1038,43 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const [coachForm, setCoachForm] = useStateH({});
   const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
   const [confirmEl, confirm] = useConfirm();
+
+  // The two training overlays in the status picker below. They are not plain
+  // status flips like sick/vacation: each owns a whole cycle, carries its own
+  // start alignment and coaching note, and a cleanup also reads the stored
+  // reduction, so both go through their LB start/end functions rather than
+  // onSetStatus. The wording mirrors the Plan tab's own buttons so the two
+  // entry points cannot drift apart.
+  const startOverlayStatus = async (mode) => {
+    const lead = store.statusMode ? `This will end your ${store.statusMode} status. ` : '';
+    if (mode === 'cleanup') {
+      const pct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
+      const startISO = LB.nextCleanupStartISO(store);
+      const when = startISO
+        ? `Starts ${new Date(startISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}, the first day of your next cycle, and the rest of this one still trains at full load.`
+        : 'Starts right away and runs for one full rotation.';
+      if (!await confirm(`${lead}Train your normal plan at ${100 - pct}% load for one full cycle, then build back up from there. ${when}`,
+        { title: 'Start cleanup week', ok: 'Start cleanup' })) return;
+      // Re-resolved after the confirm: the dialog can sit open across midnight.
+      await LB.startCleanup(userId, store, setStore, LB.nextCleanupStartISO(store));
+      return;
+    }
+    if (!await confirm(`${lead}Train your normal plan at ~50% load for one cycle. Weights pre-fill light and the week is excluded from progression. Start now?`,
+      { title: 'Start deload week', ok: 'Start deload' })) return;
+    await LB.startDeload(userId, store, setStore);
+  };
+  const endOverlayStatus = async () => {
+    const isCleanup = store.statusMode === 'cleanup';
+    const running = !isCleanup || LB.cleanupStarted(store);
+    const what = isCleanup ? 'cleanup' : 'deload';
+    const [msg, ok] = running
+      ? [`End the ${what} week and return to normal training?`, `End ${what}`]
+      : [`Call off the ${what} week before it starts?`, 'Call it off'];
+    if (!await confirm(msg, { title: running ? `End ${what}` : `Cancel ${what}`, ok })) return;
+    if (isCleanup) await LB.endCleanup(userId, store, setStore);
+    else await LB.endDeload(userId, store, setStore);
+  };
+
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
 
@@ -1478,26 +1515,61 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       {onSetStatus && (
         <div style={{ marginBottom: 18 }}>
+          {/* Five states, icon-only: SICK, CLEANUP, NORMAL, DELOAD, VACATION,
+              with NORMAL centred so the two training overlays sit either side
+              of it and the two away-from-training ones on the outside.
+              Sick/vacation are plain status flips and can be backdated; the
+              two overlays are not, they own a whole cycle and are started
+              through their own functions (alignment, percentage, coaching
+              note), so they are today-only and confirm first. */}
           <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
+            {[
+              { mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' },
+              { mode: 'cleanup', label: 'Cleanup week', icon: 'fa-broom', overlay: true },
+              { mode: null, label: 'Normal', icon: 'fa-circle-check' },
+              { mode: 'deload', label: 'Deload week', icon: 'fa-battery-quarter', overlay: true },
+              { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' },
+            ].map(({ mode, label, icon, overlay }, i) => {
               const active = dayMode === mode;
+              // An overlay can only be started for today: backdating one would
+              // claim a cycle's worth of reduced training that never happened.
+              const disabled = !!overlay && date !== todayISO;
               return (
-                <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
-                  flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
+                <button key={String(mode)} aria-label={label} title={disabled ? `${label} can only be started for today` : label}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return;
+                    if (overlay) { if (!active) startOverlayStatus(mode); return; }
+                    // Leaving an overlay runs its own end function so the
+                    // coaching thread gets the closing note too.
+                    if (mode === null && (store.statusMode === 'deload' || store.statusMode === 'cleanup') && date === todayISO) { endOverlayStatus(); return; }
+                    onSetStatus(mode, date < todayISO ? date : null);
+                  }} style={{
+                  flex: 1, padding: '14px 4px', cursor: disabled ? 'default' : 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   textShadow: active ? 'none' : 'var(--text-lift)',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: disabled ? 0.35 : 1,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
-                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
-                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? 'var(--accent-ink)' : UI.inkFaint }}>{label}</span>
+                  <i className={`fa-solid ${icon}`} style={{ fontSize: 15, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />
                 </button>
               );
             })}
           </div>
-          {dayMode && date === todayISO && (() => {
+          {/* A cleanup's start is pinned to the next cycle, so it is shown, not
+              edited: the input below caps at today and would render an
+              out-of-range value for a start that is still ahead. */}
+          {dayMode === 'cleanup' && date === todayISO && store.statusModeSince && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span className="micro" style={{ color: UI.inkGhost }}>{LB.cleanupStarted(store) ? 'SINCE' : 'STARTS'}</span>
+              <span className="num" style={{ color: 'var(--accent)', fontSize: 12 }}>
+                {new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              </span>
+            </div>
+          )}
+          {dayMode && dayMode !== 'cleanup' && date === todayISO && (() => {
             const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return LB.fmtISO(d); })();
             // LB.fmtISO(new Date(...)), not a bare slice: statusModeSince is a
             // UTC timestamp, slicing its first 10 chars gives the UTC date,
