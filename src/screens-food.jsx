@@ -296,6 +296,61 @@ function fdTransferStepLabel(items, from) {
   if (nextIdx < 0) return items; // last member, text dies with the run
   return items.map((x, k) => k === nextIdx ? { ...x, stepLabel: it.stepLabel } : k === from ? { ...x, stepLabel: null } : x);
 }
+// Pure step-start toggle, extracted for testing. Three cases:
+// - ungrouped row: starts a step with ONLY this row (fresh id). Members are
+//   added by dragging rows in (fdReorderWithSteps), never by sweeping to the
+//   end of the list.
+// - mid-run member: split, this row through the run's end gets a fresh id
+//   (the old head keeps the label, the new step starts without)
+// - run head or lone member: toggle off, the whole run loses its step id
+//   and label, all members become ungrouped again
+function fdToggleStepStart(items, idx) {
+  const list = [...(items || [])];
+  const it = list[idx];
+  if (!it) return list;
+  if (it.stepId) {
+    const isHead = idx === 0 || list[idx - 1].stepId !== it.stepId;
+    if (isHead) {
+      return list.map(x => (x.stepId === it.stepId ? { ...x, stepId: null, stepLabel: null } : x));
+    }
+    const fresh = LB.uid();
+    return list.map((x, k) => (k >= idx && x.stepId === it.stepId ? { ...x, stepId: fresh, stepLabel: null } : x));
+  }
+  return list.map((x, k) => (k === idx ? { ...x, stepId: LB.uid() } : x));
+}
+// Moves one row and applies drag-in / drag-out step semantics to the MOVED
+// row only (the others keep their relative order, so only the moved row can
+// cross a run boundary):
+// - an ungrouped row dropped directly next to a step run (before its first
+//   member, after its last, or between two members) joins it: it takes the
+//   neighbor's stepId and the rail appears
+// - a member dropped away from its run (no same-id neighbor left) leaves
+//   the step again and becomes ungrouped, unless it carries the step's
+//   instruction, which makes it its own one-ingredient step
+// Dropping a member directly next to its own run (or between two members)
+// keeps it a member; two neighbors with different stepIds resolve to the
+// predecessor. The label rescue (fdTransferStepLabel) runs first so a
+// dragged-out labeled head hands the instruction to its run before leaving.
+function fdReorderWithSteps(items, from, to) {
+  if (from === to) return items;
+  const rescued = fdTransferStepLabel(items, from);
+  const next = [...rescued];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  const prev = to > 0 ? next[to - 1] : null;
+  const succ = to < next.length - 1 ? next[to + 1] : null;
+  let adjusted = moved;
+  if (moved.stepId) {
+    const linked = (prev && prev.stepId === moved.stepId) || (succ && succ.stepId === moved.stepId);
+    if (!linked && moved.stepLabel == null) adjusted = { ...moved, stepId: null, stepLabel: null };
+  } else if (prev && prev.stepId) {
+    adjusted = { ...moved, stepId: prev.stepId };
+  } else if (succ && succ.stepId) {
+    adjusted = { ...moved, stepId: succ.stepId };
+  }
+  next[to] = adjusted;
+  return fdNormalizeSteps(next);
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -8380,46 +8435,18 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     removeItem(item.id);
   }
   // Array order IS the deliberate prep order now (see the ingredient list
-  // below and Cooking Mode further down): a plain splice-to-new-position,
-  // no macro recalculation, only position changes. Step invariants are
-  // re-established after the move: a labeled run head dragged out of its
-  // run hands the instruction to the run's new head (fdTransferStepLabel),
-  // orphaned ids and misplaced labels are cleaned up (fdNormalizeSteps).
+  // below and Cooking Mode further down): fdReorderWithSteps is a plain
+  // splice-to-new-position plus the drag-in/drag-out step semantics on the
+  // moved row (dropping a row next to a step joins it, dropping a member
+  // away from its run ungroups it), no macro recalculation.
   function reorderItems(from, to) {
-    if (from === to) return;
-    setItems(list => {
-      const rescued = fdTransferStepLabel(list, from);
-      const next = [...rescued];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return fdNormalizeSteps(next);
-    });
+    setItems(list => fdReorderWithSteps(list, from, to));
   }
-  // Step-start toggle on a row, three cases (see the helpers above for the
-  // run semantics fdBuildSteps relies on):
-  // - ungrouped row: mark-and-following, this row and every following
-  //   ungrouped row up to the next already-marked row join one fresh step
-  // - mid-run member: split, this row through the run's end gets a fresh
-  //   step id (the old head keeps the label, the new step starts without)
-  // - run head or lone member: toggle off, the whole run loses its step
-  //   id and label, all members become ungrouped again
+  // Step-start toggle, see fdToggleStepStart for the three cases. The
+  // toggle only ever starts a step on THIS row; further members are added
+  // by dragging rows in.
   function toggleStepStart(idx) {
-    setItems(list => {
-      const it = list[idx];
-      if (!it) return list;
-      if (it.stepId) {
-        const isHead = idx === 0 || list[idx - 1].stepId !== it.stepId;
-        if (isHead) {
-          return list.map(x => (x.stepId === it.stepId ? { ...x, stepId: null, stepLabel: null } : x));
-        }
-        const fresh = LB.uid();
-        return list.map((x, k) => (k >= idx && x.stepId === it.stepId ? { ...x, stepId: fresh, stepLabel: null } : x));
-      }
-      const fresh = LB.uid();
-      const nextMark = list.findIndex((x, k) => k >= idx && !!x.stepId);
-      const end = nextMark < 0 ? list.length : nextMark;
-      return list.map((x, k) => (k >= idx && k < end ? { ...x, stepId: fresh } : x));
-    });
+    setItems(list => fdToggleStepStart(list, idx));
   }
   // Live instruction text on the step's head row. Raw text while typing
   // (trimmed at save); clearing the field back to null only removes the
