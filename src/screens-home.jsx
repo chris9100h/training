@@ -1557,6 +1557,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return LB.getPlanDaysForDate(sch, dStr)?.length || dayCount;
   }, [sch, sessionDate, dayCount]);
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
+  // A cleanup is activated ahead of time and pinned to the next cycle start, so
+  // statusMode alone is not enough to label the strip: between activating and
+  // that day the plan still trains at full load and must still read that way.
+  const cleanupShowing = LB.cleanupStarted(store);
 
   const periodLabel = useMemo(() => {
     if (LB.is531Plan(sch)) {
@@ -1572,13 +1576,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // show no hint at all while its assistance work IS reduced. Deload wins
       // when both apply (w531 === 4 is a built-in deload week, independent of
       // statusMode); statusMode itself can only ever hold one of the two.
-      const cl531 = store.statusMode === 'cleanup' && weekOffset === 0;
+      const cl531 = cleanupShowing && weekOffset === 0;
       if (dl531) return `CYCLE ${c531} · DELOAD`;
       if (cl531) return `CYCLE ${c531} · CLEANUP`;
       return `CYCLE ${c531} · WEEK ${w531}`;
     }
     if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
-    if (store.statusMode === 'cleanup' && weekOffset === 0) return 'CLEANUP';
+    if (cleanupShowing && weekOffset === 0) return 'CLEANUP';
     // Flex has no calendar week; the meaningful counter is how many times you've
     // been through the rotation (position, advances on a session OR a skip).
     // weekOffset lets the strip page back to earlier passes, so mirror the cycle
@@ -1616,7 +1620,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode, store.sessions]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode, cleanupShowing, store.sessions]);
 
   const cardLabel = useMemo(() => {
     // During a deload or a cleanup week, today's label reads DELOAD / CLEANUP
@@ -1624,12 +1628,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // Reverts automatically on end.
     const todayWord = !isViewingToday ? 'TODAY'
       : store.statusMode === 'deload' ? 'DELOAD'
-      : store.statusMode === 'cleanup' ? 'CLEANUP'
+      : cleanupShowing ? 'CLEANUP'
       : 'TODAY';
     if (isFlex) {
       const flexPrefix = !isViewingToday ? ''
         : store.statusMode === 'deload' ? 'DELOAD · '
-        : store.statusMode === 'cleanup' ? 'CLEANUP · '
+        : cleanupShowing ? 'CLEANUP · '
         : 'NEXT UP · ';
       return `${flexPrefix}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
@@ -1651,7 +1655,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${dayNum} OF ${viewedDayCount}`;
-  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode, cleanupShowing]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1878,9 +1882,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const selectedDayStatusMode = useMemo(() => {
     if (isFutureSlot) return null;
-    if (isViewingToday) return store.statusMode ?? null;
+    if (isViewingToday) {
+      // A cleanup pinned to the next cycle start is not running yet, so the
+      // card must not announce it on the days before it begins.
+      if (store.statusMode === 'cleanup' && !cleanupShowing) return null;
+      return store.statusMode ?? null;
+    }
     return statusPeriodModeFor(sessionDate);
-  }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
+  }, [isViewingToday, isFutureSlot, store.statusMode, cleanupShowing, statusPeriodModeFor, sessionDate]);
 
   const handleClearStatus = () => {
     // "Back to normal" is the primary way a break ends, offer to realign the

@@ -5093,6 +5093,46 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-03T09:00:00')), 5);
     assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-20T09:00:00')), 0);
   });
+  // Start alignment: a cleanup covers a whole cycle, so it waits for the next
+  // one rather than reducing the tail of the current one.
+  const cyclePlanStore = (cycleStartDate, dayCount) => ({
+    activeScheduleId: 'p1',
+    cycleStartDate,
+    schedules: [{ id: 'p1', days: Array.from({ length: dayCount }, (_, i) => ({ id: `d${i}`, name: `D${i}`, items: [{ exId: 'e1' }] })) }],
+  });
+  test('nextCleanupStartISO: an 8-day cycle started on day 8 begins tomorrow', () => {
+    // cycleStartDate 2026-06-01 with 8 days: 2026-06-08 is day 8 (pos 7).
+    const iso = LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-08T18:00:00'));
+    assert.strictEqual(LB.fmtISO(new Date(iso)), '2026-06-09');
+  });
+  test('nextCleanupStartISO: on day 1 it waits for the NEXT cycle, not today', () => {
+    const iso = LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-01T18:00:00'));
+    assert.strictEqual(LB.fmtISO(new Date(iso)), '2026-06-09');
+  });
+  test('nextCleanupStartISO: lands on local midnight, so the window covers whole days', () => {
+    const d = new Date(LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-08T18:00:00')));
+    assert.strictEqual(d.getHours(), 0);
+    assert.strictEqual(d.getMinutes(), 0);
+  });
+  test('nextCleanupStartISO: a flex plan has no date boundary, so it starts now', () => {
+    const flex = { activeScheduleId: 'p1', schedules: [{ id: 'p1', is_flex: true, sessions_per_week: 3, days: [{ id: 'a', items: [{ exId: 'e1' }] }] }] };
+    assert.strictEqual(LB.nextCleanupStartISO(flex, new Date('2026-06-08T18:00:00')), null);
+  });
+  test('cleanupStarted: false while the start is still ahead, true from that day on', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00' };
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-08T23:00:00')), false);
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-09T00:30:00')), true);
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-12T09:00:00')), true);
+  });
+  test('cleanupElapsed: a not-yet-started cleanup never counts as elapsed', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00', schedules: [], sessions: [] };
+    assert.strictEqual(LB.cleanupElapsed(pending, new Date('2026-06-08T23:00:00')), false);
+  });
+  test('cleanupDaysRemaining: a pending cleanup still shows its full length', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00', schedules: [], sessions: [] };
+    assert.strictEqual(LB.cleanupDaysRemaining(pending, new Date('2026-06-08T09:00:00')), 7);
+  });
+
   test('cleanupDaysRemaining: agrees with cleanupElapsed on the final day', () => {
     // The label must not still promise a day left on the morning the overlay
     // ends (the two used to run off separately-rounded arithmetic).

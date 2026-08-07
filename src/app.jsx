@@ -1845,7 +1845,11 @@ function App() {
   // boolean like __DELOAD: the reduction is user-set, and buildSeedSets also
   // needs sinceISO to window the seed history so the week doesn't compound its
   // own reduction. Consumers test it for null, never === true.
-  window.__CLEANUP = store?.statusMode === 'cleanup'
+  // Gated on cleanupStarted, not on statusMode alone: a cleanup is activated
+  // ahead of time and pinned to the next cycle start, so between activating and
+  // that day the overlay must stay completely inert or the rest of the current
+  // cycle would already seed reduced.
+  window.__CLEANUP = LB.cleanupStarted(store)
     ? { percent: store?.settings?.cleanupPercent ?? 20, sinceISO: store?.statusModeSince ?? null }
     : null;
 

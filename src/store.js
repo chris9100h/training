@@ -6797,6 +6797,52 @@ function calendarDaysSince(sinceISO, now = new Date()) {
   return Math.round((b - a) / 86400000);
 }
 
+// When a cleanup week should BEGIN. A cleanup is a whole cycle of rebuilding,
+// so it always starts at the next cycle / week boundary rather than mid-cycle:
+// starting it on day 5 would otherwise reduce the tail of the current cycle
+// and hand back full load partway through the next one, and neither cycle
+// would read as a clean unit afterwards. Same idea the deload nudge already
+// uses (screens-home.jsx), generalised here so every entry point shares it.
+//
+// Returns an ISO timestamp at LOCAL MIDNIGHT of that day, or null when there
+// is nothing to align to and the cleanup should just start now. Midnight
+// matters: cleanupElapsed counts calendar days, so a start pinned to a day
+// boundary makes the window cover exactly that cycle.
+function nextCleanupStartISO(store, now = new Date()) {
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (!sch) return null;
+  // A flex plan's rotation advances per logged SESSION, not per calendar day,
+  // and its cleanup ends on a session count too (see cleanupElapsed), so there
+  // is no date boundary that could drift out of alignment. Start now.
+  if (isFlexPlan(sch)) return null;
+  const todayStr = fmtISO(now);
+  const atMidnight = (daysAhead) => {
+    const d = new Date(todayStr + 'T00:00:00');
+    d.setDate(d.getDate() + daysAhead);
+    return d.toISOString();
+  };
+  // Weekday plans run on the calendar week, which starts Monday (isoWd).
+  if (isWeekdayPlan(sch)) return atMidnight(7 - isoWd(now));
+  const cycleLen = (getPlanDaysForDate(sch, todayStr) || []).length;
+  if (!cycleLen) return null;
+  // Versioned plans carry their own offset per version; unversioned ones are
+  // anchored on store.cycleStartDate. Same split the deload nudge makes.
+  const pos = sch.versions?.length
+    ? getCyclePosForDate(sch, todayStr)
+    : (store.cycleStartDate ? cyclePosFromStartDate(store.cycleStartDate, cycleLen, todayStr) : null);
+  if (pos == null) return null;
+  return atMidnight(cycleLen - pos);
+}
+
+// True once an activated cleanup has actually BEGUN. The start can sit in the
+// future (aligned to the next cycle above), and until that day arrives NOTHING
+// about the overlay may apply, least of all the seed reduction: the days
+// between activating and the cycle rolling over are still normal training.
+function cleanupStarted(store, now = new Date()) {
+  if (store?.statusMode !== 'cleanup' || !store?.statusModeSince) return false;
+  return calendarDaysSince(store.statusModeSince, now) >= 0;
+}
+
 // True once the active cleanup has run its course (one cycle / week elapsed,
 // or, for flex, the weekly session goal of cleanup sessions has been logged).
 // Checked on the home screen for the auto-end.
@@ -6827,8 +6873,11 @@ function cleanupDaysRemaining(store, now = new Date()) {
 // Start a cleanup week: switch status mode to 'cleanup' and open a status
 // period. Same optimistic-write-plus-rollback shape as startDeload, and the
 // same reason for it (statusPeriods has no syncStore retry path).
-async function startCleanup(userId, store, setStore) {
-  const startedAt = new Date().toISOString();
+// sinceISO: when the week should actually begin, normally the next cycle start
+// from nextCleanupStartISO. Until that day the overlay is inert (cleanupStarted
+// gates it), so the rest of the current cycle still trains at full load.
+async function startCleanup(userId, store, setStore, sinceISO = null) {
+  const startedAt = sinceISO || new Date().toISOString();
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
   const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
   setStore(s => ({
@@ -6847,7 +6896,12 @@ async function startCleanup(userId, store, setStore) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
       const pct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
-      await addCoachingNote(coachingId, 'general', null, null, `Status: Cleanup week, training at ${100 - pct}% to rebuild technique.`, userId, threadId);
+      // Say WHEN when it is aligned to a future cycle start, so a coach reading
+      // this doesn't expect reduced loads in the sessions before then.
+      const when = calendarDaysSince(startedAt, new Date()) < 0
+        ? ` from ${fmtISO(new Date(startedAt))}`
+        : '';
+      await addCoachingNote(coachingId, 'general', null, null, `Status: Cleanup week${when}, training at ${100 - pct}% to rebuild technique.`, userId, threadId);
     } catch (_) {}
   }
 }
@@ -9295,7 +9349,7 @@ window.LB = {
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining,
+  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted,
   loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,

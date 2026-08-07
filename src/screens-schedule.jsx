@@ -126,15 +126,30 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   };
 
   const isCleanup = store.statusMode === 'cleanup';
-  const cleanupRemaining = isCleanup ? LB.cleanupDaysRemaining(store) : null;
+  // A cleanup is pinned to the next cycle start, so it can sit activated but
+  // not yet running. The button has to say which of the two it is, otherwise
+  // "Cleanup · 8d" reads as "already reducing" on a day that still trains full.
+  const cleanupRunning = isCleanup && LB.cleanupStarted(store);
+  const cleanupRemaining = cleanupRunning ? LB.cleanupDaysRemaining(store) : null;
+  const cleanupStartsOn = (isCleanup && !cleanupRunning && store.statusModeSince)
+    ? new Date(store.statusModeSince) : null;
   // Draft percentage for the start sheet, seeded from the stored setting so the
   // next cleanup starts where the last one left off.
   const [cleanupSheet, setCleanupSheet] = useStateS(false);
   const [cleanupDraftPct, setCleanupDraftPct] = useStateS(20);
+  // Where the week would land if started now. Computed on render so the sheet
+  // can name the day before the user commits.
+  const cleanupStartISO = LB.nextCleanupStartISO(store);
+  const fmtStartDay = (d) => d.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' });
   const toggleCleanup = async (e) => {
     e.stopPropagation();
     if (isCleanup) {
-      if (!await confirm('End the cleanup week and return to normal training?', { title: 'End cleanup', ok: 'End cleanup' })) return;
+      // Wording follows the two states: a cleanup that has not begun yet is
+      // called off, not ended.
+      const [msg, title, ok] = cleanupRunning
+        ? ['End the cleanup week and return to normal training?', 'End cleanup', 'End cleanup']
+        : [`Call off the cleanup week before it starts${cleanupStartsOn ? ` on ${fmtStartDay(cleanupStartsOn)}` : ''}?`, 'Cancel cleanup', 'Call it off'];
+      if (!await confirm(msg, { title, ok })) return;
       await LB.endCleanup(userId, store, setStore);
       return;
     }
@@ -150,7 +165,10 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
     // Written before the status flips so the very first seed already reads the
     // chosen percentage (syncStore diffs it out to the settings row from here).
     setStore(s => ({ ...s, settings: { ...s.settings, cleanupPercent: pct } }));
-    await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore);
+    // Re-resolved here rather than reusing the render-time value: the sheet can
+    // sit open across midnight, which would move the boundary.
+    const sinceISO = LB.nextCleanupStartISO(store);
+    await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore, sinceISO);
   };
 
   const importPlan = (e) => {
@@ -232,8 +250,23 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
       {newPlanPicker && <NewPlanPickerModal onClose={() => setNewPlanPicker(false)} go={go} />}
       {cleanupSheet && (
         <MiniSheet title="Cleanup week" onClose={() => setCleanupSheet(false)}>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 18 }}>
-            Train your normal plan with lighter weights for one cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: next week builds back up from them. You can put any single exercise back on full load while training.
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 12 }}>
+            Train your normal plan with lighter weights for one full cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: the cycle after builds back up from them. You can put any single exercise back on full load while training.
+          </div>
+          {/* The single most surprising thing about this button, so it gets its
+              own line rather than a clause buried in the paragraph above: it
+              does NOT start today. A cleanup covers a whole cycle, so it waits
+              for the next one to begin and leaves the rest of this one at full
+              load. */}
+          <div style={{
+            fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.gold, marginBottom: 18,
+            background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.goldSoft}`,
+            borderRadius: 6, padding: '8px 10px',
+          }}>
+            <i className="fa-solid fa-calendar-day" style={{ marginRight: 7 }} />
+            {cleanupStartISO
+              ? <>Starts <strong>{fmtStartDay(new Date(cleanupStartISO))}</strong>, the first day of your next cycle. The rest of this one still trains at full load.</>
+              : <>Starts right away and runs for one full rotation.</>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
             <span className="label" style={{ color: UI.inkFaint }}>Reduce by</span>
@@ -417,7 +450,9 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                 <button onClick={toggleCleanup} style={overlayBtnStyle(isCleanup)}>
                   <i className={`fa-solid ${isCleanup ? 'fa-arrow-rotate-left' : 'fa-broom'}`} style={{ fontSize: 12, flexShrink: 0 }} />
                   <span style={overlayBtnLabelStyle}>
-                    {isCleanup && cleanupRemaining != null ? `Cleanup · ${cleanupRemaining}d` : 'Cleanup'}
+                    {cleanupStartsOn ? `Cleanup · ${fmtStartDay(cleanupStartsOn).split(',')[0]}`
+                      : cleanupRunning && cleanupRemaining != null ? `Cleanup · ${cleanupRemaining}d`
+                      : 'Cleanup'}
                   </span>
                 </button>
               </div>
