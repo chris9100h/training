@@ -8263,8 +8263,13 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
           return (
             // Translucent fill rather than fdEntryRow's opaque one, so the
             // watermark reads through the cards instead of only in the gaps.
+            // A step member carries the same left accent hairline the
+            // training side uses for superset groups: the step grouping
+            // reads at a glance in the screenshot, not just via the header
+            // above the run's first member.
             <div key={i.id} style={{
               background: 'rgba(var(--bg-rgb),0.5)', border: `var(--hair-width) solid ${UI.hair}`,
+              ...(i.stepId ? { borderLeft: '2px solid rgba(var(--accent-rgb),0.45)' } : null),
               borderRadius: 6, padding: '10px 12px', marginBottom: 6, overflow: 'hidden',
             }}>
               {stepHead && (
