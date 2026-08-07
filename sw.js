@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.710';
+const CACHE = 'zane-v2.711';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
@@ -88,6 +88,13 @@ function precacheAll(cache, urls) {
   return Promise.all(urls.map(url =>
     fetch(url, { cache: 'no-store' }).then(res => {
       if (!res.ok) throw new Error(`Precache failed: ${url} (${res.status})`);
+      // A host that redirects this URL (e.g. Cloudflare's clean-URL handling
+      // turning /index.html into /) hands back a Response with redirected
+      // === true, and Cache Storage preserves that flag on the stored entry.
+      // Serving such an entry later via respondWith() for a navigation is
+      // rejected by the browser ("Response served by service worker has
+      // redirections"), so rebuild a plain Response before storing it.
+      if (res.redirected) res = new Response(res.body, res);
       return cache.put(url, res);
     })
   ));
@@ -202,6 +209,10 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       caches.match(e.request).then(cached => {
         const network = fetch(e.request, { cache: 'no-store' }).then(res => {
+          // Same reasoning as precacheAll above: a redirected same-origin
+          // response (e.g. Cloudflare turning /index.html into /) can't be
+          // respondWith()'d for a navigation as-is, rebuild it first.
+          if (res.redirected) res = new Response(res.body, res);
           if (res.ok) {
             const clone = res.clone();
             // A photo that missed precaching (e.g. a transient 404 during
