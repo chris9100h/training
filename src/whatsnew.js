@@ -22,6 +22,14 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.728',
+    date: '2026-08-08',
+    title: 'Switch units without leaving the log 🔄',
+    items: [
+      "🔄 The Amount field on Search and the recipe ingredient picker now has its own g/oz switch, right next to the field. Flip it whenever, it starts on whatever your Food setting says and sticks for the rest of your session.",
+    ],
+  },
+  {
     id: 'v2.727',
     date: '2026-08-08',
     title: 'Grams-only, if you want it ⚖️',

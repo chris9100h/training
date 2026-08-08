@@ -11753,14 +11753,14 @@ const fdPreset = {
 function FdUnitToggle({ useOz, onToggle }) {
   return (
     <button type="button" onClick={onToggle} aria-label={`Switch to ${useOz ? 'grams' : 'ounces'}`} style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-      padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
-      fontSize: 9, letterSpacing: '0.08em', fontFamily: UI.fontUi, fontWeight: 700, textTransform: 'uppercase',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
+      minWidth: 74, padding: '4px 12px', borderRadius: 4, cursor: 'pointer',
+      fontSize: 10, letterSpacing: '0.08em', fontFamily: UI.fontUi, fontWeight: 700, textTransform: 'uppercase',
       background: 'rgba(var(--accent-rgb),0.12)', color: 'var(--accent)',
       border: `1px solid rgba(var(--accent-rgb),0.3)`, WebkitTapHighlightColor: 'transparent',
     }}>
-      <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 8 }} />
-      {useOz ? 'oz' : 'g'}
+      <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 9 }} />
+      Use {useOz ? 'g' : 'oz'}
     </button>
   );
 }
