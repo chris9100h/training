@@ -22,6 +22,15 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.724',
+    date: '2026-08-08',
+    title: 'We forgot to flip the switch 🤦',
+    items: [
+      "⚖️ Confession: imperial units for the food tracker were built and just... never turned on. That's on us. Fixed now: set your unit to lbs in Settings and portions, ingredients, cooked weights, package sizes and the shopping list all go imperial. Macros stay in grams either way, that's what the label says.",
+      "🩹 The Daily Log's status row covers all five now: sick, cleanup week, normal, deload week, vacation. Every pick confirms first, and going back to normal tells you which status it's ending.",
+    ],
+  },
+  {
     id: 'v2.713',
     date: '2026-08-07',
     title: 'Cleanup weeks, cook-along steps, and recipes inside recipes 🧹',
