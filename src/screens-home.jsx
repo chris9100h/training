@@ -1733,6 +1733,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     let improvements = 0, regressions = 0;
     const neededIds = new Set();
     doneSession.entries.forEach(e => {
+      // A deload, or a cleanup week's reduced load, must not count toward
+      // either arrow: the drop is deliberate, not lost strength. Mirrors the
+      // live training screen's isDeloadSession gate and the same reducedLoad
+      // check in SessionDetailScreen/SessionCompareScreen (screens-lib.jsx),
+      // off the one shared LB.cleanupAppliesToExercise. Skipped before the
+      // prior-session search below so a reduced exercise never queues an
+      // unnecessary lazy fetch for a comparison its result gets discarded.
+      const reducedLoad = doneSession.isDeload
+        || (doneSession.isCleanup && !doneSession.cleanupOptOuts?.[e.exId] && LB.cleanupAppliesToExercise(store, e.exId, doneSession.dayId));
+      if (reducedLoad) return;
       let prevSession = null;
       for (const x of priorSessions) {
         if (!(x.entries || []).length) {
@@ -1764,7 +1774,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (regressed) regressions++;
     });
     return { improvementCount: improvements, regressionCount: regressions, neededPriorSessionIds: [...neededIds] };
-  }, [doneSession, priorSessions]);
+  }, [doneSession, priorSessions, store.exercises, store.schedules]);
 
   // A prior session used by the comparison above may sit outside the boot
   // history window (aggExercises > 0, entries not loaded locally yet). Fetch
