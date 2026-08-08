@@ -48,8 +48,11 @@ const fdDisplayG = e => e?.loggedCookedGrams ?? e?.quantityG;
 // one formatter for that: a stored gram figure in, a label out. fdMassOf is the
 // entry-shaped shorthand, fdDisplayG + fdMass in one call.
 // Macros never go through here, they stay grams for everyone (see UI.massInOz).
-const fdMass = g => UI.formatMass(g || 0);
-const fdMassOf = e => fdMass(fdDisplayG(e));
+// The optional `inOz` overrides UI.massInOz() for callers that let the user
+// flip units per-sheet (the logging quantity step's qtyUseOz toggle) instead
+// of always following the global Settings default.
+const fdMass = (g, inOz) => LB.formatMassG(g || 0, inOz ?? UI.massInOz());
+const fdMassOf = (e, inOz) => fdMass(fdDisplayG(e), inOz);
 // Grams of the finished dish <-> the equivalent chosenPortions, so a recipe
 // with a cookedWeightG can be logged by weight while every downstream
 // consumer (confirmRecipeLog, draftBuilt, the live preview) keeps reading
@@ -493,12 +496,21 @@ function fdDecimalFilter(raw, maxDecimals = 1) {
 // is read (fdMassG below). Deliberately not converted inside onChange: a
 // round trip mid-typing eats the decimal point the user just pressed
 // ("8." -> 8 -> 226.8 -> "8"), the classic converted-controlled-input bug.
-const fdMassFilter = raw => fdDecimalFilter(raw, UI.massInOz() ? 2 : 1);
+// All three take the same optional `inOz` override as fdMass above, for the
+// same per-sheet toggle reason.
+const fdMassFilter = (raw, inOz) => fdDecimalFilter(raw, (inOz ?? UI.massInOz()) ? 2 : 1);
 // A mass field's string -> canonical grams. null for an empty/garbage field,
 // same contract as fdNum, so every existing `fdNum(x) || 0` guard still reads.
-const fdMassG = v => (v === '' || v == null) ? null : UI.massEntryToG(v);
+const fdMassG = (v, inOz) => {
+  if (v === '' || v == null) return null;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  if (n == null || isNaN(n)) return null;
+  return Math.round(((inOz ?? UI.massInOz()) ? LB.ozToG(n) : n) * 10) / 10;
+};
 // Canonical grams -> the string to put in a mass field.
-const fdMassEntry = g => UI.massToEntry(g);
+const fdMassEntry = (g, inOz) => g == null ? '' : String((inOz ?? UI.massInOz())
+  ? Math.round(LB.gToOz(g) * 100) / 100
+  : Math.round(g * 10) / 10);
 
 // Shared "derive calories from protein/carbs/fat unless the user has typed
 // into the calorie field directly" rule, used by three calorie fields:
@@ -1730,20 +1742,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own date/time (its own commit path skips the staging entirely, an
   // in-place edit isn't a new item to batch). null the rest of the time.
   const [editingEntry, setEditingEntry] = useStateFd(null);
-  // What's in the amount field, in the VIEWER's mass unit (grams, or ounces
-  // for an imperial user). Read through qtyGrams() below, never directly, that
-  // is where it becomes the canonical grams everything downstream works in.
+  // Per-sheet oz/g override: defaults to the Settings-derived unit
+  // (UI.massInOz(), "Health > Food > Grams instead of oz/lb") but can be
+  // flipped right here for this logging session without touching Settings.
+  // Users kept asking for exactly this instead of having to leave the flow
+  // to change a global preference. Every fdMass* call below takes it as an
+  // explicit `inOz` override rather than falling through to the global.
+  const [qtyUseOz, setQtyUseOz] = useStateFd(() => UI.massInOz());
+  // What's in the amount field, in qtyUseOz's unit. Read through qtyGrams()
+  // below, never directly, that is where it becomes the canonical grams
+  // everything downstream works in.
   const [qtyStr, setQtyStr] = useStateFd('');
   // The exact gram figure behind a value the user did not type: a preset tap, a
   // unit pick, an entry being edited. Without it, a 62 g serving would go out
-  // as 2.19 oz and come back as 62.1 g, so a US user would silently log a
-  // different amount than an EU user tapping the same "Serving" button.
+  // as 2.19 oz and come back as 62.1 g, so flipping units mid-log would
+  // silently change the amount actually logged.
   // Every keystroke in the field clears it (setQtyTyped), so it can never
   // outlive the value it belongs to.
   const [qtyExactG, setQtyExactG] = useStateFd(null);
-  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw)); };
-  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g)); };
-  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr);
+  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw, qtyUseOz)); };
+  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g, qtyUseOz)); };
+  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr, qtyUseOz);
+  // Flips the toggle and re-renders whatever's already in the field under the
+  // NEW unit, from the canonical grams: a half-typed "8" (oz) becomes "226.8"
+  // (g) instead of silently keeping the digits and changing what they mean.
+  // Re-marks the result exact (setQtyFromG) so a second flip round-trips
+  // losslessly instead of compounding rounding through the display string.
+  const toggleQtyUseOz = () => {
+    const g = qtyGrams();
+    const next = !qtyUseOz;
+    setQtyUseOz(next);
+    setQtyExactG(g);
+    setQtyStr(fdMassEntry(g, next));
+  };
   // Amount field mode when pendingFood.units has entries: null means the
   // field is a mass (qtyStr itself, typed directly); otherwise it's an index
   // into pendingFood.units and the field is a COUNT of that unit
@@ -3275,7 +3306,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const satFat = sc1(pendingFood.satFatPer100g);
     const sodiumMg = pendingFood.sodiumMgPer100g == null ? null : Math.round(pendingFood.sodiumMgPer100g * factor);
     return { calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg };
-  }, [pendingFood, qtyStr, qtyExactG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
+  }, [pendingFood, qtyStr, qtyExactG, qtyUseOz, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
@@ -5340,15 +5371,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 ))}
               </div>
             )}
-            <Field label={qtyUnitIdx == null ? `${pendingFood.custom ? 'Portion' : 'Amount'} (${UI.massEntryUnit()})` : `Count (${pendingFood.units[qtyUnitIdx].label})`} style={{ marginBottom: qtyUnitIdx == null ? 14 : 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+              <span className="label">{qtyUnitIdx == null ? `${pendingFood.custom ? 'Portion' : 'Amount'} (${qtyUseOz ? 'oz' : 'g'})` : `Count (${pendingFood.units[qtyUnitIdx].label})`}</span>
+              {qtyUnitIdx == null && <FdUnitToggle useOz={qtyUseOz} onToggle={toggleQtyUseOz} />}
+            </div>
+            <div style={{ marginBottom: qtyUnitIdx == null ? 14 : 4 }}>
               <input
                 value={qtyUnitIdx == null ? qtyStr : qtyCountStr}
                 onChange={e => qtyUnitIdx == null ? setQtyTyped(e.target.value) : onQtyCountChange(e.target.value)}
-                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? UI.massEntryUnit() : 'count'}
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? (qtyUseOz ? 'oz' : 'g') : 'count'}
                 style={fdBigInput} />
-            </Field>
+            </div>
             {qtyUnitIdx != null && (
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>= {fdMass(qtyGrams() || 0)}</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>= {fdMass(qtyGrams() || 0, qtyUseOz)}</div>
             )}
             {qtyUnitIdx == null && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -5357,12 +5392,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     are not round anything. Imperial gets the portions a US kitchen
                     actually thinks in. Both store EXACT grams via setQtyFromG, so the
                     label is the only thing the unit changes. */}
-                {(UI.massInOz() ? [LB.ozToG(2), LB.ozToG(4), LB.ozToG(6), LB.ozToG(8)] : [50, 100, 150, 200]).map(g => (
-                  <button key={g} onClick={() => setQtyFromG(g)} style={fdPreset}>{fdMass(g)}</button>
+                {(qtyUseOz ? [LB.ozToG(2), LB.ozToG(4), LB.ozToG(6), LB.ozToG(8)] : [50, 100, 150, 200]).map(g => (
+                  <button key={g} onClick={() => setQtyFromG(g)} style={fdPreset}>{fdMass(g, qtyUseOz)}</button>
                 ))}
                 {pendingFood.servingSizeG > 0 && (
                   <button onClick={() => setQtyFromG(Math.round(pendingFood.servingSizeG))} style={fdPreset}>
-                    {pendingFood.servingLabel || 'Serving'} ({fdMass(Math.round(pendingFood.servingSizeG))})
+                    {pendingFood.servingLabel || 'Serving'} ({fdMass(Math.round(pendingFood.servingSizeG), qtyUseOz)})
                   </button>
                 )}
               </div>
@@ -10186,15 +10221,25 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   // null while browsing. Search/favorites/recent all funnel through this one
   // quantity step before joining `staged`.
   const [qtyItem, setQtyItem] = useStateFd(null);
-  // Same three-value amount state FoodScreen's quantity sheet uses (see the
-  // comments there): the field holds the VIEWER's mass unit, qtyExactG carries
-  // a value the user did not type so it is not lost to a display round trip,
-  // and qtyGrams() is the only way anything reads it.
+  // Same qtyUseOz/qtyStr/qtyExactG quartet FoodScreen's quantity sheet uses
+  // (see the comments there): qtyUseOz is the per-sheet g/oz override
+  // (defaults to Settings, flippable here without leaving the flow), the
+  // field holds qtyUseOz's unit, qtyExactG carries a value the user did not
+  // type so it is not lost to a display round trip, and qtyGrams() is the
+  // only way anything reads it.
+  const [qtyUseOz, setQtyUseOz] = useStateFd(() => UI.massInOz());
   const [qtyStr, setQtyStr] = useStateFd('');
   const [qtyExactG, setQtyExactG] = useStateFd(null);
-  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw)); };
-  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g)); };
-  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr);
+  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw, qtyUseOz)); };
+  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g, qtyUseOz)); };
+  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr, qtyUseOz);
+  const toggleQtyUseOz = () => {
+    const g = qtyGrams();
+    const next = !qtyUseOz;
+    setQtyUseOz(next);
+    setQtyExactG(g);
+    setQtyStr(fdMassEntry(g, next));
+  };
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
   // The recipe currently being exploded into ingredients (Recipes tab), or
@@ -10398,7 +10443,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
       protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
-  }, [qtyItem, qtyStr, qtyExactG, store.settings?.netCarbs]);
+  }, [qtyItem, qtyStr, qtyExactG, qtyUseOz, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
   // the "Add N ingredients" button below) and caches a not-yet-cached DB
   // food right away, same rule confirmLogFood/toggleFavorite use in
@@ -10815,13 +10860,17 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                 ))}
               </div>
             )}
-            <Field label={qtyUnitIdx == null ? `Amount (${UI.massEntryUnit()})` : `Count (${qtyItem.units[qtyUnitIdx].label})`} style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+              <span className="label">{qtyUnitIdx == null ? `Amount (${qtyUseOz ? 'oz' : 'g'})` : `Count (${qtyItem.units[qtyUnitIdx].label})`}</span>
+              {qtyUnitIdx == null && <FdUnitToggle useOz={qtyUseOz} onToggle={toggleQtyUseOz} />}
+            </div>
+            <div style={{ marginBottom: 14 }}>
               <input
                 value={qtyUnitIdx == null ? qtyStr : qtyCountStr}
                 onChange={e => qtyUnitIdx == null ? setQtyTyped(e.target.value) : onQtyCountChange(e.target.value)}
-                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? UI.massEntryUnit() : 'count'} style={fdInputStyle}
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? (qtyUseOz ? 'oz' : 'g') : 'count'} style={fdInputStyle}
               />
-            </Field>
+            </div>
             {qtyPreview && (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
                 <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{qtyPreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
@@ -11696,6 +11745,25 @@ const fdPreset = {
   color: UI.ink, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };
+// Per-sheet g/oz flip next to a mass field's label (qtyUseOz and friends).
+// Shows the CURRENT unit, tapping switches to the other: styled with the
+// accent fill/border/icon of every other tappable pill in this module
+// (the cleanup opt-out row learned this lesson the hard way, a control that
+// looks identical to a passive info badge reads as one and gets missed).
+function FdUnitToggle({ useOz, onToggle }) {
+  return (
+    <button type="button" onClick={onToggle} aria-label={`Switch to ${useOz ? 'grams' : 'ounces'}`} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+      padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
+      fontSize: 9, letterSpacing: '0.08em', fontFamily: UI.fontUi, fontWeight: 700, textTransform: 'uppercase',
+      background: 'rgba(var(--accent-rgb),0.12)', color: 'var(--accent)',
+      border: `1px solid rgba(var(--accent-rgb),0.3)`, WebkitTapHighlightColor: 'transparent',
+    }}>
+      <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 8 }} />
+      {useOz ? 'oz' : 'g'}
+    </button>
+  );
+}
 
 window.Screens = window.Screens || {};
 Object.assign(window.Screens, { FoodScreen, RecipeShareSheet });
