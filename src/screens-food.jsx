@@ -1672,6 +1672,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // text search or did find something.
   const [barcodeMiss, setBarcodeMiss] = useStateFd(null);
   const labelInputRef = useRefFd(null);
+  // Separate input, no `capture` attribute: with `capture="environment"` set,
+  // Android Chrome opens the camera app directly and skips the OS chooser
+  // entirely, so there was no way to reach the photo library at all. Both
+  // inputs share handleLabelFile, the handler only ever sees a plain File.
+  const labelLibraryInputRef = useRefFd(null);
 
   // "Describe a meal" sheet: free-text -> parse-meal edge function -> a
   // review list (mealItems) the user picks through before anything is
@@ -5869,7 +5874,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       {/* ── Barcode vs. label picker (opened by the search box's scan button) ── */}
       <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           <button onClick={() => { setScanPickerOpen(false); setScanOpen(true); }} style={fdScanChoice}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
@@ -5877,15 +5882,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
           <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={fdScanChoice}>
             <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Take photo</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+          <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelLibraryInputRef.current && labelLibraryInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-images" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Photo library</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Pick an existing photo</span>
           </button>
         </div>
       </Sheet>
 
-      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
-          which works on iOS Safari without any library. */}
+      {/* Two hidden pickers, same handler: `capture` opens the live camera
+          directly on tap (and still degrades to the OS chooser on iOS/desktop),
+          the other has no `capture` so the OS chooser opens with the library
+          reachable even on Android, where `capture` skips straight past it. */}
       <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
+      <input ref={labelLibraryInputRef} type="file" accept="image/*" onChange={handleLabelFile} style={{ display: 'none' }} />
       {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
 
@@ -6512,6 +6525,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
   const [pickerLabelError, setPickerLabelError] = useStateFd(null);
   const pickerLabelInputRef = useRefFd(null);
+  // See labelLibraryInputRef in FoodScreen for why this is a separate input
+  // rather than a shared one with `capture` toggled: Android skips the OS
+  // chooser (and the library with it) whenever `capture` is present at all.
+  const pickerLabelLibraryInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
   // A flex plan has no fixed weekday schedule to look ahead at, so a Training/
@@ -7272,7 +7289,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 
       {/* ── Barcode vs. label picker (opened by the Search tab's scan button) ── */}
       <Sheet open={pickerScanPickerOpen} onClose={() => setPickerScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           <button onClick={() => { setPickerScanPickerOpen(false); setPickerScanOpen(true); }} style={fdScanChoice}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
@@ -7280,15 +7297,22 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           </button>
           <button onClick={() => { setPickerScanPickerOpen(false); setPickerLabelError(null); pickerLabelInputRef.current && pickerLabelInputRef.current.click(); }} style={fdScanChoice}>
             <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Take photo</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+          <button onClick={() => { setPickerScanPickerOpen(false); setPickerLabelError(null); pickerLabelLibraryInputRef.current && pickerLabelLibraryInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-images" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Photo library</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Pick an existing photo</span>
           </button>
         </div>
       </Sheet>
 
-      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
-          which works on iOS Safari without any library. */}
+      {/* Two hidden pickers, same handler: `capture` opens the live camera
+          directly on tap, the other has no `capture` so the library is
+          reachable even on Android (see labelLibraryInputRef in FoodScreen). */}
       <input ref={pickerLabelInputRef} type="file" accept="image/*" capture="environment" onChange={handlePickerLabelFile} style={{ display: 'none' }} />
+      <input ref={pickerLabelLibraryInputRef} type="file" accept="image/*" onChange={handlePickerLabelFile} style={{ display: 'none' }} />
       {pickerLabelScanning && <FdLabelBusy />}
       {pickerScanOpen && <FdScanner onClose={() => setPickerScanOpen(false)} onDetect={handlePickerScan} />}
 
@@ -10161,6 +10185,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
   const labelInputRef = useRefFd(null);
+  // See labelLibraryInputRef in FoodScreen for why this is a separate input
+  // rather than a shared one with `capture` toggled.
+  const labelLibraryInputRef = useRefFd(null);
 
   useEffectFd(() => {
     if (!open) return;
@@ -10830,7 +10857,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
           above, since it also must render above the still-open "Add
           ingredients" Sheet. ── */}
       <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)" zIndex={200}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           <button onClick={() => { setScanPickerOpen(false); setScanOpen(true); }} style={fdScanChoice}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
@@ -10838,15 +10865,22 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
           </button>
           <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={fdScanChoice}>
             <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Take photo</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+          <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelLibraryInputRef.current && labelLibraryInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-images" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Photo library</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Pick an existing photo</span>
           </button>
         </div>
       </Sheet>
 
-      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
-          which works on iOS Safari without any library. */}
+      {/* Two hidden pickers, same handler: `capture` opens the live camera
+          directly on tap, the other has no `capture` so the library is
+          reachable even on Android (see labelLibraryInputRef in FoodScreen). */}
       <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
+      <input ref={labelLibraryInputRef} type="file" accept="image/*" onChange={handleLabelFile} style={{ display: 'none' }} />
       {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </>
