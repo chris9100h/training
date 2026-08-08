@@ -338,7 +338,8 @@ CREATE TABLE public.zane_user_settings (
   daily_log_reminder_last_date text,
   pillbox_slots jsonb,
   fasting_protocol text,  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
-  cleanup_percent integer NOT NULL DEFAULT 20  -- 0251: cleanup week load reduction in percent (UI clamps 10-30)
+  cleanup_percent integer NOT NULL DEFAULT 20,  -- 0251: cleanup week load reduction in percent (UI clamps 10-30)
+  food_force_grams boolean NOT NULL DEFAULT false  -- 0252: opt-out, keep the food tracker in grams even when unit='lbs'
 );
 
 CREATE TABLE public.zane_pushover_active (

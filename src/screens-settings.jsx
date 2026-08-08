@@ -2287,6 +2287,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
               <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
               <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
+              {/* Only meaningful for the imperial unit preference: on kg (or
+                  mixed) the food tracker is already grams, there's nothing to
+                  opt out of. Portions/ingredients/cooked weights/shopping only,
+                  macros stay grams for everyone regardless of this toggle (see
+                  UI.massInOz, ui.jsx). */}
+              {store.settings?.unit === 'lbs' && (
+                <>
+                  <Row label="Grams instead of oz/lb">
+                    <Toggle on={!!store.settings?.foodForceGrams} onToggle={() => patchSettings({ foodForceGrams: !store.settings?.foodForceGrams })} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
+                    Keep the food tracker in grams even though your unit preference is lbs. Macros stay grams either way, this only affects portions, ingredients, and the shopping list.
+                  </div>
+                </>
+              )}
             </>
           )}
           <div style={{ marginTop: 24 }}>

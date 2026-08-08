@@ -1837,6 +1837,11 @@ function App() {
   window.__UNIT = (_u === 'lbs') ? 'lbs' : 'kg';
   if (_u === 'mixed' || _u === 'lbs') LB.setCardioDistUnit('mi');
   else if (_u === 'kg') LB.setCardioDistUnit('km');
+  // Per-module opt-out: an imperial user can keep the food tracker in grams
+  // (UI.massInOz reads this alongside window.__UNIT). Mirrored the same way
+  // __UNIT itself is, on every render, so it's never stale behind a setting
+  // change made elsewhere (e.g. a coach editing a client's own settings sync).
+  window.__FOOD_FORCE_GRAMS = !!store?.settings?.foodForceGrams;
 
   // Deload overlay flag, buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';

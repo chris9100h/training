@@ -486,6 +486,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     equipment_config: convEquipmentConfig(sett.equipmentConfig),
     weight_fill_down: sett.weightFillDown ?? true,
     net_carbs: sett.netCarbs ?? false,
+    food_force_grams: sett.foodForceGrams ?? false,
     plan_mode: sett.planMode ?? false,
     hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
@@ -1724,6 +1725,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
         netCarbs: sett.net_carbs ?? false,
+        foodForceGrams: sett.food_force_grams ?? false,
         planMode: sett.plan_mode ?? false,
         hideFoodCategories: sett.hide_food_categories ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
@@ -2513,6 +2515,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
+    prev.settings?.foodForceGrams     !== next.settings?.foodForceGrams     ||
     prev.settings?.planMode           !== next.settings?.planMode           ||
     prev.settings?.hideFoodCategories !== next.settings?.hideFoodCategories ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
@@ -2585,6 +2588,7 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
       net_carbs: next.settings?.netCarbs ?? false,
+      food_force_grams: next.settings?.foodForceGrams ?? false,
       plan_mode: next.settings?.planMode ?? false,
       hide_food_categories: next.settings?.hideFoodCategories ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,

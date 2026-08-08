@@ -1406,7 +1406,12 @@ UI.waterSummaryValue = (ml, u) => UI.waterInFloz(u) ? Math.round(UI.mlToFloz(ml)
 // there is no client-unit path to plumb. Add the parameter when one appears,
 // not before. A shared recipe opened by a signed-out viewer has no settings at
 // all and falls back to grams, which is the right answer for an unknown viewer.
-UI.massInOz = () => UI.unit() === 'lbs';
+// A per-module opt-out lives on top of the global unit: an imperial user can
+// still keep the food tracker specifically in grams (settings.foodForceGrams,
+// mirrored to window.__FOOD_FORCE_GRAMS by app.jsx same as __UNIT itself).
+// US nutrition labels are printed in grams too, so staying metric here is a
+// legitimate choice independent of preferring lbs for bodyweight/water.
+UI.massInOz = () => UI.unit() === 'lbs' && !(typeof window !== 'undefined' && window.__FOOD_FORCE_GRAMS);
 UI.massEntryUnit = () => UI.massInOz() ? 'oz' : 'g';
 // Stored grams -> the value shown in an entry field, in the viewer's unit.
 // Two decimals in oz, one in grams: 0.1 oz is a 2.8 g step, which would put
