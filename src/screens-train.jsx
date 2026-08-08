@@ -6530,30 +6530,44 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           {/* Cleanup week, per-exercise opt-out. cleanupApplies is the single
               source of truth for "was this lift actually reduced" (see there),
-              so the chip can never appear on an exercise whose loads the
+              so the row can never appear on an exercise whose loads the
               cleanup never touched.
-              Radius 4, not the 2 the neighbouring Pills use at this size: this
-              one is tappable, and the scale's line is interactive-or-not. */}
-          {isCleanupSession && cleanupApplies(entry.exId) && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              A full-width labeled row, not a small chip: the chip version of
+              this (same size/style as the passive category/equipment Pills
+              right above it) read as just another info badge, not something
+              tappable, real user report ("didn't even see it"). This is
+              deliberately built to look like a settings row instead: its own
+              bordered block, a title + a one-line explanation of what tapping
+              it does right now, and a toggle glyph on the right as the
+              unambiguous "this switches" affordance. */}
+          {isCleanupSession && cleanupApplies(entry.exId) && (() => {
+            const reduced = isCleanupReduced(entry.exId);
+            return (
               <button
                 onClick={() => toggleCleanupOptOut(entry.exId)}
                 aria-pressed={!!session.cleanupOptOuts?.[entry.exId]}
                 style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 5,
-                  padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                  fontSize: 9, letterSpacing: '0.14em', fontFamily: UI.fontUi,
-                  fontWeight: 600, textTransform: 'uppercase',
-                  WebkitTapHighlightColor: 'transparent',
-                  background: isCleanupReduced(entry.exId) ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                  color: isCleanupReduced(entry.exId) ? UI.gold : UI.inkSoft,
-                  border: `1px solid ${isCleanupReduced(entry.exId) ? UI.goldSoft : UI.hairStrong}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                  width: '100%', marginTop: 10, padding: '10px 12px', borderRadius: 6,
+                  cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  background: reduced ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                  border: `1px solid ${reduced ? UI.goldSoft : UI.hairStrong}`,
                 }}>
-                <i className="fa-solid fa-broom" style={{ fontSize: 9 }} />
-                {isCleanupReduced(entry.exId) ? `${100 - cleanupPct}%` : 'Full'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <i className="fa-solid fa-broom" style={{ fontSize: 14, flexShrink: 0, color: reduced ? UI.gold : UI.inkSoft }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: reduced ? UI.gold : UI.ink }}>
+                      {reduced ? `Cleanup week · ${100 - cleanupPct}% load` : 'Cleanup week · full load'}
+                    </div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, marginTop: 2, lineHeight: 1.35 }}>
+                      {reduced ? 'Tap to log this lift at full weight instead' : 'Tap to reduce this lift like the rest of your plan'}
+                    </div>
+                  </div>
+                </div>
+                <i className={`fa-solid ${reduced ? 'fa-toggle-on' : 'fa-toggle-off'}`} style={{ fontSize: 18, flexShrink: 0, color: reduced ? UI.gold : UI.inkFaint }} />
               </button>
-            </div>
-          )}
+            );
+          })()}
           {/* 5/3/1 wave for this main lift: the prescribed sets off the Training
               Max for the current week, top set an AMRAP (+). */}
           {(() => {
