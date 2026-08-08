@@ -5238,6 +5238,69 @@ async function testAsync(name, fn) {
     assert.strictEqual(again.mesoState.pumpLowCounts.e1, 1);
   });
 
+  // ── Food masses: grams canonical, oz/lb display for imperial viewers ─────
+  test('gToOz/ozToG: a round trip survives to well under a tenth of a gram', () => {
+    for (const g of [1, 5, 62, 100, 248, 453.59237, 1000, 2500]) {
+      assert.ok(Math.abs(LB.ozToG(LB.gToOz(g)) - g) < 0.001, `${g}g round-trips`);
+    }
+    assert.strictEqual(Math.round(LB.gToOz(LB.LB_G)), 16, 'a pound is 16 ounces');
+    assert.strictEqual(LB.gToOz(0), 0);
+    assert.strictEqual(LB.ozToG(null), 0, 'null reads as zero, not NaN');
+  });
+
+  test('formatMassG: metric steps up to kg at 1000g', () => {
+    assert.strictEqual(LB.formatMassG(248, false), '248g');
+    assert.strictEqual(LB.formatMassG(62.4, false), '62.4g');
+    assert.strictEqual(LB.formatMassG(999, false), '999g');
+    assert.strictEqual(LB.formatMassG(1000, false), '1kg', 'no trailing zeros');
+    assert.strictEqual(LB.formatMassG(1250, false), '1.25kg');
+    assert.strictEqual(LB.formatMassG(0, false), '0g');
+    // Float noise from summing many logged quantities must not leak through.
+    assert.strictEqual(LB.formatMassG(741.2300000000001, false), '741.2g');
+    // The step-up is decided on the ROUNDED value, so this is 1kg, not "1000g".
+    assert.strictEqual(LB.formatMassG(999.96, false), '1kg');
+  });
+
+  test('formatMassG: imperial steps up to lb at one pound', () => {
+    assert.strictEqual(LB.formatMassG(28.349523125, true), '1 oz');
+    assert.strictEqual(LB.formatMassG(248, true), '8.75 oz');
+    assert.strictEqual(LB.formatMassG(LB.LB_G - 1, true), '15.96 oz', 'just under a pound stays oz');
+    assert.strictEqual(LB.formatMassG(LB.LB_G, true), '1 lb');
+    assert.strictEqual(LB.formatMassG(1000, true), '2.2 lb');
+    assert.strictEqual(LB.formatMassG(0, true), '0 oz');
+  });
+
+  test('roundShoppingQty: the metric grid is unchanged (5g under 50g, else 25g)', () => {
+    assert.strictEqual(LB.roundShoppingQty(12, false).text, '10g');
+    assert.strictEqual(LB.roundShoppingQty(13, false).text, '15g');
+    assert.strictEqual(LB.roundShoppingQty(240, false).text, '250g');
+    // Decided off the ROUNDED value, so 990 becomes 1kg rather than "1000g".
+    assert.strictEqual(LB.roundShoppingQty(990, false).text, '1kg');
+    assert.strictEqual(LB.roundShoppingQty(0, false).text, '0g');
+    assert.strictEqual(LB.roundShoppingQty(1, false).text, '5g', 'never rounds a real need to nothing');
+  });
+
+  test('roundShoppingQty: the imperial grid is native, not a converted metric one', () => {
+    // Under 2oz: quarter ounces, so spice-sized amounts stay reachable.
+    assert.strictEqual(LB.roundShoppingQty(5, true).text, '0.25 oz');
+    assert.strictEqual(LB.roundShoppingQty(20, true).text, '0.75 oz');
+    // 2 to 16oz: half ounces.
+    assert.strictEqual(LB.roundShoppingQty(100, true).text, '3.5 oz');
+    assert.strictEqual(LB.roundShoppingQty(248, true).text, '8.5 oz');
+    // A pound and up: quarter pounds.
+    assert.strictEqual(LB.roundShoppingQty(500, true).text, '1 lb');
+    assert.strictEqual(LB.roundShoppingQty(1000, true).text, '2.25 lb');
+    assert.strictEqual(LB.roundShoppingQty(0, true).text, '0 oz');
+    assert.strictEqual(LB.roundShoppingQty(1, true).text, '0.25 oz', 'never rounds a real need to nothing');
+  });
+
+  test('roundShoppingQty: grams comes back so the buy quantity needs no re-parse', () => {
+    assert.strictEqual(LB.roundShoppingQty(240, false).grams, 250);
+    const imperial = LB.roundShoppingQty(248, true);
+    assert.strictEqual(imperial.text, '8.5 oz');
+    assert.ok(Math.abs(imperial.grams - LB.ozToG(8.5)) < 0.001, 'grams matches the label it printed');
+  });
+
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

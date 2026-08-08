@@ -1385,6 +1385,44 @@ UI.waterQuickAdds = () => UI.waterInFloz() ? [8, 16] : [250, 500];
 UI.waterSummaryUnit = (u) => UI.waterInFloz(u) ? 'fl oz' : 'L';
 UI.waterSummaryValue = (ml, u) => UI.waterInFloz(u) ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
 
+// Food masses (portions, ingredients, cooked weights, shopping quantities) are
+// stored canonically in grams; imperial (lbs) users see ounces and pounds. Same
+// split as the water block above, and for the same reason: the DB never learns
+// about the viewer's unit. The arithmetic and the rounding grids live in
+// store.js (LB.formatMassG / LB.roundShoppingQty) so the tests can reach them,
+// these are only the wrappers that supply the viewer's unit. ui.jsx runs first
+// in the loader's SOURCES, ahead of every screen, but these are the file's only
+// LB references and they all sit inside function bodies: store.js is a plain
+// <script> in index.html and has long since set window.LB by the time any of
+// them is actually called, so the ordering never comes into it.
+//
+// MACROS ARE NOT MASSES here: protein/carbs/fat/fibre/sugar/sat fat stay grams
+// and sodium stays mg for everyone. A US nutrition label prints grams too, so
+// converting those would be wrong rather than helpful. Never route a macro
+// field through these.
+//
+// No `u` override (unlike water): nothing in the app renders someone else's
+// food masses. Coaches only read meal-plan NAMES and write macro targets, so
+// there is no client-unit path to plumb. Add the parameter when one appears,
+// not before. A shared recipe opened by a signed-out viewer has no settings at
+// all and falls back to grams, which is the right answer for an unknown viewer.
+UI.massInOz = () => UI.unit() === 'lbs';
+UI.massEntryUnit = () => UI.massInOz() ? 'oz' : 'g';
+// Stored grams -> the value shown in an entry field, in the viewer's unit.
+// Two decimals in oz, one in grams: 0.1 oz is a 2.8 g step, which would put
+// spice-sized amounts out of reach (see fdDecimalFilter's own cap).
+UI.massToEntry = (g) => g == null ? '' : String(UI.massInOz()
+  ? Math.round(LB.gToOz(g) * 100) / 100
+  : Math.round(g * 10) / 10);
+// Entry value (viewer's unit) -> canonical grams, rounded to the one decimal
+// the food module works in throughout.
+UI.massEntryToG = (v) => {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  if (n == null || isNaN(n)) return null;
+  return Math.round((UI.massInOz() ? LB.ozToG(n) : n) * 10) / 10;
+};
+UI.formatMass = (g) => LB.formatMassG(g, UI.massInOz());
+
 // Styled stand-in for window.alert(). The app has useConfirm() for anything
 // that asks a question, but a plain "this failed" message forced a component
 // to be async and to render confirmEl, so ~40 error paths reached for the raw

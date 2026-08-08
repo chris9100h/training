@@ -9084,6 +9084,73 @@ function volumeAnswerAllowsBump(volume, loadOnly) {
   return !!loadOnly && volume === 'pushed';
 }
 
+// ─── Food masses: grams canonical, oz/lb for imperial viewers ────────────────
+// Every mass in the food tracker is STORED in grams, always: quantity_g, recipe
+// weights, package sizes, the per-100g rate every food is scaled from. These
+// helpers are a display/entry layer on top of that, the same shape the water
+// tracker uses for ml -> fl oz (UI.waterInFloz and friends in ui.jsx).
+//
+// They live here rather than next to their UI wrappers because the rounding
+// grids below are the only genuinely tricky part of the feature and this file
+// is the one tools/test/store.test.cjs can load. ui.jsx keeps one-line wrappers
+// that supply `inOz` from window.__UNIT.
+//
+// MACROS ARE NOT MASSES for this purpose: protein/carbs/fat/fibre/sugar/sat fat
+// stay grams and sodium stays mg for everyone, US nutrition labels are printed
+// in grams too. Only portions, ingredients, cooked weights and shopping
+// quantities convert.
+const OZ_G = 28.349523125; // avoirdupois ounce
+const LB_G = 453.59237;
+function gToOz(g) { return (g || 0) / OZ_G; }
+function ozToG(oz) { return (oz || 0) * OZ_G; }
+
+// Display string for a stored gram figure. Metric steps up to kg at 1000g,
+// imperial to lb at 16oz, both with one decimal and no trailing zero.
+// Both branches round to their display precision BEFORE testing the step-up
+// threshold, not after: deciding off the raw value let 999.96g print as
+// "1000g" (it rounds to 1000 but tested as < 1000) instead of "1kg".
+function formatMassG(g, inOz) {
+  const v = g || 0;
+  if (inOz) {
+    const oz = Math.round(gToOz(v) * 100) / 100;
+    if (Math.abs(oz) >= 16) return `${parseFloat((oz / 16).toFixed(2))} lb`;
+    return `${oz} oz`;
+  }
+  const grams = Math.round(v * 10) / 10;
+  if (Math.abs(grams) >= 1000) return `${parseFloat((grams / 1000).toFixed(3))}kg`;
+  return `${grams}g`;
+}
+
+// Shopping-list quantity: an ESTIMATE, so it is rounded to a grid you can
+// actually shop on, unlike a package size (a printed fact, formatMassG above).
+// Metric keeps its long-standing 5g/25g grid. Imperial gets its own native grid
+// rather than a converted one: running the metric result through gToOz would
+// print "0.2 oz" and "8.8 oz", and a shoppable number is the entire point of
+// rounding in the first place.
+//   metric:   <50g -> nearest 5g, else nearest 25g, >=1000g shown as kg
+//   imperial: <2oz -> nearest 0.25oz, <16oz -> nearest 0.5oz, else 0.25 lb
+// Returns { grams, text } so callers that need the rounded mass back (the
+// buy-quantity used for inventory) do not have to re-parse the label.
+function roundShoppingQty(g, inOz) {
+  if (!(g > 0)) return { grams: 0, text: inOz ? '0 oz' : '0g' };
+  if (inOz) {
+    const oz = gToOz(g);
+    if (oz >= 16) {
+      const lb = Math.round((oz / 16) / 0.25) * 0.25 || 0.25;
+      return { grams: lb * LB_G, text: `${parseFloat(lb.toFixed(2))} lb` };
+    }
+    const step = oz < 2 ? 0.25 : 0.5;
+    const rounded = Math.round(oz / step) * step || step;
+    return { grams: ozToG(rounded), text: `${parseFloat(rounded.toFixed(2))} oz` };
+  }
+  // Round FIRST, then decide g vs kg off the rounded value: deciding off the
+  // raw one let something like 990g round up to 1000g but still print "1000g".
+  const step = g < 50 ? 5 : 25;
+  const rounded = Math.round(g / step) * step || step;
+  if (rounded >= 1000) return { grams: rounded, text: `${Math.round((rounded / 1000) * 10) / 10}kg` };
+  return { grams: rounded, text: `${rounded}g` };
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -9352,6 +9419,7 @@ window.LB = {
   loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

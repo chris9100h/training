@@ -43,6 +43,13 @@ const fdRound1 = v => Math.round(v * 10) / 10;
 // entry. loggedCookedGrams is null for every non-grams-mode entry, so this
 // is a no-op everywhere else.
 const fdDisplayG = e => e?.loggedCookedGrams ?? e?.quantityG;
+// Every mass in this module is STORED in grams and only ever DISPLAYED in the
+// viewer's unit (grams, or oz/lb when settings.unit is 'lbs'). fdMass is the
+// one formatter for that: a stored gram figure in, a label out. fdMassOf is the
+// entry-shaped shorthand, fdDisplayG + fdMass in one call.
+// Macros never go through here, they stay grams for everyone (see UI.massInOz).
+const fdMass = g => UI.formatMass(g || 0);
+const fdMassOf = e => fdMass(fdDisplayG(e));
 // Grams of the finished dish <-> the equivalent chosenPortions, so a recipe
 // with a cookedWeightG can be logged by weight while every downstream
 // consumer (confirmRecipeLog, draftBuilt, the live preview) keeps reading
@@ -61,7 +68,7 @@ const fdPortionsToGrams = (portionsVal, cookedWeightG, totalPortions) => totalPo
 function fdEffectiveChosenPortions(prompt) {
   if (!prompt) return 0;
   if (prompt.mode === 'grams' && prompt.recipe.cookedWeightG > 0) {
-    return fdGramsToPortions(fdNum(prompt.gramsStr) || 0, prompt.recipe.cookedWeightG, prompt.totalPortions);
+    return fdGramsToPortions(fdMassG(prompt.gramsStr) || 0, prompt.recipe.cookedWeightG, prompt.totalPortions);
   }
   return prompt.chosenPortions;
 }
@@ -467,12 +474,31 @@ function fdOrdinal(n) {
 // for more precision than that, and it's what let a typed value carry
 // enough digits to surface as raw floating-point noise once multiplied
 // through a scaling calculation elsewhere.
-function fdDecimalFilter(raw) {
+// A MASS field in ounces needs two, though (fdMassFilter below): 0.1 oz is a
+// 2.8 g step, so one decimal would put spice-sized amounts out of reach
+// entirely. The float-noise argument still holds because the value that
+// actually gets stored is the converted GRAM figure, and UI.massEntryToG
+// rounds that back to one decimal before anything downstream sees it.
+function fdDecimalFilter(raw, maxDecimals = 1) {
   let v = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
   const dot = v.indexOf('.');
-  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 1);
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, maxDecimals);
   return v;
 }
+// The filter for a MASS field specifically (portion, ingredient, cooked weight,
+// package size), as opposed to a macro or calorie field. Everything a mass
+// field touches goes through this pair, never fdDecimalFilter directly:
+//   onChange={e => setX(fdMassFilter(e.target.value))}
+// and the state then holds the VIEWER's unit, converted to grams only where it
+// is read (fdMassG below). Deliberately not converted inside onChange: a
+// round trip mid-typing eats the decimal point the user just pressed
+// ("8." -> 8 -> 226.8 -> "8"), the classic converted-controlled-input bug.
+const fdMassFilter = raw => fdDecimalFilter(raw, UI.massInOz() ? 2 : 1);
+// A mass field's string -> canonical grams. null for an empty/garbage field,
+// same contract as fdNum, so every existing `fdNum(x) || 0` guard still reads.
+const fdMassG = v => (v === '' || v == null) ? null : UI.massEntryToG(v);
+// Canonical grams -> the string to put in a mass field.
+const fdMassEntry = g => UI.massToEntry(g);
 
 // Shared "derive calories from protein/carbs/fat unless the user has typed
 // into the calorie field directly" rule, used by three calorie fields:
@@ -1038,37 +1064,30 @@ function fdWriteLowStockAcks(v) {
 // needs an actual gram amount (not a formatted display string) shares the
 // exact same rounding, e.g. openBoughtPrompt's suggested quantity further
 // below (a starting point the user can still edit before it hits inventory).
+// Both of these delegate to LB.roundShoppingQty, which owns the grids (5g/25g
+// metric, 0.25oz/0.5oz/0.25lb imperial, each with its own step-up threshold)
+// and is unit-tested there. It returns { grams, text } so the rounded MASS and
+// the LABEL always come from one calculation: fdRoundShoppingQtyG takes the
+// former, fdRoundShoppingQty the latter, and they can no longer disagree the
+// way two parallel implementations eventually would.
 function fdRoundShoppingQtyG(grams) {
-  if (!(grams > 0)) return 0;
-  const unit = grams < 50 ? 5 : 25;
-  return Math.round(grams / unit) * unit || unit;
+  return LB.roundShoppingQty(grams, UI.massInOz()).grams;
 }
 function fdRoundShoppingQty(grams) {
-  // Rounds to the nearest 5/25 FIRST, then checks the rounded value against
-  // the 1000g cutoff, not the raw one: deciding off the raw value let
-  // something like 990g round up to 1000g but still print as "1000g"
-  // instead of switching to "1kg".
-  const rounded = fdRoundShoppingQtyG(grams);
-  if (!rounded) return '0g';
-  if (rounded >= 1000) return `${fdRound1(rounded / 1000)}kg`;
-  return `${rounded}g`;
+  return LB.roundShoppingQty(grams, UI.massInOz()).text;
 }
 // A package size is a fact printed on the product, not an estimate: unlike
 // fdRoundShoppingQty above, this never rounds to a coarser display grid, only
-// picks g vs kg and how many decimals to show (found via a real 372g wrap
+// picks the unit and how many decimals to show (found via a real 372g wrap
 // pack that fdRoundShoppingQty's nearest-25 rule was silently showing as
-// 375g). Rounded to 1 decimal first (matching fdDecimalFilter's own
-// input-side cap) purely to clean up float noise from summing many logged
-// quantities, e.g. "741.23000000000001g" reading as "741.2g": that's noise
-// cleanup, not the estimate-rounding fdRoundShoppingQty does, a whole-gram
-// package fact like 372 passes through unchanged either way. parseFloat
-// drops any trailing zeros in the kg branch so a round kg value still reads
-// "1kg".
+// 375g). That is exactly what fdMass does, so it is the same formatter the
+// rest of the module uses for a plain stored mass, and the g-vs-kg (or
+// oz-vs-lb) step-up lives in one place. The float-noise cleanup that used to
+// happen here now sits inside LB.formatMassG: summing many logged quantities
+// produces things like "741.23000000000001g", which reads as "741.2g".
 function fdExactShoppingQty(grams) {
-  if (!(grams > 0)) return '0g';
-  const g = Math.round(grams * 10) / 10;
-  if (g < 1000) return `${g}g`;
-  return `${parseFloat((g / 1000).toFixed(3))}kg`;
+  if (!(grams > 0)) return fdMass(0);
+  return fdMass(grams);
 }
 // Package-aware buy quantity. With no package size set, the plain rounded
 // estimate above, unchanged, as `headline` with no `sub`. With one, the whole
@@ -1701,11 +1720,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own date/time (its own commit path skips the staging entirely, an
   // in-place edit isn't a new item to batch). null the rest of the time.
   const [editingEntry, setEditingEntry] = useStateFd(null);
-  const [qtyG, setQtyG] = useStateFd(''); // always grams, the actual source of truth for qtyPreview/buildQtyEntry
+  // What's in the amount field, in the VIEWER's mass unit (grams, or ounces
+  // for an imperial user). Read through qtyGrams() below, never directly, that
+  // is where it becomes the canonical grams everything downstream works in.
+  const [qtyStr, setQtyStr] = useStateFd('');
+  // The exact gram figure behind a value the user did not type: a preset tap, a
+  // unit pick, an entry being edited. Without it, a 62 g serving would go out
+  // as 2.19 oz and come back as 62.1 g, so a US user would silently log a
+  // different amount than an EU user tapping the same "Serving" button.
+  // Every keystroke in the field clears it (setQtyTyped), so it can never
+  // outlive the value it belongs to.
+  const [qtyExactG, setQtyExactG] = useStateFd(null);
+  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw)); };
+  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g)); };
+  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr);
   // Amount field mode when pendingFood.units has entries: null means the
-  // field is grams (qtyG itself, typed directly); otherwise it's an index
+  // field is a mass (qtyStr itself, typed directly); otherwise it's an index
   // into pendingFood.units and the field is a COUNT of that unit
-  // (qtyCountStr), with qtyG derived from it (count * unit.grams) by
+  // (qtyCountStr), with the mass derived from it (count * unit.grams) by
   // onQtyCountChange/selectQtyUnit below rather than typed directly.
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
@@ -1900,10 +1932,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // entry as a unit count too (the bug this replaced).
     return e.loggedUnit || null;
   }
-  const splitUnit = (e) => splitEntryUnit(e)?.label || ((e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal');
+  // An entry with no loggedUnit splits by its raw basis: grams for a weighed
+  // entry (shown in the viewer's mass unit like everywhere else in this module)
+  // or kcal for a calorie-only one, which is not a mass and never converts.
+  const splitIsMass = (e) => !splitEntryUnit(e) && e.quantityG != null && e.quantityG > 0;
+  const splitUnit = (e) => splitEntryUnit(e)?.label || (splitIsMass(e) ? UI.massEntryUnit() : 'kcal');
   const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
-  const splitDisplayFromAmount = (e, amt) => { const u = splitEntryUnit(e); return u ? amt / u.grams : amt; };
-  const splitAmountFromDisplay = (e, display) => { const u = splitEntryUnit(e); return u ? display * u.grams : display; };
+  const splitDisplayFromAmount = (e, amt) => {
+    const u = splitEntryUnit(e);
+    if (u) return amt / u.grams;
+    return splitIsMass(e) && UI.massInOz() ? LB.gToOz(amt) : amt;
+  };
+  const splitAmountFromDisplay = (e, display) => {
+    const u = splitEntryUnit(e);
+    if (u) return display * u.grams;
+    return splitIsMass(e) && UI.massInOz() ? LB.ozToG(display) : display;
+  };
   const splitDisplayStr = (e, amt) => String(Math.round(splitDisplayFromAmount(e, amt) * 100) / 100);
   // Opens with a fresh even-split draft when there's actually something to
   // split (2+ items); also opens, draft-less, when the hour holds nothing
@@ -1975,7 +2019,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // item, so the fields always stay aware of both the total and each other
   // instead of needing to be reconciled by hand.
   function updateSplitQty(entryId, idx, raw) {
-    const filtered = fdDecimalFilter(raw);
+    // A mass split needs the mass filter's two oz decimals; a unit COUNT or a
+    // kcal-only entry is not a mass and keeps the plain one.
+    const filterEntry = (byHour[splitHour] || []).find(x => x.id === entryId);
+    const filtered = filterEntry && splitIsMass(filterEntry) ? fdMassFilter(raw) : fdDecimalFilter(raw);
     setSplitQtys(prev => {
       const arr = [...(prev[entryId] || [])];
       const n = arr.length;
@@ -3049,7 +3096,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // matches the package numbers as a read-back sanity check), else the
       // stated serving. The user edits it to their actual portion and the
       // macros scale live.
-      setQtyG((label.basis === '100g' || label.basis === '100ml') ? '100' : String(Math.round(label.serving_size_g)));
+      setQtyFromG((label.basis === '100g' || label.basis === '100ml') ? 100 : Math.round(label.serving_size_g));
       openQtySheet();
       return;
     }
@@ -3080,7 +3127,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function pickResult(r) {
     setPendingFood({ ...r, fromCache: !!r.cached });
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
-    setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
+    setQtyFromG(r.servingSizeG != null ? Math.round(r.servingSizeG) : 100);
     openQtySheet();
   }
 
@@ -3114,7 +3161,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setC100Str(String(fdRound1(item.carbs * per100)));
     setF100Str(String(fdRound1(item.fat * per100)));
     setKcal100Touched(false);
-    setQtyG(item.quantityG != null ? String(item.quantityG) : '100');
+    setQtyFromG(item.quantityG != null ? item.quantityG : 100);
     openQtySheet();
   }
 
@@ -3172,7 +3219,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // branch above.
         units: l.units ?? matchingFavorite(l.foodId, l.foodName)?.units,
       });
-      setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
+      setQtyFromG(l.quantityG != null ? l.quantityG : 100);
       openQtySheet();
     } else {
       openCustomAsScalable(l);
@@ -3181,7 +3228,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const qtyPreview = useMemoFd(() => {
     if (!pendingFood) return null;
-    const qty = fdNum(qtyG);
+    const qty = qtyGrams();
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
     // For a scanned/custom item the per-100g P/C/F (and calories, see
@@ -3218,7 +3265,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const satFat = sc1(pendingFood.satFatPer100g);
     const sodiumMg = pendingFood.sodiumMgPer100g == null ? null : Math.round(pendingFood.sodiumMgPer100g * factor);
     return { calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg };
-  }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
+  }, [pendingFood, qtyStr, qtyExactG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
@@ -3234,27 +3281,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   // Switches the amount field between grams and a count of one of
   // pendingFood.units. Switching TO a unit seeds the count from whatever
-  // qtyG currently holds (so picking a unit right after typing/tapping a
-  // gram amount doesn't reset it to 1); switching back to grams just
-  // leaves qtyG as-is, since it was already grams.
+  // the field currently holds (so picking a unit right after typing/tapping
+  // an amount doesn't reset it to 1); switching back leaves the mass as-is.
+  // Both paths go through setQtyFromG: a count times a unit's grams is an
+  // exact figure, it must not survive a round trip through the display unit.
   function selectQtyUnit(idx) {
     setQtyUnitIdx(idx);
     if (idx == null) { setQtyCountStr(''); return; }
     const unit = pendingFood?.units?.[idx];
     if (!unit || !(unit.grams > 0)) return;
-    const curG = fdNum(qtyG);
+    const curG = qtyGrams();
     const count = curG != null ? fdRound1(curG / unit.grams) : 1;
     setQtyCountStr(String(count));
-    setQtyG(String(fdRound1(count * unit.grams)));
+    setQtyFromG(fdRound1(count * unit.grams));
   }
   function onQtyCountChange(v) {
     const filtered = fdDecimalFilter(v);
     setQtyCountStr(filtered);
     const unit = pendingFood?.units?.[qtyUnitIdx];
     const n = fdNum(filtered);
-    setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
+    setQtyFromG(unit && n != null ? fdRound1(n * unit.grams) : null);
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyFromG(null); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -3295,7 +3343,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodId: custom ? null : `${pendingFood.source}:${pendingFood.sourceId}`,
       foodName: custom ? name : pendingFood.name, brand: pendingFood.brand || null,
       source: custom ? 'custom' : pendingFood.source,
-      quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
+      quantityG: qtyGrams(), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
       // The exact unit this entry was logged in (e.g. "Pc"), so a later
@@ -3310,7 +3358,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
     const cal = fdNum(customCal);
     if (!name || p == null || c == null || f == null || cal == null) return null;
-    const g = fdNum(customG);
+    const g = fdMassG(customG);
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
@@ -3394,7 +3442,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function closeEditFavorite() { setEditFavId(null); }
   function addEditUnit() {
     const label = editUnitNewLabel.trim();
-    const grams = fdNum(editUnitNewGrams);
+    const grams = fdMassG(editUnitNewGrams);
     if (!label || !(grams > 0)) return;
     setEditUnits(u => [...u, { label, grams }]);
     setEditUnitNewLabel('');
@@ -3862,7 +3910,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setRecipeLogPrompt({
       recipe: promptRecipe, mode: gramsMode ? 'grams' : 'portions',
       chosenPortions: origChosen, totalPortions,
-      gramsStr: gramsMode ? String(entry.loggedCookedGrams) : '',
+      gramsStr: gramsMode ? fdMassEntry(entry.loggedCookedGrams) : '',
     });
   }
 
@@ -3916,12 +3964,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // with the same unit re-entry toggle for snapshot rows that carry a
   // loggedUnit.
   const ingrEditUnit = ingrEditItem && ingrEditItem.loggedUnit && ingrEditItem.loggedUnit.grams > 0 ? ingrEditItem.loggedUnit : null;
-  const ingrEditEffectiveGrams = !ingrEditUnit ? (fdNum(ingrEditGrams) || 0)
-    : ingrEditCountMode ? (fdNum(ingrEditCountStr) || 0) * ingrEditUnit.grams : (fdNum(ingrEditGrams) || 0);
+  const ingrEditEffectiveGrams = !ingrEditUnit ? (fdMassG(ingrEditGrams) || 0)
+    : ingrEditCountMode ? (fdNum(ingrEditCountStr) || 0) * ingrEditUnit.grams : (fdMassG(ingrEditGrams) || 0);
   function onIngrEditUnitMode(id) {
     if (!ingrEditUnit) return;
     if (id === 'count') {
-      const g = fdNum(ingrEditGrams) || 0;
+      const g = fdMassG(ingrEditGrams) || 0;
       setIngrEditCountStr(g > 0 ? String(Math.round((g / ingrEditUnit.grams) * 10) / 10) : '');
     } else {
       const c = fdNum(ingrEditCountStr) || 0;
@@ -3929,7 +3977,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // (selectQtyUnit): this used to be Math.round (nearest whole gram),
       // silently less precise than the count<->grams conversion everywhere
       // else in the app for the exact same operation (audit-2026-08 O11).
-      setIngrEditGrams(c > 0 ? String(fdRound1(c * ingrEditUnit.grams)) : '');
+      setIngrEditGrams(c > 0 ? fdMassEntry(fdRound1(c * ingrEditUnit.grams)) : '');
     }
     setIngrEditCountMode(id === 'count');
   }
@@ -3953,7 +4001,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
   }, [ingrEditItem, ingrEditGrams, ingrEditCountMode, ingrEditCountStr, store.settings?.netCarbs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(String(item.quantityG ?? '')); setIngrEditCountMode(false); setIngrEditCountStr(''); }
+  function openIngrEdit(item) { setIngrEditItem(item); setIngrEditGrams(item.quantityG == null ? '' : fdMassEntry(item.quantityG)); setIngrEditCountMode(false); setIngrEditCountStr(''); }
   function closeIngrEdit() { setIngrEditItem(null); setIngrEditGrams(''); setIngrEditCountMode(false); setIngrEditCountStr(''); }
   function saveIngrEdit() {
     const g = ingrEditEffectiveGrams;
@@ -3980,7 +4028,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Same confirm the recipe editor uses for row removal (requestRemoveItem):
   // this rewrites historical data, one level of safety.
   async function requestRemoveIngredient(item) {
-    if (!await confirm(`${item.foodName} · ${item.quantityG || 0}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm(`${item.foodName} · ${fdMass(item.quantityG)}`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     setIngredientItems(list => list.filter(i => i._k !== item._k));
   }
   // Picker hands back finished, already-quantified rows (commitStaged); `_k`
@@ -4047,7 +4095,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const { recipe, totalPortions, mode, gramsStr } = recipeLogPrompt;
     const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
     const gramsMode = mode === 'grams' && recipe.cookedWeightG > 0;
-    const gramsVal = gramsMode ? (fdNum(gramsStr) || 0) : null;
+    const gramsVal = gramsMode ? (fdMassG(gramsStr) || 0) : null;
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
@@ -4212,7 +4260,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       mode: typedThisSession ? 'grams' : 'portions',
       chosenPortions: 1,
       totalPortions: recipe.portions || 1,
-      gramsStr: typedThisSession ? String(resolvedCookedWeightG) : '',
+      gramsStr: typedThisSession ? fdMassEntry(resolvedCookedWeightG) : '',
       fromCookingMode: true,
     });
   }
@@ -4347,7 +4395,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
                   <span style={fdEntryMeta}>
-                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                     <span style={fdMetaDivider} />
                     <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                   </span>
@@ -4635,7 +4683,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
-                                {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                 <span style={fdMetaDivider} />
                                 <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                 {e.moc ? ' left for it' : ''}
@@ -4892,7 +4940,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
-                                            {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                            {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                             <span style={fdMetaDivider} />
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
@@ -4910,7 +4958,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                                 <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
                                                 <span style={fdEntryMeta}>
-                                                  {ri.quantityG}g{fdUnitCountLabel(ri) && <span> ({fdUnitCountLabel(ri)})</span>} · <span className="num" style={{ color: UI.warn }}>{ri.calories} kcal</span>
+                                                  {fdMass(ri.quantityG)}{fdUnitCountLabel(ri) && <span> ({fdUnitCountLabel(ri)})</span>} · <span className="num" style={{ color: UI.warn }}>{ri.calories} kcal</span>
                                                   <span style={fdMetaDivider} />
                                                   <FdMacroBits protein={ri.protein} carbs={ri.carbs} fat={ri.fat} />
                                                 </span>
@@ -5147,7 +5195,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
                         <div className="num" style={{ fontSize: 12, color: UI.warn }}>{l.calories} kcal</div>
-                        <div style={fdEntryMeta}>{l.quantityG}g</div>
+                        <div style={fdEntryMeta}>{fdMass(l.quantityG)}</div>
                       </div>
                     </button>
                   ))}
@@ -5174,7 +5222,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div className="num" style={{ fontSize: 12, color: UI.warn }}>{f.calories} kcal</div>
-                          <div style={fdEntryMeta}>{f.quantityG}g</div>
+                          <div style={fdEntryMeta}>{fdMass(f.quantityG)}</div>
                         </div>
                       </button>
                       <button onClick={() => openEditFavorite(f)} aria-label="Edit units" style={fdSideBtn}>
@@ -5282,24 +5330,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 ))}
               </div>
             )}
-            <Field label={qtyUnitIdx == null ? (pendingFood.custom ? 'Portion (g)' : 'Amount (g)') : `Count (${pendingFood.units[qtyUnitIdx].label})`} style={{ marginBottom: qtyUnitIdx == null ? 14 : 4 }}>
+            <Field label={qtyUnitIdx == null ? `${pendingFood.custom ? 'Portion' : 'Amount'} (${UI.massEntryUnit()})` : `Count (${pendingFood.units[qtyUnitIdx].label})`} style={{ marginBottom: qtyUnitIdx == null ? 14 : 4 }}>
               <input
-                value={qtyUnitIdx == null ? qtyG : qtyCountStr}
-                onChange={e => qtyUnitIdx == null ? setQtyG(fdDecimalFilter(e.target.value)) : onQtyCountChange(e.target.value)}
-                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'}
+                value={qtyUnitIdx == null ? qtyStr : qtyCountStr}
+                onChange={e => qtyUnitIdx == null ? setQtyTyped(e.target.value) : onQtyCountChange(e.target.value)}
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? UI.massEntryUnit() : 'count'}
                 style={fdBigInput} />
             </Field>
             {qtyUnitIdx != null && (
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>= {qtyG || 0}g</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>= {fdMass(qtyGrams() || 0)}</div>
             )}
             {qtyUnitIdx == null && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                {[50, 100, 150, 200].map(g => (
-                  <button key={g} onClick={() => setQtyG(String(g))} style={fdPreset}>{g}g</button>
+                {/* Native presets per unit rather than converted ones: 50/100/150/200g
+                    are round metric portions, their oz equivalents (1.8/3.5/5.3/7.1)
+                    are not round anything. Imperial gets the portions a US kitchen
+                    actually thinks in. Both store EXACT grams via setQtyFromG, so the
+                    label is the only thing the unit changes. */}
+                {(UI.massInOz() ? [LB.ozToG(2), LB.ozToG(4), LB.ozToG(6), LB.ozToG(8)] : [50, 100, 150, 200]).map(g => (
+                  <button key={g} onClick={() => setQtyFromG(g)} style={fdPreset}>{fdMass(g)}</button>
                 ))}
                 {pendingFood.servingSizeG > 0 && (
-                  <button onClick={() => setQtyG(String(Math.round(pendingFood.servingSizeG)))} style={fdPreset}>
-                    {pendingFood.servingLabel || 'Serving'} ({Math.round(pendingFood.servingSizeG)}g)
+                  <button onClick={() => setQtyFromG(Math.round(pendingFood.servingSizeG))} style={fdPreset}>
+                    {pendingFood.servingLabel || 'Serving'} ({fdMass(Math.round(pendingFood.servingSizeG))})
                   </button>
                 )}
               </div>
@@ -5353,8 +5406,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <Field label="Amount (g, optional)" style={{ flex: 1 }}>
-            <input value={customG} onChange={e => setCustomG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+          <Field label={`Amount (${UI.massEntryUnit()}, optional)`} style={{ flex: 1 }}>
+            <input value={customG} onChange={e => setCustomG(fdMassFilter(e.target.value))} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
           </Field>
           <Field label="Calories (kcal, from macros)" style={{ flex: 1 }}>
             <input value={customCal} onChange={e => onCustomCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
@@ -5474,7 +5527,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <button onClick={() => editMealItem(i)} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
                   <span style={fdEntryMeta}>
-                    {i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
+                    {fdMass(i.quantityG)} · <span className="num" style={{ color: UI.warn }}>{kcal} kcal</span>
                     <span style={fdMetaDivider} />
                     <FdMacroBits protein={i.protein} carbs={i.carbs} fat={i.fat} />
                   </span>
@@ -5591,7 +5644,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                   <div style={fdEntryName}>{e.foodName}</div>
                   <span style={fdEntryMeta}>
-                    {e.time} · {fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                    {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                     <span style={fdMetaDivider} />
                     <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                   </span>
@@ -5767,7 +5820,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div key={e.id} style={fdEntryRow}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={fdEntryName}>{e.foodName}</div>
-                    <span style={fdEntryMeta}>{fdDisplayG(e) ? `${fdDisplayG(e)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
+                    <span style={fdEntryMeta}>{fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span></span>
                   </div>
                 </div>
               ))}
@@ -5789,7 +5842,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
             {editUnits.map((u, i) => (
               <div key={i} style={fdEntryRow}>
-                <span style={fdEntryName}>1 {u.label} = {u.grams}g</span>
+                <span style={fdEntryName}>1 {u.label} = {fdMass(u.grams)}</span>
                 <button onClick={() => removeEditUnit(i)} aria-label="Remove unit" style={fdInlineDeleteBtn}>
                   <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
                 </button>
@@ -5801,11 +5854,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Field label="Unit name" style={{ flex: 1 }}>
             <TextInput value={editUnitNewLabel} onChange={setEditUnitNewLabel} placeholder="e.g. Pc" />
           </Field>
-          <Field label="Grams" style={{ flex: 1 }}>
-            <input value={editUnitNewGrams} onChange={e => setEditUnitNewGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+          <Field label={UI.massInOz() ? 'Ounces' : 'Grams'} style={{ flex: 1 }}>
+            <input value={editUnitNewGrams} onChange={e => setEditUnitNewGrams(fdMassFilter(e.target.value))} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
           </Field>
         </div>
-        <Btn kind="ghost" onClick={addEditUnit} disabled={!editUnitNewLabel.trim() || !(fdNum(editUnitNewGrams) > 0)} style={{ width: '100%', marginBottom: 16 }}>
+        <Btn kind="ghost" onClick={addEditUnit} disabled={!editUnitNewLabel.trim() || !(fdMassG(editUnitNewGrams) > 0)} style={{ width: '100%', marginBottom: 16 }}>
           <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add unit
         </Btn>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -5864,14 +5917,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           const gramsCapable = recipeLogPrompt.recipe.cookedWeightG > 0;
           const gramsModeOn = gramsCapable && recipeLogPrompt.mode === 'grams';
           const qtyLabel = gramsModeOn
-            ? `${fdNum(recipeLogPrompt.gramsStr) || 0}g`
+            ? fdMass(fdMassG(recipeLogPrompt.gramsStr) || 0)
             : `${recipeLogPrompt.chosenPortions} portion${recipeLogPrompt.chosenPortions === 1 ? '' : 's'}`;
           // Portions mode is already safe (the Stepper below floors at 0.5),
           // but grams mode is a free-typed field with no min at all, so a
           // cleared or "0" input would otherwise stage a real, 0-calorie
           // "Chicken Bowl (0g)" entry, the exact phantom-entry class every
           // other add flow in this file already guards against.
-          const qtyValid = gramsModeOn ? fdNum(recipeLogPrompt.gramsStr) > 0 : recipeLogPrompt.chosenPortions > 0;
+          const qtyValid = gramsModeOn ? fdMassG(recipeLogPrompt.gramsStr) > 0 : recipeLogPrompt.chosenPortions > 0;
           return (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
@@ -5885,9 +5938,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     // switching units mid-edit shouldn't reset the quantity.
                     if (!p || p.mode === id) return p;
                     if (id === 'grams') {
-                      return { ...p, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(p.chosenPortions, p.recipe.cookedWeightG, p.totalPortions)))) };
+                      return { ...p, mode: id, gramsStr: fdMassEntry(Math.max(0, Math.round(fdPortionsToGrams(p.chosenPortions, p.recipe.cookedWeightG, p.totalPortions)))) };
                     }
-                    return { ...p, mode: id, chosenPortions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(p.gramsStr) || 0, p.recipe.cookedWeightG, p.totalPortions) * 2) / 2) };
+                    return { ...p, mode: id, chosenPortions: Math.max(0.5, Math.round(fdGramsToPortions(fdMassG(p.gramsStr) || 0, p.recipe.cookedWeightG, p.totalPortions) * 2) / 2) };
                   })} style={fdSegBtn(recipeLogPrompt.mode === id)}>{label}</button>
                 ))}
               </div>
@@ -5898,9 +5951,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               // off a 960g default is exactly the "tap fifty times" complaint
               // this replaced), unlike portions below where a half-step really
               // is normally the whole adjustment.
-              <Field label="Amount (g)" style={{ marginBottom: 20 }}>
-                <input value={recipeLogPrompt.gramsStr} onChange={e => setRecipeLogPrompt(p => p ? { ...p, gramsStr: fdDecimalFilter(e.target.value) } : p)}
-                  type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              <Field label={`Amount (${UI.massEntryUnit()})`} style={{ marginBottom: 20 }}>
+                <input value={recipeLogPrompt.gramsStr} onChange={e => setRecipeLogPrompt(p => p ? { ...p, gramsStr: fdMassFilter(e.target.value) } : p)}
+                  type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
               </Field>
             ) : (
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
@@ -6087,7 +6140,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ marginBottom: 12 }}>
           <FdMacroHero label="Totals" calories={ingredientTotals.calories} protein={ingredientTotals.protein} carbs={ingredientTotals.carbs} fat={ingredientTotals.fat} compact />
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, textAlign: 'center' }}>
-            {ingredientTotals.grams}g raw · {ingredientItems.length} ingredient{ingredientItems.length === 1 ? '' : 's'}
+            {fdMass(ingredientTotals.grams)} raw · {ingredientItems.length} ingredient{ingredientItems.length === 1 ? '' : 's'}
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '42vh', overflowY: 'auto', marginBottom: 12 }}>
@@ -6103,7 +6156,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <span style={{ ...fdEntryName, fontSize: 12 }}>{item.foodName}</span>
                 </div>
                 <span style={fdEntryMeta}>
-                  {item.quantityG || 0}g{fdUnitCountLabel(item) && <span> ({fdUnitCountLabel(item)})</span>} · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
+                  {fdMass(item.quantityG)}{fdUnitCountLabel(item) && <span> ({fdUnitCountLabel(item)})</span>} · <span className="num" style={{ color: UI.warn }}>{item.calories} kcal</span>
                   <span style={fdMetaDivider} />
                   <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
                 </span>
@@ -6133,11 +6186,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <button onClick={() => onIngrEditUnitMode('count')} style={fdSegBtn(ingrEditCountMode)}>{ingrEditUnit.label}</button>
           </div>
         )}
-        <Field label={ingrEditUnit && ingrEditCountMode ? `Count (${ingrEditUnit.label})` : 'Amount (g)'} style={{ marginBottom: 16 }}>
+        <Field label={ingrEditUnit && ingrEditCountMode ? `Count (${ingrEditUnit.label})` : `Amount (${UI.massEntryUnit()})`} style={{ marginBottom: 16 }}>
           <input
             value={ingrEditUnit && ingrEditCountMode ? ingrEditCountStr : ingrEditGrams}
-            onChange={e => ingrEditUnit && ingrEditCountMode ? setIngrEditCountStr(fdDecimalFilter(e.target.value)) : setIngrEditGrams(fdDecimalFilter(e.target.value))}
-            type="text" inputMode="decimal" placeholder={ingrEditUnit && ingrEditCountMode ? 'count' : 'g'} style={fdInputStyle} />
+            onChange={e => ingrEditUnit && ingrEditCountMode ? setIngrEditCountStr(fdDecimalFilter(e.target.value)) : setIngrEditGrams(fdMassFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder={ingrEditUnit && ingrEditCountMode ? 'count' : UI.massEntryUnit()} style={fdInputStyle} />
         </Field>
         {ingrEditPreview && (
           <FdMacroPreview calories={ingrEditPreview.calories} protein={ingrEditPreview.protein} carbs={ingrEditPreview.carbs} fat={ingrEditPreview.fat}
@@ -6706,7 +6759,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   function openAddFood(fav) {
     const q = fav.quantityG || 100;
     setPickerOpen(false);
-    const d = { id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: String(q), hour: 8, dayType: 'any' };
+    const d = { id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: fdMassEntry(q), hour: 8, dayType: 'any' };
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
   }
@@ -6743,7 +6796,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       foodName: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId, fromCache: !!r.cached,
       per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null,
         sug: r.sugarPer100g ?? null, sat: r.satFatPer100g ?? null, sod: r.sodiumMgPer100g ?? null },
-      gramsStr: r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100',
+      gramsStr: fdMassEntry(r.servingSizeG != null ? Math.round(r.servingSizeG) : 100),
       hour: 8, dayType: 'any',
     };
     draftInitialSnap.current = snapDraft(d);
@@ -6818,7 +6871,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       foodName: label.name || '', brand: label.brand || null, source: 'custom',
       per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null,
         sug: per100.sug ?? null, sat: per100.sat ?? null, sod: per100.sod ?? null },
-      gramsStr: label.serving_size_g > 0 ? String(Math.round(label.serving_size_g)) : '100',
+      gramsStr: fdMassEntry(label.serving_size_g > 0 ? Math.round(label.serving_size_g) : 100),
       hour: 8, dayType: 'any',
     };
     draftInitialSnap.current = snapDraft(d);
@@ -6830,7 +6883,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       d = { id: slot.id, kind: 'recipe', recipeId: slot.recipeId ?? null, name: slot.foodName, recipe: null, portions: null, hour: slot.hour, dayType: slot.dayType, slot };
     } else {
       const q = slot.quantityG || 100;
-      d = { id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: String(q), hour: slot.hour, dayType: slot.dayType };
+      d = { id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: fdMassEntry(q), hour: slot.hour, dayType: slot.dayType };
     }
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
@@ -6878,7 +6931,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const draftBuilt = useMemoFd(() => {
     if (!draft) return null;
     if (draft.kind === 'food') {
-      const g = fdNum(draft.gramsStr);
+      const g = fdMassG(draft.gramsStr);
       if (g == null || !(g > 0)) return null;
       const sc = g / 100;
       return {
@@ -6900,7 +6953,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       // fdEffectiveChosenPortions, just against draft's own field names
       // (portions here, not chosenPortions).
       const gramsMode = draft.mode === 'grams' && recipe.cookedWeightG > 0;
-      const gramsVal = gramsMode ? (fdNum(draft.gramsStr) || 0) : null;
+      const gramsVal = gramsMode ? (fdMassG(draft.gramsStr) || 0) : null;
       const chosenPortions = gramsMode ? fdGramsToPortions(gramsVal, recipe.cookedWeightG, totalPortions) : draft.portions;
       // Same guard the food branch above already has (g == null || !(g > 0)):
       // a cleared/zero grams field here would otherwise build and let
@@ -7100,7 +7153,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                           {slot.foodName}
                         </span>
                         <span style={fdEntryMeta}>
-                          {fdDisplayG(slot) ? `${fdDisplayG(slot)}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                          {fdDisplayG(slot) ? `${fdMassOf(slot)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
                           <span style={fdMetaDivider} />
                           <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
                         </span>
@@ -7195,7 +7248,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                   <button key={f.id} onClick={() => openAddFood(f)} style={fdResultRow}>
                     <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <div style={fdEntryName}>{f.foodName}</div>
-                      <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
+                      <div style={fdEntryMeta}>{fdMass(f.quantityG)} · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
                     </div>
                     <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
                   </button>
@@ -7244,8 +7297,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         {draft && (
           <>
             {draft.kind === 'food' ? (
-              <Field label="Amount (g)" style={{ marginBottom: 14 }}>
-                <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              <Field label={`Amount (${UI.massEntryUnit()})`} style={{ marginBottom: 14 }}>
+                <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdMassFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
               </Field>
             ) : draft.recipe ? (
               <div style={{ marginBottom: 14 }}>
@@ -7258,9 +7311,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                         // prompt's own toggle.
                         if (!d || d.mode === id) return d;
                         if (id === 'grams') {
-                          return { ...d, mode: id, gramsStr: String(Math.max(0, Math.round(fdPortionsToGrams(d.portions, d.recipe.cookedWeightG, d.recipe.portions || 1)))) };
+                          return { ...d, mode: id, gramsStr: fdMassEntry(Math.max(0, Math.round(fdPortionsToGrams(d.portions, d.recipe.cookedWeightG, d.recipe.portions || 1)))) };
                         }
-                        return { ...d, mode: id, portions: Math.max(0.5, Math.round(fdGramsToPortions(fdNum(d.gramsStr) || 0, d.recipe.cookedWeightG, d.recipe.portions || 1) * 2) / 2) };
+                        return { ...d, mode: id, portions: Math.max(0.5, Math.round(fdGramsToPortions(fdMassG(d.gramsStr) || 0, d.recipe.cookedWeightG, d.recipe.portions || 1) * 2) / 2) };
                       })} style={fdSegBtn(draft.mode === id)}>{label}</button>
                     ))}
                   </div>
@@ -7270,8 +7323,8 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                   // for a fixed step to ever be the right size, unlike
                   // portions below where a half-step really is normally the
                   // whole adjustment.
-                  <Field label="Amount (g)">
-                    <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  <Field label={`Amount (${UI.massEntryUnit()})`}>
+                    <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdMassFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
                   </Field>
                 ) : (
                   <>
@@ -7600,12 +7653,12 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   function openEdit(item) {
     setEditItem(item);
     setEditDraft(item.displayName);
-    setPkgDraft(item.packageSizeG != null ? String(item.packageSizeG) : '');
+    setPkgDraft(item.packageSizeG != null ? fdMassEntry(item.packageSizeG) : '');
     setStockDraft('');
     setStockPacksDraft('');
     setStockExtraDraft('');
     setThresholdPacksDraft(item.lowStockThresholdG != null && item.packageSizeG > 0 ? String(fdRound1(item.lowStockThresholdG / item.packageSizeG)) : '');
-    setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? String(item.lowStockThresholdG) : '');
+    setThresholdGramsDraft(item.lowStockThresholdG != null && !(item.packageSizeG > 0) ? fdMassEntry(item.lowStockThresholdG) : '');
     setExcludeDraft(item.permanentExcluded ? 'permanent' : (item.tempExcludedUntil || null));
   }
   function closeEdit() {
@@ -7622,9 +7675,13 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   function isEditDirty() {
     if (!editItem) return false;
     if (editDraft !== editItem.displayName) return true;
-    if (pkgDraft !== (editItem.packageSizeG != null ? String(editItem.packageSizeG) : '')) return true;
+    // The two MASS drafts rebuild their comparison value with fdMassEntry, the
+    // same way openEdit prefilled them. A String(grams) here would never match
+    // an imperial draft ("17.64" vs "500") and the sheet would claim to be dirty
+    // the moment it opened. thresholdPacksDraft is a pack COUNT, not a mass.
+    if (pkgDraft !== (editItem.packageSizeG != null ? fdMassEntry(editItem.packageSizeG) : '')) return true;
     if (thresholdPacksDraft !== (editItem.lowStockThresholdG != null && editItem.packageSizeG > 0 ? String(fdRound1(editItem.lowStockThresholdG / editItem.packageSizeG)) : '')) return true;
-    if (thresholdGramsDraft !== (editItem.lowStockThresholdG != null && !(editItem.packageSizeG > 0) ? String(editItem.lowStockThresholdG) : '')) return true;
+    if (thresholdGramsDraft !== (editItem.lowStockThresholdG != null && !(editItem.packageSizeG > 0) ? fdMassEntry(editItem.lowStockThresholdG) : '')) return true;
     if (excludeDraft !== (editItem.permanentExcluded ? 'permanent' : (editItem.tempExcludedUntil || null))) return true;
     return !!(stockDraft.trim() || stockPacksDraft.trim() || stockExtraDraft.trim());
   }
@@ -7647,7 +7704,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // non-numeric characters, it never caps magnitude, so an accidental
     // extra digit or a pasted barcode-length number would otherwise sail
     // straight into the DB as-is.
-    const packageSizeG = fdClampQtyG(fdNum(pkgDraft));
+    const packageSizeG = fdClampQtyG(fdMassG(pkgDraft));
     // Reads whichever unit is currently live off the just-computed
     // packageSizeG (not editItem's old one): a package size typed in this
     // same visit should convert its packs threshold against the NEW size,
@@ -7655,7 +7712,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // contents (if any, from before a mode switch) are left as-is on
     // screen but don't affect what gets saved.
     const thresholdPacksTyped = fdNum(thresholdPacksDraft);
-    const thresholdGramsTyped = fdNum(thresholdGramsDraft);
+    const thresholdGramsTyped = fdMassG(thresholdGramsDraft);
     // A package size added or removed in THIS visit flips which of the two
     // draft fields above is "live", but openEdit only ever prefilled the
     // field matching the item's ORIGINAL mode (see its comment), so the
@@ -7699,9 +7756,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     // switch, so it's what's currently visible/intended).
     let stockTyped = null;
     if (packageSizeG > 0 && (stockPacksDraft.trim() || stockExtraDraft.trim())) {
-      stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdNum(stockExtraDraft) || 0);
+      stockTyped = (fdNum(stockPacksDraft) || 0) * packageSizeG + (fdMassG(stockExtraDraft) || 0);
     } else if (stockDraft.trim()) {
-      stockTyped = fdNum(stockDraft);
+      stockTyped = fdMassG(stockDraft);
     }
     if (stockTyped != null) { patch.stockBaselineG = fdClampQtyG(stockTyped); patch.stockSetAt = new Date().toISOString(); }
     fdSetShoppingPref(setStore, editItem, patch);
@@ -7751,7 +7808,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
       // the same pack count the headline showed instead of dividing the
       // gram total back out to recover it.
       packsStr: hasPkg ? String(fdShoppingPacks(item.grams, item.packageSizeG)) : '',
-      gramsStr: hasPkg ? '' : String(suggestedG),
+      gramsStr: hasPkg ? '' : fdMassEntry(suggestedG),
     });
   }
   function closeBoughtPrompt() { setBoughtPrompt(null); }
@@ -7761,7 +7818,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
       const packs = fdNum(p.packsStr);
       return packs > 0 ? fdClampQtyG(packs * p.item.packageSizeG) : null;
     }
-    const g = fdNum(p.gramsStr);
+    const g = fdMassG(p.gramsStr);
     return g > 0 ? fdClampQtyG(g) : null;
   }
   function confirmBoughtPrompt() {
@@ -8184,8 +8241,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
         <Field label="Show as" accent style={{ marginBottom: 14 }}>
           <TextInput value={editDraft} onChange={setEditDraft} placeholder={editItem?.foodName} autoFocus />
         </Field>
-        <Field label="Package size (g)" accent style={{ marginBottom: 6 }}>
-          <input value={pkgDraft} onChange={e => setPkgDraft(fdDecimalFilter(e.target.value))}
+        <Field label={`Package size (${UI.massEntryUnit()})`} accent style={{ marginBottom: 6 }}>
+          <input value={pkgDraft} onChange={e => setPkgDraft(fdMassFilter(e.target.value))}
             type="text" inputMode="decimal" placeholder="e.g. 400" style={fdInputStyle} />
         </Field>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
@@ -8207,7 +8264,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
               )}
             </div>
           )}
-          {fdNum(pkgDraft) > 0 ? (
+          {fdMassG(pkgDraft) > 0 ? (
             // A package size is already known, so stock is worth entering in
             // packs instead of doing the pack-to-gram math yourself: "2
             // packs" beats "800g", and "2 packs + 150g" (a couple of sealed
@@ -8220,27 +8277,27 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                   type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
               </Field>
               <Field label="+ grams" accent style={{ flex: 1, marginBottom: 0 }}>
-                <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdDecimalFilter(e.target.value))}
+                <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdMassFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
               </Field>
             </div>
           ) : (
-            <Field label="Update stock (g)" accent style={{ marginBottom: 6 }}>
-              <input value={stockDraft} onChange={e => setStockDraft(fdDecimalFilter(e.target.value))}
+            <Field label={`Update stock (${UI.massEntryUnit()})`} accent style={{ marginBottom: 6 }}>
+              <input value={stockDraft} onChange={e => setStockDraft(fdMassFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
             </Field>
           )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
             Tracks what's actually eaten since. Leave blank to keep the current count unchanged.
           </div>
-          {fdNum(pkgDraft) > 0 ? (
+          {fdMassG(pkgDraft) > 0 ? (
             <Field label="Warn when below (packs)" accent style={{ marginBottom: 6 }}>
               <input value={thresholdPacksDraft} onChange={e => setThresholdPacksDraft(fdDecimalFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
             </Field>
           ) : (
             <Field label="Warn when below (g)" accent style={{ marginBottom: 6 }}>
-              <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdDecimalFilter(e.target.value))}
+              <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdMassFilter(e.target.value))}
                 type="text" inputMode="decimal" placeholder="e.g. 1000" style={fdInputStyle} />
             </Field>
           )}
@@ -8304,8 +8361,8 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                   </div>
                 </>
               ) : (
-                <Field label="Amount (g)" accent style={{ marginBottom: 16 }}>
-                  <input value={boughtPrompt.gramsStr} onChange={e => setBoughtPrompt(p => ({ ...p, gramsStr: fdDecimalFilter(e.target.value) }))}
+                <Field label={`Amount (${UI.massEntryUnit()})`} accent style={{ marginBottom: 16 }}>
+                  <input value={boughtPrompt.gramsStr} onChange={e => setBoughtPrompt(p => ({ ...p, gramsStr: fdMassFilter(e.target.value) }))}
                     type="text" inputMode="decimal" placeholder="e.g. 500" style={fdInputStyle} autoFocus />
                 </Field>
               )}
@@ -8431,7 +8488,7 @@ function RecipePoster({ captureRef, name, items, portions, totals, netCarbs, log
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, lineHeight: 1.3 }}>{i.foodName}</div>
                     <div style={{ ...rcpNum, fontSize: 10, color: UI.inkFaint, marginTop: 3, lineHeight: 1.4 }}>
-                      {i.quantityG}g{unitLabel && <span style={{ color: UI.inkSoft }}> ({unitLabel})</span>}<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
+                      {fdMass(i.quantityG)}{unitLabel && <span style={{ color: UI.inkSoft }}> ({unitLabel})</span>}<span style={{ color: UI.warn, marginLeft: 8 }}>{kcal} kcal</span>
                       {RCP_MACRO_LABELS.map(([k, label]) => (
                         <span key={k} style={{ color: FD_MACRO_COLORS[k], marginLeft: 10 }}>{label}{Math.round(i[k] || 0)}</span>
                       ))}
@@ -8579,7 +8636,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // the head-only/connected invariants the editor renders under.
     const it = fdNormalizeSteps((recipe?.items || []).map(i => ({ ...i, id: i.id || LB.uid(), originalFoodName: i.originalFoodName || i.foodName })));
     const p = recipe?.portions || 1;
-    const cw = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+    const cw = recipe?.cookedWeightG != null ? fdMassEntry(recipe.cookedWeightG) : '';
     setName(n); setItems(it); setPortions(p); setCookedWeightG(cw);
     initialSnap.current = JSON.stringify({ name: n, items: it, portions: p, cookedWeightG: cw });
   }, [open, recipe]);
@@ -8653,7 +8710,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // already shows: one action, one level of safety, no matter which of the two
   // affordances the user reaches for.
   async function requestRemoveItem(item) {
-    if (!await confirm(`${item.foodName} · ${item.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm(`${item.foodName} · ${fdMass(item.quantityG)}`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     removeItem(item.id);
   }
   // Array order IS the deliberate prep order now (see the ingredient list
@@ -8682,7 +8739,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   function setStepLabel(id, value) {
     setItems(list => list.map(i => (i.id !== id ? i : { ...i, stepLabel: value ? value : null })));
   }
-  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); setEditName(item.foodName || ''); setEditCountMode(false); setEditCountStr(''); }
+  function openEditItem(item) { setEditItem(item); setEditGrams(item.quantityG == null ? '' : fdMassEntry(item.quantityG)); setEditName(item.foodName || ''); setEditCountMode(false); setEditCountStr(''); }
   function closeEditItem() { setEditItem(null); setEditGrams(''); setEditName(''); setEditCountMode(false); setEditCountStr(''); }
   function openNoteItem(item) { setNoteItem(item); setNoteText(item.note || ''); }
   function closeNoteItem() { setNoteItem(null); setNoteText(''); }
@@ -8703,12 +8760,12 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   // picker's own quantity sheet does. grams stays the canonical stored
   // value in both modes, the count is derived and re-derived.
   const editUnit = editItem && editItem.loggedUnit && editItem.loggedUnit.grams > 0 ? editItem.loggedUnit : null;
-  const editEffectiveGrams = !editUnit ? (fdNum(editGrams) || 0)
-    : editCountMode ? (fdNum(editCountStr) || 0) * editUnit.grams : (fdNum(editGrams) || 0);
+  const editEffectiveGrams = !editUnit ? (fdMassG(editGrams) || 0)
+    : editCountMode ? (fdNum(editCountStr) || 0) * editUnit.grams : (fdMassG(editGrams) || 0);
   function onEditUnitMode(id) {
     if (!editUnit) return;
     if (id === 'count') {
-      const g = fdNum(editGrams) || 0;
+      const g = fdMassG(editGrams) || 0;
       setEditCountStr(g > 0 ? String(Math.round((g / editUnit.grams) * 10) / 10) : '');
     } else {
       const c = fdNum(editCountStr) || 0;
@@ -8717,7 +8774,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
       // Math.round (nearest whole gram), silently less precise than the
       // count<->grams conversion everywhere else for the same operation
       // (audit-2026-08 O11).
-      setEditGrams(c > 0 ? String(fdRound1(c * editUnit.grams)) : '');
+      setEditGrams(c > 0 ? fdMassEntry(fdRound1(c * editUnit.grams)) : '');
     }
     setEditCountMode(id === 'count');
   }
@@ -8771,7 +8828,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
   }
   async function removeEditItem() {
     if (!editItem) return;
-    const ok = await confirm(`${editItem.foodName} · ${editItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true });
+    const ok = await confirm(`${editItem.foodName} · ${fdMass(editItem.quantityG)}`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true });
     if (!ok) return;
     removeItem(editItem.id);
     closeEditItem();
@@ -8787,7 +8844,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     // re-establish the head-only/connected invariants one last time, so
     // nothing stale (an orphaned id from a late edit) reaches the store.
     const finalItems = fdNormalizeSteps(items.map(i => i.stepLabel != null ? { ...i, stepLabel: String(i.stepLabel).trim() || null } : i));
-    onSave({ name: trimmed, items: finalItems, portions, cookedWeightG: fdNum(cookedWeightG) });
+    onSave({ name: trimmed, items: finalItems, portions, cookedWeightG: fdMassG(cookedWeightG) });
   }
   const canSave = !!(name.trim() && items.length);
   // Run list for the step layout below (badge ordinals, rail, and the
@@ -8887,8 +8944,8 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             (FoodScreen's addRecipeToLog / FoodTemplateScreen's openAddRecipe).
             Never auto-filled from the ingredient total below: cooking loses
             or gains water weight, so the two numbers are rarely the same. */}
-        <Field label="Cooked weight (g), optional">
-          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal"
+        <Field label={`Cooked weight (${UI.massEntryUnit()}), optional`}>
+          <input value={cookedWeightG} onChange={e => setCookedWeightG(fdMassFilter(e.target.value))} type="text" inputMode="decimal"
             placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6 }}>
             Raw ingredients weigh {Math.round(rawGramsTotal)}g. Weigh the actual finished dish, it usually differs.
@@ -8943,7 +9000,7 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
                             <span style={{ ...fdEntryName, fontSize: 12 }}>{it.foodName}</span>
                           </div>
                           <span style={fdEntryMeta}>
-                            {it.quantityG}g{unitLabel && <span> ({unitLabel})</span>} · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(it.protein, it.carbs, it.fat, netCarbs ? it.fiber : null) || 0)} kcal</span>
+                            {fdMass(it.quantityG)}{unitLabel && <span> ({unitLabel})</span>} · <span className="num" style={{ color: UI.warn }}>{Math.round(LB.caloriesFromMacros(it.protein, it.carbs, it.fat, netCarbs ? it.fiber : null) || 0)} kcal</span>
                             <span style={fdMetaDivider} />
                             <FdMacroBits protein={it.protein} carbs={it.carbs} fat={it.fat} />
                           </span>
@@ -9027,11 +9084,11 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
             <button onClick={() => onEditUnitMode('count')} style={fdSegBtn(editCountMode)}>{editUnit.label}</button>
           </div>
         )}
-        <Field label={editUnit && editCountMode ? `Count (${editUnit.label})` : 'Amount (g)'} style={{ marginBottom: 16 }}>
+        <Field label={editUnit && editCountMode ? `Count (${editUnit.label})` : `Amount (${UI.massEntryUnit()})`} style={{ marginBottom: 16 }}>
           <input
             value={editUnit && editCountMode ? editCountStr : editGrams}
-            onChange={e => editUnit && editCountMode ? setEditCountStr(fdDecimalFilter(e.target.value)) : setEditGrams(fdDecimalFilter(e.target.value))}
-            type="text" inputMode="decimal" placeholder={editUnit && editCountMode ? 'count' : 'g'} style={fdInputStyle} />
+            onChange={e => editUnit && editCountMode ? setEditCountStr(fdDecimalFilter(e.target.value)) : setEditGrams(fdMassFilter(e.target.value))}
+            type="text" inputMode="decimal" placeholder={editUnit && editCountMode ? 'count' : UI.massEntryUnit()} style={fdInputStyle} />
         </Field>
         {editItemPreview && (
           <FdMacroPreview calories={editItemPreview.calories} protein={editItemPreview.protein} carbs={editItemPreview.carbs} fat={editItemPreview.fat}
@@ -9326,14 +9383,17 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
       initItems = fdNormalizeSteps((draft.items || []).map(i => (i.id ? { ...i } : { ...i, id: LB.uid() })));
       initIdx = Math.max(0, Math.min(draft.currentIdx || 0, initItems.length - 1));
       initStep = draft.step === 'cookedWeight' ? 'cookedWeight' : 'ingredients';
-      initCookedWeightG = draft.cookedWeightG || '';
+      // The draft stores GRAMS (canonical), not the display string, so a cook
+      // started before an imperial/metric switch still resumes at the right
+      // weight. Legacy drafts hold a gram string, which reads identically here.
+      initCookedWeightG = draft.cookedWeightG == null ? '' : fdMassEntry(draft.cookedWeightG);
       initSwapEvents = draft.swapEvents || [];
       startedAtRef.current = draft.startedAt || new Date().toISOString();
     } else {
       initItems = idsFilled.map(i => ({ ...i }));
       initIdx = 0;
       initStep = 'ingredients';
-      initCookedWeightG = recipe?.cookedWeightG != null ? String(recipe.cookedWeightG) : '';
+      initCookedWeightG = recipe?.cookedWeightG != null ? fdMassEntry(recipe.cookedWeightG) : '';
       initSwapEvents = [];
       startedAtRef.current = new Date().toISOString();
     }
@@ -9345,7 +9405,13 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     // a from-scratch open, where it's the same prefill by construction)
     // means untouched.
     const recipeCookedWeight = recipe?.cookedWeightG ?? null;
-    cookedWeightTypedRef.current = fdNum(initCookedWeightG) > 0 && fdNum(initCookedWeightG) !== recipeCookedWeight;
+    // Compared as DISPLAY strings, not as grams: a gram figure round-tripped
+    // through ounces comes back up to 0.1g off (500g -> 17.64oz -> 500.1g), so a
+    // gram-vs-gram !== here would read every untouched imperial cook as "typed"
+    // and then wrongly prefill the log prompt's grams mode. Both sides are built
+    // by fdMassEntry, so the string comparison is exact in either unit.
+    const recipeCookedWeightStr = recipeCookedWeight == null ? '' : fdMassEntry(recipeCookedWeight);
+    cookedWeightTypedRef.current = fdMassG(initCookedWeightG) > 0 && initCookedWeightG !== recipeCookedWeightStr;
     setItems(initItems);
     setCurrentIdx(initIdx);
     setStep(initStep);
@@ -9354,7 +9420,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     setDiffOpen(false);
     setDiffList([]);
     baseItemRef.current = initItems[initIdx] || null;
-    setAmountStr(initItems[initIdx] ? String(initItems[initIdx].quantityG ?? '') : '');
+    setAmountStr(initItems[initIdx]?.quantityG == null ? '' : fdMassEntry(initItems[initIdx].quantityG));
   }, [open, recipe, draft]);
 
   // Persists on every change so an app-kill mid-cook survives (this device
@@ -9367,13 +9433,13 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // them as a plain amount change (or drop them) instead of "swapped".
   useEffectFd(() => {
     if (!open || !recipe || !items.length) return;
-    fdWriteCookingDraft({ recipeId: recipe.id, startedAt: startedAtRef.current, step, currentIdx, items, cookedWeightG, swapEvents });
+    fdWriteCookingDraft({ recipeId: recipe.id, startedAt: startedAtRef.current, step, currentIdx, items, cookedWeightG: fdMassG(cookedWeightG), swapEvents });
   }, [open, recipe, step, currentIdx, items, cookedWeightG, swapEvents]);
 
   function syncAmountField(idx, list) {
     const it = list[idx];
     baseItemRef.current = it || null;
-    setAmountStr(it ? String(it.quantityG ?? '') : '');
+    setAmountStr(it?.quantityG == null ? '' : fdMassEntry(it.quantityG));
   }
   function goToIndex(idx, list) {
     const arr = list || items;
@@ -9405,10 +9471,10 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     : 32;
 
   function onAmountChange(v) {
-    const filtered = fdDecimalFilter(v);
+    const filtered = fdMassFilter(v);
     setAmountStr(filtered);
     const base = baseItemRef.current;
-    const g = fdNum(filtered);
+    const g = fdMassG(filtered);
     if (!base || !(g > 0) || !(base.quantityG > 0)) return;
     dirtyRef.current = true;
     const factor = g / base.quantityG;
@@ -9498,7 +9564,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   }
   async function requestRemove() {
     if (items.length <= 1 || !curItem) return;
-    if (!await confirm(`${curItem.foodName} · ${curItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    if (!await confirm(`${curItem.foodName} · ${fdMass(curItem.quantityG)}`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
     dirtyRef.current = true;
     const removedId = curItem.id;
     // Label rescue before the removal (a removed labeled run head hands its
@@ -9544,7 +9610,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   function applySwap(picked) {
     if (!curItem) return;
     dirtyRef.current = true;
-    const keptGrams = fdNum(amountStr) || curItem.quantityG || 0;
+    const keptGrams = fdMassG(amountStr) || curItem.quantityG || 0;
     const factor = picked.quantityG > 0 ? keptGrams / picked.quantityG : 0;
     const swapped = {
       ...curItem,
@@ -9569,7 +9635,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     const next = items.map((it, i) => i === currentIdx ? swapped : it);
     setItems(next);
     baseItemRef.current = swapped;
-    setAmountStr(String(swapped.quantityG));
+    setAmountStr(fdMassEntry(swapped.quantityG));
     // Net-tracks per slot rather than appending a new row per swap: two
     // swaps of the same ingredient (rice to quinoa, then quinoa to
     // couscous) collapse into one "rice to couscous" event, matching what
@@ -9596,7 +9662,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
   // even when the user never touched the field, wrongly forcing Part D's
   // hand-off into 'grams' instead of the spec's 'portions' default.
   function resolveCookedWeight() {
-    const typed = fdNum(cookedWeightG);
+    const typed = fdMassG(cookedWeightG);
     return { resolved: typed > 0 ? typed : (recipe?.cookedWeightG ?? null), typedThisSession: cookedWeightTypedRef.current && typed > 0 };
   }
   function proceedToLog() {
@@ -9749,8 +9815,8 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
             </div>
           )}
 
-          <Field label={fdUnitCountLabel(curItem) ? `Amount (g) · ${fdUnitCountLabel(curItem)}` : 'Amount (g)'}>
-            <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+          <Field label={fdUnitCountLabel(curItem) ? `Amount (${UI.massEntryUnit()}) · ${fdUnitCountLabel(curItem)}` : `Amount (${UI.massEntryUnit()})`}>
+            <input value={amountStr} onChange={e => onAmountChange(e.target.value)} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
           </Field>
 
           <FdMacroPreview calories={curItem.calories} protein={curItem.protein} carbs={curItem.carbs} fat={curItem.fat}
@@ -9796,8 +9862,8 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
               Optional. Weigh the finished dish to log it by weight later instead of by portion, it usually differs from the raw ingredient total below.
             </div>
           </div>
-          <Field label="Cooked weight (g), optional">
-            <input value={cookedWeightG} onChange={e => { dirtyRef.current = true; cookedWeightTypedRef.current = true; setCookedWeightG(fdDecimalFilter(e.target.value)); }} type="text" inputMode="decimal"
+          <Field label={`Cooked weight (${UI.massEntryUnit()}), optional`}>
+            <input value={cookedWeightG} onChange={e => { dirtyRef.current = true; cookedWeightTypedRef.current = true; setCookedWeightG(fdMassFilter(e.target.value)); }} type="text" inputMode="decimal"
               placeholder={`e.g. ${Math.round(rawGramsTotal)}`} style={fdInputStyle} />
           </Field>
         </div>
@@ -9837,7 +9903,7 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
               ) : d.type === 'amount' ? (
                 <>
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
-                  <span><strong>{d.name}</strong>{': '}<span style={{ color: UI.inkSoft }}>{Math.round(d.oldG)}g</span>{' → '}<strong>{Math.round(d.newG)}g</strong></span>
+                  <span><strong>{d.name}</strong>{': '}<span style={{ color: UI.inkSoft }}>{fdMass(Math.round(d.oldG))}</span>{' → '}<strong>{fdMass(Math.round(d.newG))}</strong></span>
                 </>
               ) : d.type === 'added' ? (
                 <>
@@ -10066,7 +10132,15 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   // null while browsing. Search/favorites/recent all funnel through this one
   // quantity step before joining `staged`.
   const [qtyItem, setQtyItem] = useStateFd(null);
-  const [qtyG, setQtyG] = useStateFd('');
+  // Same three-value amount state FoodScreen's quantity sheet uses (see the
+  // comments there): the field holds the VIEWER's mass unit, qtyExactG carries
+  // a value the user did not type so it is not lost to a display round trip,
+  // and qtyGrams() is the only way anything reads it.
+  const [qtyStr, setQtyStr] = useStateFd('');
+  const [qtyExactG, setQtyExactG] = useStateFd(null);
+  const setQtyTyped = (raw) => { setQtyExactG(null); setQtyStr(fdMassFilter(raw)); };
+  const setQtyFromG = (g) => { setQtyExactG(g == null ? null : g); setQtyStr(fdMassEntry(g)); };
+  const qtyGrams = () => qtyExactG != null ? qtyExactG : fdMassG(qtyStr);
   const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
   const [qtyCountStr, setQtyCountStr] = useStateFd('');
   // The recipe currently being exploded into ingredients (Recipes tab), or
@@ -10094,7 +10168,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
-    setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
+    setQtyItem(null); setQtyFromG(null); setQtyUnitIdx(null); setQtyCountStr('');
     setExplodeRecipe(null); setExplodeMode('portions'); setExplodePortions(1); setExplodeGramsStr('');
     setScanPickerOpen(false); setScanOpen(false); setLabelScanning(false); setLabelError(null);
   }, [open]);
@@ -10180,7 +10254,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
         fromCache: false, units: null,
       });
       setQtyUnitIdx(null); setQtyCountStr('');
-      setQtyG((label.basis === '100g' || label.basis === '100ml') ? '100' : String(Math.round(label.serving_size_g)));
+      setQtyFromG((label.basis === '100g' || label.basis === '100ml') ? 100 : Math.round(label.serving_size_g));
       return;
     }
 
@@ -10193,7 +10267,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
     setMFib(fib != null ? String(Math.round(fib)) : '');
   }
 
-  function closeQtySheet() { setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr(''); }
+  function closeQtySheet() { setQtyItem(null); setQtyFromG(null); setQtyUnitIdx(null); setQtyCountStr(''); }
   // Opens the quantity step for a search result: per-100g rates are already
   // right there in the search response, default amount is its stated
   // serving (else 100g), same defaults pickResult uses in FoodScreen.
@@ -10206,7 +10280,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       fromCache: !!r.cached, units: null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
-    setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
+    setQtyFromG(r.servingSizeG != null ? Math.round(r.servingSizeG) : 100);
   }
   // Opens the quantity step for a favorite or a past log entry: both only
   // carry already-scaled macros, so per-100g rates are derived from their
@@ -10226,28 +10300,28 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       fromCache: true, units: l.units || null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
-    setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
+    setQtyFromG(l.quantityG != null ? l.quantityG : 100);
   }
   function selectQtyUnit(idx) {
     setQtyUnitIdx(idx);
     if (idx == null) { setQtyCountStr(''); return; }
     const unit = qtyItem?.units?.[idx];
     if (!unit || !(unit.grams > 0)) return;
-    const curG = fdNum(qtyG);
+    const curG = qtyGrams();
     const count = curG != null ? fdRound1(curG / unit.grams) : 1;
     setQtyCountStr(String(count));
-    setQtyG(String(fdRound1(count * unit.grams)));
+    setQtyFromG(fdRound1(count * unit.grams));
   }
   function onQtyCountChange(v) {
     const filtered = fdDecimalFilter(v);
     setQtyCountStr(filtered);
     const unit = qtyItem?.units?.[qtyUnitIdx];
     const n = fdNum(filtered);
-    setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
+    setQtyFromG(unit && n != null ? fdRound1(n * unit.grams) : null);
   }
   const qtyPreview = useMemoFd(() => {
     if (!qtyItem) return null;
-    const qty = fdNum(qtyG);
+    const qty = qtyGrams();
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
     const netCarbs = !!store.settings?.netCarbs;
@@ -10264,7 +10338,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
       protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
-  }, [qtyItem, qtyG, store.settings?.netCarbs]);
+  }, [qtyItem, qtyStr, qtyExactG, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
   // the "Add N ingredients" button below) and caches a not-yet-cached DB
   // food right away, same rule confirmLogFood/toggleFavorite use in
@@ -10275,7 +10349,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       tempId: LB.uid(),
       foodId: qtyItem.sourceId ? `${qtyItem.source}:${qtyItem.sourceId}` : null,
       foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.source,
-      quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
+      quantityG: qtyGrams(), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
       // The exact unit this ingredient was picked in ({ label, grams }, same
@@ -10312,9 +10386,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   function onExplodeModeChange(id) {
     if (!explodeRecipe || explodeMode === id) return;
     if (id === 'grams') {
-      setExplodeGramsStr(String(Math.max(0, Math.round(fdPortionsToGrams(explodePortions, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1)))));
+      setExplodeGramsStr(fdMassEntry(Math.max(0, Math.round(fdPortionsToGrams(explodePortions, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1)))));
     } else {
-      setExplodePortions(Math.max(0.5, Math.round(fdGramsToPortions(fdNum(explodeGramsStr) || 0, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1) * 2) / 2));
+      setExplodePortions(Math.max(0.5, Math.round(fdGramsToPortions(fdMassG(explodeGramsStr) || 0, explodeRecipe.cookedWeightG, explodeRecipe.portions || 1) * 2) / 2));
     }
     setExplodeMode(id);
   }
@@ -10323,7 +10397,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   const explodeFactor = useMemoFd(() => {
     if (!explodeRecipe) return null;
     if (explodeMode === 'grams') {
-      const g = fdNum(explodeGramsStr);
+      const g = fdMassG(explodeGramsStr);
       return g > 0 && explodeRecipe.cookedWeightG > 0 ? g / explodeRecipe.cookedWeightG : null;
     }
     return explodePortions > 0 ? explodePortions / (explodeRecipe.portions || 1) : null;
@@ -10421,7 +10495,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   // nothing to scale, so it stages directly, skipping the quantity step.
   function submitManual() {
     if (!manualValid) return;
-    const g = fdNum(mG);
+    const g = fdMassG(mG);
     setStaged(list => [...list, {
       tempId: LB.uid(),
       foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
@@ -10535,8 +10609,8 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                   <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" />
                 </Field>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                  <Field label="Amount (g)" style={{ flex: 1 }}>
-                    <input value={mG} onChange={e => setMG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  <Field label={`Amount (${UI.massEntryUnit()})`} style={{ flex: 1 }}>
+                    <input value={mG} onChange={e => setMG(fdMassFilter(e.target.value))} type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
                   </Field>
                   <Field label="Calories (kcal)" style={{ flex: 1 }}>
                     <input value={mCal} onChange={e => onMCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
@@ -10581,7 +10655,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div className="num" style={{ fontSize: 12, color: UI.warn }}>{f.calories} kcal</div>
-                    <div style={fdEntryMeta}>{f.quantityG}g</div>
+                    <div style={fdEntryMeta}>{fdMass(f.quantityG)}</div>
                   </div>
                 </button>
               ))}
@@ -10605,7 +10679,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div className="num" style={{ fontSize: 12, color: UI.warn }}>{l.calories} kcal</div>
-                    <div style={fdEntryMeta}>{l.quantityG}g</div>
+                    <div style={fdEntryMeta}>{fdMass(l.quantityG)}</div>
                   </div>
                 </button>
               ))}
@@ -10646,7 +10720,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                 <div key={i.tempId} style={fdDraftRow}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>{i.quantityG}g · <span className="num" style={{ color: UI.warn }}>{i.calories} kcal</span></span>
+                    <span style={fdEntryMeta}>{fdMass(i.quantityG)} · <span className="num" style={{ color: UI.warn }}>{i.calories} kcal</span></span>
                   </div>
                   <button onClick={() => removeStaged(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
@@ -10681,11 +10755,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                 ))}
               </div>
             )}
-            <Field label={qtyUnitIdx == null ? 'Amount (g)' : `Count (${qtyItem.units[qtyUnitIdx].label})`} style={{ marginBottom: 14 }}>
+            <Field label={qtyUnitIdx == null ? `Amount (${UI.massEntryUnit()})` : `Count (${qtyItem.units[qtyUnitIdx].label})`} style={{ marginBottom: 14 }}>
               <input
-                value={qtyUnitIdx == null ? qtyG : qtyCountStr}
-                onChange={e => qtyUnitIdx == null ? setQtyG(fdDecimalFilter(e.target.value)) : onQtyCountChange(e.target.value)}
-                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'} style={fdInputStyle}
+                value={qtyUnitIdx == null ? qtyStr : qtyCountStr}
+                onChange={e => qtyUnitIdx == null ? setQtyTyped(e.target.value) : onQtyCountChange(e.target.value)}
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? UI.massEntryUnit() : 'count'} style={fdInputStyle}
               />
             </Field>
             {qtyPreview && (
@@ -10725,9 +10799,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
               </div>
             )}
             {gramsModeOn ? (
-              <Field label="Amount (g)" style={{ marginBottom: 20 }}>
-                <input value={explodeGramsStr} onChange={e => setExplodeGramsStr(fdDecimalFilter(e.target.value))}
-                  type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              <Field label={`Amount (${UI.massEntryUnit()})`} style={{ marginBottom: 20 }}>
+                <input value={explodeGramsStr} onChange={e => setExplodeGramsStr(fdMassFilter(e.target.value))}
+                  type="text" inputMode="decimal" placeholder={UI.massEntryUnit()} style={fdInputStyle} />
               </Field>
             ) : (
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
