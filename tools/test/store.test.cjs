@@ -4966,10 +4966,44 @@ async function testAsync(name, fn) {
       { id: 'bar', name: 'Barbell Row', equipment: 'barbell' },
       { id: 'dip', name: 'Assisted Dip', equipment: 'machine', movement_type: 'assisted' },
       { id: 'bw',  name: 'Pull-up', equipment: 'bodyweight' },
+      { id: 'run', name: 'Treadmill', movement_type: 'cardio' },
+      { id: 'hold', name: 'Plank', log_mode: 'time' },
     ],
     settings: {},
   };
   const cleanupLast = (kg) => ({ entry: { sets: [{ warmup: false, kg, reps: 8, done: true }] } });
+
+  test('cleanupAppliesToExercise: the exemptions match buildSeedSets exactly', () => {
+    // The single source of truth for "was this lift actually reduced", shared
+    // by the live opt-out chip and the post-hoc PR/regression suppression in
+    // session detail/compare. Every buildSeedSets exemption above must agree
+    // with this predicate, or the chip and the read-only views would disagree
+    // about which exercises a cleanup week touched.
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bar', null), true);
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'dip', null), false, 'assisted is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bw', null), false, 'bodyweight is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'run', null), false, 'cardio is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'hold', null), false, 'time-based is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, null, null), false, 'no exId');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'nope', null), false, 'unknown exId');
+  });
+  test('cleanupAppliesToExercise: a 5/3/1 main lift is exempt, its assistance work is not', () => {
+    // buildSeedSets never even sees a 531 main lift (buildSessionEntries seeds
+    // it straight off the Training Max), so this is the one exemption
+    // buildSeedSets itself has no matching branch for.
+    const store531 = {
+      ...cleanupStore,
+      schedules: [{ id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'bar' }] }],
+        program_data: { mainLifts: { bar: { tm: 100, kind: 'row', stall: 0 } } } }],
+    };
+    assert.strictEqual(LB.cleanupAppliesToExercise(store531, 'bar', 'd1'), false, 'the main lift itself');
+    assert.strictEqual(LB.cleanupAppliesToExercise(store531, 'dip', 'd1'), false, 'assisted, exempt for its own reason');
+    // A different exId on the same day that never got registered as a main
+    // lift is unaffected, still reduced normally, only 'bar' is exempt here.
+    const storeAssistExtra = { ...store531, exercises: [...store531.exercises, { id: 'assist_bar', equipment: 'barbell' }],
+      schedules: [{ ...store531.schedules[0], days: [{ id: 'd1', items: [{ exId: 'bar' }, { exId: 'assist_bar' }] }] }] };
+    assert.strictEqual(LB.cleanupAppliesToExercise(storeAssistExtra, 'assist_bar', 'd1'), true);
+  });
 
   test('buildSeedSets: cleanup reduces by the configured percent, on the 2.5 grid', () => {
     const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,

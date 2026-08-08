@@ -3261,6 +3261,27 @@ function buildTimeSeedSets(it, last) {
   return Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false }));
 }
 
+// Does a cleanup week's reduction apply to this exercise at all? Single source
+// of truth for "was this lift actually reduced", shared by the live training
+// screen's per-exercise opt-out chip (screens-train.jsx) and the post-hoc
+// PR/improvement/regression suppression in session detail/compare
+// (screens-lib.jsx): a set that a cleanup week never touched must never be
+// treated as reduced just because the session overall is a cleanup week.
+// Mirrors buildSeedSets' own exemptions (bodyweight, assisted, cardio,
+// non-weight log modes), plus the one buildSeedSets never sees: a 5/3/1 main
+// lift is seeded straight off its Training Max in buildSessionEntries and
+// never reaches buildSeedSets, so its wave is already at full prescription.
+function cleanupAppliesToExercise(store, exId, dayId) {
+  if (!exId) return false;
+  const ex = (store?.exercises || []).find(x => x.id === exId);
+  if (!ex) return false;
+  if (ex.movement_type === 'cardio' || isAssisted(ex)) return false;
+  if (ex.equipment === 'bodyweight') return false;
+  if (exerciseLogMode(ex) !== 'weight') return false; // time / reps-only / checkbox carry no load
+  if (is531MainLift(store, exId, dayId)) return false;
+  return true;
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
@@ -9419,7 +9440,7 @@ window.LB = {
   loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
-  OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty,
+  OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

@@ -4460,6 +4460,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const prev = prevEntryMap[i];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
+                // A deload, or a cleanup week's reduced load, must not read as an
+                // improvement/decline/PR against the pre-reduction baseline: the
+                // drop is deliberate, not lost strength. Mirrors the live training
+                // screen's isDeloadSession gate (screens-train.jsx) exactly, off the
+                // one shared LB.cleanupAppliesToExercise so the two views can never
+                // disagree about which exercises a cleanup week actually touched.
+                const reducedLoad = s.isDeload
+                  || (s.isCleanup && !s.cleanupOptOuts?.[e.exId] && LB.cleanupAppliesToExercise(store, e.exId, s.dayId));
 
                 // Cardio entry, show activity summary instead of sets
                 // isCardio may be missing on entries loaded from DB (not a DB column),
@@ -4582,10 +4590,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
-                      const pr = !isWarm && isPR(st, e.exId);
-                      const highlight = !isWarm && (pr || isImprovement(st, prevSet));
-                      const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
-                      const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
+                      const pr = !isWarm && !reducedLoad && isPR(st, e.exId);
+                      const highlight = !isWarm && !reducedLoad && (pr || isImprovement(st, prevSet));
+                      const anyImprovementBefore = !isWarm && !reducedLoad && filteredSets.slice(0, j).some((st2, k) => !st2.warmup && (isPR(st2, e.exId) || isImprovement(st2, prevWorkingFor(k))));
+                      const decline = !isWarm && !reducedLoad && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
 
                       // Drop set: DS badge + chips connected by arrows
@@ -5781,6 +5789,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
         <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
           {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
+          {/* Both sides get their own line: an explicit compare is just as often
+              "today (post-cleanup) vs a pre-cleanup baseline" as the other way
+              round, and only cmp used to be checked here, so that first case
+              silently lost its context note. */}
+          {s.isDeload && <span style={{ color: UI.inkFaint }}> · today's session was a deload week</span>}
+          {s.isCleanup && <span style={{ color: UI.inkFaint }}> · today's session was a cleanup week</span>}
           {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
           {cmp.isCleanup && <span style={{ color: UI.inkFaint }}> · compared session was a cleanup week</span>}
         </div>
@@ -5809,6 +5823,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const entryVolB = (cmpEntry && !isMobilityEx) ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
               const entryDelta = entryVolA - entryVolB;
               const entryDeltaRounded = Math.round(entryDelta);
+              // Neither side's own reduction may drive a red/gold per-set verdict:
+              // a lighter cleanup set compared against a full-weight baseline (or
+              // the reverse) is not an honest apples-to-apples read. Mirrors
+              // SessionDetailScreen's reducedLoad exactly, checked on both sessions
+              // since either one, not just "today", can be the reduced side here.
+              const reducedInS = s.isDeload || (s.isCleanup && !s.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, s.dayId));
+              const reducedInCmp = cmp.isDeload || (cmp.isCleanup && !cmp.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, cmp.dayId));
+              const reducedLoad = reducedInS || reducedInCmp;
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
@@ -5826,10 +5848,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     const prev = cmpSets[si];
                     if (!curr && !prev) return null;
                     const prevDone = prev && !prev.skipped;
-                    const improved = isImprovement(curr, prev);
-                    const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
+                    const improved = !reducedLoad && isImprovement(curr, prev);
+                    const anyImprovementBefore = !reducedLoad && sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
                     const currSkipped = curr?.skipped && !curr?.done;
-                    const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                    const declined = !reducedLoad && !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
                     // A "+" only signals a real improvement (extra set added to an
                     // exercise you already had a baseline for) when cmpEntry exists.
                     // If the whole exercise is new (NOT LOGGED THEN), there's nothing

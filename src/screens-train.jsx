@@ -3507,22 +3507,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     && session.startedAt != null && store.statusModeSince != null
     && session.startedAt >= store.statusModeSince;
   const isCleanupSession = !!session.isCleanup || startedUnderCleanup;
-  // Does the reduction apply to this exercise at all? Mirrors buildSeedSets'
-  // own exemptions, plus the one it never sees: a 5/3/1 main lift is seeded
-  // straight off its Training Max in buildSessionEntries and never reaches
-  // buildSeedSets, so its wave is already at full prescription. Offering the
-  // chip there would let a tap inflate a correct 100/115/130 wave to
-  // 125/142.5/162.5 while the panel underneath still shows the real numbers.
-  const cleanupApplies = (exId) => {
-    if (!exId) return false;
-    const ex = store.exercises?.find(x => x.id === exId);
-    if (!ex) return false;
-    if (ex.movement_type === 'cardio' || LB.isAssisted(ex)) return false;
-    if (ex.equipment === 'bodyweight') return false;
-    if (LB.exerciseLogMode(ex) !== 'weight') return false; // time / reps-only / checkbox carry no load
-    if (LB.is531MainLift(store, exId, session.dayId)) return false;
-    return true;
-  };
+  // Does the reduction apply to this exercise at all? LB.cleanupAppliesToExercise
+  // is the single source of truth (store.js), shared with the post-hoc
+  // PR/improvement/regression suppression in session detail/compare
+  // (screens-lib.jsx) so the two views can never disagree about which
+  // exercises a cleanup week actually touched.
+  const cleanupApplies = (exId) => LB.cleanupAppliesToExercise(store, exId, session.dayId);
   const isCleanupReduced = (exId) => isCleanupSession && cleanupApplies(exId) && !session.cleanupOptOuts?.[exId];
   // Clamped the same way buildSeedSets clamps it, so the badge and the chip
   // can never claim a reduction the seeds didn't actually apply.
