@@ -22,6 +22,14 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.727',
+    date: '2026-08-08',
+    title: 'Grams-only, if you want it ⚖️',
+    items: [
+      "⚖️ Prefer lbs everywhere except food? Settings → Health → Food now has a \"Grams instead of oz/lb\" toggle, only shows up when your unit is lbs. Flip it and the food tracker stays in grams while your bodyweight/water stay imperial.",
+    ],
+  },
+  {
     id: 'v2.724',
     date: '2026-08-08',
     title: 'We forgot to flip the switch 🤦',
