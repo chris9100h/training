@@ -303,7 +303,7 @@ CREATE TABLE public.zane_user_settings (
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
-  plan_mode boolean NOT NULL DEFAULT false,
+  plan_mode boolean NOT NULL DEFAULT true, -- 0253: default flipped from false, existing rows backfilled to true
   hide_food_categories boolean NOT NULL DEFAULT false, -- 0214: flat hour timeline instead of meal-category header cards, display-only
   default_checkin_schema jsonb,
   status_mode text,

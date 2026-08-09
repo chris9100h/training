@@ -487,7 +487,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     weight_fill_down: sett.weightFillDown ?? true,
     net_carbs: sett.netCarbs ?? false,
     food_force_grams: sett.foodForceGrams ?? false,
-    plan_mode: sett.planMode ?? false,
+    plan_mode: sett.planMode ?? true,
     hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
@@ -1726,7 +1726,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         weightFillDown: sett.weight_fill_down ?? true,
         netCarbs: sett.net_carbs ?? false,
         foodForceGrams: sett.food_force_grams ?? false,
-        planMode: sett.plan_mode ?? false,
+        // Plan Mode is the default experience (migration 0253). The column is
+        // NOT NULL, so this fallback only fires for a user whose settings row
+        // does not exist yet, which must match the column default rather than
+        // the pre-0253 opt-in value.
+        planMode: sett.plan_mode ?? true,
         hideFoodCategories: sett.hide_food_categories ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
@@ -2589,7 +2593,7 @@ async function syncStore(prev, next, userId) {
       weight_fill_down: next.settings?.weightFillDown ?? true,
       net_carbs: next.settings?.netCarbs ?? false,
       food_force_grams: next.settings?.foodForceGrams ?? false,
-      plan_mode: next.settings?.planMode ?? false,
+      plan_mode: next.settings?.planMode ?? true,
       hide_food_categories: next.settings?.hideFoodCategories ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
