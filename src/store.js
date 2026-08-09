@@ -5708,7 +5708,19 @@ function checkinWeekStart() {
 
 // responses = plain object with snake_case keys matching the form schema fields.
 // Writes both the responses jsonb column and backward-compat fixed columns.
-async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false, schema = null) {
+// existingRef: the row being edited, or a falsy value for a first submission.
+// A string is taken as that row's id and REUSED, which is the whole point:
+// the upsert below resolves on (coaching_id, week_start), so an edit lands on
+// the existing row but used to hand it a brand-new random id. The primary key
+// of a stored check-in silently changed on every save, and everything holding
+// the old one, a coaching note's entity_id, the ai_opinion row the edge
+// function is writing back to, the coach's open selection, was pointing at an
+// id that no longer existed. Any other truthy value still means "this is an
+// edit" (the label below) but generates a fresh id, so an older caller that
+// passes a bare boolean keeps its previous behaviour rather than writing
+// `true` into the key.
+async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, existingRef = false, schema = null) {
+  const isEdit = !!existingRef;
   // Free-text fields have no length bound in the UI (a plain textarea) or
   // guaranteed anywhere upstream: cap them here too, as defense in depth
   // independent of the edge function's own cap (ai-checkin-opinion's
@@ -5723,7 +5735,9 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     general_note: clampCheckinText(responses.general_note),
   };
   const weekStart = weekStartArg || checkinWeekStart();
-  const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const id = (typeof existingRef === 'string' && existingRef)
+    ? existingRef
+    : 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {
     id,
     coaching_id: coachingId,
@@ -7034,6 +7048,37 @@ function nextCleanupStartISO(store, now = new Date()) {
     : (store.cycleStartDate ? cyclePosFromStartDate(store.cycleStartDate, cycleLen, todayStr) : null);
   if (pos == null) return null;
   return atMidnight(cycleLen - pos);
+}
+
+// A cleanup start pinned to "the next cycle boundary" is only meaningful for
+// the plan it was computed against. Switching the active plan, or editing the
+// current one's day count, moves that boundary, and the pin stayed where it
+// was: a cleanup activated under a 5-day cycle and then switched to a 3-day
+// plan starts mid-cycle, which is precisely the misalignment nextCleanupStartISO
+// exists to prevent. Recompute and persist.
+//
+// Only while the window has NOT started. Once it is running the start date is
+// history: it is what cleanupElapsed counts from and what the logged cleanup
+// sessions sit inside, so moving it would retroactively change which sessions
+// belong to the week.
+async function repinCleanupStart(userId, store, setStore, now = new Date()) {
+  if (store?.statusMode !== 'cleanup' || !store?.statusModeSince) return;
+  if (cleanupStarted(store, now)) return;
+  // A null means "nothing to align to, start now", which is also what a fresh
+  // activation would do. Take it, so switching from a date-based plan to a flex
+  // one does not leave the cleanup pinned to a boundary the new plan has no
+  // concept of.
+  const next = nextCleanupStartISO(store, now) || new Date(now).toISOString();
+  if (next === store.statusModeSince) return;
+  // The period row is the durable record and has no retry path in syncStore,
+  // so it goes first; the scalar only follows once that succeeded.
+  try { await updateStatusPeriodStart(userId, next); }
+  catch (e) { console.error('repinCleanupStart: status period write failed', e); return; }
+  setStore(s => (s.statusMode === 'cleanup' ? {
+    ...s,
+    statusModeSince: next,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt: next } : p),
+  } : s));
 }
 
 // True once an activated cleanup has actually BEGUN. The start can sit in the
@@ -9728,7 +9773,7 @@ window.LB = {
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted,
+  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,

@@ -1318,7 +1318,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
           if (!schemaKeys.has(k) && v != null && v !== '') responses[k] = v;
         });
       }
-      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, !!existing, sections);
+      // existing?.id, not !!existing: re-saving a check-in must keep the row's
+      // primary key, see the comment on submitCheckin.
+      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, existing?.id, sections);
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }

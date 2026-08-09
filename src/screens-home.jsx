@@ -2069,6 +2069,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
+  // A cleanup start pinned to the next cycle boundary belongs to the plan it
+  // was computed against. Switching plans or editing the day count moves that
+  // boundary, so re-pin while the window is still pending. Keyed on the plan
+  // signature rather than the schedules array so an unrelated plan edit does
+  // not re-run it; repinCleanupStart is a no-op once the date already matches.
+  const cleanupPlanKey = sch
+    ? `${sch.id}|${LB.isFlexPlan(sch) ? 'flex' : LB.isWeekdayPlan(sch) ? 'weekday' : 'cycle'}|${(LB.getPlanDaysForDate(sch, LB.todayISO()) || []).length}`
+    : '';
+  useEffect(() => {
+    if (store?.statusMode !== 'cleanup' || !cleanupPlanKey) return;
+    LB.repinCleanupStart(userId, store, setStore);
+  }, [cleanupPlanKey, store?.statusMode]);
+
   // 5/3/1 cycle-end: once a cycle completes, bump each main lift's Training Max
   // per its AMRAP results (Wendler's rule), announce it, and, only for a plan
   // with no built-in deload, offer to insert a deload week first. program_data
