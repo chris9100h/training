@@ -1438,7 +1438,7 @@ AS $function$
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
-        'timeSec', st.time_sec,
+        'timeSec', st.time_sec, 'addedKg', st.added_kg, 'hornLoads', st.horn_loads,
         'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
         'technique', st.technique, 'drops', st.drops
       ) ORDER BY st.set_idx)

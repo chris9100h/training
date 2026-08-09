@@ -3553,10 +3553,20 @@ function bestEntryFromSetLists(perSession) {
     }
     // Time-based sets carry no kg/reps to compare, so `best` stays the most
     // recent set, pass its duration through as the reference / seed.
-    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, done: false, skipped: false, warmup: false };
+    // Carry the fields that describe HOW the load was made up, not just its
+    // size. This rebuilds set objects from an explicit field list, so anything
+    // not named here is silently dropped before buildSeedSets ever sees it:
+    // that is why the belt load of a plus_load exercise and the horn
+    // distribution of a multi-horn machine never seeded, the seeder was reading
+    // fields this function had already thrown away.
+    const carry = {
+      ...(best.addedKg != null ? { addedKg: best.addedKg } : {}),
+      ...(Array.isArray(best.hornLoads) && best.hornLoads.length ? { hornLoads: best.hornLoads } : {}),
+    };
+    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, ...carry, done: false, skipped: false, warmup: false };
     return (best.repsL != null || best.repsR != null)
-      ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
-      : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
+      ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, ...carry, done: false, skipped: false, warmup: false }
+      : { kg: curKg, reps: best.reps ?? null, ...carry, done: false, skipped: false, warmup: false };
   });
   return { entry: { sets } };
 }
