@@ -4133,6 +4133,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
   async function confirmRecipeLog(planned = false) {
+    // Backstop for the Plan Mode invariant: only Plan Mode can produce a
+    // planned entry. With it off nothing renders the check-off box (or the
+    // planned/logged switch), so a planned row would sit in the timeline
+    // forever, permanently outside dayTotals, the daily log, the adherence
+    // score and the coach's view. Every Plan it button is gated already, this
+    // keeps a future call site from reintroducing that leak. The editingEntry
+    // path below is deliberately NOT forced: it carries an existing entry's
+    // own state (qtyEditPlanned), and silently flipping an old planned row to
+    // logged would rewrite that day's totals on a plain amount edit.
+    const wantPlanned = planned && planMode;
     const { recipe, totalPortions, mode, gramsStr } = recipeLogPrompt;
     const chosenPortions = fdEffectiveChosenPortions(recipeLogPrompt);
     const gramsMode = mode === 'grams' && recipe.cookedWeightG > 0;
@@ -4227,7 +4237,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       });
       setEditingEntry(null);
     } else {
-      setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned, ...built }]);
+      setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), planned: wantPlanned, ...built }]);
       flyStagedChip(built.foodName);
       // Cooking Mode's own draft (see startCookingMode) is done once its log
       // actually commits, whichever of Plan it/Log it got tapped: this is one
@@ -6070,14 +6080,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               {/* Three real actions instead of the old plan-mode-only split:
                   Cook it walks through Cooking Mode below (real-time only,
                   same reasoning as Log it, a future date can't be cooked
-                  today); Plan it/Log it are unchanged. The chosen quantity no
-                  longer fits inside a now-narrower button label, so it's
-                  called out here instead. */}
+                  today); Plan it/Log it keep the plan-mode gate every other
+                  add flow uses. The chosen quantity no longer fits inside a
+                  now-narrower button label, so it's called out here instead. */}
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, textAlign: 'center' }}>{qtyLabel}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {!curDateIsFuture && <Btn kind="ghost" onClick={startCookingMode} style={{ flex: 1 }}>Cook it</Btn>}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                {planMode ? (<>
+                  <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmRecipeLog(true)} disabled={!qtyValid} style={{ flex: 1 }}>Plan it</Btn>
+                  {!curDateIsFuture && <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 1 }}>Log it</Btn>}
+                </>) : (
+                  // Without Plan Mode there is no planned state to land in, so
+                  // the split collapses to a single Add, same as the quantity,
+                  // custom-item and meal-review sheets. It stays visible on a
+                  // future date too, where Cook it and Log it are both gone:
+                  // those sheets add onto a future day exactly this way, and
+                  // hiding it here would leave the sheet with no way to commit
+                  // anything at all.
+                  <Btn onClick={() => confirmRecipeLog(false)} disabled={!qtyValid} style={{ flex: 2 }}>Add</Btn>
+                )}
               </div>
             </>)}
           </>
