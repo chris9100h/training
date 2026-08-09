@@ -1561,7 +1561,33 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const handleSignOut = async () => { markIntentionalSignOut(); await flushBeforeSignOut(userId); await LB.signOut(); };
+  // Flush BEFORE arming the latch: markIntentionalSignOut() is what allows
+  // SIGNED_OUT to run LB.clearLocal, which drops the local cache, the pending
+  // diff and syncBase in one go. If the final sync did not land (slow network,
+  // failed write), that cache is the only copy left of the last sets / cycle
+  // advance / day macros, so arming it would delete them for good. Sign out
+  // UNARMED instead: the involuntary path keeps the cache and the next sign-in
+  // on this device re-uploads the diff. Asked, not silent, because the user
+  // then stays "not fully synced" and should know why.
+  const handleSignOut = async () => {
+    const flushed = await flushBeforeSignOut(userId);
+    if (!flushed) {
+      const ok = await confirm(
+        'Some changes could not be saved to the server. They stay on this device and are uploaded the next time you sign in here.',
+        { title: 'Sign out anyway?', ok: 'Sign out anyway', danger: true }
+      );
+      if (!ok) return;
+      await LB.signOut();
+      // Reload so the user actually lands on the login screen: the involuntary
+      // SIGNED_OUT path deliberately leaves the app on screen (it also covers
+      // a flaky refresh while you keep training), which after a tapped sign-out
+      // would look like nothing happened. The cache stays untouched by it.
+      window.location.reload();
+      return;
+    }
+    markIntentionalSignOut();
+    await LB.signOut();
+  };
 
   const attachSupportImageFile = (file) => {
     if (!file) return;

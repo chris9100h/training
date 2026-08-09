@@ -852,19 +852,33 @@ function App() {
   // attempted reactively inside the SIGNED_OUT handler would already be
   // fighting a session Supabase is in the middle of invalidating. Bounded so
   // a dead network can't hang the sign-out button.
+  // Returns whether the pending diff is safely on the server: true when it
+  // landed (or when there was nothing to flush), false on timeout and on a
+  // failed write. Callers MUST NOT arm the wipe latch on false, the local
+  // cache is then the only remaining copy of the change.
   const flushBeforeSignOut = useCallbackA(async (uid) => {
-    if (uid !== userIdRef.current) return;
+    // Not the current user any more: this diff must never be written (same
+    // reason as in flushSync), so whatever is pending stays unflushed. Report
+    // failure, the caller then keeps the local cache instead of wiping it.
+    if (uid !== userIdRef.current) return false;
     const target = pendingStore.current;
-    if (!target || target === syncBase.current || !uid) return;
+    // Nothing pending: there is no unsynced change a wipe could destroy.
+    if (!target || target === syncBase.current || !uid) return true;
+    // Only the sync path sets this. The timeout ends the WAIT, it can never
+    // report success: without the flag, a 5s stall resolved the race exactly
+    // like a completed write (and so did the catch below), the caller wiped
+    // the local cache, and the change was gone with nothing left to retry.
+    let landed = false;
     const timeout = new Promise(resolve => setTimeout(resolve, 5000));
     try {
       await Promise.race([
-        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); }),
+        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); landed = true; }),
         timeout,
       ]);
     } catch (err) {
       console.error('flushBeforeSignOut: final sync attempt failed', err);
     }
+    return landed;
   }, []);
 
   // Arms the SIGNED_OUT handler below to actually wipe local storage. Must be
