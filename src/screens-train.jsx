@@ -1208,7 +1208,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // The row shows the SUM and is not typed into directly, see startHornSet.
   const hornLabels = LB.exerciseHornLabels(exercise);
   const isMultiHornEx = !!hornLabels;
-  const activateWeight = (setIdx) => (isMultiHornEx ? startHornSet(setIdx) : activateKb(setIdx, 'kg'));
+  // One rule, in activateKb, so the row tap cannot drift from every other path.
+  const activateWeight = (setIdx) => activateKb(setIdx, 'kg');
 
   const totalToPatch = (total) => {
     if (!isPlusLoad) return { kg: total };
@@ -4717,6 +4718,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // now stays open until the user taps ⌄ explicitly or navigates away.
 
   const activateKb = (setIdx, field) => {
+    // A multi-horn exercise has no single weight field to type into: kg is the
+    // computed sum of the horns. Routing here rather than at the call sites,
+    // because the weight gets focused from several places that are easy to miss
+    // (the row tap, the auto-advance to the next exercise via pendingFocusRef,
+    // the outlier dialog's "No, fix it"). Typing into the keypad on such a set
+    // would write kg with no hornLoads and let the total and the breakdown
+    // drift apart, which is the whole failure mode this feature is built to
+    // avoid. Numeric setIdx only: the chain sheets address their rows with
+    // 'drop'/'myo'/'av'/'stretch' and own their kg fields.
+    if (field === 'kg' && isMultiHornEx && typeof setIdx === 'number') { startHornSet(setIdx); return; }
     _log(`activateKb(set${setIdx} ${field})`);
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
     // Seed the kg buffer from dispWeight, never from s.kg: every write path
