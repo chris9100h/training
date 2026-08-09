@@ -2981,7 +2981,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!selected.length) return s;
       const now = new Date().toISOString();
       const clones = selected.map(l => ({
-        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetLandsPlanned ? true : l.planned,
+        // The target decides, the source never does. Inheriting planned from
+        // the source left a planned row planned on a target that cannot hold
+        // one (a past date, or any date with Plan Mode off), where nothing
+        // renders a check-off box, so it sat outside the day's totals for
+        // good. Forcing it also makes the two lines below honest again: with
+        // no clone able to land planned, "not targetLandsPlanned" really does
+        // mean "everything here counts", which is what the macro warning and
+        // patchDaily already assumed.
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: !!targetLandsPlanned,
         // Same rule "Repeat yesterday" follows: a copy is its own entry and
         // must not inherit the split/merge batch (its "undo split" would act
         // on another day) or the template-slot marker (auto-fill would treat
@@ -8402,15 +8410,15 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 <input value={stockPacksDraft} onChange={e => setStockPacksDraft(fdDecimalFilter(e.target.value))}
                   type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
               </Field>
-              <Field label="+ grams" accent style={{ flex: 1, marginBottom: 0 }}>
+              <Field label={`+ ${UI.massEntryUnit()}`} accent style={{ flex: 1, marginBottom: 0 }}>
                 <input value={stockExtraDraft} onChange={e => setStockExtraDraft(fdMassFilter(e.target.value))}
-                  type="text" inputMode="decimal" placeholder="e.g. 150" style={fdInputStyle} />
+                  type="text" inputMode="decimal" placeholder={UI.massInOz() ? "e.g. 5" : "e.g. 150"} style={fdInputStyle} />
               </Field>
             </div>
           ) : (
             <Field label={`Update stock (${UI.massEntryUnit()})`} accent style={{ marginBottom: 6 }}>
               <input value={stockDraft} onChange={e => setStockDraft(fdMassFilter(e.target.value))}
-                type="text" inputMode="decimal" placeholder="e.g. 10000 after restocking" style={fdInputStyle} />
+                type="text" inputMode="decimal" placeholder={UI.massInOz() ? "e.g. 350 after restocking" : "e.g. 10000 after restocking"} style={fdInputStyle} />
             </Field>
           )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
@@ -8422,9 +8430,9 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 type="text" inputMode="decimal" placeholder="e.g. 2" style={fdInputStyle} />
             </Field>
           ) : (
-            <Field label="Warn when below (g)" accent style={{ marginBottom: 6 }}>
+            <Field label={`Warn when below (${UI.massEntryUnit()})`} accent style={{ marginBottom: 6 }}>
               <input value={thresholdGramsDraft} onChange={e => setThresholdGramsDraft(fdMassFilter(e.target.value))}
-                type="text" inputMode="decimal" placeholder="e.g. 1000" style={fdInputStyle} />
+                type="text" inputMode="decimal" placeholder={UI.massInOz() ? "e.g. 35" : "e.g. 1000"} style={fdInputStyle} />
             </Field>
           )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px' }}>
