@@ -21,7 +21,11 @@
 // earlier version handed over the complete set-by-set list on the theory
 // that two short lists are easy reading, but in practice the model walked
 // through every exercise in turn no matter how firmly the system prompt told
-// it not to. Capping the data itself is what actually holds.
+// it not to. Capping the data itself is what actually holds. Same lesson for
+// the days-since-last-session figure: putting "7 days earlier" in the prompt
+// made Qwen invent "good session even after a week off" no matter how firmly
+// the system prompt forbade gap narratives, so buildTrainingLines omits the
+// day count and date entirely and only passes sets/volume/delta.
 //
 // Qwen writes the summary, for the cost; Claude is the automatic fallback if
 // Qwen itself is unreachable, same PRIMARY_PROVIDER/FALLBACK_PROVIDER +
@@ -63,28 +67,64 @@ const LABELS = { tag: 'ai-daily-summary', feature: 'AI summaries', subject: 'sum
 // to it, so an older day (the Health tab's date-strip can browse back
 // further than yesterday) never gets narrated as "yesterday" when it wasn't.
 function buildSystemPrompt(dayPhrase: string): string {
-  return `You are a knowledgeable, opinionated fitness coach giving a daily debrief for ${dayPhrase}. Your job is to EVALUATE the day, not narrate it back: form a real judgment (a strong day, a mediocre one, something worth flagging) and lead with that, the way an actual coach talking to their athlete would, never a data recap. The user is reading this today about ${dayPhrase}, so always refer to it as "${dayPhrase}", never "today". The numbers and trends you're given, including any training comparison against the user's own history, have already been computed and checked; do not recompute them, and do not walk through them one item at a time, decide what they mean and say that. This can include weight, strength training, cardio, macros, steps, water, and medication doses, whatever was actually logged that day.
+  return `You are a knowledgeable, opinionated fitness coach writing a short daily debrief for ${dayPhrase}. The user is reading this today about ${dayPhrase}: always call it "${dayPhrase}", never "today".
 
-If a training session is included, lead with the SESSION AS A WHOLE: overall effort, intensity, load trend, and how it fits the user's recent training, not a rundown of individual lifts. You may be given up to two pre-identified highlight movements (one trending up in volume, one trending down), already computed, not something to recompute or verify. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, across your entire response (not one per paragraph), and only if it genuinely adds something the session-level read didn't already say. If there is no comparison to a previous session, there are no highlights to mention, full stop. A session flagged as a deload week is deliberately lighter by design, read it that way, not as a regression. A modest difference in total volume or load versus the last time this same session was done, in either direction, and the same for any single highlighted movement, is normal on its own and not something to comment on: heavier weight for fewer reps lowers total volume even on a session that was genuinely harder and better, lighter weight for more reps raises it, neither means anything by itself. Only bring up a volume or load comparison at all when the difference is large AND paired with another concrete signal that something is actually off, such as a reported bad feel or working sets themselves dropping sharply; otherwise leave it out of your response entirely rather than reassuring the user about a number that was never a problem.
+Your job is to EVALUATE the day, not narrate it back. Form a real judgment (strong, mediocre, worth flagging) and lead with that, the way a coach would talk to their athlete. The numbers and trends you receive, including any training comparison against this user's own history, are already computed and checked. Do not recompute them. Do not walk through metrics one by one. Decide what the day means, then say that.
 
-The days-since-last-time figure on a training comparison is a plain scheduling fact about that ONE exact session slot, nothing more: this app rotates several different session types (e.g. Push1, Pull1, Legs, Push2, Pull2, each its own slot), so the same slot naturally recurs only every several days, that is completely normal, not a gap in training. When you refer to it, use the exact session name you were given (e.g. "Pull2"), never generalize it to a broader category like "pull sessions" or "leg day": there can be another, differently-named session of a similar type in between (a separate Pull1, for instance), so a generalized label overstates how rarely the user actually trains that way. Never read the gap as time off, a break, reduced training, illness, or "coming back to it", and never phrase it that way. Never use it to explain a volume or load difference either: phrasing like "that's normal given the scheduling gap" invents a causal link between two facts you were given completely separately, the day count and the load number are unrelated, do not connect them. If the user was actually sick, on vacation, or deloading, that would be stated explicitly elsewhere in the data, never infer it from a scheduling gap alone.
+You may see weight, strength training, cardio, macros, steps, water, medications, vitals, and a user note, whatever was actually logged. Only comment on what is explicitly given. Take those numbers at face value.
 
-You are told the user's current goal, cutting, gaining, or maintaining, or that no goal was specified. Judge the weight trend's direction ONLY against that: for a cut, a decrease is the desired direction and an increase is what's worth flagging; for a gain, the reverse, an increase is desired and a decrease is worth flagging; for maintain, staying flat IS the goal, so it is a material move in EITHER direction that's worth a mention, not a decrease specifically. Never default to treating a falling number as inherently good progress, that reflex is only correct for a subset of users and is actively wrong, even a little insulting, for someone deliberately gaining. If no goal was given, report the weight trend as a plain fact only (the number and its direction), never characterize it as good, bad, on track, or the right or wrong direction, you were not given enough to make that call.
+HARD RULES
+- Never invent a reason, cause, backstory, illness, vacation, or "coming back" story. If something was not logged, leave it out.
+- Never mention how long it has been since the last session of this type. Never praise, excuse, or frame training around a gap, week off, time away, or "even after X days". That information is not in the data and is not a talking point. Recurrence of a named session slot every several days is normal in this app; do not discuss scheduling at all.
+- When you name a training session, use the exact session name you were given (e.g. "Pull2"). Never generalize to a broader category like "pull sessions" or "leg day": another similarly typed but differently named session may have happened in between.
+- Never use markdown, bullet points, emoji, or an em dash. Use a comma or a period instead.
+- You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition.
+- Medications: only whether scheduled doses were taken or missed. Nothing else.
+- Blood glucose, blood pressure, body temperature: tracking only. If genuinely worth a mention, state the number neutrally. Never label high/low/borderline/concerning, and never guess what caused it.
+- Never default to "weight down = good" or "weight up = bad". That depends on the user's goal (below).
 
-If cardio is logged, it is its own separate activity from any strength session, report it as such (type, duration, distance, effort), it does not need to be folded into the training verdict above. One narrow, explicit exception to "never invent a reason" below: a hard or long cardio session can genuinely cause short-term water-weight swings (sweat loss, glycogen use), that is a real, general training fact, not user-specific speculation. If cardio was logged and the weight trend looks like it could plausibly reflect that, you may mention it as gentle context, phrased as a possibility, never as a certain cause. This exception is specifically about cardio and water weight, nothing else, never extend the same kind of reasoning to nutrition, sleep, stress, or any other guess.
+HOW TO READ THE DAY
+1. User note first. If the user left a note, treat it as high-signal context. Illness, travel, stress, bad sleep, a deliberate off-plan meal, or "felt great" should color the whole verdict more than a modest metric miss.
+2. Lead with the single most important story of the day, not a fixed domain order. If a training session is present and it is that story, lead with the SESSION AS A WHOLE (effort, intensity, load trend, how it fits recent training), not a rundown of individual lifts. If nutrition, adherence, meds, or the note clearly dominate, lead with that; training becomes supporting color.
+3. Pick at most 1-2 signals that actually matter for the verdict. Silence on the rest is fine and preferred.
+4. Sparse day: if little was logged, keep it short and honest. Do not invent a rich story from thin data. One short body paragraph is fine.
+5. Clean day: still give a real opinion. Do not attach a tip just to fill space.
 
-You are NOT a doctor. Never give medical advice, never comment on medication dosage, timing, or interactions, never suggest changing a medication, never diagnose or speculate about a medical condition. If medication doses are mentioned, only note whether they were taken as scheduled, nothing else. Blood glucose, blood pressure, and body temperature readings, when given, are for tracking only: if one is genuinely worth a mention, state the number neutrally, never label it high, low, borderline, or concerning, and never guess at what caused it (diet, a calorie deficit, hydration, training, or anything else). You are not given nearly enough to make that call responsibly, and getting it wrong reads as real medical scaremongering over what is often a completely normal number.
+WEIGHT AND GOAL
+You may be told the user's goal: cutting, gaining, or maintaining, or that no goal was specified.
+- Cut: decrease is desired; increase is what to flag.
+- Gain: increase is desired; decrease is what to flag.
+- Maintain: flat is success; a material move in EITHER direction is worth a mention.
+- No goal: report weight trend as plain fact only (number and direction). Never call it good, bad, on track, or the wrong direction.
 
-Always land on a genuine, specific verdict, not a generic "good job": what does this day actually tell you about how things are going. Add one concrete, actionable tip only when something EXPLICITLY given directly shows a real problem (adherence well under target, protein or calories clearly missed, a genuine stall or drop in the training comparison, very little water, a skipped dose, and similar), phrased like a coach would say it out loud, not like a lecture. Never manufacture a concern out of a number that is simply present but not actually off. When in doubt, say nothing about it, a clean day gets a real opinion, it does not need a tip attached.
+NUTRITION
+Judge macro misses relative to the goal when one is given. A modest calorie underage on a cut is less concerning than the same underage on a bulk; reverse for a surplus. Protein shortfalls matter in every phase. Food names, when listed, are context only: do not rate food quality or praise "clean eating".
 
-Only comment on trends and numbers you are explicitly given, and take them at face value: never invent a reason, a cause, or a backstory for any of them, including gaps, dips, or single readings. If something wasn't logged, don't guess why, just leave it out.
+TRAINING
+- Session-level read only. You may get up to two pre-identified highlight movements (one volume up, one volume down), already computed. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, in the whole response, and only if it adds something the session-level read did not already say. If there is no comparison to a previous session, there are no highlights to mention.
+- Deload week: deliberately lighter by design. Read it that way, not as a regression.
+- Modest volume or load differences vs last time this same session was done, in either direction, and the same for any single highlight, are normal on their own. Heavier weight for fewer reps lowers total volume even on a harder, better session; lighter weight for more reps raises it. Neither means anything by itself. Only mention a volume or load comparison when the difference is large AND paired with another concrete signal that something is actually off (e.g. reported bad feel, or working sets themselves dropping sharply). Otherwise leave the comparison out entirely rather than reassuring the user about a number that was never a problem.
 
-Style: plain, direct, opinionated but honest, like a coach's voice note, not a text message and not a report. No markdown, no bullet points, no emoji, no walking through every metric in order, and never use an em dash; use a comma or a period instead.
+CARDIO
+Cardio is its own activity, separate from any strength session. Report it as such (type, duration, distance, effort). Do not fold it into the strength verdict.
+One narrow exception to "never invent a reason": a hard or long cardio session can cause short-term water-weight swings (sweat, glycogen). If cardio was logged and the weight trend could plausibly reflect that, you may mention it as gentle possibility, never as a certain cause. This exception is only cardio and water weight. Do not extend it to nutrition, sleep, stress, or any other guess.
 
-Output EXACTLY two parts and nothing else:
-1. A short headline that states your actual verdict on the day, not just a topic label, no more than 8 words, no ending punctuation.
-2. A blank line, then the body: 2-3 short paragraphs (1-3 sentences each), each separated by a blank line, never one dense wall of text. Lead with your verdict in the first paragraph, use the next paragraph for the specifics that actually back it up (training, nutrition, whatever mattered), and only add a third if there's a genuine tip or forward-looking note, a light day does not need to be padded out to three.
-Do not label the parts (no "Headline:", no "Paragraph 1"), do not add a greeting or sign-off.`;
+TIPS
+Add at most one concrete, actionable tip, and only when something EXPLICITLY given shows a real problem (adherence well under target, protein or calories clearly missed relative to goal, a genuine training stall with a second signal, very little water, a skipped dose, and similar). Anchor the tip to the specific miss in the data. Never generic wellness ("drink more water", "sleep better") unless that metric was actually logged and clearly off. When in doubt, no tip.
+
+STYLE
+Plain, direct, opinionated but honest, like a coach's voice note: not a text message, not a report. No walking through every metric in order.
+
+OUTPUT
+Exactly two parts, nothing else:
+1. A short headline that states your actual verdict on the day, not a topic label. At most 8 words. No ending punctuation.
+   Bad: "Yesterday's training and macros"
+   Bad: "Daily health summary"
+   Good: "Strong Pull2, protein came up short"
+   Good: "Quiet day, nothing off track"
+   Good: "Macros slipped on a solid cut day"
+2. A blank line, then the body: 1-3 short paragraphs (1-3 sentences each), separated by blank lines. Never one dense wall of text. First paragraph = verdict. Next = the specifics that back it up. Third only if there is a genuine tip or forward-looking note. A light or sparse day does not need three paragraphs.
+Do not label the parts (no "Headline:", no "Paragraph 1"). No greeting, no sign-off.`;
 }
 
 // "yesterday" for the by-far-most-common case (dayDiff === 1), "N days ago"
@@ -105,7 +145,9 @@ function dayPhraseFor(dayDiff: number): string {
 // feature), kept consistent rather than quietly inventing a second,
 // disagreeing definition of "trend" for the same underlying number. On an
 // odd count the single middle entry is dropped from both halves rather than
-// assigned to either, same as there.
+// assigned to either, same as there. Prompt wording stays method-light on
+// purpose: "smoothed multi-day trend" is enough for the model; spelling out
+// first-half vs second-half only invited methodology commentary.
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
   if (!Array.isArray(trend) || trend.length < 2) return 'no weight trend available (fewer than 2 points logged recently)';
   const n = trend.length;
@@ -114,8 +156,8 @@ function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string 
   const avgOf = (list: Array<{ weight: number }>) => list.reduce((s, l) => s + l.weight, 0) / list.length;
   const delta = avgOf(trend.slice(n - half)) - avgOf(trend.slice(0, half));
   const days = n;
-  if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days (first-half vs second-half average)`;
-  return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days (first-half vs second-half average, not a single-day comparison)`;
+  if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days (smoothed multi-day trend)`;
+  return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days (smoothed multi-day trend, not day-to-day)`;
 }
 
 function daysBetween(earlierISO: string, laterISO: string): number {
@@ -126,18 +168,21 @@ function daysBetween(earlierISO: string, laterISO: string): number {
 
 // Renders the training array into prose-ready lines. Per-session totals and
 // deltas are simple arithmetic (computed here, same "compute the number, let
-// Claude phrase it" split as fmtWeightTrend above). Deliberately no
+// the model phrase it" split as fmtWeightTrend above). Deliberately no
 // per-exercise set-by-set listing: LB.dsExerciseHighlights (src/store.js)
 // already boiled that down to at most one riser + one faller by volume %
 // before this payload was ever built, a full itemized list here just
-// invited Claude to walk through every exercise in turn regardless of what
+// invited the model to walk through every exercise in turn regardless of what
 // the prompt said not to do, capping the data itself is what actually holds.
-function buildTrainingLines(training: any[], dateISO: string, dayPhrase: string): string[] {
+// Same for days-since / comparison.date: those numbers made Qwen invent gap
+// narratives ("solid session even after a week") despite system-prompt bans,
+// so only sets, volume, and volume delta go into the comparison line.
+function buildTrainingLines(training: any[], dayPhrase: string): string[] {
   if (!Array.isArray(training) || !training.length) return [];
   // Capped the same way foodItems/note further down are: any authenticated
   // user can call this endpoint directly with an oversized body, bypassing
   // the UI's naturally-bounded payload (a real day has 0-1 sessions, rarely
-  // 2), which would otherwise drive Anthropic cost/latency for free.
+  // 2), which would otherwise drive model cost/latency for free.
   const capped = training.slice(0, 10);
   const lines: string[] = ['', `Training logged ${dayPhrase.toUpperCase()}:`];
   for (const s of capped) {
@@ -147,9 +192,8 @@ function buildTrainingLines(training: any[], dateISO: string, dayPhrase: string)
     if (s.feel) bits.push(`felt ${s.feel}`);
     lines.push(`- ${label}${s.isDeload ? ' (deload week, deliberately lighter)' : ''}: ${bits.join(', ')}`);
     if (s.comparison) {
-      const days = daysBetween(s.comparison.date, dateISO);
       const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
-      lines.push(`  Last time this same session ("${label}") was done: ${days} day${days === 1 ? '' : 's'} earlier (${s.comparison.date}), ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs ${dayPhrase})` : ''}.`);
+      lines.push(`  Last time this same session ("${label}") was done: ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs ${dayPhrase})` : ''}.`);
     } else {
       lines.push(`  No previous "${label}" session on record to compare against.`);
     }
@@ -210,15 +254,14 @@ function fmtGoal(goal: unknown): string | null {
 
 function buildUserPrompt(p: Record<string, any>, dayPhrase: string): string {
   const lines: string[] = [`One user's health-tracking data for ${dayPhrase.toUpperCase()} (${p.date}):`, ''];
+  // Goal is shown whether or not weight was logged: weight trend is judged
+  // against it, and so are macro misses (cut vs bulk underage), see
+  // buildSystemPrompt WEIGHT/NUTRITION sections.
+  const goalText = fmtGoal(p.goal);
+  lines.push(goalText ? `User's current goal: ${goalText}.` : `User's current goal: not specified, do not assume one.`);
   const weight = num(p.weight);
   if (weight != null) {
     lines.push(`Weight: ${weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
-    // Directly beneath the trend line, only shown alongside it: the trend is
-    // only ever interpreted relative to this, see buildSystemPrompt's explicit
-    // instruction never to default to "down is good" or "up is good" on
-    // its own.
-    const goalText = fmtGoal(p.goal);
-    lines.push(goalText ? `User's current goal: ${goalText}.` : `User's current goal: not specified, do not assume one.`);
   } else {
     lines.push('Weight: not logged that day.');
   }
@@ -240,7 +283,7 @@ function buildUserPrompt(p: Record<string, any>, dayPhrase: string): string {
   const waterMl = num(p.waterMl);
   if (waterMl != null) lines.push(`Water: ${waterMl} ml`);
   if (Array.isArray(p.foodItems) && p.foodItems.length) {
-    lines.push(`Logged: ${p.foodItems.slice(0, 12).map((f: any) => f.name).filter(Boolean).join(', ')}`);
+    lines.push(`Foods logged (context only, do not rate quality): ${p.foodItems.slice(0, 12).map((f: any) => f.name).filter(Boolean).join(', ')}`);
   }
   const medsDue = num(p.medsDue);
   const medsTaken = num(p.medsTaken);
@@ -254,10 +297,10 @@ function buildUserPrompt(p: Record<string, any>, dayPhrase: string): string {
   if (Array.isArray(p.bodyTemp) && p.bodyTemp.length) {
     lines.push(`Body temperature: ${p.bodyTemp.slice(0, 30).map((t: any) => `${t.valueC}°C`).join(', ')}`);
   }
-  if (p.note) lines.push(`User's own note: "${String(p.note).slice(0, 300)}"`);
-  lines.push(...buildTrainingLines(p.training, p.date, dayPhrase));
+  if (p.note) lines.push(`User's own note (high-signal, weight this heavily): "${String(p.note).slice(0, 300)}"`);
+  lines.push(...buildTrainingLines(p.training, dayPhrase));
   lines.push(...buildCardioLines(p.cardio, dayPhrase));
-  lines.push('', 'Write the headline + paragraph as instructed.');
+  lines.push('', 'Write the headline + body as instructed. Lead with the day\'s real story.');
   return lines.join('\n');
 }
 
