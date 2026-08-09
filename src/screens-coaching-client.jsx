@@ -3,7 +3,22 @@
    isDecline) with screens-coaching-core.jsx, loaded first. */
 
 function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, checkinAt, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
-  const [tab, setTab] = useStateC(initialTab || 'overview');
+  const TABS = [
+    { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
+    { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
+    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
+    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
+    { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
+    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
+  ];
+
+  // A caller can address a sub-tab as "<tab>:<sub>" (e.g. 'setup:plan'), since
+  // app.jsx forwards named route props one by one and initialTab is the single
+  // one carrying tab intent. Split it off before it reaches the tab state, and
+  // fall back to the first tab for anything that is not a real tab id: an
+  // unknown id lit no tab at all and left the body blank.
+  const [wantTab, wantSub] = String(initialTab || '').split(':');
+  const [tab, setTab] = useStateC(TABS.some(t => t.id === wantTab) ? wantTab : 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
   const openSession = (session) => { setSelectedSession(session); setTab('sessions'); };
@@ -82,15 +97,6 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     } catch (_) {}
   };
 
-  const TABS = [
-    { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
-    { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
-    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
-    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
-    { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
-    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
-  ];
-
   return (
     <Screen scroll={false}>
       {!hideTopBar && (
@@ -161,7 +167,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
-          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} initialSub={wantSub} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1107,11 +1113,18 @@ function StatBox({ label, value, gold, onClick }) {
 // ─── Tab: Setup (Plan + Nutrition combined) ───────────────────────────────────
 
 function ClientSetupTab(props) {
-  const [sub, setSub] = useStateC('plan');
+  const SUBS = [
+    { id: 'plan', label: 'Plan', icon: 'fa-calendar-days' },
+    { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' },
+    { id: 'medications', label: 'Meds', icon: 'fa-pills' },
+  ];
+  // initialSub lets a route land straight on one of these (the plan editor
+  // returns here after a save). Same rule as the tab bar above: an id that has
+  // no entry falls back to Plan instead of rendering an empty body.
+  const [sub, setSub] = useStateC(SUBS.some(s => s.id === props.initialSub) ? props.initialSub : 'plan');
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }, { id: 'medications', label: 'Meds', icon: 'fa-pills' }]}
-        active={sub} onChange={setSub} />
+      <SubTabBar tabs={SUBS} active={sub} onChange={setSub} />
       {sub === 'plan'      && <ClientPlanTab {...props} />}
       {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
       {sub === 'medications' && <ClientMedicationsTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
