@@ -1204,6 +1204,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the new total, and tapping that weight cell then seeded 20 and reverted kg
   // on confirm. Bodyweight is folded in at write time here for the same reason
   // weightPatch does it, a later weigh-in must not rewrite a finished set.
+  // Multi-horn exercises (PRIME-style machines with several loading horns).
+  // The row shows the SUM and is not typed into directly, see startHornSet.
+  const hornLabels = LB.exerciseHornLabels(exercise);
+  const isMultiHornEx = !!hornLabels;
+  const activateWeight = (setIdx) => (isMultiHornEx ? startHornSet(setIdx) : activateKb(setIdx, 'kg'));
+
   const totalToPatch = (total) => {
     if (!isPlusLoad) return { kg: total };
     if (total == null) return { kg: null, addedKg: null };
@@ -2178,6 +2184,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (dropSetIdx != null) return dropDrops.length > 1 || hasFin(dropDrops);
     if (myoSetIdx != null) return myoDrops.length > 1 || hasFin(myoDrops);
     if (avSetIdx != null) return avDrops.length > 1 || hasFin(avDrops);
+    // Horn sheet: dirty once anything differs from what the set already holds,
+    // so cancelling a sheet the user only opened to look at stays silent while
+    // a real edit still warns. Seeded values are not an edit.
+    if (hornSetIdx != null) {
+      const st = store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[hornSetIdx];
+      const before = Array.isArray(st?.hornLoads) ? st.hornLoads : [];
+      const now = hornRows.filter(r => r.kg != null);
+      if (now.length !== before.filter(h => h?.kg != null).length) return true;
+      return now.some(r => (before.find(h => h?.label === r.label)?.kg ?? null) !== r.kg);
+    }
     return false;
   };
   const confirmDiscardChain = async () => {
@@ -2185,7 +2201,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
   };
   const closeChainSheet = () => {
-    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; }
+    if (hornSetIdx != null) { setHornSetIdx(null); setHornRows([]); }
+    else if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; }
     else if (myoSetIdx != null) { cancelMyo(); return; }
     else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; }
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
@@ -2843,6 +2860,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [dropDrops, setDropDrops] = useStateT([]);
   const dropDropsRef = useRefT([]);
   dropDropsRef.current = dropDrops;
+  // Multi-horn loading: which set's horn sheet is open, and the rows being
+  // edited. Same state shape as the drop chain above, including the ref mirror
+  // the keyboard handlers read (they run from callbacks that closed over an
+  // older render).
+  const [hornSetIdx, setHornSetIdx] = useStateT(null);
+  const [hornRows, setHornRows] = useStateT([]);
+  const hornRowsRef = useRefT([]);
+  hornRowsRef.current = hornRows;
   const [myoSetIdx, setMyoSetIdx] = useStateT(null);
   const [myoTechnique, setMyoTechnique] = useStateT(null);
   const [myoDrops, setMyoDrops] = useStateT([]);
@@ -4714,6 +4739,54 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }, 80);
   };
 
+  // ── Multi-horn sheet ──────────────────────────────────────────────────────
+  // The weight cell of a multi-horn exercise opens this instead of the keypad:
+  // three horns plus reps do not fit in a set row, and the row keeps showing the
+  // SUM (LB.setLoadLabel). Deliberately NOT routed through weightPatch: the row
+  // is read-only here and the sheet is the single write path, so the typed
+  // number and the stored total never occupy the same field. That confusion is
+  // what produced three defects on plus_load.
+  const startHornSet = (setIdx) => {
+    if (!hornLabels) return;
+    const st = store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx];
+    const existing = Array.isArray(st?.hornLoads) ? st.hornLoads : null;
+    // Match by label, not position: the exercise's horn list can have been
+    // reordered since this set was logged.
+    const rows = hornLabels.map(l => ({ label: l, kg: existing?.find(h => h?.label === l)?.kg ?? null }));
+    setHornRows(rows);
+    hornRowsRef.current = rows;
+    setHornSetIdx(setIdx);
+    setTimeout(() => activateHornKb(0), 80);
+  };
+  const activateHornKb = (hornIdx) => {
+    const d = hornRowsRef.current[hornIdx];
+    const val = d?.kg != null ? String(d.kg).replace('.', ',') : '';
+    kbFieldRef.current = { setIdx: 'horn', hornIdx, field: 'kg' };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'horn', hornIdx, field: 'kg' });
+    setKbRaw(val);
+    setTimeout(() => scrollChainRowIntoView('data-horn-row', hornIdx), 80);
+  };
+  // Writes the breakdown and the sum together so the two can never drift, then
+  // hands off to reps the same way kbConfirm does after a plain weight.
+  const finishHornSet = () => {
+    if (hornSetIdx == null) return;
+    const targetIdx = hornSetIdx;
+    const rows = hornRowsRef.current.map(r => ({ label: r.label, kg: r.kg ?? null }));
+    const total = LB.hornLoadTotal(rows);
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== targetIdx ? st : { ...st, kg: total, hornLoads: rows, done: false }),
+      }),
+    }));
+    setHornSetIdx(null); setHornRows([]);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    setTimeout(() => activateKb(targetIdx, isUnilateral ? 'repsL' : 'reps'), 60);
+  };
+
   const activateDropKb = (dropIdx, field) => {
     const d = dropDropsRef.current[dropIdx];
     const val = field === 'kg'
@@ -4804,6 +4877,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setStretchVal(target, dropIdx, { timeSec: num });
       }
+      return;
+    }
+    if (setIdx === 'horn') {
+      const hornIdx = kbFieldRef.current?.hornIdx;
+      if (typeof hornIdx !== 'number') return;
+      const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+      if (newRaw === '' || !isNaN(num)) setHornRows(prev => prev.map((d, i) => i === hornIdx ? { ...d, kg: num ?? null } : d));
       return;
     }
     if (setIdx === 'drop') {
@@ -4928,6 +5008,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'horn') {
+      const { hornIdx } = kbFieldRef.current;
+      const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+      const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+      const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+      const newRaw = String(next).replace('.', ',');
+      kbRawRef.current = newRaw;
+      setKbRaw(newRaw);
+      setHornRows(prev => prev.map((d, i) => i === hornIdx ? { ...d, kg: next } : d));
+      return;
+    }
     if (setIdx === 'drop') {
       const { dropIdx } = kbFieldRef.current;
       if (field === 'kg') {
@@ -5035,6 +5126,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
         setKbField(null); setKbRaw('');
         armKbShield();
+      }
+      return;
+    }
+    if (setIdx === 'horn') {
+      const { hornIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (hornIdx + 1 < hornRowsRef.current.length) {
+        setTimeout(() => activateHornKb(hornIdx + 1), 50);
+      } else {
+        finishHornSet();
       }
       return;
     }
@@ -7017,7 +7118,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       letterSpacing: '-0.02em',
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
-                    onActivate={() => activateKb(bgSetIdx, 'kg')}
+                    onActivate={() => activateWeight(bgSetIdx)}
                     kbRaw={kbRaw}
                     isKbActive={kbField?.setIdx === bgSetIdx && kbField?.field === 'kg'}
                     onChange={kg => updateSession(sess => ({
@@ -7269,7 +7370,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         value={dispWeight(s)}
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
-                        onActivate={() => activateKb(i, 'kg')}
+                        onActivate={() => activateWeight(i)}
                         onDisabledTap={() => showLockHint(exIdx, i)}
                         kbRaw={kbRaw}
                         isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
@@ -8239,11 +8340,46 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           the header is a genuinely separate, non-scrolling box, not
           scroll-positioned relative to anything. */}
       <Sheet
-        open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null}
+        open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null || hornSetIdx != null}
         onClose={requestCloseChainSheet}
         keyboardHeight={kbField ? customKbHeight : 0}
         accent
       >
+        {hornSetIdx != null && (
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+              <span style={chainTitleStyle}>LOADING HORNS</span>
+              <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+            </div>
+            <div style={{ overflowY: 'auto', minHeight: 0 }}>
+              {hornRows.map((h, hi) => {
+                const isActive = kbField?.setIdx === 'horn' && kbField?.hornIdx === hi;
+                return (
+                  <div key={hi} data-horn-row={hi} style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.label}</div>
+                    <KbCell
+                      text={isActive ? kbRaw : (h.kg != null ? String(h.kg).replace('.', ',') : '')}
+                      placeholder="0"
+                      onActivate={() => activateHornKb(hi)}
+                      style={{ ...setInputStyle(false, isActive), ...(isActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ flexShrink: 0, paddingTop: 10 }}>
+              {/* The sum is the number that lands in kg and drives volume, e1RM
+                  and the records, so it is shown here rather than left implied. */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 4px 8px' }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>Total</span>
+                <span className="num" style={{ fontSize: 15, color: 'var(--accent)' }}>
+                  {LB.hornLoadTotal(hornRows) ?? 0} {UI.unit()}
+                </span>
+              </div>
+              <Btn onClick={finishHornSet} style={{ width: '100%' }}>Done</Btn>
+            </div>
+          </div>
+        )}
         {dropSetIdx != null && (
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
@@ -8688,7 +8824,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
                 if (!working.length) return null;
                 const sessionBest = isTimeEx ? bestTimeOf(working) : isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
-                const isPR = (isAssistedEx || isTimeEx)
+                // Suppressed for multi-horn exercises for the same reason as the
+                // session-detail badge: the best is a bare number with no record
+                // of how the load was distributed, so it cannot say the same work
+                // was beaten (see isPR in screens-lib.jsx).
+                const isPR = isMultiHornEx ? false : (isAssistedEx || isTimeEx)
                   ? (pr != null && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
                   : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
                 return (

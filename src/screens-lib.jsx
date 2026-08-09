@@ -1298,13 +1298,18 @@ function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
-function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight }) {
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight, hornLabels, onHornLabels }) {
   if (!loggingPickerVisible(equipment, movementType)) return null;
   const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
              : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
              : null;
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
+  // Multi-horn is a loaded-machine thing and mutually exclusive with the
+  // bodyweight modes above: plus_load already means "the number you type is not
+  // the total", and stacking a second such rule onto the same field is exactly
+  // the space confusion that produced three defects there.
+  const showHorns = !!onHornLabels && logMode === 'weight' && equipment !== 'bodyweight';
   return (
     <div>
       <span className="label">Logging</span>
@@ -1333,8 +1338,51 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMod
           )}
         </div>
       )}
+      {showHorns && (() => {
+        const horns = hornLabels || [];
+        const set = (next) => onHornLabels(next.length ? next : null);
+        return (
+          <div style={{ marginTop: 12 }}>
+            <span className="label">Loading horns</span>
+            <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>
+              For plate-loaded machines with more than one weight horn. Name them once, then log what goes on each horn instead of a single number. The set stores the total, and the split is kept so you can set the machine up the same way next time.
+            </div>
+            {horns.map((h, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                <TextInput value={h} onChange={v => set(horns.map((x, j) => (j === i ? v : x)))} placeholder={`Horn ${i + 1}`} />
+                <button
+                  onClick={() => set(horns.filter((_, j) => j !== i))}
+                  aria-label={`Remove horn ${i + 1}`}
+                  style={{
+                    width: 36, minHeight: 36, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 13, WebkitTapHighlightColor: 'transparent',
+                  }}
+                >&times;</button>
+              </div>
+            ))}
+            <div style={{ marginTop: 8 }}>
+              <Btn kind="ghost" onClick={() => set([...horns, ''])}>Add horn</Btn>
+            </div>
+            {horns.length > 0 && (
+              <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>
+                Renaming or reordering these later leaves sets you already logged untouched: each set keeps the names it was logged with. Trend arrows still work, but no PRs are claimed on these: a stored best is a single number and cannot say which setup produced it.
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
+}
+
+// Empty rows and stray whitespace never reach the DB: an all-blank list means
+// "not a multi-horn exercise" and must store null, otherwise isMultiHorn would
+// flip the whole logging UI over for a machine with no horns named.
+function cleanHornLabels(list, equipment, logMode) {
+  if (equipment === 'bodyweight' || logMode !== 'weight') return null;
+  const out = (list || []).map(h => String(h ?? '').trim()).filter(Boolean);
+  return out.length ? out : null;
 }
 
 // ── Exercise-creation wizard ────────────────────────────────────────────────
@@ -1553,6 +1601,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
   const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
   const [bwMode, setBwMode] = useStateL(null); // null | 'pull' | 'plus_load'
+  const [hornLabels, setHornLabels] = useStateL(null); // null | ordered horn names
   const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
@@ -1592,7 +1641,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null),
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null), horn_labels: cleanHornLabels(hornLabels, equipment, effLogMode),
       // Written in lockstep so a client still running an older cached build,
       // which only knows the boolean, keeps pre-filling bodyweight.
       pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
@@ -1674,6 +1723,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           equipment={equipment} movementType={movementType}
           logMode={logMode} onLogMode={pickLogMode}
           bwMode={bwMode} onBwMode={setBwMode}
+          hornLabels={hornLabels} onHornLabels={setHornLabels}
           hasLoggedWeight={LB.latestBodyweight(store) != null}
         />
         <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
@@ -1731,6 +1781,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
   const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
   const [editBwMode, setEditBwMode] = useStateL(autoEdit ? LB.bodyweightMode(ex) : null);
+  const [editHornLabels, setEditHornLabels] = useStateL(autoEdit ? (LB.exerciseHornLabels(ex) || null) : null);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
@@ -1763,7 +1814,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), horn_labels: cleanHornLabels(editHornLabels, editEquipment, effLogMode), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1980,6 +2031,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               equipment={editEquipment} movementType={editMovementType}
               logMode={editLogMode} onLogMode={setEditLogMode}
               bwMode={editBwMode} onBwMode={setEditBwMode}
+              hornLabels={editHornLabels} onHornLabels={setEditHornLabels}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
             <Field label="Progression increment (optional)">
@@ -3938,6 +3990,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const isPR = (st, exId) => {
       const val = prValueOf(st, exId);
       if (val == null) return false;
+      // No PR claims on a multi-horn exercise. The stored bests (prMap and the
+      // server's exerciseBests) are bare numbers with no record of how the load
+      // was distributed, and on these machines the distribution decides the
+      // leverage and the resistance curve, so "higher than the old best" does
+      // not mean the same work was beaten. Gated here rather than at the badge
+      // so the star and the header's PR count can never disagree. The trend
+      // arrows still work: isImprovement/isDecline compare against a concrete
+      // prior set and know its split.
+      if (LB.isMultiHorn(store.exercises.find(x => x.id === exId))) return false;
       // Tie-break: only the specific set that FIRST reached the session best
       // is credited, see sessionBestSetMap above. Reference equality is safe
       // here, filteredSets/e.sets below are the same array (filtered, not
@@ -4995,7 +5056,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         }}>
                           {st.timeSec != null ? LB.fmtDuration(st.timeSec) : isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{LB.hornLoadLabel(st) && <span className="num" style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 6 }}>{LB.hornLoadLabel(st)}</span>}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
                         </span>
                       );
