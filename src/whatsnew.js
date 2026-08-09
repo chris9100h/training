@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.732',
+    date: '2026-08-09',
+    title: 'Machines with many horns, and a lot of housekeeping',
+    items: [
+      'Log every loading horn \u{1F529} Got one of those plate-loaded machines with three or four weight horns? Open the exercise, or create a new one, set the equipment to Machine (or plates, or cable) and "Loading horns" appears: name them once, the way they are arranged on the machine. From then on, tapping the weight during training opens a sheet with one field per horn. The app adds it up, remembers the setup, and starts your next session with it already filled in. It also knows that 20/20 is not the same as 40/0, so it will not hand you a fake record for just moving plates around.',
+      'Plan Mode is on for everyone. Plan your meals ahead and tick them off once you have actually eaten them. It used to be a switch you had to go find. If you would rather not, it is still under Settings, Health.',
+      'Finish stops guessing. Left a set unticked because the lift failed or you cut the session short? The app used to quietly log it as done, using the numbers it had pencilled in for you. Now it asks, and it defaults to skipping them. Your history says what you did, not what was planned.',
+      'A long list of things that should never have happened. Weighted pull-ups no longer invent phantom kilos, and they pre-fill your belt weight again. Abandoned workouts are no longer deleted on the server. Signing out on a bad connection no longer eats your last sets. Your library stops claiming you have never logged anything after a break. And the daily weight reminder actually sends again.',
+    ],
+  },
+  {
     id: 'v2.728',
     date: '2026-08-08',
     title: 'Switch units without leaving the log 🔄',
