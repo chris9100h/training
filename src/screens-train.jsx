@@ -2202,7 +2202,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
   };
   const closeChainSheet = () => {
-    if (hornSetIdx != null) { setHornSetIdx(null); setHornRows([]); }
+    if (hornSetIdx != null) { setHornSetIdx(null); setHornRows([]); setHornPrev(null); }
     else if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; }
     else if (myoSetIdx != null) { cancelMyo(); return; }
     else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; }
@@ -2869,6 +2869,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [hornRows, setHornRows] = useStateT([]);
   const hornRowsRef = useRefT([]);
   hornRowsRef.current = hornRows;
+  // Last session's distribution for the set being edited, shown next to each
+  // input. Seeding pre-fills the fields, but the moment the user changes one
+  // the reference is gone, and on a deload or cleanup week the seeds are scaled
+  // and never matched last time to begin with.
+  const [hornPrev, setHornPrev] = useStateT(null);
   const [myoSetIdx, setMyoSetIdx] = useStateT(null);
   const [myoTechnique, setMyoTechnique] = useStateT(null);
   const [myoDrops, setMyoDrops] = useStateT([]);
@@ -4759,11 +4764,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // what produced three defects on plus_load.
   const startHornSet = (setIdx) => {
     if (!hornLabels) return;
-    const st = store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx];
+    const liveSets = store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets || [];
+    const st = liveSets[setIdx];
     const existing = Array.isArray(st?.hornLoads) ? st.hornLoads : null;
+    // Same working-set alignment prevWorkingSetFor uses, so the reference is
+    // this set's counterpart from last time, not just the first one.
+    const prevWorking = (lastEntrySets || []).filter(x => !x.warmup);
+    const wIdx = st?.warmup ? -1 : liveSets.slice(0, setIdx + 1).filter(x => !x.warmup).length - 1;
+    const prevSet = wIdx >= 0 ? prevWorking[wIdx] : undefined;
+    setHornPrev(Array.isArray(prevSet?.hornLoads) ? prevSet.hornLoads : null);
+    // Nothing on this set yet: inherit from the nearest earlier set that has a
+    // distribution. Nobody rebuilds the machine between sets, and on the rare
+    // occasion they do, most of it is already right and only one horn changes.
+    let inherited = existing;
+    if (!inherited) {
+      for (let i = setIdx - 1; i >= 0; i--) {
+        const h = liveSets[i]?.hornLoads;
+        if (Array.isArray(h) && h.length) { inherited = h; break; }
+      }
+    }
     // Match by label, not position: the exercise's horn list can have been
     // reordered since this set was logged.
-    const rows = hornLabels.map(l => ({ label: l, kg: existing?.find(h => h?.label === l)?.kg ?? null }));
+    const rows = hornLabels.map(l => ({ label: l, kg: inherited?.find(h => h?.label === l)?.kg ?? null }));
     setHornRows(rows);
     hornRowsRef.current = rows;
     setHornSetIdx(setIdx);
@@ -4790,10 +4812,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
         ...en,
-        sets: en.sets.map((st, si) => si !== targetIdx ? st : { ...st, kg: total, hornLoads: rows, done: false }),
+        sets: en.sets.map((st, si) => {
+          if (si === targetIdx) return { ...st, kg: total, hornLoads: rows, done: false };
+          // Same fill-down kbApply does for a plain weight, and the same
+          // setting gates it: later sets of the same exercise are almost always
+          // the identical machine setup.
+          if (store.settings?.weightFillDown !== false && si > targetIdx && !st.done && !st.warmup) {
+            return { ...st, kg: total, hornLoads: rows.map(r => ({ ...r })) };
+          }
+          return st;
+        }),
       }),
     }));
-    setHornSetIdx(null); setHornRows([]);
+    setHornSetIdx(null); setHornRows([]); setHornPrev(null);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
     setTimeout(() => activateKb(targetIdx, isUnilateral ? 'repsL' : 'reps'), 60);
   };
@@ -8360,14 +8391,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
               <span style={chainTitleStyle}>LOADING HORNS</span>
+              {hornPrev && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 8 }}>last time</span>}
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
             </div>
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
               {hornRows.map((h, hi) => {
                 const isActive = kbField?.setIdx === 'horn' && kbField?.hornIdx === hi;
                 return (
-                  <div key={hi} data-horn-row={hi} style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                  <div key={hi} data-horn-row={hi} style={{ display: 'grid', gridTemplateColumns: '1fr 52px 96px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.label}</div>
+                    {/* Last session's load for this horn. The fields are
+                        pre-filled, but that reference disappears the moment one
+                        is changed, and on a deload or cleanup week the seeds are
+                        scaled so they never matched last time anyway. */}
+                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint, textAlign: 'right' }}>
+                      {(() => {
+                        const p = hornPrev?.find(x => x?.label === h.label);
+                        return p?.kg != null ? String(p.kg) : '';
+                      })()}
+                    </div>
                     <KbCell
                       text={isActive ? kbRaw : (h.kg != null ? String(h.kg).replace('.', ',') : '')}
                       placeholder="0"
