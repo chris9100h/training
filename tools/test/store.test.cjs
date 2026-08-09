@@ -1536,6 +1536,29 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.isNutritionUnscoredMode('taper'), false);
   });
 
+  test('isRoutineDisruptedMode: only sick and vacation leave the trend', () => {
+    // Gates the adaptive-TDEE window and the daily summary's weight trend.
+    // Illness and travel distort intake and scale weight at once. A deload or
+    // cleanup week does not: the training calories at stake are smaller than a
+    // fortnight of weigh-in noise, the eating is unchanged, and excluding them
+    // cut the 14-day window to 7, one step above the 5-day minimum.
+    assert.strictEqual(LB.isRoutineDisruptedMode('sick'), true);
+    assert.strictEqual(LB.isRoutineDisruptedMode('vacation'), true);
+    assert.strictEqual(LB.isRoutineDisruptedMode('deload'), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode('cleanup'), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode(null), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode('taper'), false);
+  });
+
+  test('the two status predicates stay separate functions', () => {
+    // They read the same today and answer different questions: one asks
+    // whether a macro score means anything, the other whether a weigh-in can
+    // be trusted. A later mode can land differently on the two (a peak week
+    // scores fine and weighs terribly), so this pins that they are two
+    // decisions, not one shared list behind two names.
+    assert.notStrictEqual(LB.isNutritionUnscoredMode, LB.isRoutineDisruptedMode);
+  });
+
   test('dailyLogsWeekPrefill: today weight + week sum/averages', () => {
     const today = LB.todayISO(); // weight_today is sourced from TODAY's log
     const logs = [

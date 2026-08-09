@@ -6548,6 +6548,31 @@ function isNutritionUnscoredMode(mode) {
   return !!mode && NUTRITION_UNSCORED_MODES.includes(mode);
 }
 
+// Modes where the day's ROUTINE is disrupted enough that neither its intake nor
+// its scale weight represents normal life, so it is dropped from the adaptive
+// TDEE window and the daily summary's weight trend rather than diluting them.
+// Illness and travel do that to both sides at once: you eat differently and you
+// weigh differently, and neither number means what it usually means.
+//
+// A deload or cleanup week does not. The training calories at stake are a small
+// share of the day (a few hundred at most, less than the noise a fortnight of
+// weigh-ins carries anyway), the eating is unchanged, and both weeks are rare
+// enough that whatever glycogen and water shift they do cause washes out of a
+// rolling window. Excluding them cost far more than they distorted: a cleanup
+// week cut the 14-day window to 7 days, one short step above the 5-day
+// minimum, so the estimate lurched every mesocycle for no real reason.
+//
+// SEPARATE from isNutritionUnscoredMode on purpose, even though both lists read
+// the same today. They answer different questions: that one asks whether a
+// macro score means anything, this one asks whether a weigh-in can be trusted.
+// A mode added later can easily land differently on the two (a peak week eats
+// to target exactly, so it scores, while its water swings make the scale
+// useless), and folding them together would hide that the choice was ever made.
+const ROUTINE_DISRUPTED_MODES = ['sick', 'vacation'];
+function isRoutineDisruptedMode(mode) {
+  return !!mode && ROUTINE_DISRUPTED_MODES.includes(mode);
+}
+
 // ── Adaptive TDEE recalibration (weekly check-in, migration-free) ──────────
 // estimateTdee above is a formula run once from static inputs (height/weight/
 // age/activity) and never revisited. This is the opposite approach and the
@@ -6592,12 +6617,14 @@ function estimateAdaptiveTdee(store, todayStr) {
   })();
   const dayDiff = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 
-  // Sick/vacation/deload days carry neither reliable intake nor a meaningful
-  // weight signal (routine and hydration both swing), so they drop out of
-  // both sides of the calculation entirely rather than diluting it.
+  // Sick and vacation days carry neither reliable intake nor a meaningful
+  // weight signal (routine and hydration both swing), so they drop out of both
+  // sides of the calculation entirely rather than diluting it. Deload and
+  // cleanup weeks do NOT: see isRoutineDisruptedMode for why, and note that
+  // this filter used to drop all four while its own comment named three.
   const windowLogs = (store?.dailyLogs || [])
     .filter(l => l.date >= winStart && l.date <= today)
-    .filter(l => !statusModeForDate(store, l.date));
+    .filter(l => !isRoutineDisruptedMode(statusModeForDate(store, l.date)));
 
   // Today's own log is still being written to (the day isn't over), so its
   // calorie total is necessarily partial: averaging it in alongside 13 full
@@ -7498,17 +7525,16 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
-  // Sick/vacation/deload still drop out (routine + hydration swing, same
-  // idea as estimateAdaptiveTdee). Cleanup does NOT: it is intentional
-  // lighter lifting with normal eating, and dropping those weigh-ins
-  // flattens a real bulk/cut trend so the summary model narrates "weight
-  // flat" against a chart that still shows the move.
+  // Sick and vacation still drop out (routine + hydration swing, same idea and
+  // now the same predicate as estimateAdaptiveTdee). Deload and cleanup do
+  // NOT: both are intentional lighter lifting with normal eating, and dropping
+  // those weigh-ins flattens a real bulk/cut trend so the summary model
+  // narrates "weight flat" against a chart that still shows the move. Cleanup
+  // was already kept here for exactly that reason while the TDEE window threw
+  // it away, which is how the two drifted apart in the first place.
   const weightTrend = (store.dailyLogs || [])
     .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
-    .filter(l => {
-      const m = statusModeForDate(store, l.date);
-      return m !== 'sick' && m !== 'vacation' && m !== 'deload';
-    })
+    .filter(l => !isRoutineDisruptedMode(statusModeForDate(store, l.date)))
     .map(l => ({ date: l.date, weight: Number(l.weight) }))
     .filter(l => Number.isFinite(l.weight))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -9805,7 +9831,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee,
