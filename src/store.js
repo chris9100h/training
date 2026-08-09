@@ -3354,7 +3354,9 @@ function cleanupAppliesToExercise(store, exId, dayId) {
   const ex = (store?.exercises || []).find(x => x.id === exId);
   if (!ex) return false;
   if (ex.movement_type === 'cardio' || isAssisted(ex)) return false;
-  if (ex.equipment === 'bodyweight') return false;
+  // Pure bodyweight carries no load to reduce, but plus_load does: the belt is
+  // exactly the part a cleanup week is supposed to take off.
+  if (ex.equipment === 'bodyweight' && !isBodyweightPlusLoad(ex)) return false;
   if (exerciseLogMode(ex) !== 'weight') return false; // time / reps-only / checkbox carry no load
   if (is531MainLift(store, exId, dayId)) return false;
   return true;
@@ -3396,11 +3398,18 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   // Assisted exercises store a negative load, so halving it would REDUCE the
   // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
   const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
-  const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
+  const plusLoadItemEx = isBodyweightPlusLoad((store?.exercises || []).find(e => e.id === it.exId));
+  // bodyweightKg == null is how the reduction gates recognise "there is a load
+  // to reduce". It is the right test for a pull-bodyweight exercise, whose kg
+  // IS the body, but plus_load callers also pass a bodyweight (to rebuild the
+  // total), which switched both reductions off for exactly the exercises that
+  // do carry a reducible load. withPlusLoad below applies the factor itself.
+  const loadIsReducible = bodyweightKg == null || plusLoadItemEx;
+  const deload = deloadActive && loadIsReducible && !isAssistedEx;
   // Same exemptions as deload, plus this exercise's own opt-out: the user can
   // flip a single lift back to full load from the exercise header without
   // ending the cleanup week for everything else.
-  const cleanup = !deload && cleanupCfg != null && bodyweightKg == null && !isAssistedEx
+  const cleanup = !deload && cleanupCfg != null && loadIsReducible && !isAssistedEx
     && !(cleanupCfg.optOuts && cleanupCfg.optOuts[it.exId]);
   // Clamped here rather than trusting the caller: the value round-trips through
   // the DB and a backup restore, so a hand-edited row can't seed a 90% cut.
@@ -3421,8 +3430,20 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     return seeded.map((st, i) => {
       const prevAdded = workingSets[i]?.addedKg ?? null;
       if (prevAdded == null) return { ...st, kg: null, addedKg: null };
-      const total = plusLoadBw == null ? null : Math.round((plusLoadBw + prevAdded) * 100) / 100;
-      return { ...st, kg: total, addedKg: prevAdded };
+      const bw = plusLoadBw ?? null;
+      if (bw == null) return { ...st, kg: null, addedKg: prevAdded };
+      // A deload or cleanup reduces what the lifter actually moves, which here
+      // is bodyweight PLUS belt, not the belt on its own. Taking the factor off
+      // the belt alone would cut a 100 kg weighted pull-up to 96 while every
+      // barbell lift in the same session starts at 80. So reduce the TOTAL and
+      // derive the belt from it, floored at 0: once the target drops below
+      // bodyweight there is nothing left to take off, and a bare pull-up is
+      // exactly what a deload week means for this lift. Never negative, that
+      // would read as assistance the exercise does not have.
+      const fullTotal = Math.round((bw + prevAdded) * 100) / 100;
+      const target = factor != null ? Math.round((fullTotal * factor) / 2.5) * 2.5 : fullTotal;
+      const belt = Math.max(0, Math.round((target - bw) * 100) / 100);
+      return { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
     });
   };
 

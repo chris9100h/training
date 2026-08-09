@@ -2551,7 +2551,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
       // Load-only autoregulate plans never apply set deltas (weight is tuned,
       // set count stays authored), this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
@@ -2804,7 +2804,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null, 3, occ);
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, plannedProgressionOffset: it.progressionOffset ?? null, plannedTechniques: it.plannedTechniques ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });

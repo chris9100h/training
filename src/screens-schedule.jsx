@@ -1178,7 +1178,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null, occ);
         // Match the real session-start bodyweight rule (screens-home.jsx), not
         // the stricter shouldPullBodyweight, so preview and session agree.
-        const bodyweightKg = (ex?.equipment === 'bodyweight') ? LB.latestBodyweight(store) : null;
+        const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
         // Load-only autoregulate plans never apply set deltas (mirrors the real
         // seeding in screens-home.jsx so this preview agrees with it).
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;

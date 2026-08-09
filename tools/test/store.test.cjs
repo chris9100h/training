@@ -276,6 +276,38 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
   });
 
+  // ── plus_load seeding and the deload/cleanup reduction ──────────────────
+  test('bestEntryFromSetLists keeps the fields that say HOW a load was made up', () => {
+    // This field list has silently dropped a field twice now, addedKg and then
+    // hornLoads, each time with kg staying correct so nothing looked broken.
+    const sets = [[{ kg: 100, reps: 8, addedKg: 20, done: true }]];
+    const e = LB.bestEntryFromSetLists(sets);
+    assert.strictEqual(e.entry.sets[0].addedKg, 20);
+    const horned = [[{ kg: 90, reps: 8, hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }], done: true }]];
+    assert.deepStrictEqual(LB.bestEntryFromSetLists(horned).entry.sets[0].hornLoads,
+      [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }]);
+  });
+
+  test('a deload reduces what the lifter actually moves, and floors the belt at zero', () => {
+    const store = {
+      exercises: [{ id: 'x', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' }],
+      dailyLogs: [{ date: '2026-06-10', weight: 80 }],
+      settings: {},
+      sessions: [],
+    };
+    const last = { entry: { sets: [{ kg: 120, reps: 8, addedKg: 40, done: true }] } };
+    const it = { exId: 'x', sets: 1, repsPerSet: null };
+    // 120 total at 50 percent is 60, which is under the 80 kg body, so the belt
+    // floors at 0 and the set becomes a bare pull-up. Never negative.
+    const deloaded = LB.buildSeedSets(it, last, null, false, store, null, true, null);
+    assert.strictEqual(deloaded[0].addedKg, 0);
+    assert.strictEqual(deloaded[0].kg, 80);
+    // Without a deload the belt is repeated as logged.
+    const plain = LB.buildSeedSets(it, last, null, false, store, null, false, null);
+    assert.strictEqual(plain[0].addedKg, 40);
+    assert.strictEqual(plain[0].kg, 120);
+  });
+
   // ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────
   test('hornLoadTotal sums the loaded horns and stays null when nothing is on', () => {
     assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: 20 }, { label: 'B', kg: 10.5 }]), 30.5);
