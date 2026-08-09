@@ -1654,7 +1654,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
           if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
             const num = parseFloat((rawRef || '').replace(',', '.'));
-            if (!isNaN(num) && num > 0) loggedKg = num;
+            // refKg and the stored kg are totals; the still-open kg buffer holds
+            // the added load on a plus_load exercise, so fold bodyweight in
+            // (exactly what weightPatch will store) before comparing. Without
+            // this, completing via the checkbox while the weight field is still
+            // active compares a "+20" belt load against a 100 total and fires a
+            // false "weight looks low" prompt on every plus_load set.
+            if (!isNaN(num) && num > 0) loggedKg = isPlusLoad ? Math.round(((plusLoadBw ?? 0) + num) * 100) / 100 : num;
           }
         }
       }
@@ -4644,8 +4650,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const activateKb = (setIdx, field) => {
     _log(`activateKb(set${setIdx} ${field})`);
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
+    // Seed the kg buffer from dispWeight, never from s.kg: every write path
+    // (kbApply, kbAdjust) reads this buffer as the number the user TYPED, which
+    // on a plus_load exercise is the added load, not the stored total. Seeding
+    // the total made kbConfirm re-run weightPatch over it and fold bodyweight in
+    // a second time, so opening a set and confirming it unchanged grew the load.
+    const shownKg = field === 'kg' ? dispWeight(s) : null;
     const val = field === 'kg'
-      ? (s?.kg != null ? String(s.kg).replace('.', ',') : '')
+      ? (shownKg != null ? String(shownKg).replace('.', ',') : '')
       : (s?.[field] != null ? String(s[field]) : '');
     kbFieldRef.current = { setIdx, field };
     kbRawRef.current = val;
@@ -4942,13 +4954,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
+      // Same patch kbApply writes: the ± keys step the typed number, so on a
+      // plus_load exercise `next` is an added load and only weightPatch can turn
+      // it into the stored total. Writing kg directly here left addedKg stale and
+      // put the belt figure into the total's slot.
       updateSession(sess => ({
         ...sess,
         entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
           ...en,
           sets: en.sets.map((st, si) =>
-            si === setIdx ? { ...st, kg: next, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-            : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: next }
+            si === setIdx ? { ...st, ...weightPatch(next), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
+            : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(next) }
             : st
           ),
         }),
