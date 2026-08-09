@@ -120,26 +120,27 @@ Deno.serve(async (req) => {
 
       // A session that isn't this user's currently-tracked in-progress one is
       // an orphan (lost cross-device start race, or a local abandon/delete
-      // that hasn't synced yet), the client's own boot reconciliation
-      // (store.js loadFromSupabase) silently deletes any such session rather
-      // than treating it as real, so mirror that here instead of "closing"
-      // it with a real notification for a workout the user never left open.
+      // that hasn't synced yet). This used to hard-delete every one of them,
+      // justified as mirroring the client's boot reconciliation, which it
+      // did NOT: store.js loadFromSupabase (the `orphanIds` filter) deletes
+      // an orphan only when it is genuinely empty, no entry rows AND an
+      // exercise_count aggregate of 0, and its comment states outright that
+      // an orphan with real logged data is left alone so that this cron ENDS
+      // it later via the timeout. The delete therefore destroyed exactly the
+      // workouts the client had preserved for us. The faithful mirror is to
+      // split on hasSets the same way the tracked path does: empty orphan is
+      // thrown away, orphan with sets is a real workout and gets closed.
+      // Untracked only changes who gets told (see the notification below),
+      // never whether the data survives.
       const isTracked = sett?.in_progress_session_id === sess.id;
-      if (!isTracked) {
-        await dbFetch(`zane_sets?session_id=eq.${sess.id}`, { method: 'DELETE' });
-        await dbFetch(`zane_session_entries?session_id=eq.${sess.id}`, { method: 'DELETE' });
-        await dbFetch(`zane_sessions?id=eq.${sess.id}`, { method: 'DELETE' });
-        console.log(`[auto-close] deleted untracked orphan session ${sess.id}`);
-        deleted++;
-        continue;
-      }
 
       if (!hasSets) {
-        // Butt start, delete everything silently
+        // Butt start when tracked, empty orphan when not. Nothing was ever
+        // logged either way, delete everything silently.
         await dbFetch(`zane_sets?session_id=eq.${sess.id}`, { method: 'DELETE' });
         await dbFetch(`zane_session_entries?session_id=eq.${sess.id}`, { method: 'DELETE' });
         await dbFetch(`zane_sessions?id=eq.${sess.id}`, { method: 'DELETE' });
-        console.log(`[auto-close] deleted butt-start session ${sess.id}`);
+        console.log(`[auto-close] deleted ${isTracked ? 'butt-start' : 'empty untracked orphan'} session ${sess.id}`);
         deleted++;
       } else {
         // Has sets, close with ended = last set's updated_at. started_at is
@@ -174,34 +175,45 @@ Deno.serve(async (req) => {
           console.error(`[auto-close] close-PATCH failed for session ${sess.id}: ${closeResp.status} ${await closeResp.text().catch(() => '')}`);
           continue;
         }
-        console.log(`[auto-close] closed session ${sess.id} (${durationMinutes ?? 'unknown'} min)`);
+        console.log(`[auto-close] closed ${isTracked ? '' : 'untracked '}session ${sess.id} (${durationMinutes ?? 'unknown'} min)`);
 
-        // Write notification for next app start
-        await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}`, {
-          method: 'PATCH',
-          headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            auto_close_notify: {
-              dayName: sess.day_name || 'Session',
-              date: (sess.date || '').slice(0, 10),
-              durationMinutes,
-            },
-          }),
-        });
+        // Notify only for the session this user's device still tracks as in
+        // progress. An untracked one is a session that device has already
+        // moved on from, and the usual cause (a lost cross-device start race)
+        // means a DIFFERENT session may be live right now, so "Session ended"
+        // would be plain wrong; auto_close_notify is also a single slot, so
+        // it would overwrite the pending notice for the real session on top
+        // of that. Saving the sets is the point of closing an orphan, the
+        // notification isn't, and a silent close is still infinitely better
+        // than the delete this branch used to do.
+        if (isTracked) {
+          // Write notification for next app start
+          await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}`, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify({
+              auto_close_notify: {
+                dayName: sess.day_name || 'Session',
+                date: (sess.date || '').slice(0, 10),
+                durationMinutes,
+              },
+            }),
+          });
 
-        if (sett?.push_enabled) {
-          const msg = durationMinutes != null
-            ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
-            : `Session auto-ended after ${timeoutMin} min of inactivity.`;
-          // Pushover INSTEAD of Web Push when the user chose that channel, the
-          // same rule the three reminder functions follow. This used to send
-          // both whenever a key existed, so a Pushover user got every
-          // auto-close twice.
-          const viaPushover = !!sett.use_pushover && !!sett.pushover_user_key;
-          if (viaPushover) {
-            await sendPushover(sett.pushover_user_key, sess.user_id, msg);
-          } else {
-            await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
+          if (sett?.push_enabled) {
+            const msg = durationMinutes != null
+              ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
+              : `Session auto-ended after ${timeoutMin} min of inactivity.`;
+            // Pushover INSTEAD of Web Push when the user chose that channel, the
+            // same rule the three reminder functions follow. This used to send
+            // both whenever a key existed, so a Pushover user got every
+            // auto-close twice.
+            const viaPushover = !!sett.use_pushover && !!sett.pushover_user_key;
+            if (viaPushover) {
+              await sendPushover(sett.pushover_user_key, sess.user_id, msg);
+            } else {
+              await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
+            }
           }
         }
         closed++;
@@ -220,7 +232,15 @@ Deno.serve(async (req) => {
       // (H2-Rest, audit-2026-08 verification pass). Scoping the PATCH
       // itself on in_progress_session_id=eq.<id> makes it an atomic
       // conditional update: a race makes this a no-op instead of a wrong
-      // write.
+      // write. Untracked sessions reach this line too now that they no
+      // longer `continue` out early, and that is fine for the same reason:
+      // the pointer by definition points elsewhere, so the scope matches
+      // nothing. Guarding it with a plain `if (isTracked)` would be exactly
+      // the stale-snapshot decision this scoping exists to avoid, and in the
+      // one case where the scope does match (a device re-adopted this id
+      // while we were closing/deleting it) nulling a pointer to an ended or
+      // gone session is the right repair anyway: the column is plain text,
+      // no FK, so nothing else clears it.
       await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}&in_progress_session_id=eq.${sess.id}`, {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
