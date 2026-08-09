@@ -7808,25 +7808,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // never touches them, so counting them here would advertise a
               // number the buttons below cannot act on, which is the exact
               // mismatch this box used to have against the silent auto-seal.
+              // `started` decides whether the choice below can touch a row at
+              // all: an exercise with no confirmed set was not attempted, so
+              // sealDoneSets skips ALL of it either way. Listing those rows as
+              // "N left" next to a "Mark as done" button implied the button
+              // would log them, which it never does. They are named as what
+              // they are instead.
               const incomplete = session.entries
                 .map(e => e.isCardio
-                  ? { name: e.name, remaining: e.cardioDone ? 0 : 1, isCardio: true }
-                  : { name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped && !s.warmup).length })
+                  ? { name: e.name, remaining: e.cardioDone ? 0 : 1, isCardio: true, started: false }
+                  : {
+                      name: e.name,
+                      remaining: e.sets.filter(s => !s.done && !s.skipped && !s.warmup).length,
+                      started: e.sets.some(s => s.done),
+                    })
                 .filter(e => e.remaining > 0);
               if (!incomplete.length) return null;
-              // The choice only exists where an exercise was actually started:
-              // with no confirmed set at all the exercise counts as not done
-              // and everything in it is skipped either way, nothing to decide.
-              const choosable = session.entries.some(e => !e.isCardio
-                && e.sets.some(st => st.done)
-                && e.sets.some(st => !st.done && !st.skipped && !st.warmup));
+              const choosable = incomplete.some(e => !e.isCardio && e.started);
               return (
                 <div style={{ background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                   <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
                   {incomplete.map(e => (
                     <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
-                      <span style={{ color: UI.inkSoft }}>{e.name}</span>
-                      <span className="num" style={{ color: 'var(--accent)' }}>{e.isCardio ? 'not logged' : `${e.remaining} left`}</span>
+                      <span style={{ color: e.started || e.isCardio ? UI.inkSoft : UI.inkFaint }}>{e.name}</span>
+                      {/* Muted "not started" rather than a count: the choice
+                          below cannot reach these, they are skipped either way. */}
+                      <span className="num" style={{ color: e.started ? 'var(--accent)' : UI.inkFaint }}>
+                        {e.isCardio ? 'not logged' : e.started ? `${e.remaining} left` : 'not started'}
+                      </span>
                     </div>
                   ))}
                   {choosable && (<>
@@ -7844,7 +7853,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                     <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.5 }}>
                       {sealMode === 'done'
-                        ? 'Sets that already hold numbers are logged as completed, the rest as skipped.'
+                        ? 'Applies to the exercises you started: sets that already hold numbers are logged as completed, the rest as skipped. Exercises you never started stay skipped.'
                         : 'Recorded as skipped, so they count for nothing. You can reopen them later by editing the session.'}
                     </div>
                   </>)}
