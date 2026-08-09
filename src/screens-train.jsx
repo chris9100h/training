@@ -8396,7 +8396,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 column it labels instead of floating between the two. */}
             <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: '1fr 52px 96px', gap: 8, alignItems: 'baseline', padding: '0 4px 10px' }}>
               <span style={chainTitleStyle}>LOADING HORNS</span>
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{hornPrev ? 'LAST' : ''}</span>
+              {/* .micro sets letter-spacing 0.18em, which the browser also renders
+                  AFTER the final glyph. Right-aligned against the mono digits
+                  below, that trailing gap reads as the header being off to the
+                  left. Pulled back by exactly that much so the two line up. */}
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right', marginRight: '-0.18em' }}>{hornPrev ? 'LAST' : ''}</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em', textAlign: 'right' }}>CANCEL</button>
             </div>
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
