@@ -6718,8 +6718,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </a>
             )}
           </div>
-          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null || (entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1) || (!isCardio && !isNoWeightReps && entry.plannedReps)) && (
+          {(isMultiHornEx || exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null || (entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1) || (!isCardio && !isNoWeightReps && entry.plannedReps)) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              {/* Says from the set list itself that this exercise's weight cell
+                  opens the horn sheet rather than the keypad. */}
+              {isMultiHornEx && <Pill gold>{hornLabels.length} horns</Pill>}
               {entry.plannedRepsMax != null && <Pill gold>Range {entry.plannedReps}–{entry.plannedRepsMax}</Pill>}
               {entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && <Pill gold>Per Set {entry.plannedRepsPerSet.join('/')}</Pill>}
               {entry.plannedRepsMax == null && !(entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1) && !isCardio && !isNoWeightReps && entry.plannedReps && <Pill gold>{entry.plannedReps} reps</Pill>}
@@ -8389,22 +8392,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       >
         {hornSetIdx != null && (
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+            {/* Same grid as the rows below, so LAST TIME sits exactly over the
+                column it labels instead of floating between the two. */}
+            <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: '1fr 52px 96px', gap: 8, alignItems: 'baseline', padding: '0 4px 10px' }}>
               <span style={chainTitleStyle}>LOADING HORNS</span>
-              {hornPrev && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 8 }}>last time</span>}
-              <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{hornPrev ? 'LAST' : ''}</span>
+              <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em', textAlign: 'right' }}>CANCEL</button>
             </div>
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
               {hornRows.map((h, hi) => {
                 const isActive = kbField?.setIdx === 'horn' && kbField?.hornIdx === hi;
                 return (
                   <div key={hi} data-horn-row={hi} style={{ display: 'grid', gridTemplateColumns: '1fr 52px 96px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.label}</div>
+                    {/* The horn name is what the user is matching against the
+                        machine in front of them, so it carries the row. */}
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, color: UI.ink, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.label}</div>
                     {/* Last session's load for this horn. The fields are
                         pre-filled, but that reference disappears the moment one
                         is changed, and on a deload or cleanup week the seeds are
                         scaled so they never matched last time anyway. */}
-                    <div className="num" style={{ fontSize: 10, color: UI.inkFaint, textAlign: 'right' }}>
+                    <div className="num" style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'right' }}>
                       {(() => {
                         const p = hornPrev?.find(x => x?.label === h.label);
                         return p?.kg != null ? String(p.kg) : '';
