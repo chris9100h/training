@@ -482,7 +482,17 @@ function MdDoseRing({ taken, due, size = 104 }) {
 
 function MedicationsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
-  const today = LB.todayISO();
+  // Same rollover idiom as the Water tracker and the Food Tracker: `today` was
+  // computed once at mount, so a screen left open past midnight kept logging
+  // doses onto yesterday and the timeline kept showing yesterday's schedule.
+  const [today, setToday] = useStateMd(() => LB.todayISO());
+  useEffectMd(() => {
+    const tick = () => setToday(cur => { const now = LB.todayISO(); return now === cur ? cur : now; });
+    const iv = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
   const [screenTab, setScreenTab] = useStateMd('timeline'); // 'timeline' | 'schedule' | 'inventory'
   const [weeklyPrepOpen, setWeeklyPrepOpen] = useStateMd(false);
 
@@ -526,6 +536,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // date switcher plus a full 0-23 hour grid that's always rendered, filled
   // or not, rather than an empty-state takeover on a day with nothing yet.
   const [curDate, setCurDate] = useStateMd(today);
+  // Only a day the user did NOT deliberately navigate to follows the rollover.
+  const prevTodayRef = useRefMd(today);
+  useEffectMd(() => {
+    const prev = prevTodayRef.current;
+    if (today !== prev) {
+      setCurDate(d => d === prev ? today : d);
+      prevTodayRef.current = today;
+    }
+  }, [today]);
   const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
   const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
   const curDateLogs = useMemoMd(
