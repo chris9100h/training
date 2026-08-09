@@ -2397,16 +2397,35 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     runPhase('ecc', ctx.currentTime);
   };
 
-  // Seal non-warmup sets that have values as done, guards against a sync
-  // race where kbApply (done:false) lands in Supabase after completeSet
-  // (done:true). Only seal exercises where at least one set is done; if no
-  // set was ever confirmed the exercise was skipped/not started. Shared by
-  // finish() below between the actual store write (sealed off the FRESH
-  // sess.entries, same "read fresh state" reasoning as everywhere else
-  // updateSession is used) and finishedSnapshot (sealed off the closure's
-  // own session.entries): both need the POST-seal entries, not the raw ones,
-  // for the autoreg block-recap/overreach detector to count the same sets
-  // that are about to be written as done.
+  // What Finish does with a set that was never confirmed: 'skip' records it as
+  // skipped, 'done' seals it as completed. The user picks in the finish sheet,
+  // which lists exactly these sets under "Incomplete sets".
+  //
+  // This used to be decided here, always in favour of sealing, justified as a
+  // guard against kbApply (done:false) landing in Supabase after completeSet
+  // (done:true). That justification did not hold: sealDoneSets reads LOCAL
+  // entries, and a set the user really confirmed already reads done there, so
+  // what the rule actually caught was every set carrying values but no tick.
+  // buildSeedSets pre-fills kg/reps with done:false, so a set left unticked on
+  // purpose (failed lift, cut short, back-off dropped) was logged as completed
+  // with its planned numbers, and progression plus the meso grades, which
+  // filter on st.done, counted work that never happened. The finish sheet
+  // meanwhile listed that same set as incomplete.
+  //
+  // Default is 'skip' because the two mistakes are not symmetric. A wrongly
+  // skipped set keeps its numbers and can be reopened from the session editor
+  // (any field edit there clears skipped and re-derives done). A wrongly
+  // sealed one silently inflates volume, PRs and the autoreg grade, and
+  // nothing tells the user to go look.
+  const [sealMode, setSealMode] = useStateT('skip');
+  // Only exercises with at least one confirmed set are subject to the choice;
+  // if nothing was ever confirmed the exercise was not started, and all of it
+  // is skipped regardless. Shared by finish() below between the actual store
+  // write (sealed off the FRESH sess.entries, same "read fresh state"
+  // reasoning as everywhere else updateSession is used) and finishedSnapshot
+  // (sealed off the closure's own session.entries): both need the POST-seal
+  // entries, not the raw ones, so the autoreg block-recap/overreach detector
+  // counts exactly the sets that are about to be written.
   const sealDoneSets = (entries) => entries.map(e => {
     const hasDone = e.sets.some(st => st.done);
     return {
@@ -2414,8 +2433,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       sets: e.sets.map(st => {
         if (st.done || st.warmup || st.skipped) return st;
         if (!hasDone) return { ...st, skipped: true };
+        // Sealing needs numbers to seal. A set with nothing in it cannot be
+        // recorded as completed whichever way the choice went, and leaving it
+        // neither done nor skipped (what this used to do) is the ambiguous
+        // third state that made the finish sheet's own count disagree with
+        // what was actually written.
         const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
-        return hasValue ? { ...st, done: true } : st;
+        return hasValue && sealMode === 'done' ? { ...st, done: true } : { ...st, skipped: true };
       }),
     };
   });
@@ -2532,11 +2556,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // hold its ended/recap until the setState flushes) so both block-recap
       // framings, the block-end celebration and the mid-block decline, aggregate
       // the FULL block including the session that just closed it out. entries
-      // goes through sealDoneSets too, same as the actual store write above:
-      // without it, a value-bearing set left unticked at Finish counts as 0
-      // done sets here even though the write happening in parallel is about
-      // to seal it to done, so the block recap/overreach detector would
-      // silently undercount the session that just closed the block.
+      // goes through sealDoneSets too, same as the actual store write above,
+      // and therefore under the same seal choice: the two must agree, or the
+      // block recap/overreach detector counts a different number of done sets
+      // than the session it is reporting on actually ends up holding.
       const finishedSnapshot = {
         ...session,
         entries: sealDoneSets(session.entries),
@@ -7753,12 +7776,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {finishStep === 'confirm' ? (<>
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
+              // Warm-ups are left out of the count on purpose: sealDoneSets
+              // never touches them, so counting them here would advertise a
+              // number the buttons below cannot act on, which is the exact
+              // mismatch this box used to have against the silent auto-seal.
               const incomplete = session.entries
                 .map(e => e.isCardio
                   ? { name: e.name, remaining: e.cardioDone ? 0 : 1, isCardio: true }
-                  : { name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length })
+                  : { name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped && !s.warmup).length })
                 .filter(e => e.remaining > 0);
               if (!incomplete.length) return null;
+              // The choice only exists where an exercise was actually started:
+              // with no confirmed set at all the exercise counts as not done
+              // and everything in it is skipped either way, nothing to decide.
+              const choosable = session.entries.some(e => !e.isCardio
+                && e.sets.some(st => st.done)
+                && e.sets.some(st => !st.done && !st.skipped && !st.warmup));
               return (
                 <div style={{ background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                   <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
@@ -7768,6 +7801,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <span className="num" style={{ color: 'var(--accent)' }}>{e.isCardio ? 'not logged' : `${e.remaining} left`}</span>
                     </div>
                   ))}
+                  {choosable && (<>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      {[{ id: 'skip', label: 'Skip them' }, { id: 'done', label: 'Mark as done' }].map(o => (
+                        <button key={o.id} onClick={() => setSealMode(o.id)} style={{
+                          flex: 1, padding: '9px 6px', borderRadius: 4, cursor: 'pointer',
+                          fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.02em',
+                          background: sealMode === o.id ? 'rgba(var(--accent-rgb),0.3)' : 'transparent',
+                          border: `1px solid ${sealMode === o.id ? 'var(--accent)' : UI.hairStrong}`,
+                          color: sealMode === o.id ? 'var(--accent)' : UI.inkSoft,
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>{o.label}</button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.5 }}>
+                      {sealMode === 'done'
+                        ? 'Sets that already hold numbers are logged as completed, the rest as skipped.'
+                        : 'Recorded as skipped, so they count for nothing. You can reopen them later by editing the session.'}
+                    </div>
+                  </>)}
                 </div>
               );
             })()}
