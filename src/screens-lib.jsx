@@ -129,6 +129,13 @@ function PinNoteToggle({ on, onToggle }) {
   );
 }
 
+// Library "Recent" tab: how many exercises the list shows, and the ceiling on
+// how many windowed-out sessions a single hydration pass pulls back. An account
+// with years of history must never fetch all of it to fill a 12-row list, so the
+// walk back through the window happens in batches over successive renders.
+const RECENT_LIMIT = 12;
+const RECENT_HYDRATE_MAX = 12;
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -223,11 +230,35 @@ function LibraryScreen({ store, setStore, go, userId }) {
     go({ name: 'exercise', exId: first, editQueue: rest, editQueueTotal: ordered.length, autoEdit: true });
   };
 
-  const recent = useMemoL(() => {
+  // This list is indexed out of session ENTRIES, but sessions outside the boot
+  // history window carry aggregates only (entries: [], aggExercises > 0, see
+  // docs/internals.md "History-Windowing"). They contribute nothing here, so a
+  // user returning from a break longer than the window, or opening the app on a
+  // reinstalled device, got an empty list, which the tab then presented as a
+  // first-run "nothing logged yet" on top of months of real history. The scan
+  // now stops at the first windowed session and queues it (plus the next ones
+  // behind it, so the walk back is one round trip per batch rather than per
+  // session) for the lazy fetch below, same mechanism as the Home recap.
+  const { items: recent, needIds: recentNeedIds, hasEnded: hasEndedSessions, unloaded: recentUnloaded } = useMemoL(() => {
     const sortedSessions = [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
     const lastTwo = new Map();
     const seenFirst = new Map();
-    sortedSessions.forEach(s => {
+    let blockedAt = -1;
+    for (let i = 0; i < sortedSessions.length; i++) {
+      const s = sortedSessions[i];
+      if (!(s.entries || []).length) {
+        // aggExercises > 0 = windowed out (the server has its sets), 0 = a
+        // session that genuinely holds nothing and is safe to scan past.
+        if ((s.aggExercises || 0) > 0) {
+          // Stop either way: dating an exercise off an OLDER session while this
+          // one sits unloaded right here would be a lie. Only worth fetching
+          // while the list is still short, once it is full the unloaded
+          // sessions could at most add a trend arrow, never a row.
+          if (seenFirst.size < RECENT_LIMIT) blockedAt = i;
+          break;
+        }
+        continue;
+      }
       // Per SESSION, not per entry: an exercise trained twice in one session
       // (two entries) used to fill both "last two sessions" slots with that
       // same session, so cur and prev were computed from the same workout and
@@ -242,14 +273,24 @@ function LibraryScreen({ store, setStore, go, userId }) {
           if (arr.length === 0) seenFirst.set(e.exId, s.ended);
         }
       });
-    });
+    }
+    const needIds = [];
+    for (let j = blockedAt; j >= 0 && j < sortedSessions.length && needIds.length < RECENT_HYDRATE_MAX; j++) {
+      const x = sortedSessions[j];
+      if (!(x.entries || []).length && (x.aggExercises || 0) > 0) needIds.push(x.id);
+    }
+    // Working sets only. The caption beside the arrow deliberately shows the
+    // first non-warmup, non-skipped set, so feeding the trend off every set
+    // (a warm-up ramp, or a set the user skipped but that still carries its
+    // seeded numbers) had the arrow rating something the row never displays.
+    // Same filter Home applies before its own comparison (currWorking).
     const e1rm = (entry) => entry
-      ? Math.max(0, ...(entry.sets || []).map(s => { const r = LB.effReps(s); return s.kg && r ? LB.e1rm(s.kg, r) : 0; }), 0)
+      ? Math.max(0, ...(entry.sets || []).filter(s => !s.warmup && !s.skipped).map(s => { const r = LB.effReps(s); return s.kg && r ? LB.e1rm(s.kg, r) : 0; }), 0)
       : 0;
-    return store.exercises
+    const items = store.exercises
       .filter(e => seenFirst.has(e.id))
       .sort((a,b) => (seenFirst.get(b.id)||'').localeCompare(seenFirst.get(a.id)||''))
-      .slice(0, 12)
+      .slice(0, RECENT_LIMIT)
       .map(e => {
         const [sess0, sess1] = lastTwo.get(e.id) || [];
         const lastEntry = sess0?.entries.find(en => en.exId === e.id);
@@ -260,7 +301,37 @@ function LibraryScreen({ store, setStore, go, userId }) {
           : null;
         return { ex: e, last: seenFirst.get(e.id), lastEntry, trend };
       });
+    return { items, needIds, hasEnded: sortedSessions.length > 0, unloaded: blockedAt >= 0 };
   }, [store.exercises, store.sessions]);
+
+  // Pull the windowed sessions the scan ran into into the store, which reruns
+  // the memo and lets it walk further back. Re-checks entries are still empty at
+  // merge time so a concurrent update never gets clobbered, same idiom as
+  // SessionDetailScreen / SessionCompareScreen and the Home recap. The bail-out
+  // when nothing actually merged is this list's own addition and load-bearing:
+  // unlike those one-shot fetches, this effect is re-armed by the very memo it
+  // feeds, so handing back a fresh sessions array for a session the server
+  // answers with no rows (aggregate says it has sets, entries table disagrees)
+  // would re-arm it forever.
+  useEffectL(() => {
+    if (!recentNeedIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(recentNeedIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [recentNeedIds]);
 
   const filtered = useMemoL(() => {
     const ql = q.toUpperCase();
@@ -402,8 +473,25 @@ function LibraryScreen({ store, setStore, go, userId }) {
           );
         })()}
 
+        {/* Ended sessions exist, but none of them could be indexed: either they
+            all sit outside the boot history window and the lazy fetch above has
+            not landed yet (or cannot, offline), or they no longer point at any
+            exercise still in the library. Never the first-run copy in either
+            case, and History reads session metadata, so it stays complete
+            whatever this tab can see. */}
         {tab === 'recent' && recent.length === 0 && (
-          <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
+          hasEndedSessions ? (
+            <Empty
+              title="Nothing recent"
+              sub={recentUnloaded
+                ? 'Your older sessions are not loaded on this device. They fill in from the server as soon as you are online.'
+                : 'Your logged sessions no longer point at an exercise in your library.'}
+              icon={ICON_BARBELL}
+              action={<Btn kind="ghost" onClick={() => go({ name: 'hist' })}>Open history</Btn>}
+            />
+          ) : (
+            <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
+          )
         )}
 
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
@@ -2829,9 +2917,26 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [filtersOpen, setFiltersOpen] = useStateL(false);
   const filterCount = [planFilter, periodFilter, dayFilter].filter(Boolean).length;
 
+  // CardioQuickLogSheet creates when editLog is null, so clearing the edit
+  // target IS the create path. Shared by the tab's add button and its empty
+  // state so the two can never drift apart.
+  const openNewCardioLog = () => { setEditingCardioLog(null); setCardioLogOpen(true); };
+
   return (
     <Screen scroll={false}>
-      <TopBar title="History" right={tab === 'workouts' && planOptions.length > 0 ? (
+      <TopBar title="History" right={tab === 'cardio' ? (
+        // The Cardio tab's only other way into the log sheet is the edit pencil
+        // on an existing row, so a fresh account had no create path here at all
+        // and the empty state pointed at a control that only exists on the
+        // Workouts tab. Same add button the exercise library uses.
+        <button onClick={openNewCardioLog} style={{
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
+          color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          WebkitTapHighlightColor: 'transparent',
+        }}>+</button>
+      ) : tab === 'workouts' && planOptions.length > 0 ? (
         <button onClick={() => setFiltersOpen(true)} style={{
           background: filterCount > 0 ? UI.goldFaint : 'transparent',
           border: `1px solid ${filterCount > 0 ? UI.goldSoft : UI.hairStrong}`,
@@ -2965,7 +3070,12 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
               {logs.length === 0 && (
-                <Empty title="No cardio logged" sub="Tap the button above to log your first cardio session." icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                <Empty
+                  title="No cardio logged"
+                  sub="Tap + in the top right, or the button below, to log your first cardio session."
+                  icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />}
+                  action={<Btn onClick={openNewCardioLog}>Log cardio</Btn>}
+                />
               )}
               {(() => {
                 const items = [];
@@ -3640,9 +3750,26 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // the account's session history actually changes, not on every render
   // (a keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to this data).
-  const prevEntryMap = useMemoL(() => {
+  const { prevEntryMap, prevPendingMap, prevPendingExIds, prevNeedIds } = useMemoL(() => {
     const map = {};
+    const pending = {};
+    const pendingExIds = new Set();
+    const needIds = new Set();
     const prevOccSeen = {};
+    // A prior session outside the boot history window carries aggregates only
+    // (entries: [], aggExercises > 0, see docs/internals.md "History-Windowing").
+    // Nothing here can tell whether it holds this exercise, so the candidate
+    // walk must not step past it and hand an older, unrelated session over as
+    // "last time". Mark the entry pending instead (the render suppresses its
+    // arrows and PR star), queue the session, and let the fetch below rerun
+    // this memo, same mechanism as the Home recap's prior-session lookup.
+    const windowedGap = (x, idx, exId) => {
+      if ((x.aggExercises || 0) <= 0) return false; // genuinely empty, safe to skip
+      needIds.add(x.id);
+      pending[idx] = true;
+      pendingExIds.add(exId);
+      return true;
+    };
     s.entries.forEach((e, idx) => {
       // The Nth occurrence of an exercise in the day compares against the SAME Nth
       // occurrence of past sessions (audit L3, matching the seed path). Keyed by
@@ -3657,14 +3784,54 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // a false decline). Only the main lift itself: assistance work on a
       // 5/3/1 day still compares against the plain most-recent session below.
       const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
-      const prev = cyclePrev || store.sessions
-        .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
-        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-        .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
+      let prev = null;
+      if (cyclePrev) {
+        // The wave-matched session can be windowed out just as well, and it has
+        // no fallback candidate: without its entries there is simply no prev.
+        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx, e.exId);
+        else prev = cyclePrev;
+      } else {
+        const candidates = store.sessions
+          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+          .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+        for (const x of candidates) {
+          if (!(x.entries || []).length) {
+            if (windowedGap(x, idx, e.exId)) break;
+            continue;
+          }
+          if (x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null)) { prev = x; break; }
+        }
+      }
       map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
     });
-    return map;
+    return { prevEntryMap: map, prevPendingMap: pending, prevPendingExIds: pendingExIds, prevNeedIds: [...needIds] };
   }, [store.sessions, store.schedules, s]);
+
+  // Load the windowed prior sessions the comparison above ran into, so the
+  // suppressed entries resolve into a real verdict. Same merge guard as
+  // everywhere else: entries are re-checked as still empty at merge time so a
+  // concurrent update never gets clobbered, plus the same bail-out the Library's
+  // Recent list uses, since this effect is likewise re-armed by the memo it
+  // feeds and must not spin on a session the server answers with no rows.
+  useEffectL(() => {
+    if (!prevNeedIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(prevNeedIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [prevNeedIds]);
 
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
@@ -3822,7 +3989,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // volDelta below: total volume can land lower than last time even on a
   // session that set new records (fewer sets, a lighter secondary exercise,
   // ...), so leading with the count keeps that from reading as a step back.
-  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
+  // Exercises whose prior session is still being fetched back are held out here
+  // too, or the header would advertise a PR the set list below deliberately
+  // leaves unbadged (see noVerdict in renderEntry).
+  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => !prevPendingExIds.has(exId) && isPR(st, exId)).length;
   // A cleanup session's volume is down by design, same as a deload's, so the
   // delta is suppressed there too rather than reading as a step back.
   const showVol = volDelta != null && !s.isDeload && !s.isCleanup;
@@ -4468,6 +4638,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 // disagree about which exercises a cleanup week actually touched.
                 const reducedLoad = s.isDeload
                   || (s.isCleanup && !s.cleanupOptOuts?.[e.exId] && LB.cleanupAppliesToExercise(store, e.exId, s.dayId));
+                // This entry's real "last time" sits in a windowed-out session
+                // that has not been fetched back yet (see prevEntryMap): the
+                // baseline is unknown, not absent, so hold every verdict until
+                // it lands rather than colouring against whatever older session
+                // would otherwise have stood in for it.
+                const noVerdict = reducedLoad || !!prevPendingMap[i];
 
                 // Cardio entry, show activity summary instead of sets
                 // isCardio may be missing on entries loaded from DB (not a DB column),
@@ -4590,10 +4766,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
-                      const pr = !isWarm && !reducedLoad && isPR(st, e.exId);
-                      const highlight = !isWarm && !reducedLoad && (pr || isImprovement(st, prevSet));
-                      const anyImprovementBefore = !isWarm && !reducedLoad && filteredSets.slice(0, j).some((st2, k) => !st2.warmup && (isPR(st2, e.exId) || isImprovement(st2, prevWorkingFor(k))));
-                      const decline = !isWarm && !reducedLoad && !anyImprovementBefore && isDecline(st, prevSet);
+                      const pr = !isWarm && !noVerdict && isPR(st, e.exId);
+                      const highlight = !isWarm && !noVerdict && (pr || isImprovement(st, prevSet));
+                      const anyImprovementBefore = !isWarm && !noVerdict && filteredSets.slice(0, j).some((st2, k) => !st2.warmup && (isPR(st2, e.exId) || isImprovement(st2, prevWorkingFor(k))));
+                      const decline = !isWarm && !noVerdict && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
 
                       // Drop set: DS badge + chips connected by arrows
