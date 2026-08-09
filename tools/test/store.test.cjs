@@ -286,6 +286,16 @@ async function testAsync(name, fn) {
     const horned = [[{ kg: 90, reps: 8, hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }], done: true }]];
     assert.deepStrictEqual(LB.bestEntryFromSetLists(horned).entry.sets[0].hornLoads,
       [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }]);
+    // And they have to come off the WINNING set, not the most recent one. Same
+    // total, different distribution: the older session did more reps, so it
+    // wins, and its horn split is the one that describes those reps.
+    const twoSessions = [
+      [{ kg: 90, reps: 6, hornLoads: [{ label: 'Std', kg: 45 }, { label: 'Mid', kg: 45 }], done: true }],
+      [{ kg: 90, reps: 9, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 70 }], done: true }],
+    ];
+    const won = LB.bestEntryFromSetLists(twoSessions).entry.sets[0];
+    assert.strictEqual(won.reps, 9);
+    assert.deepStrictEqual(won.hornLoads, [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 70 }]);
   });
 
   test('a deload reduces what the lifter actually moves, and floors the belt at zero', () => {
@@ -428,9 +438,14 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.weekPlanStartDate, '2026-06-15');
   });
   test('mergeBootScalars resolves statusMode and statusModeSince as one pair', () => {
+    // The period is open and agrees with the local mode, so the status rules
+    // below stay out of it and the group resolution is what is under test: the
+    // local statusModeSince has to ride along with the local statusMode rather
+    // than being taken from either the server row or the period.
     const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
     const fresh = { ...bs, statusModeSince: '2026-01-01T00:00:00Z' };
-    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-01-01T00:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, periods);
     assert.strictEqual(out.statusMode, 'sick');
     assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
   });
@@ -448,10 +463,10 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(edited.customDayTypes, ['Mobility']);
   });
   test('mergeBootScalars keeps the local side when there is no base (legacy cache)', () => {
-    const cur = { ...bs, activeScheduleId: 'local', statusMode: 'vacation' };
+    const cur = { ...bs, activeScheduleId: 'local', activeMealTemplateId: 'mt1' };
     const out = LB.mergeBootScalars({ ...bs }, cur, null, []);
     assert.strictEqual(out.activeScheduleId, 'local');
-    assert.strictEqual(out.statusMode, 'vacation');
+    assert.strictEqual(out.activeMealTemplateId, 'mt1');
   });
   test('mergeBootScalars never writes undefined for a field the cache predates', () => {
     const cur = { ...bs, activeScheduleId: 'local' };
@@ -480,6 +495,33 @@ async function testAsync(name, fn) {
     const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-08T00:00:00Z' }];
     const out = LB.mergeBootScalars({ ...bs }, { ...bs }, { ...bs }, periods);
     assert.strictEqual(out.statusMode, null);
+  });
+  test('mergeBootScalars clears a statusMode no open period backs (server side)', () => {
+    // The mirror of the rule above. Every clear path closes the period with an
+    // unwrapped write and leaves the scalar to the diff queue, so the settings
+    // row can still say sick after the period is properly closed. Without this
+    // the user is stuck in an overlay they already turned off.
+    const fresh = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-08T00:00:00Z' }];
+    const out = LB.mergeBootScalars(fresh, { ...fresh }, { ...fresh }, periods);
+    assert.strictEqual(out.statusMode, null);
+    assert.strictEqual(out.statusModeSince, null);
+  });
+  test('mergeBootScalars clears a statusMode the cache kept after the period went', () => {
+    // Same contradiction from the other side: the clear synced from another
+    // device (fresh agrees there is no status), this device's cache still holds
+    // the mode. The group rule alone would call that an unsynced local edit.
+    const cur = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    assert.strictEqual(out.statusMode, null);
+    assert.strictEqual(out.statusModeSince, null);
+  });
+  test('mergeBootScalars leaves statusMode alone when it has no period data at all', () => {
+    // null periods means "the caller did not supply any", not "there are none".
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, null);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-05-01T00:00:00Z');
   });
 
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────

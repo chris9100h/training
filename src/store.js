@@ -5409,6 +5409,25 @@ async function reloadCoachingState(userId) {
     _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').not('id', 'like', 'support_%').maybeSingle(),
   ]);
+
+  // A failed query resolves with { error } and data null, and every field
+  // below reads through `?.` into a default: no coach, no clients, no unread
+  // notes. One dropped request during a realtime reconnect therefore looked
+  // exactly like "your coach ended the relationship", and the callers wrote
+  // that emptiness into the store. Throw instead. All seven call sites sit in
+  // try/catch (or a .catch), so a failure now leaves the previous coaching
+  // state standing, which is the honest answer to "I could not check".
+  //
+  // PGRST116 stays tolerated: maybeSingle raises it when MORE than one row
+  // matches, and both those queries are already narrowed against the case
+  // that used to cause it (the support_% comment above). If a duplicate row
+  // ever appears anyway, that is one uncertain field, not a reason to blank
+  // the whole relationship.
+  const soft = (res) => !res?.error || res.error.code === 'PGRST116';
+  const firstErr = [coachInfoRes, coachClientsRes, unreadRes].find(r => r?.error)?.error
+    || [coachingRowRes, selfRowRes].find(r => !soft(r))?.error;
+  if (firstErr) throw firstErr;
+
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
       id: coachInfoRes.data[0].coaching_id,
@@ -9455,10 +9474,29 @@ function mergeBootScalars(fresh, cur, base, statusPeriods) {
   // history says sick, and the coach sees a third thing. The period row is the
   // stronger signal (it is the one that is written synchronously and unwrapped),
   // so an open period decides the mode.
-  const open = (statusPeriods || []).find(p => p.endedAt == null);
-  if (open && out.statusMode !== open.mode) {
-    out.statusMode = open.mode;
-    out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
+  //
+  // The rule has to run in BOTH directions, and only ran in one. Every path
+  // that clears a status (clearStatusMode, endDeload, endCleanup) closes or
+  // deletes the open period with an unwrapped write first, then leaves the
+  // statusMode scalar to the diff queue. So the exact failure the forward rule
+  // exists for has a mirror image that was left standing: the period is
+  // properly closed on the server while the settings row still says sick, and
+  // the merge preserved that. The user is stuck in a sick/deload overlay they
+  // already turned off, with reduced loads and missed days written off, and
+  // nothing in the UI to clear because as far as the period history goes it is
+  // already cleared. No open period means no status, full stop.
+  //
+  // statusPeriods == null means "the caller has no period data", not "there
+  // are none", so it must not clear anything.
+  const open = statusPeriods ? statusPeriods.find(p => p.endedAt == null) : null;
+  if (open) {
+    if (out.statusMode !== open.mode) {
+      out.statusMode = open.mode;
+      out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
+    }
+  } else if (statusPeriods && out.statusMode) {
+    out.statusMode = null;
+    out.statusModeSince = null;
   }
   return out;
 }

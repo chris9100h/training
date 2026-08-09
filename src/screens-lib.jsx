@@ -2528,6 +2528,12 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   // but no local entries. If just one of them gets lazy-loaded elsewhere (e.g. opening
   // its own detail view), setsPerMuscle would otherwise sum only that session and
   // silently present a partial cycle total as complete, batch-fetch the rest too.
+  // Bail when nothing merged. thisPeriodSessions is memoized off store.sessions,
+  // so returning a fresh sessions array re-runs the memo and re-arms this
+  // effect. `bySession[x.id]` is truthy for an EMPTY array, so a session the
+  // server answers with no rows (aggregate claims sets, the entries table
+  // disagrees) rebuilt its object on every pass, changed the identity, stayed
+  // in needIds and refetched forever. Same shape as the Recent-tab walk above.
   useEffectL(() => {
     const needIds = thisPeriodSessions
       .filter(s => s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0)
@@ -2537,10 +2543,15 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     LB.fetchSessionEntries(needIds)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };
@@ -5966,10 +5977,20 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
     LB.fetchSessionEntries(need)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        // Same merge guard as the other hydration sites. This effect keys on
+        // stable ids so it cannot spin, but `bySession[x.id]` is truthy for an
+        // empty array: without the length check a session the server answers
+        // with no rows still gets a new object identity, and syncStore then
+        // re-uploads a session nothing changed about.
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };

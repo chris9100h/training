@@ -7,6 +7,13 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
+// Ceiling on how many windowed-out sessions the post-workout recap pulls back
+// per mount, across all batches. One comparison needs at most one prior session
+// per exercise, so a healthy walk stops well under this; the cap is there so a
+// pathological one cannot drag years of history into the store. Mirrors
+// RECENT_HYDRATE_CAP in screens-lib.jsx.
+const RECAP_HYDRATE_CAP = 24;
+
 // Renders text on a single line, scaling the font size down so it always fits
 // the parent's width (used for the hero day name, which varies in length).
 function FitText({ text, max, min, style }) {
@@ -1782,16 +1789,38 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // empty at merge time so a concurrent update never gets clobbered. Same
   // idiom as fetchSessionEntries usage in SessionDetailScreen /
   // SessionCompareScreen (screens-lib.jsx).
+  //
+  // Bail when nothing actually merged, and cap the walk. neededPriorSessionIds
+  // is memoized off store.sessions, so handing back a fresh sessions array
+  // re-runs the memo and re-arms this effect. A session the server answers
+  // with no rows (aggregate claims sets, the entries table disagrees) used to
+  // do exactly that forever: `bySession[x.id]` is truthy for an empty array,
+  // so the map rebuilt the object, the identity changed, the id stayed in the
+  // needed list and the fetch fired again on the next render. Same failure the
+  // Recent-tab hydration had (RECENT_HYDRATE_CAP, screens-lib.jsx), and the
+  // cost is the same: syncStore re-uploads every hydrated entry with a fresh
+  // updated_at and the boot merge keeps them, defeating History-Windowing on
+  // this device for good.
+  const recapHydrated = useRef(0);
   useEffect(() => {
     if (!neededPriorSessionIds.length) return;
+    const budget = RECAP_HYDRATE_CAP - recapHydrated.current;
+    if (budget <= 0) return;
+    const ids = neededPriorSessionIds.slice(0, budget);
+    recapHydrated.current += ids.length;
     let on = true;
-    LB.fetchSessionEntries(neededPriorSessionIds)
+    LB.fetchSessionEntries(ids)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };
