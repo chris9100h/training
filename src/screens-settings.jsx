@@ -92,12 +92,21 @@ function UserArchivedSection({ tickets, renderTicket }) {
 }
 
 function Row({ label, children, first = false }) {
+  // The row's text is the switch's name, but nothing associates the two: a
+  // screen reader on a bare Toggle reads "switch, on" with no idea of what.
+  // Hand the label down rather than repeating it at eighty call sites. Only
+  // for a Toggle that has none of its own, so an explicit label always wins.
+  const named = React.Children.map(children, c => (
+    (React.isValidElement(c) && c.type === Toggle && !c.props.label && typeof label === 'string')
+      ? React.cloneElement(c, { label })
+      : c
+  ));
   return (
     <>
       {!first && <div className="knurl" />}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }}>
         <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-        {children}
+        {named}
       </div>
     </>
   );
@@ -1561,7 +1570,46 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const handleSignOut = async () => { markIntentionalSignOut(); await flushBeforeSignOut(userId); await LB.signOut(); };
+  // Flush BEFORE arming the latch: markIntentionalSignOut() is what allows
+  // SIGNED_OUT to run LB.clearLocal, which drops the local cache, the pending
+  // diff and syncBase in one go. If the final sync did not land (slow network,
+  // failed write), that cache is the only copy left of the last sets / cycle
+  // advance / day macros, so arming it would delete them for good. Sign out
+  // UNARMED instead: the involuntary path keeps the cache and the next sign-in
+  // on this device re-uploads the diff. Asked, not silent, because the user
+  // then stays "not fully synced" and should know why.
+  const handleSignOut = async () => {
+    const flushed = await flushBeforeSignOut(userId);
+    if (!flushed) {
+      const ok = await confirm(
+        'Some changes could not be saved to the server. They stay on this device and are uploaded the next time you sign in here.',
+        { title: 'Sign out anyway?', ok: 'Sign out anyway', danger: true }
+      );
+      if (!ok) return;
+      // Check the result before acting on it. The most common reason the flush
+      // failed is being offline, and offline signOut returns { error } BEFORE
+      // it removes the session, so nothing is signed out and no SIGNED_OUT
+      // fires. Reloading regardless booted straight back into the signed-in
+      // app: the user confirmed a red dialog and the only visible effect was
+      // losing their place. Say so instead.
+      const { error: signOutErr } = (await LB.signOut()) || {};
+      if (signOutErr) {
+        await confirm(
+          'Signing out needs a connection, and there is none right now. Your data is safe on this device. Try again once you are back online.',
+          { title: "Couldn't sign out", ok: 'OK', cancel: null }
+        );
+        return;
+      }
+      // Reload so the user actually lands on the login screen: the involuntary
+      // SIGNED_OUT path deliberately leaves the app on screen (it also covers
+      // a flaky refresh while you keep training), which after a tapped sign-out
+      // would look like nothing happened. The cache stays untouched by it.
+      window.location.reload();
+      return;
+    }
+    markIntentionalSignOut();
+    await LB.signOut();
+  };
 
   const attachSupportImageFile = (file) => {
     if (!file) return;
@@ -2287,6 +2335,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
               <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
               <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
+              {/* Only meaningful for the imperial unit preference: on kg (or
+                  mixed) the food tracker is already grams, there's nothing to
+                  opt out of. Portions/ingredients/cooked weights/shopping only,
+                  macros stay grams for everyone regardless of this toggle (see
+                  UI.massInOz, ui.jsx). */}
+              {store.settings?.unit === 'lbs' && (
+                <>
+                  <Row label="Grams instead of oz/lb">
+                    <Toggle on={!!store.settings?.foodForceGrams} onToggle={() => patchSettings({ foodForceGrams: !store.settings?.foodForceGrams })} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
+                    Keep the food tracker in grams even though your unit preference is lbs. Macros stay grams either way, this only affects portions, ingredients, and the shopping list.
+                  </div>
+                </>
+              )}
             </>
           )}
           <div style={{ marginTop: 24 }}>
@@ -2599,8 +2662,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               {visible.map((p, i) => {
                 const isActive = !p.endedAt;
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
-                const label = p.mode === 'sick' ? 'SICK' : p.mode === 'deload' ? 'DELOAD' : 'VACATION';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : p.mode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach';
+                const label = p.mode === 'sick' ? 'SICK' : p.mode === 'deload' ? 'DELOAD' : p.mode === 'cleanup' ? 'CLEANUP' : 'VACATION';
                 return (
                   <div key={p.id}>
                     {i > 0 && <div className="knurl" />}
@@ -2617,7 +2680,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
                           {isActive
-                            ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
+                            // A cleanup period is opened when it is activated but
+                            // dated to the next cycle start, so an open one whose
+                            // start is still ahead is upcoming, not running.
+                            ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>
+                                {p.mode === 'cleanup' && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt }) ? 'upcoming' : 'ongoing'}
+                              </span>
                             : <input type="date" value={LB.fmtISO(new Date(p.endedAt))} min={LB.fmtISO(new Date(p.startedAt))} max={todayStr}
                                 onChange={e => e.target.value && updatePeriod(p.id, { endedAt: LB.parseDate(e.target.value).toISOString() })}
                                 style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />

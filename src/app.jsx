@@ -852,19 +852,33 @@ function App() {
   // attempted reactively inside the SIGNED_OUT handler would already be
   // fighting a session Supabase is in the middle of invalidating. Bounded so
   // a dead network can't hang the sign-out button.
+  // Returns whether the pending diff is safely on the server: true when it
+  // landed (or when there was nothing to flush), false on timeout and on a
+  // failed write. Callers MUST NOT arm the wipe latch on false, the local
+  // cache is then the only remaining copy of the change.
   const flushBeforeSignOut = useCallbackA(async (uid) => {
-    if (uid !== userIdRef.current) return;
+    // Not the current user any more: this diff must never be written (same
+    // reason as in flushSync), so whatever is pending stays unflushed. Report
+    // failure, the caller then keeps the local cache instead of wiping it.
+    if (uid !== userIdRef.current) return false;
     const target = pendingStore.current;
-    if (!target || target === syncBase.current || !uid) return;
+    // Nothing pending: there is no unsynced change a wipe could destroy.
+    if (!target || target === syncBase.current || !uid) return true;
+    // Only the sync path sets this. The timeout ends the WAIT, it can never
+    // report success: without the flag, a 5s stall resolved the race exactly
+    // like a completed write (and so did the catch below), the caller wiped
+    // the local cache, and the change was gone with nothing left to retry.
+    let landed = false;
     const timeout = new Promise(resolve => setTimeout(resolve, 5000));
     try {
       await Promise.race([
-        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); }),
+        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); landed = true; }),
         timeout,
       ]);
     } catch (err) {
       console.error('flushBeforeSignOut: final sync attempt failed', err);
     }
+    return landed;
   }, []);
 
   // Arms the SIGNED_OUT handler below to actually wipe local storage. Must be
@@ -913,7 +927,7 @@ function App() {
           LB.saveBase(diffBase, uid);
           let merged = fresh;
           if (cur) {
-            // Same unsynced-edit test as PLAN_POS_FIELDS below: an explicit
+            // Same unsynced-edit test LB.mergeBootScalars applies below: an explicit
             // local null, "session just ended on this device", must still win
             // over the stale server value instead of being treated as missing
             // and resurrecting the old session, but ONLY if this device
@@ -1103,31 +1117,18 @@ function App() {
             // isolated from the schedule merge so an autosaved draft can never
             // touch a committed plan (and a schedule merge quirk can't drop it).
             const planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base?.planDrafts);
-            // Plan-position fields get the SAME unsynced-edit test as the
-            // ID-keyed collections below, not a blind "cur always wins": unlike
-            // darkMode/accentColor/etc, these can be changed by someone OTHER
-            // than this device (a coach pushing + activating a plan writes them
-            // directly via syncStore from their own session). Blindly trusting
-            // cur here silently reverted a coach's just-pushed activation the
-            // next time this device booted, cur still held the pre-push
-            // (usually null) value, and the very next flush then re-synced that
-            // stale value back over the coach's write. Keep cur only if it
-            // differs from the persisted base (this device changed it and
-            // hasn't synced yet); otherwise trust fresh (the server, possibly
-            // changed elsewhere). No base (legacy cache) → keep cur, matching
-            // every other no-base fallback in this merge.
-            // These four fields are one coupled unit: a coach's activation writes a
-            // new activeScheduleId AND resets cycleIndex/dates together. Resolving
-            // them per-field could splice a new plan id onto a stale cycle index, so
-            // decide the whole tuple at once: keep this device's values only if it
-            // changed ANY of them since base (an unsynced local edit); otherwise take
-            // the server's whole tuple.
-            const PLAN_POS_FIELDS = ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate'];
-            const planPosSrc = (!base || PLAN_POS_FIELDS.some(f => cur[f] !== base[f])) ? cur : fresh;
-            // Same coupled-pointer treatment for the active meal plan (no cycle
-            // fields, just the scalar), so a coach's push-and-activate on the
-            // server isn't reverted by a stale local value, and vice versa.
-            const mealPlanPosSrc = (!base || cur.activeMealTemplateId !== base.activeMealTemplateId) ? cur : fresh;
+            // Status periods first: LB.mergeBootScalars needs the merged rows to
+            // settle statusMode against, since an open period is written
+            // straight to the server while the mode itself rides the diff queue.
+            // Server membership decides which periods exist (they are only ever
+            // created by a direct write), the local side wins on a field that
+            // diverged from base, same rule as every other id-keyed collection.
+            const statusPeriods = mergeById(fresh.statusPeriods || [], cur.statusPeriods, base?.statusPeriods);
+            // Every top-level scalar, grouped so coupled pointers resolve as one
+            // unit. Lives in store.js because it is the one part of this merge
+            // that can be unit-tested, and the boot merge is where the expensive
+            // mistakes have historically been made.
+            const bootScalars = LB.mergeBootScalars(fresh, cur, base, statusPeriods);
             // Scalar state: the local cache is authoritative, it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -1179,11 +1180,8 @@ function App() {
               // / not chosen) must win so the picker re-fires, since the cache
               // still holds the old kg/lbs value; and the water config above.
               settings: mergedSettings,
-              activeScheduleId: planPosSrc.activeScheduleId,
-              activeMealTemplateId: mealPlanPosSrc.activeMealTemplateId,
-              cycleIndex: planPosSrc.cycleIndex,
-              cycleStartDate: planPosSrc.cycleStartDate,
-              lastAdvancedDate: planPosSrc.lastAdvancedDate,
+              ...bootScalars,
+              statusPeriods,
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions,
@@ -1837,9 +1835,26 @@ function App() {
   window.__UNIT = (_u === 'lbs') ? 'lbs' : 'kg';
   if (_u === 'mixed' || _u === 'lbs') LB.setCardioDistUnit('mi');
   else if (_u === 'kg') LB.setCardioDistUnit('km');
+  // Per-module opt-out: an imperial user can keep the food tracker in grams
+  // (UI.massInOz reads this alongside window.__UNIT). Mirrored the same way
+  // __UNIT itself is, on every render, so it's never stale behind a setting
+  // change made elsewhere (e.g. a coach editing a client's own settings sync).
+  window.__FOOD_FORCE_GRAMS = !!store?.settings?.foodForceGrams;
 
   // Deload overlay flag, buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';
+
+  // Cleanup-week overlay (migration 0251). Deliberately an OBJECT rather than a
+  // boolean like __DELOAD: the reduction is user-set, and buildSeedSets also
+  // needs sinceISO to window the seed history so the week doesn't compound its
+  // own reduction. Consumers test it for null, never === true.
+  // Gated on cleanupStarted, not on statusMode alone: a cleanup is activated
+  // ahead of time and pinned to the next cycle start, so between activating and
+  // that day the overlay must stay completely inert or the rest of the current
+  // cycle would already seed reduced.
+  window.__CLEANUP = LB.cleanupStarted(store)
+    ? { percent: store?.settings?.cleanupPercent ?? 20, sinceISO: store?.statusModeSince ?? null }
+    : null;
 
   // Two layout variants: the iPad sidebar layout (only on tab routes) and the
   // full-bleed layout (everything else). Navigating between a tab route and a

@@ -11,6 +11,10 @@ let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
 const rpcLog = []; // records every rpc(name, args) call
+// The sandbox's own `window`, exposed so a test can set the globals store.js
+// reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
+// is a different object entirely, setting that one has no effect in here.
+let storeWindow = null;
 
 function loadStore() {
   const code = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
@@ -39,6 +43,7 @@ function loadStore() {
     const src = fs.readFileSync(path.join(__dirname, '../../', f), 'utf8');
     new Function('window', src)(sandbox.window);
   }
+  storeWindow = sandbox.window;
   return sandbox.window.LB;
 }
 
@@ -269,6 +274,254 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8 }] }).stretch, null);
     assert.strictEqual(LB.techniqueRounds({ technique: null }).stretch, null);
     assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
+  });
+
+  // ── plus_load seeding and the deload/cleanup reduction ──────────────────
+  test('bestEntryFromSetLists keeps the fields that say HOW a load was made up', () => {
+    // This field list has silently dropped a field twice now, addedKg and then
+    // hornLoads, each time with kg staying correct so nothing looked broken.
+    const sets = [[{ kg: 100, reps: 8, addedKg: 20, done: true }]];
+    const e = LB.bestEntryFromSetLists(sets);
+    assert.strictEqual(e.entry.sets[0].addedKg, 20);
+    const horned = [[{ kg: 90, reps: 8, hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }], done: true }]];
+    assert.deepStrictEqual(LB.bestEntryFromSetLists(horned).entry.sets[0].hornLoads,
+      [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 50 }]);
+    // And they have to come off the WINNING set, not the most recent one. Same
+    // total, different distribution: the older session did more reps, so it
+    // wins, and its horn split is the one that describes those reps.
+    const twoSessions = [
+      [{ kg: 90, reps: 6, hornLoads: [{ label: 'Std', kg: 45 }, { label: 'Mid', kg: 45 }], done: true }],
+      [{ kg: 90, reps: 9, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 70 }], done: true }],
+    ];
+    const won = LB.bestEntryFromSetLists(twoSessions).entry.sets[0];
+    assert.strictEqual(won.reps, 9);
+    assert.deepStrictEqual(won.hornLoads, [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 70 }]);
+  });
+
+  test('a deload reduces what the lifter actually moves, and floors the belt at zero', () => {
+    const store = {
+      exercises: [{ id: 'x', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' }],
+      dailyLogs: [{ date: '2026-06-10', weight: 80 }],
+      settings: {},
+      sessions: [],
+    };
+    const last = { entry: { sets: [{ kg: 120, reps: 8, addedKg: 40, done: true }] } };
+    const it = { exId: 'x', sets: 1, repsPerSet: null };
+    // 120 total at 50 percent is 60, which is under the 80 kg body, so the belt
+    // floors at 0 and the set becomes a bare pull-up. Never negative.
+    const deloaded = LB.buildSeedSets(it, last, null, false, store, null, true, null);
+    assert.strictEqual(deloaded[0].addedKg, 0);
+    assert.strictEqual(deloaded[0].kg, 80);
+    // Without a deload the belt is repeated as logged.
+    const plain = LB.buildSeedSets(it, last, null, false, store, null, false, null);
+    assert.strictEqual(plain[0].addedKg, 40);
+    assert.strictEqual(plain[0].kg, 120);
+  });
+
+  test('chainRoundKg shows a chain round in the same space as its set', () => {
+    // 80 kg body, 20 kg belt: the set stores kg 100 / addedKg 20 and renders
+    // "+20", so a drop round stored as 90 must render as 10, not 90.
+    const st = { kg: 100, addedKg: 20 };
+    assert.strictEqual(LB.chainRoundKg(st, 90), 10);
+    assert.strictEqual(LB.chainRoundKg(st, null), null);
+    // An ordinary set is untouched, and so is a legacy set with no belt figure.
+    assert.strictEqual(LB.chainRoundKg({ kg: 100 }, 90), 90);
+    assert.strictEqual(LB.chainRoundKg({ kg: null, addedKg: 20 }, 90), 90);
+  });
+
+  // ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────
+  test('hornLoadTotal sums the loaded horns and stays null when nothing is on', () => {
+    assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: 20 }, { label: 'B', kg: 10.5 }]), 30.5);
+    // An untouched set must read empty, not as a real 0 kg lift.
+    assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: null }, { label: 'B', kg: null }]), null);
+    assert.strictEqual(LB.hornLoadTotal([]), null);
+    assert.strictEqual(LB.hornLoadTotal(null), null);
+  });
+  test('hornLoadLabel renders the split, setLoadLabel still renders the sum', () => {
+    const st = { kg: 40, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    assert.strictEqual(LB.hornLoadLabel(st), '20 / 20');
+    assert.strictEqual(LB.setLoadLabel(st), '40');
+    assert.strictEqual(LB.hornLoadLabel({ kg: 40 }), null);
+  });
+  test('setLoadLabel plus_load behaviour is untouched by the horn helpers', () => {
+    assert.strictEqual(LB.setLoadLabel({ kg: 90, addedKg: 10 }), '+10');
+    assert.strictEqual(LB.setLoadLabel({ kg: 90 }), '90');
+    assert.strictEqual(LB.setLoadLabel({}), null);
+  });
+  test('sameHornLoad separates splits that happen to sum alike', () => {
+    const a = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    const b = { hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 0 }] };
+    // Both total 40, but the resistance curve is not the same work.
+    assert.strictEqual(LB.sameHornLoad(a, b), false);
+    assert.strictEqual(LB.sameHornLoad(a, { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] }), true);
+  });
+  test('sameHornLoad compares the shape, so loading the same setup heavier still counts', () => {
+    // The whole point: 20/20 to 30/30 is the same machine setup with more weight
+    // on it. Comparing raw kilos would call that "not comparable" and suppress
+    // progression on multi-horn machines entirely.
+    const light = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    const heavy = { hornLoads: [{ label: 'Std', kg: 30 }, { label: 'Mid', kg: 30 }] };
+    assert.strictEqual(LB.sameHornLoad(light, heavy), true);
+    // An uneven bias kept in proportion is also the same setup.
+    assert.strictEqual(LB.sameHornLoad(
+      { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 10 }] },
+      { hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 20 }] }), true);
+    // Shifting the bias is not.
+    assert.strictEqual(LB.sameHornLoad(
+      { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 10 }] },
+      { hornLoads: [{ label: 'Std', kg: 10 }, { label: 'Mid', kg: 20 }] }), false);
+  });
+  test('sameHornLoad compares by label, not position', () => {
+    const a = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'High', kg: 10 }] };
+    const b = { hornLoads: [{ label: 'High', kg: 10 }, { label: 'Std', kg: 20 }] };
+    assert.strictEqual(LB.sameHornLoad(a, b), true);
+  });
+  test('sameHornLoad treats two plain sets as equal and a switch of style as not', () => {
+    assert.strictEqual(LB.sameHornLoad({ kg: 40 }, { kg: 60 }), true);
+    assert.strictEqual(LB.sameHornLoad({ kg: 40, hornLoads: [{ label: 'A', kg: 40 }] }, { kg: 40 }), false);
+  });
+  test('isImprovement and isDecline stay silent across different horn splits', () => {
+    const heavier = { kg: 60, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 60 }, { label: 'Mid', kg: 0 }] };
+    const lighter = { kg: 40, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    // More total weight, but on a different distribution: not comparable.
+    assert.strictEqual(LB.isImprovement(heavier, lighter), false);
+    assert.strictEqual(LB.isDecline(lighter, heavier), false);
+    // Same split, more weight: the normal verdict still fires.
+    const sameSplitUp = { kg: 60, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 30 }, { label: 'Mid', kg: 30 }] };
+    const sameSplitLo = { kg: 40, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    assert.strictEqual(LB.isImprovement(sameSplitUp, sameSplitLo), true);
+    assert.strictEqual(LB.isDecline(sameSplitLo, sameSplitUp), true);
+  });
+  test('the horn gate is transparent for ordinary sets', () => {
+    assert.strictEqual(LB.isImprovement({ kg: 100, reps: 5, done: true }, { kg: 95, reps: 5, done: true }), true);
+    assert.strictEqual(LB.isDecline({ kg: 90, reps: 5, done: true }, { kg: 100, reps: 5, done: true }), true);
+  });
+  test('isMultiHorn reads the exercise horn list', () => {
+    assert.strictEqual(LB.isMultiHorn({ horn_labels: ['Std', 'Mid'] }), true);
+    assert.strictEqual(LB.isMultiHorn({ horn_labels: [] }), false);
+    assert.strictEqual(LB.isMultiHorn({}), false);
+    assert.deepStrictEqual(LB.exerciseHornLabels({ horn_labels: ['Std'] }), ['Std']);
+  });
+
+  // ── mergeBootScalars: top-level scalar resolution at boot ────────────────
+  // The boot merge is where this project's most expensive mistakes have been
+  // made, and app.jsx has no test harness, so the decision itself lives in
+  // store.js purely so these can exist.
+  const bs = {
+    activeScheduleId: 'srv', cycleIndex: 3, cycleStartDate: '2026-06-01',
+    weekPlanStartDate: '2026-06-01', lastAdvancedDate: '2026-06-05',
+    activeMealTemplateId: null, statusMode: null, statusModeSince: null,
+    activeCardioPlanId: null, deloadPromptDismissedAt: null, customDayTypes: [],
+  };
+  test('mergeBootScalars keeps an unsynced local plan switch', () => {
+    const cur = { ...bs, activeScheduleId: 'local', cycleIndex: 0 };
+    const out = LB.mergeBootScalars(bs, cur, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.cycleIndex, 0);
+  });
+  test('mergeBootScalars takes the server value this device never touched', () => {
+    const fresh = { ...bs, activeScheduleId: 'srv2', cycleIndex: 9 };
+    const out = LB.mergeBootScalars(fresh, { ...bs }, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'srv2');
+    assert.strictEqual(out.cycleIndex, 9);
+  });
+  test('mergeBootScalars never splits the plan tuple (weekPlanStartDate rides with the plan id)', () => {
+    const cur = { ...bs, activeScheduleId: 'local', weekPlanStartDate: '2026-06-08' };
+    const fresh = { ...bs, weekPlanStartDate: '2026-05-01' };
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-08');
+  });
+  test('mergeBootScalars keeps an offline weekPlanStartDate edit on its own', () => {
+    const cur = { ...bs, weekPlanStartDate: '2026-06-15' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-15');
+  });
+  test('mergeBootScalars resolves statusMode and statusModeSince as one pair', () => {
+    // The period is open and agrees with the local mode, so the status rules
+    // below stay out of it and the group resolution is what is under test: the
+    // local statusModeSince has to ride along with the local statusMode rather
+    // than being taken from either the server row or the period.
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const fresh = { ...bs, statusModeSince: '2026-01-01T00:00:00Z' };
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-01-01T00:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, periods);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars keeps offline activeCardioPlanId and deloadPromptDismissedAt', () => {
+    const cur = { ...bs, activeCardioPlanId: 'cp1', deloadPromptDismissedAt: '2026-06-09' };
+    const fresh = { ...bs, activeCardioPlanId: 'other', deloadPromptDismissedAt: null };
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    assert.strictEqual(out.activeCardioPlanId, 'cp1');
+    assert.strictEqual(out.deloadPromptDismissedAt, '2026-06-09');
+  });
+  test('mergeBootScalars compares customDayTypes by value, not identity', () => {
+    const untouched = LB.mergeBootScalars({ ...bs, customDayTypes: ['Rehab'] }, { ...bs, customDayTypes: [] }, { ...bs, customDayTypes: [] }, []);
+    assert.deepStrictEqual(untouched.customDayTypes, ['Rehab']);
+    const edited = LB.mergeBootScalars({ ...bs, customDayTypes: ['Rehab'] }, { ...bs, customDayTypes: ['Mobility'] }, { ...bs, customDayTypes: [] }, []);
+    assert.deepStrictEqual(edited.customDayTypes, ['Mobility']);
+  });
+  test('mergeBootScalars keeps the local side when there is no base (legacy cache)', () => {
+    const cur = { ...bs, activeScheduleId: 'local', activeMealTemplateId: 'mt1' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, null, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.activeMealTemplateId, 'mt1');
+  });
+  test('mergeBootScalars never writes undefined for a field the cache predates', () => {
+    const cur = { ...bs, activeScheduleId: 'local' };
+    delete cur.weekPlanStartDate;   // cache written before the column existed
+    delete cur.customDayTypes;
+    const out = LB.mergeBootScalars({ ...bs, weekPlanStartDate: '2026-06-01', customDayTypes: ['Rehab'] }, cur, null, []);
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-01');
+    assert.deepStrictEqual(out.customDayTypes, ['Rehab']);
+  });
+  test('mergeBootScalars lets an open status period override a stale statusMode', () => {
+    // Period rows are written straight to Supabase, statusMode rides the diff
+    // queue, so the durable record can say sick while the settings row does not.
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-06-09T08:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars({ ...bs }, { ...bs }, { ...bs }, periods);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars leaves statusMode alone when the open period agrees', () => {
+    const fresh = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-06-01T00:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars(fresh, { ...fresh }, { ...fresh }, periods);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars ignores closed status periods', () => {
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-08T00:00:00Z' }];
+    const out = LB.mergeBootScalars({ ...bs }, { ...bs }, { ...bs }, periods);
+    assert.strictEqual(out.statusMode, null);
+  });
+  test('mergeBootScalars clears a statusMode no open period backs (server side)', () => {
+    // The mirror of the rule above. Every clear path closes the period with an
+    // unwrapped write and leaves the scalar to the diff queue, so the settings
+    // row can still say sick after the period is properly closed. Without this
+    // the user is stuck in an overlay they already turned off.
+    const fresh = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-08T00:00:00Z' }];
+    const out = LB.mergeBootScalars(fresh, { ...fresh }, { ...fresh }, periods);
+    assert.strictEqual(out.statusMode, null);
+    assert.strictEqual(out.statusModeSince, null);
+  });
+  test('mergeBootScalars clears a statusMode the cache kept after the period went', () => {
+    // Same contradiction from the other side: the clear synced from another
+    // device (fresh agrees there is no status), this device's cache still holds
+    // the mode. The group rule alone would call that an unsynced local edit.
+    const cur = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    assert.strictEqual(out.statusMode, null);
+    assert.strictEqual(out.statusModeSince, null);
+  });
+  test('mergeBootScalars leaves statusMode alone when it has no period data at all', () => {
+    // null periods means "the caller did not supply any", not "there are none".
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, null);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-05-01T00:00:00Z');
   });
 
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────
@@ -4951,6 +5204,383 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, last, null, false, bwPlusStore, null);
     assert.strictEqual(seeded[0].kg, 100);
     assert.strictEqual(seeded[0].addedKg, undefined);
+  });
+
+  // ── Cleanup week (migration 0251) ────────────────────────────────────────
+  // The deload overlay's sibling: same reduction mechanics, opposite relation
+  // to the progression chain (the reduced loads stay in it).
+  const cleanupStore = {
+    exercises: [
+      { id: 'bar', name: 'Barbell Row', equipment: 'barbell' },
+      { id: 'dip', name: 'Assisted Dip', equipment: 'machine', movement_type: 'assisted' },
+      { id: 'bw',  name: 'Pull-up', equipment: 'bodyweight' },
+      { id: 'run', name: 'Treadmill', movement_type: 'cardio' },
+      { id: 'hold', name: 'Plank', log_mode: 'time' },
+    ],
+    settings: {},
+  };
+  const cleanupLast = (kg) => ({ entry: { sets: [{ warmup: false, kg, reps: 8, done: true }] } });
+
+  test('cleanupAppliesToExercise: the exemptions match buildSeedSets exactly', () => {
+    // The single source of truth for "was this lift actually reduced", shared
+    // by the live opt-out chip and the post-hoc PR/regression suppression in
+    // session detail/compare. Every buildSeedSets exemption above must agree
+    // with this predicate, or the chip and the read-only views would disagree
+    // about which exercises a cleanup week touched.
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bar', null), true);
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'dip', null), false, 'assisted is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bw', null), false, 'bodyweight is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'run', null), false, 'cardio is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'hold', null), false, 'time-based is exempt');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, null, null), false, 'no exId');
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'nope', null), false, 'unknown exId');
+  });
+  test('cleanupAppliesToExercise: a 5/3/1 main lift is exempt, its assistance work is not', () => {
+    // buildSeedSets never even sees a 531 main lift (buildSessionEntries seeds
+    // it straight off the Training Max), so this is the one exemption
+    // buildSeedSets itself has no matching branch for.
+    const store531 = {
+      ...cleanupStore,
+      schedules: [{ id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'bar' }] }],
+        program_data: { mainLifts: { bar: { tm: 100, kind: 'row', stall: 0 } } } }],
+    };
+    assert.strictEqual(LB.cleanupAppliesToExercise(store531, 'bar', 'd1'), false, 'the main lift itself');
+    assert.strictEqual(LB.cleanupAppliesToExercise(store531, 'dip', 'd1'), false, 'assisted, exempt for its own reason');
+    // A different exId on the same day that never got registered as a main
+    // lift is unaffected, still reduced normally, only 'bar' is exempt here.
+    const storeAssistExtra = { ...store531, exercises: [...store531.exercises, { id: 'assist_bar', equipment: 'barbell' }],
+      schedules: [{ ...store531.schedules[0], days: [{ id: 'd1', items: [{ exId: 'bar' }, { exId: 'assist_bar' }] }] }] };
+    assert.strictEqual(LB.cleanupAppliesToExercise(storeAssistExtra, 'assist_bar', 'd1'), true);
+  });
+
+  test('buildSeedSets: cleanup reduces by the configured percent, on the 2.5 grid', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup rounds to the 2.5 grid like a deload does', () => {
+    // 97.5 * 0.8 = 78 -> 77.5 on the grid.
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(97.5), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 77.5);
+  });
+  test('buildSeedSets: cleanup reduces the LAST load, not the progression suggestion', () => {
+    // Same trap the deload path guards: 100 kg with a +5 suggestion must seed
+    // 80, not 84. Mirrors the deload comment on the baseKg line.
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100),
+      { kg: 105, reps: 8 }, false, cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup percent is clamped to 10-30 either way', () => {
+    const tooLow = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 5 });
+    assert.strictEqual(tooLow[0].kg, 90, '5% clamps up to 10%');
+    const tooHigh = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 40 });
+    assert.strictEqual(tooHigh[0].kg, 70, '40% clamps down to 30%');
+  });
+  test('buildSeedSets: an opted-out exercise seeds its full load', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20, optOuts: { bar: true } });
+    assert.strictEqual(seeded[0].kg, 100);
+  });
+  test('buildSeedSets: an opt-out on ANOTHER exercise does not leak across', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, null, { percent: 20, optOuts: { dip: true } });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: cleanup leaves assisted loads alone (reducing them makes it harder)', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'dip', reps: 8 }, cleanupLast(-40), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, -40);
+  });
+  test('buildSeedSets: cleanup leaves a bodyweight seed alone', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, 80, null, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: deload still wins over a cleanup config', () => {
+    const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+      cleanupStore, null, true, { percent: 20 });
+    assert.strictEqual(seeded[0].kg, 50);
+  });
+  test('buildSeedSets: cleanupOpts false means "not in a cleanup", not "use the global"', () => {
+    // What a coach preview passes for a client who isn't in a cleanup. If this
+    // read as null the viewer's own window.__CLEANUP would leak into the seeds.
+    storeWindow.__CLEANUP = { percent: 30 };
+    try {
+      const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+        cleanupStore, null, null, false);
+      assert.strictEqual(seeded[0].kg, 100);
+      const viaGlobal = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
+        cleanupStore, null, null, null);
+      assert.strictEqual(viaGlobal[0].kg, 70, 'null still falls back to the global');
+    } finally { delete storeWindow.__CLEANUP; }
+  });
+
+  // Compounding guard: while a cleanup runs, its own sessions are hidden from
+  // the seed history so session 2 doesn't seed off session 1's reduced load.
+  const cleanupWindowState = {
+    statusMode: 'cleanup',
+    statusModeSince: '2026-06-10T00:00:00Z',
+    sessions: [
+      { id: 'pre', ended: '2026-06-09T11:00:00Z', startedAt: '2026-06-09T10:00:00Z', dayId: 'd1',
+        entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 8, done: true }] }] },
+      { id: 'in',  ended: '2026-06-11T11:00:00Z', startedAt: '2026-06-11T10:00:00Z', dayId: 'd1',
+        entries: [{ exId: 'e1', sets: [{ kg: 80, reps: 8, done: true }] }] },
+    ],
+  };
+  test('recentSessionsForExercise: an active cleanup hides its own sessions', () => {
+    const rows = LB.recentSessionsForExercise(cleanupWindowState, 'e1', 'd1');
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].session.id, 'pre');
+  });
+  test('recentSessionsForExercise: once the cleanup ends they are the new baseline', () => {
+    const after = { ...cleanupWindowState, statusMode: null, statusModeSince: null };
+    const rows = LB.recentSessionsForExercise(after, 'e1', 'd1');
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].session.id, 'in', 'newest first, the cleanup session leads');
+  });
+  test('recentSessionsForExercise: a session started before the cleanup still counts', () => {
+    const rows = LB.recentSessionsForExercise(cleanupWindowState, 'e1', 'd1');
+    assert.ok(rows.some(r => r.session.id === 'pre'));
+  });
+
+  // Auto-end. deloadPlanDays falls back to 7 without a matching schedule.
+  // Local-time literals (no trailing Z) throughout: the window is counted in
+  // calendar days, so a UTC instant would land on a different local date (and
+  // flip these assertions) depending on the timezone the tests run in.
+  const cleanupClock = (sinceLocal) => ({ statusMode: 'cleanup', statusModeSince: sinceLocal, schedules: [], sessions: [] });
+  test('cleanupElapsed: false before the week is up, true on the day it completes', () => {
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-05T09:00:00')), false);
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T09:00:00')), true);
+  });
+  test('cleanupElapsed: the window flips at midnight, not at the activation time', () => {
+    // Regression: counted as 24h units from the activation moment, a cleanup
+    // started at 20:00 was still active all through the final day's morning,
+    // so the first session of the cycle that should already be back to normal
+    // still seeded reduced. Same calendar day, hours earlier, must be over.
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-08T06:00:00')), true);
+    // ...and the day before is still genuinely inside the window.
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), new Date('2026-06-07T23:59:00')), false);
+  });
+  test('cleanupElapsed: false when no cleanup is running at all', () => {
+    assert.strictEqual(LB.cleanupElapsed({ statusMode: null, statusModeSince: null }), false);
+    assert.strictEqual(LB.cleanupElapsed({ statusMode: 'deload', statusModeSince: '2026-06-01T00:00:00' }), false);
+  });
+  test('cleanupDaysRemaining: counts down and clamps at 0', () => {
+    const since = '2026-06-01T20:00:00';
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-03T09:00:00')), 5);
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), new Date('2026-06-20T09:00:00')), 0);
+  });
+  // Start alignment: a cleanup covers a whole cycle, so it waits for the next
+  // one rather than reducing the tail of the current one.
+  const cyclePlanStore = (cycleStartDate, dayCount) => ({
+    activeScheduleId: 'p1',
+    cycleStartDate,
+    schedules: [{ id: 'p1', days: Array.from({ length: dayCount }, (_, i) => ({ id: `d${i}`, name: `D${i}`, items: [{ exId: 'e1' }] })) }],
+  });
+  test('nextCleanupStartISO: an 8-day cycle started on day 8 begins tomorrow', () => {
+    // cycleStartDate 2026-06-01 with 8 days: 2026-06-08 is day 8 (pos 7).
+    const iso = LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-08T18:00:00'));
+    assert.strictEqual(LB.fmtISO(new Date(iso)), '2026-06-09');
+  });
+  test('nextCleanupStartISO: on day 1 it waits for the NEXT cycle, not today', () => {
+    const iso = LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-01T18:00:00'));
+    assert.strictEqual(LB.fmtISO(new Date(iso)), '2026-06-09');
+  });
+  test('nextCleanupStartISO: lands on local midnight, so the window covers whole days', () => {
+    const d = new Date(LB.nextCleanupStartISO(cyclePlanStore('2026-06-01', 8), new Date('2026-06-08T18:00:00')));
+    assert.strictEqual(d.getHours(), 0);
+    assert.strictEqual(d.getMinutes(), 0);
+  });
+  test('nextCleanupStartISO: a flex plan has no date boundary, so it starts now', () => {
+    const flex = { activeScheduleId: 'p1', schedules: [{ id: 'p1', is_flex: true, sessions_per_week: 3, days: [{ id: 'a', items: [{ exId: 'e1' }] }] }] };
+    assert.strictEqual(LB.nextCleanupStartISO(flex, new Date('2026-06-08T18:00:00')), null);
+  });
+  test('cleanupStarted: false while the start is still ahead, true from that day on', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00' };
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-08T23:00:00')), false);
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-09T00:30:00')), true);
+    assert.strictEqual(LB.cleanupStarted(pending, new Date('2026-06-12T09:00:00')), true);
+  });
+  test('cleanupElapsed: a not-yet-started cleanup never counts as elapsed', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00', schedules: [], sessions: [] };
+    assert.strictEqual(LB.cleanupElapsed(pending, new Date('2026-06-08T23:00:00')), false);
+  });
+  test('cleanupDaysRemaining: a pending cleanup still shows its full length', () => {
+    const pending = { statusMode: 'cleanup', statusModeSince: '2026-06-09T00:00:00', schedules: [], sessions: [] };
+    assert.strictEqual(LB.cleanupDaysRemaining(pending, new Date('2026-06-08T09:00:00')), 7);
+  });
+
+  test('cleanupDaysRemaining: agrees with cleanupElapsed on the final day', () => {
+    // The label must not still promise a day left on the morning the overlay
+    // ends (the two used to run off separately-rounded arithmetic).
+    const since = '2026-06-01T20:00:00';
+    const end = new Date('2026-06-08T06:00:00');
+    assert.strictEqual(LB.cleanupDaysRemaining(cleanupClock(since), end), 0);
+    assert.strictEqual(LB.cleanupElapsed(cleanupClock(since), end), true);
+  });
+
+  // The autoreg exclusions. All of these need an explicit !isCleanup because a
+  // cleanup session keeps signalWeight 'full' on purpose (see detectStall).
+  const cleanupHistory = (flag) => ({
+    exerciseBests: {},
+    sessions: [{ id: 's1', ended: '2026-06-09T10:00:00Z', dayId: 'd1', ...flag,
+      entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true, timeSec: 60 }] }] }],
+  });
+  test('bestE1rmForExercise: a cleanup session is not a PR baseline', () => {
+    assert.ok(LB.bestE1rmForExercise(cleanupHistory({}), 'e1') > 0);
+    assert.strictEqual(LB.bestE1rmForExercise(cleanupHistory({ isCleanup: true }), 'e1'), 0);
+  });
+  test('bestAssistLoad: a cleanup session is not a PR baseline', () => {
+    assert.strictEqual(LB.bestAssistLoad(cleanupHistory({}), 'e1'), 100);
+    assert.strictEqual(LB.bestAssistLoad(cleanupHistory({ isCleanup: true }), 'e1'), null);
+  });
+  test('bestTimeForExercise: a cleanup session is not a PR baseline', () => {
+    assert.strictEqual(LB.bestTimeForExercise(cleanupHistory({}), 'e1'), 60);
+    assert.strictEqual(LB.bestTimeForExercise(cleanupHistory({ isCleanup: true }), 'e1'), null);
+  });
+
+  test('detectStall: cleanup sessions are excluded from the e1RM series', () => {
+    // Four flat sessions would stall; flagging them all cleanup empties the
+    // series instead, so nothing can read as a stall.
+    const flatSessions = (flag) => [1, 2, 3, 4].map(i => ({
+      id: `s${i}`, ended: `2026-06-0${i}T10:00:00Z`, scheduleId: 'p1', dayId: 'd1',
+      signalWeight: 'full', ...flag,
+      entries: [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true }] }],
+    }));
+    const muscleOf = () => 'back';
+    const opts = { planId: 'p1', dayId: 'd1', exName: 'Row' };
+    assert.strictEqual(LB.detectStall(flatSessions({}), 'e1', muscleOf, opts).stalled, true,
+      'control: flat full-signal sessions do stall');
+    assert.strictEqual(LB.detectStall(flatSessions({ isCleanup: true }), 'e1', muscleOf, opts).stalled, false,
+      'the same sessions flagged cleanup must not');
+  });
+
+  test('isMesoSessionEditable: a cleanup session stays editable (a deload does not)', () => {
+    // A cleanup week is asked the same questions as any other week, so its recap
+    // carries real answers and has to stay correctable. Only a deload, which
+    // collects nothing at all, is locked out.
+    const meso = { id: 'm1', scheduleId: 'p1', startedAt: '2026-06-01T00:00:00Z' };
+    const base = { id: 's1', scheduleId: 'p1', ended: '2026-06-09T10:00:00Z',
+      mesoRecap: { raw: { answers: {} } } };
+    assert.strictEqual(LB.isMesoSessionEditable(base, [base], meso), true);
+    const asCleanup = { ...base, isCleanup: true };
+    assert.strictEqual(LB.isMesoSessionEditable(asCleanup, [asCleanup], meso), true);
+    const asDeload = { ...base, isDeload: true };
+    assert.strictEqual(LB.isMesoSessionEditable(asDeload, [asDeload], meso), false);
+  });
+
+  test('deriveSignalWeight: a readiness-only probe ignores a pinned signalWeight', () => {
+    // How computeMesoGains' cutSignal and screens-lib's oldCut re-derive the cut
+    // gate for a cleanup session: the STORED signalWeight is pinned 'full' for
+    // detectOverreach, so the cut has to be read off the readiness answer alone.
+    const pinned = { readiness: 'rough', signalWeight: 'full', isCleanup: true };
+    assert.strictEqual(LB.deriveSignalWeight(pinned, false), 'full', 'the stored field still wins for the detector');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: pinned.readiness }, false), 'discounted',
+      'stripping it exposes the rough day the cut must honour');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'reentry' }, false), 'discounted');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'fresh' }, false), 'full');
+  });
+
+  test('recomputeMesoRepMissCut: a cleanup session re-arms its cut on a rough -> normal edit', () => {
+    // The readiness edit of a pinned cleanup session must hand the readiness-derived
+    // pair to the recompute, not the pinned 'full' twice: the latter is a same-side
+    // no-op and would silently swallow the correction.
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const session = { readiness: 'rough', signalWeight: 'full', isCleanup: true };
+    const oldCut = LB.deriveSignalWeight({ readiness: session.readiness }, false);
+    const newCut = LB.deriveSignalWeight({ readiness: 'normal' }, false);
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, oldCut, newCut);
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5, 'the cut lands once the rough answer is withdrawn');
+    const noop = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'full');
+    assert.strictEqual(noop, ms, 'control: passing the pinned value on both sides does nothing');
+  });
+
+  test('applyMesoFeedbackEdit: a low-pump edit counts toward the swap hint, cleanup included', () => {
+    // A cleanup week is NOT exempt here: the reduced load tends to improve the pump
+    // (better mind-muscle connection), so a flat pump during one is a stronger hint
+    // that the exercise is a poor fit, not a weaker one. ctx carries no cleanup flag.
+    const msOf = () => ({ deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: {} });
+    const rawOf = () => ({
+      answers: { soreness: {}, volume: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', pumpLowApplied: false, contrib: {} } } },
+      negOwner: {}, frozen: false, dayId: 'd0',
+    });
+    const edit = { type: 'joint', subject: 'e1', answer: 'none', pump: 'low' };
+    const out = LB.applyMesoFeedbackEdit(msOf(), rawOf(), edit, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.pumpLowCounts.e1, 1);
+    assert.strictEqual(out.raw.answers.joint.e1.pump, 'low');
+    // Idempotent: re-applying the same edit must not double-count.
+    const again = LB.applyMesoFeedbackEdit(out.mesoState, out.raw, edit, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(again.mesoState.pumpLowCounts.e1, 1);
+  });
+
+  // ── Food masses: grams canonical, oz/lb display for imperial viewers ─────
+  test('gToOz/ozToG: a round trip survives to well under a tenth of a gram', () => {
+    for (const g of [1, 5, 62, 100, 248, 453.59237, 1000, 2500]) {
+      assert.ok(Math.abs(LB.ozToG(LB.gToOz(g)) - g) < 0.001, `${g}g round-trips`);
+    }
+    assert.strictEqual(Math.round(LB.gToOz(LB.LB_G)), 16, 'a pound is 16 ounces');
+    assert.strictEqual(LB.gToOz(0), 0);
+    assert.strictEqual(LB.ozToG(null), 0, 'null reads as zero, not NaN');
+  });
+
+  test('formatMassG: metric steps up to kg at 1000g', () => {
+    assert.strictEqual(LB.formatMassG(248, false), '248g');
+    assert.strictEqual(LB.formatMassG(62.4, false), '62.4g');
+    assert.strictEqual(LB.formatMassG(999, false), '999g');
+    assert.strictEqual(LB.formatMassG(1000, false), '1kg', 'no trailing zeros');
+    assert.strictEqual(LB.formatMassG(1250, false), '1.25kg');
+    assert.strictEqual(LB.formatMassG(0, false), '0g');
+    // Float noise from summing many logged quantities must not leak through.
+    assert.strictEqual(LB.formatMassG(741.2300000000001, false), '741.2g');
+    // The step-up is decided on the ROUNDED value, so this is 1kg, not "1000g".
+    assert.strictEqual(LB.formatMassG(999.96, false), '1kg');
+  });
+
+  test('formatMassG: imperial steps up to lb at one pound', () => {
+    assert.strictEqual(LB.formatMassG(28.349523125, true), '1 oz');
+    assert.strictEqual(LB.formatMassG(248, true), '8.75 oz');
+    assert.strictEqual(LB.formatMassG(LB.LB_G - 1, true), '15.96 oz', 'just under a pound stays oz');
+    assert.strictEqual(LB.formatMassG(LB.LB_G, true), '1 lb');
+    assert.strictEqual(LB.formatMassG(1000, true), '2.2 lb');
+    assert.strictEqual(LB.formatMassG(0, true), '0 oz');
+  });
+
+  test('roundShoppingQty: the metric grid is unchanged (5g under 50g, else 25g)', () => {
+    assert.strictEqual(LB.roundShoppingQty(12, false).text, '10g');
+    assert.strictEqual(LB.roundShoppingQty(13, false).text, '15g');
+    assert.strictEqual(LB.roundShoppingQty(240, false).text, '250g');
+    // Decided off the ROUNDED value, so 990 becomes 1kg rather than "1000g".
+    assert.strictEqual(LB.roundShoppingQty(990, false).text, '1kg');
+    assert.strictEqual(LB.roundShoppingQty(0, false).text, '0g');
+    assert.strictEqual(LB.roundShoppingQty(1, false).text, '5g', 'never rounds a real need to nothing');
+  });
+
+  test('roundShoppingQty: the imperial grid is native, not a converted metric one', () => {
+    // Under 2oz: quarter ounces, so spice-sized amounts stay reachable.
+    assert.strictEqual(LB.roundShoppingQty(5, true).text, '0.25 oz');
+    assert.strictEqual(LB.roundShoppingQty(20, true).text, '0.75 oz');
+    // 2 to 16oz: half ounces.
+    assert.strictEqual(LB.roundShoppingQty(100, true).text, '3.5 oz');
+    assert.strictEqual(LB.roundShoppingQty(248, true).text, '8.5 oz');
+    // A pound and up: quarter pounds.
+    assert.strictEqual(LB.roundShoppingQty(500, true).text, '1 lb');
+    assert.strictEqual(LB.roundShoppingQty(1000, true).text, '2.25 lb');
+    assert.strictEqual(LB.roundShoppingQty(0, true).text, '0 oz');
+    assert.strictEqual(LB.roundShoppingQty(1, true).text, '0.25 oz', 'never rounds a real need to nothing');
+  });
+
+  test('roundShoppingQty: grams comes back so the buy quantity needs no re-parse', () => {
+    assert.strictEqual(LB.roundShoppingQty(240, false).grams, 250);
+    const imperial = LB.roundShoppingQty(248, true);
+    assert.strictEqual(imperial.text, '8.5 oz');
+    assert.ok(Math.abs(imperial.grams - LB.ozToG(8.5)) < 0.001, 'grams matches the label it printed');
   });
 
 

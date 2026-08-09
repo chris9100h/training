@@ -914,7 +914,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
     </div>
   );
   const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `var(--hair-width) solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, textShadow: active ? 'var(--text-lift)' : 'none', color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
-  const renderToggle = (on, onToggle) => <Toggle on={on} onToggle={onToggle} />;
+  const renderToggle = (on, onToggle, label) => <Toggle on={on} onToggle={onToggle} label={label} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' };
   const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 };
@@ -1017,7 +1017,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               </div>
               {renderHelp('required')}
             </div>
-            {renderToggle(fd.required, () => set('required', !fd.required))}
+            {renderToggle(fd.required, () => set('required', !fd.required), 'Required')}
           </div>
 
           <div>
@@ -1039,7 +1039,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                     Client logs this field daily, weekly aggregate prefills the check-in
                   </div>
                 </div>
-                {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log))}
+                {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log), 'Track daily in health log')}
               </div>
               {fd.show_in_health_log && (
                 <div>
@@ -1545,7 +1545,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
           <i className="fa-solid fa-sliders" />
         </button>
         <div style={{ opacity: toggling ? 0.6 : 1 }}>
-          <Toggle on={checkinEnabled} onToggle={onToggle} />
+          <Toggle on={checkinEnabled} onToggle={onToggle} label="Weekly check-ins" />
         </div>
       </div>
     </div>
@@ -2083,6 +2083,9 @@ function useCoachClientSync(clientId, scheduleId) {
   const latestClientStore = useRefC(null);  // updated synchronously for diff; prevClientStore only after confirmed sync
   const initialSchedule = useRefC(null);
   const isDirty = useRefC(false);
+  const pendingSync = useRefC(null);  // in-flight syncStore promise, so callers can wait for the write
+  const syncOk = useRefC(true);       // ref twin of syncErr: readable after an await, unlike the state a callback closed over
+  const writeIntent = useRefC(0);     // writes asked for but not yet settled, raised synchronously (see setClientStore)
 
   useEffectC(() => {
     let on = true;
@@ -2117,19 +2120,50 @@ function useCoachClientSync(clientId, scheduleId) {
   const setClientStoreRef = useRefC(null);
   if (!setClientStoreRef.current) {
     setClientStoreRef.current = (updater) => {
+      // Flags are raised HERE, not inside the updater: React only evaluates an
+      // updater eagerly when the fiber has no pending lanes, so on a second
+      // save (or after any setSyncErr) the body below runs at render time,
+      // which is after a caller that navigates in the same tick has already
+      // read them. writeIntent is what lets flushClientSync tell "queued but
+      // not started" apart from "nothing to do", and syncOk drops to false on
+      // intent so an unanswered write can never be reported as landed.
+      writeIntent.current += 1;
+      syncOk.current = false;
+      isDirty.current = true;
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
-        isDirty.current = true;
         latestClientStore.current = next;
-        LB.syncStore(prevClientStore.current, next, clientId)
-          .then(() => { prevClientStore.current = next; setSyncErr(false); })
-          .catch(e => { console.error('Coach sync failed', e); setSyncErr(true); });
+        pendingSync.current = LB.syncStore(prevClientStore.current, next, clientId)
+          .then(() => { prevClientStore.current = next; syncOk.current = true; setSyncErr(false); })
+          .catch(e => { console.error('Coach sync failed', e); syncOk.current = false; setSyncErr(true); })
+          .finally(() => { writeIntent.current = Math.max(0, writeIntent.current - 1); });
         return next;
       });
     };
   }
 
-  return { clientStore, loadError, syncErr, setClientStore: setClientStoreRef.current, latestClientStore, initialSchedule, isDirty };
+  // Waits for any in-flight write and reports whether the client's store really
+  // reached Supabase. The optimistic local copy is no proof: the plan editor
+  // fires the write and navigates in the same breath, so anything that tells
+  // the client their program changed has to wait for the answer first. A fresh
+  // write can start while we wait, so loop until none is left.
+  const flushClientSync = async () => {
+    // Give React a turn to run an updater it has queued but not yet evaluated,
+    // otherwise pendingSync is still null here and the loop below would report
+    // the PREVIOUS write's verdict for this save.
+    if (writeIntent.current > 0 && !pendingSync.current) await new Promise(r => setTimeout(r, 0));
+    while (pendingSync.current) {
+      const p = pendingSync.current;
+      await p;
+      if (pendingSync.current === p) pendingSync.current = null;
+    }
+    // Still queued after all that: unknowable, so report failure. Saying "not
+    // saved" about a write that did land costs the coach one dialog; the other
+    // direction tells a client their program changed when it did not.
+    return writeIntent.current === 0 && syncOk.current;
+  };
+
+  return { clientStore, loadError, syncErr, setClientStore: setClientStoreRef.current, latestClientStore, initialSchedule, isDirty, flushClientSync };
 }
 
 // Loading/error placeholder shown by both plan-editor wrapper screens while
@@ -2137,7 +2171,7 @@ function useCoachClientSync(clientId, scheduleId) {
 function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError, message }) {
   return (
     <Screen>
-      <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
+      <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'setup:plan' })} />
       {loadError ? (
         <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
       ) : message ? (
@@ -2153,15 +2187,47 @@ function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError, 
 // Wraps the existing ScheduleEditScreen with client store + syncing.
 
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
-  const { clientStore, loadError, syncErr, setClientStore, latestClientStore, initialSchedule, isDirty } = useCoachClientSync(clientId, scheduleId);
+  const { clientStore, loadError, syncErr, setClientStore, latestClientStore, initialSchedule, isDirty, flushClientSync } = useCoachClientSync(clientId, scheduleId);
+  const [confirmEl, confirm] = useConfirm();
+
+  // Guards re-entry while the block below is awaiting. The editor stays mounted
+  // and interactive across those awaits: SAVE (screens-schedule.jsx) carries no
+  // busy state, and Back skips its discard confirm because the optimistic save
+  // already cleared the editor's own dirty flag. Nothing on screen changes while
+  // we wait, which is exactly what provokes a second tap on a slow connection.
+  // Without this, a second entry read isDirty as still true and posted the note
+  // a second time: addCoachingNote mints a fresh id per call and does not dedup,
+  // so the client got two identical "Updated plan" rows and two pushes. The old
+  // code got this for free by clearing isDirty synchronously; waiting for the
+  // write means it can no longer be cleared that early, so the guard is explicit.
+  const coachGoBusy = useRefC(false);
 
   // Intercept go: notify client via Changes thread if plan was modified, then return to plan tab
   const coachGo = async (route) => {
     if (route.name === 'plan-view' || route.name === 'plan') {
+      if (coachGoBusy.current) return;
       if (isDirty.current) {
-        isDirty.current = false;
-        const isActivePlan = scheduleId === latestClientStore.current?.activeScheduleId;
-        if (isActivePlan) {
+        coachGoBusy.current = true;
+        try {
+        // Wait for the write before saying a word to the client: the note is
+        // built from the local store, so without this the client got told
+        // "updated plan" while the server still held the old one.
+        const synced = await flushClientSync();
+        if (!synced) {
+          // Write failed: keep isDirty and the error pill so a later successful
+          // save still sends the note, and say nothing to the client. Whether
+          // to leave is the coach's call, not ours: staying is the only retry
+          // (tapping SAVE re-diffs against the last confirmed store), but the
+          // editor already dropped its autosaved draft, so leaving throws the
+          // edit away. Ask rather than trap them here, a failed write is often
+          // just a dead connection. After a delete there is nothing left to
+          // retry on, so that path leaves without asking.
+          const stillEditable = latestClientStore.current?.schedules?.some(s => s.id === scheduleId);
+          if (stillEditable && !await confirm(
+            `The changes did not reach ${clientName || 'the client'}, so they have not been notified. Tap SAVE to try again, or leave and lose them.`,
+            { title: "Couldn't save", ok: 'Leave anyway', cancel: 'Keep editing', danger: true }
+          )) { coachGoBusy.current = false; return; }
+        } else if (scheduleId === latestClientStore.current?.activeScheduleId) {
           try {
             const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
             const schName   = finalSch?.name || scheduleId;
@@ -2172,10 +2238,14 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
               : `Updated plan: ${schName}`;
             const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
             await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
+            isDirty.current = false;  // cleared only once the client has actually been told
           } catch (e) { console.error('Failed to send plan change note', e); }
+        } else {
+          isDirty.current = false;  // nothing to announce for a plan they aren't running
         }
+        } finally { coachGoBusy.current = false; }
       }
-      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
+      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'setup:plan' });
     } else {
       go(route);
     }
@@ -2203,6 +2273,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
         setDraftStore={setStore}
       />
       <CoachSyncErrorPill show={syncErr} />
+      {confirmEl}
     </>
   );
 }
@@ -2216,7 +2287,7 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
 
   const coachGo = (route) => {
     if (route.name === 'plan') {
-      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
+      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'setup:plan' });
     } else if (route.name === 'schedule-edit') {
       go({ name: 'coaching-edit-plan', coachingId, clientId, clientName, scheduleId: route.scheduleId });
     } else {

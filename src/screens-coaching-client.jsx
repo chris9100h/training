@@ -3,7 +3,22 @@
    isDecline) with screens-coaching-core.jsx, loaded first. */
 
 function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, checkinAt, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
-  const [tab, setTab] = useStateC(initialTab || 'overview');
+  const TABS = [
+    { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
+    { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
+    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
+    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
+    { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
+    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
+  ];
+
+  // A caller can address a sub-tab as "<tab>:<sub>" (e.g. 'setup:plan'), since
+  // app.jsx forwards named route props one by one and initialTab is the single
+  // one carrying tab intent. Split it off before it reaches the tab state, and
+  // fall back to the first tab for anything that is not a real tab id: an
+  // unknown id lit no tab at all and left the body blank.
+  const [wantTab, wantSub] = String(initialTab || '').split(':');
+  const [tab, setTab] = useStateC(TABS.some(t => t.id === wantTab) ? wantTab : 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
   const openSession = (session) => { setSelectedSession(session); setTab('sessions'); };
@@ -82,15 +97,6 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     } catch (_) {}
   };
 
-  const TABS = [
-    { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
-    { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
-    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
-    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
-    { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
-    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
-  ];
-
   return (
     <Screen scroll={false}>
       {!hideTopBar && (
@@ -128,13 +134,18 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {/* Sick / vacation status banner */}
           {clientStore.statusMode && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--overlay-tint)', borderBottom: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : clientStore.statusMode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
-                {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : 'VACATION'}
+                {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : clientStore.statusMode === 'cleanup' ? 'CLEANUP' : 'VACATION'}
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
-                  const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
                   const dateStr = since.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }).toUpperCase();
+                  // A cleanup week is pinned to the client's next cycle start,
+                  // so before that day there is no "since" and no day count:
+                  // the elapsed-days math would read 0d (or negative) while the
+                  // label claimed they were already in it.
+                  if (clientStore.statusMode === 'cleanup' && !LB.cleanupStarted(clientStore)) return ` → ${dateStr}`;
+                  const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
                   return ` · SINCE ${dateStr} (${days}d)`;
                 })()}
               </span>
@@ -156,7 +167,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
-          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} initialSub={wantSub} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -715,7 +726,16 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                   const last = seedRef ?? LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, seedRef, item.repsMax || null, item.progressionOffset ?? null, occ);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
-                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
+                  // Both overrides are passed explicitly for the same reason:
+                  // without them buildSeedSets falls back to the window globals,
+                  // which hold the COACH's own deload/cleanup state, not the
+                  // client's. optOuts stays null here because those live on the
+                  // client's in-progress session, which a preview never has.
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg,
+                    clientStore.statusMode === 'deload',
+                    clientStore.statusMode === 'cleanup'
+                      ? { percent: clientStore.settings?.cleanupPercent ?? 20, optOuts: null, sinceISO: clientStore.statusModeSince ?? null }
+                      : false);
                   // Reps-only / bodyweight / checkbox exercises seed with kg==null
                   // but a real rep prescription; count them as having data so the
                   // sheet shows the seeds instead of "First time, no weight data".
@@ -822,12 +842,19 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
             <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px', paddingLeft: 2 }}>SICK & VACATION</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {sorted.map((p, i) => {
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
-                const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : 'Vacation';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : p.mode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach';
+                const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : p.mode === 'cleanup' ? 'Cleanup' : 'Vacation';
                 const startDate = new Date(p.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
                 const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
+                // An open period that has not started yet (a cleanup pinned to
+                // the client's next cycle) has run for no days at all: the
+                // elapsed-days math would otherwise count backwards from a
+                // future start and print 0d or a negative.
+                const notStarted = !p.endedAt && p.mode === 'cleanup'
+                  && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt });
                 const days = p.endedAt
                   ? Math.round((new Date(p.endedAt) - new Date(p.startedAt)) / 86400000) + 1
+                  : notStarted ? 0
                   : Math.floor((Date.now() - new Date(p.startedAt).getTime()) / 86400000) + 1;
                 return (
                   <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
@@ -835,7 +862,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                     <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: !p.endedAt ? UI.ink : UI.inkSoft }}>{modeLabel}</span>
                       <span style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint, marginLeft: 8 }}>
-                        {startDate} → {endDate || 'ongoing'}
+                        {startDate} → {endDate || (p.mode === 'cleanup' && !LB.cleanupStarted({ statusMode: p.mode, statusModeSince: p.startedAt }) ? 'upcoming' : 'ongoing')}
                       </span>
                     </div>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{days}d</span>
@@ -1086,11 +1113,18 @@ function StatBox({ label, value, gold, onClick }) {
 // ─── Tab: Setup (Plan + Nutrition combined) ───────────────────────────────────
 
 function ClientSetupTab(props) {
-  const [sub, setSub] = useStateC('plan');
+  const SUBS = [
+    { id: 'plan', label: 'Plan', icon: 'fa-calendar-days' },
+    { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' },
+    { id: 'medications', label: 'Meds', icon: 'fa-pills' },
+  ];
+  // initialSub lets a route land straight on one of these (the plan editor
+  // returns here after a save). Same rule as the tab bar above: an id that has
+  // no entry falls back to Plan instead of rendering an empty body.
+  const [sub, setSub] = useStateC(SUBS.some(s => s.id === props.initialSub) ? props.initialSub : 'plan');
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }, { id: 'medications', label: 'Meds', icon: 'fa-pills' }]}
-        active={sub} onChange={setSub} />
+      <SubTabBar tabs={SUBS} active={sub} onChange={setSub} />
       {sub === 'plan'      && <ClientPlanTab {...props} />}
       {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
       {sub === 'medications' && <ClientMedicationsTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}

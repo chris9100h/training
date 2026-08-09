@@ -482,7 +482,17 @@ function MdDoseRing({ taken, due, size = 104 }) {
 
 function MedicationsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
-  const today = LB.todayISO();
+  // Same rollover idiom as the Water tracker and the Food Tracker: `today` was
+  // computed once at mount, so a screen left open past midnight kept logging
+  // doses onto yesterday and the timeline kept showing yesterday's schedule.
+  const [today, setToday] = useStateMd(() => LB.todayISO());
+  useEffectMd(() => {
+    const tick = () => setToday(cur => { const now = LB.todayISO(); return now === cur ? cur : now; });
+    const iv = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
   const [screenTab, setScreenTab] = useStateMd('timeline'); // 'timeline' | 'schedule' | 'inventory'
   const [weeklyPrepOpen, setWeeklyPrepOpen] = useStateMd(false);
 
@@ -493,7 +503,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const activeMedications = useMemoMd(() => medications.filter(m => !m.archived).sort((a, b) => a.name.localeCompare(b.name)), [medications]);
   const medicationPlans = store.medicationPlans || [];
   const scheduleSlots = store.medicationScheduleSlots || [];
-  const medicationLogs = store.medicationLogs || [];
+  // Tombstones (see deleteLogEntry) exist only so the materialisers stop
+  // re-creating the dose. Everything that renders or counts must not see them.
+  // mdAutoFillToday reads store.medicationLogs directly on purpose, so it does.
+  const medicationLogs = (store.medicationLogs || []).filter(l => !l.skipped);
   const medicationPlanItems = store.medicationPlanItems || [];
 
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
@@ -526,6 +539,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // date switcher plus a full 0-23 hour grid that's always rendered, filled
   // or not, rather than an empty-state takeover on a day with nothing yet.
   const [curDate, setCurDate] = useStateMd(today);
+  // Only a day the user did NOT deliberately navigate to follows the rollover.
+  const prevTodayRef = useRefMd(today);
+  useEffectMd(() => {
+    const prev = prevTodayRef.current;
+    if (today !== prev) {
+      setCurDate(d => d === prev ? today : d);
+      prevTodayRef.current = today;
+    }
+  }, [today]);
   const dayLabel = curDate === today ? 'Today' : curDate === LB.shiftDate(today, -1) ? 'Yesterday' : curDate === LB.shiftDate(today, 1) ? 'Tomorrow' : LB.fmtDayLabel(curDate);
   const shiftDay = (delta) => setCurDate(d => LB.shiftDate(d, delta));
   const curDateLogs = useMemoMd(
@@ -651,7 +673,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
   async function deleteLogEntry(entry) {
     if (!await confirm('Remove this entry from the timeline?', { title: 'Delete entry', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
-    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).filter(l => l.id !== entry.id) }));
+    // A slot-materialised row cannot simply be removed: both materialisers, the
+    // reminder cron and mdAutoFillToday, only ask whether a row exists for this
+    // slot and date, so a hard delete came straight back on the next run with
+    // its reminder counters reset. Leave a tombstone instead. A hand-logged
+    // dose has no slot, nothing re-creates it, so that one really goes.
+    setStore(s => ({
+      ...s,
+      medicationLogs: entry.scheduleSlotId
+        ? (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, skipped: true, planned: false } : l)
+        : (s.medicationLogs || []).filter(l => l.id !== entry.id),
+    }));
   }
 
   const [logDraft, setLogDraft] = useStateMd(null); // { medicationId, doseQtyStr, hour } | null
@@ -732,13 +764,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // "Add medication" from within a plan: pick one or more existing
   // medications not already a member of THIS plan (any medication is
   // eligible, whether or not it's already a member of some other plan, see
-  // the header comment), or jump into medSheet to create a brand new one.
-  // Attaching only ever inserts membership rows, it never creates the
-  // medication itself, so a plan's own "Add medication" is always a picker,
-  // never a create form. Multi-pick + its own search/category filter mirror
-  // ExercisePicker (screens-schedule.jsx) exactly: tap toggles a row into
-  // `addPlanSelected` (gold highlight + check-circle) instead of attaching
-  // immediately, a bottom "Add N" button confirms the whole batch at once.
+  // the header comment). Attaching only ever inserts membership rows, it
+  // never creates the medication itself, so a plan's own "Add medication" is
+  // always a picker, never a create form; with nothing created yet the
+  // picker's own empty state hands over to goCreateMedication instead of
+  // stranding the user in front of an empty list. Multi-pick + its own
+  // search/category filter mirror ExercisePicker (screens-schedule.jsx)
+  // exactly: tap toggles a row into `addPlanSelected` (gold highlight +
+  // check-circle) instead of attaching immediately, a bottom "Add N" button
+  // confirms the whole batch at once.
   const [addToPlanOpen, setAddToPlanOpen] = useStateMd(false);
   const [addPlanSearch, setAddPlanSearch] = useStateMd('');
   const [addPlanCategories, setAddPlanCategories] = useStateMd([]); // MED_CATEGORIES ids
@@ -1208,6 +1242,18 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // declaration, nothing left to do here beyond the name/intent this
   // variable carries in the rest of this tab's code.
   const inventoryList = activeMedications;
+  // The one route that actually creates a medication, shared by every empty
+  // state that tells the user to create one. Inventory > Medications is the
+  // only surface that can (a plan's own picker exclusively attaches an
+  // already-existing medication, see confirmAddToPlan), so those hints hand
+  // over the tab switch plus the open sheet instead of naming a tab and
+  // leaving a first-time user to hunt for it. Callers with a Sheet of their
+  // own open close it first, otherwise medSheet stacks on top of it.
+  function goCreateMedication() {
+    setScreenTab('inventory');
+    setInvSubTab('medications');
+    openMedSheet(null);
+  }
   // store.medicationLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
   // understates consumption, and so overstates stock, for a baseline set
   // further back than that (a bulk supply bought a few times a year). Lazily
@@ -1336,8 +1382,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   );
 
   // Tapping a row here only ever updates stock, never identity/category/
-  // schedule: those live behind the Schedule tab's own medication sheet, on
-  // purpose, so Inventory stays a single-purpose "how much is left" screen.
+  // schedule: identity lives in medSheet (Inventory > Medications) and the
+  // schedule in schedMed (a plan's own detail view, Schedule tab), on
+  // purpose, so Stock stays a single-purpose "how much is left" view.
   // packageSize rides along read-only (this sheet never edits it, medSheet
   // does) purely to decide which input mode the JSX below shows. Warn when
   // below / Cycle only live here too, not in medSheet: this is a Stock-only
@@ -1584,8 +1631,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               </BracketFrame>
             )}
 
+            {/* Timeline is the default tab, so this is the very first thing a
+                new user reads: it has to name the ONE surface that creates a
+                medication (Inventory > Medications, see goCreateMedication).
+                It used to point at Schedule, where a plan can only attach an
+                already-existing medication, which reads as a broken feature.
+                Prose alone still leaves the hunt, hence the button, same
+                shape as WeeklyPrepScreen's own "Set up pillbox" empty. */}
             {!activeMedications.length && (
-              <div style={mdEmptyHint}>Add a medication in the Schedule tab to start logging doses.</div>
+              <div style={{ textAlign: 'center', padding: '18px 8px' }}>
+                <div style={{ ...mdEmptyHint, padding: 0, marginBottom: 14 }}>
+                  No medications yet. Create one under Inventory &gt; Medications, then you can log doses here.
+                </div>
+                <Btn onClick={goCreateMedication}>Add medication</Btn>
+              </div>
             )}
 
             {/* Hourly timeline: every hour 0-23 always renders, filled or
@@ -1761,8 +1820,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                 </Btn>
                 {isCoach && <Btn kind="ghost" onClick={() => setCoachMenuOpen(true)} style={{ flex: 1 }}>Coach</Btn>}
               </div>
+              {/* Two different empties on purpose: with medications on hand
+                  this plan is one tap from the Add button right above, but
+                  with none at all that button opens a picker with nothing in
+                  it, so point at the create surface (and go there) instead of
+                  sending the user around the loop that produced this state. */}
               {!viewedPlanMeds.length ? (
-                <Empty title="Nothing in this plan yet" sub="Add a medication you've already created in the Medications tab."
+                <Empty title="Nothing in this plan yet"
+                  sub={activeMedications.length
+                    ? 'Tap Add above to attach a medication you already created.'
+                    : 'Medications are created under Inventory > Medications, then attached to a plan here.'}
+                  action={activeMedications.length ? null : <Btn onClick={goCreateMedication}>Add medication</Btn>}
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1809,14 +1877,28 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                     </div>
                   </div>
                 )}
+                {/* Stock is a lens, never a create surface: the button hands
+                    over to the Medications sub-tab next door with the create
+                    sheet already open. Track Medication Stock is named
+                    because it defaults to OFF (see openMedSheet), so a fresh
+                    medication would otherwise still leave this view empty. */}
                 {!inventoryList.length ? (
-                  <Empty title="No medications yet" sub="Add one in the Medications tab to start tracking it here."
+                  <Empty title="No medications yet" sub="Create one under Medications, switch on Track Medication Stock, and it shows up here."
+                    action={<Btn onClick={goCreateMedication}>Add medication</Btn>}
                     icon={<i className="fa-solid fa-box-open" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
                   <>
                     {renderSearchAndFilterRow()}
                     {!mainInventoryList.length ? (
-                      <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                      // Three different empties behind one empty list. Blaming a
+                      // filter that is not set is the reachable wrong one: the
+                      // Stock empty state's own button creates a medication, and
+                      // openMedSheet leaves Track Medication Stock OFF, so two
+                      // taps from that button land here with nothing tracked and
+                      // no filter at all.
+                      stockFilterActiveCount > 0
+                        ? <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                        : <div style={mdEmptyHint}>No medication has stock tracking switched on yet. Open one under Medications and turn on Track Medication Stock.</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {mainInventoryList.map(renderMedRow)}
@@ -1837,7 +1919,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add medication
                 </Btn>
                 {!inventoryList.length ? (
-                  <Empty title="No medications yet" sub="Create one here, then add it to a plan (or several, one at a time) whenever you're ready."
+                  <Empty title="No medications yet" sub="Create one here, then attach it to a plan in the Schedule tab (or to several, one plan at a time) whenever you're ready."
                     icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
                 ) : (
                   <>
@@ -1880,8 +1962,9 @@ function MedicationsScreen({ store, setStore, go, userId }) {
         )}
       </Sheet>
 
-      {/* Inventory tab: stock-only. Identity/category/schedule stay behind
-          the Schedule tab's medication sheet on purpose, see stockSheet. */}
+      {/* Inventory > Stock: stock-only. Identity/category stay behind
+          medSheet (Inventory > Medications) and the schedule behind schedMed
+          (Schedule tab) on purpose, see stockSheet. */}
       <Sheet open={!!stockSheet} onClose={() => setStockSheet(null)} title={stockSheet?.name || 'Update stock'} titleColor="var(--accent)">
         {stockSheet && (
           <>
@@ -1995,14 +2078,27 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       {/* Add one or more existing medications (from anywhere, whether or not
           already in some other plan too) to the viewed plan. Creating a new
           medication only ever happens in the Inventory tab's Medications
-          sub-tab, never from here (see openMedSheet). Search + category
+          sub-tab, never from here (see openMedSheet); the empty state below
+          routes there rather than describing it. Search + category
           pills sit inline under the title, mirroring ExercisePicker
           (screens-schedule.jsx) rather than the Inventory tab's separate
           Filter sheet: this is already its own single-purpose picker sheet,
           nesting another sheet inside it would be one layer too many. */}
       <Sheet open={addToPlanOpen} onClose={() => setAddToPlanOpen(false)} title="Add medication" titleColor="var(--accent)">
         {availableToAddMeds.length === 0 ? (
-          <div style={mdEmptyHint}>Every medication you have is already in this plan. Create a new one in the Medications tab first.</div>
+          // Two genuinely different dead ends behind the same empty list: a
+          // full plan, versus a user who has no medications at all (for whom
+          // "already in this plan" is simply false, and who needs the create
+          // surface, not a fuller explanation of this picker). Closing this
+          // sheet before opening medSheet keeps them from stacking.
+          activeMedications.length === 0 ? (
+            <>
+              <div style={mdEmptyHint}>No medications yet. Create one under Inventory &gt; Medications, then come back here to attach it.</div>
+              <Btn onClick={() => { setAddToPlanOpen(false); goCreateMedication(); }} style={{ width: '100%' }}>Add medication</Btn>
+            </>
+          ) : (
+            <div style={mdEmptyHint}>Every medication you have is already in this plan.</div>
+          )
         ) : (
           <>
             <Field label="">
@@ -2179,8 +2275,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           sees upfront whether doses keep firing after the move, no separate
           confirm dialog needed since nothing is destroyed, only relocated. */}
       <Sheet open={movePlanOpen} onClose={() => setMovePlanOpen(false)} title="Move to plan" titleColor="var(--accent)">
+        {/* The empty branch deliberately does not name a fix: the list is also
+            empty when other plans DO exist but none is eligible (this
+            medication is already in them, or they sit in the other template
+            bucket), so "create a plan" would be wrong advice as often as it is
+            right. */}
         {moveTargetPlans.length === 0 ? (
-          <div style={mdEmptyHint}>No other plan to move this into yet. Create one first.</div>
+          <div style={mdEmptyHint}>No other plan can take this medication right now.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {moveTargetPlans.map(p => (
@@ -2497,7 +2598,10 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
             <Btn onClick={() => setSlotsSheetOpen(true)} style={{ width: '100%' }}>Set up pillbox</Btn>
           </div>
         ) : compartmentGroups.length === 0 ? (
-          <div style={mdEmptyHint}>Nothing to pack this week</div>
+          // No navigation offered: this screen is a fixed overlay with only
+          // its own back button, so it names where doses come from rather
+          // than promising a jump it can't make.
+          <div style={mdEmptyHint}>Nothing to pack this week. Doses show up here once a medication has scheduled times in an active plan (Schedule tab) and is not set to "Exclude from pillbox".</div>
         ) : compartmentGroups.map(g => (
           // Compartment first, then the days due within it: filling a real
           // pillbox goes compartment by compartment across the whole week

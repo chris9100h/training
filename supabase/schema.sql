@@ -109,7 +109,11 @@ CREATE TABLE public.zane_exercises (
   bodyweight_mode text CHECK (bodyweight_mode IS NULL OR bodyweight_mode IN ('pull', 'plus_load')),
   youtube_url text,
   note_pinned boolean NOT NULL DEFAULT false,
-  progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0)
+  progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0),
+  -- Migration 0254. Ordered horn names for a multi-horn plate-loaded machine,
+  -- e.g. ["Standard","Mid","High"]. Non-empty = log a weight per horn. No
+  -- second mode column on purpose (see no_weight_reps vs log_mode).
+  horn_labels jsonb
 );
 
 CREATE TABLE public.zane_schedules (
@@ -147,6 +151,7 @@ CREATE TABLE public.zane_sessions (
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
   is_deload boolean NOT NULL DEFAULT false,
+  is_cleanup boolean NOT NULL DEFAULT false,  -- 0251: cleanup week, see docs/database.md
   meso_recap jsonb,
   readiness text,
   signal_weight text,
@@ -196,6 +201,11 @@ CREATE TABLE public.zane_sets (
   -- this is only what the user typed. Implied bodyweight = kg - added_kg, which
   -- freezes it at logging time.
   added_kg numeric,
+  -- Migration 0254. Per-horn breakdown for a multi-horn machine,
+  -- [{"label":"Mid","kg":20}, ...]. Self-describing rather than positional so
+  -- reordering an exercise's horns cannot re-label sets already in history.
+  -- kg holds the plain SUM; no leverage math, the ratios are unpublished.
+  horn_loads jsonb,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -302,7 +312,7 @@ CREATE TABLE public.zane_user_settings (
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
-  plan_mode boolean NOT NULL DEFAULT false,
+  plan_mode boolean NOT NULL DEFAULT true, -- 0253: default flipped from false, existing rows backfilled to true
   hide_food_categories boolean NOT NULL DEFAULT false, -- 0214: flat hour timeline instead of meal-category header cards, display-only
   default_checkin_schema jsonb,
   status_mode text,
@@ -336,7 +346,9 @@ CREATE TABLE public.zane_user_settings (
   daily_log_reminder_time text NOT NULL DEFAULT '19:00'::text,
   daily_log_reminder_last_date text,
   pillbox_slots jsonb,
-  fasting_protocol text  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
+  fasting_protocol text,  -- 0249: intermittent fasting protocol preset ('16:8'|'18:6'|'20:4'|'omad'), null = off
+  cleanup_percent integer NOT NULL DEFAULT 20,  -- 0251: cleanup week load reduction in percent (UI clamps 10-30)
+  food_force_grams boolean NOT NULL DEFAULT false  -- 0252: opt-out, keep the food tracker in grams even when unit='lbs'
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -475,6 +487,9 @@ ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_user_id_fkey FOREIGN KEY
 
 ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_pkey PRIMARY KEY (user_id);
 ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+-- Migration 0109 added this alongside the zane_status_periods.mode check; it
+-- was missing from this snapshot until 0251 widened both for 'cleanup'.
+ALTER TABLE public.zane_user_settings ADD CONSTRAINT zane_user_settings_status_mode_check CHECK ((status_mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text, 'cleanup'::text])));
 
 ALTER TABLE public.zane_pushover_active ADD CONSTRAINT pushover_active_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_push_subscriptions ADD CONSTRAINT push_subscriptions_pkey PRIMARY KEY (id);
@@ -1053,7 +1068,8 @@ $function$;
 -- added_kg (plus_load belt/dip-belt load, Migration 0243) added to all three
 -- lists in Migration 0245: unreferenced jsonb keys are silently ignored, so
 -- every set synced through this RPC (i.e. every write after the first boot
--- import) had it dropped to NULL until then.
+-- import) had it dropped to NULL until then. horn_loads (Migration 0254) was
+-- added to all three lists from the start for that reason.
 CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1062,7 +1078,7 @@ AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
     set_idx, kg, reps, reps_l, reps_r, time_sec, added_kg,
-    done, skipped, warmup, technique, drops, updated_at
+    done, skipped, warmup, technique, drops, horn_loads, updated_at
   )
   SELECT
     s->>'id',
@@ -1081,6 +1097,7 @@ AS $function$
     COALESCE((s->>'warmup')::boolean,  false),
     NULLIF(s->>'technique', ''),
     CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
+    CASE WHEN s->'horn_loads' IS NOT NULL AND s->'horn_loads' != 'null'::jsonb THEN s->'horn_loads' ELSE NULL END,
     LEAST(COALESCE((s->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
@@ -1095,6 +1112,7 @@ AS $function$
     warmup     = EXCLUDED.warmup,
     technique  = EXCLUDED.technique,
     drops      = EXCLUDED.drops,
+    horn_loads = EXCLUDED.horn_loads,
     updated_at = EXCLUDED.updated_at
   WHERE zane_sets.updated_at < EXCLUDED.updated_at;
 $function$;
@@ -1105,6 +1123,32 @@ $function$;
 -- updated_at is newer (no stale clobber). Migration 0096. updated_at is
 -- clamped to LEAST(client value, now()) since migration 0238, same
 -- clock-skew guard as sync_sets_batch above.
+-- Derived-only write for a day's adherence pair (migration 0256): two columns,
+-- no updated_at, so a recompute cannot win last-write-wins for the whole row.
+CREATE OR REPLACE FUNCTION public.update_daily_log_derived(
+  p_date text,
+  p_adherence numeric DEFAULT NULL,
+  p_targets_snap jsonb DEFAULT NULL
+)
+RETURNS void
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path TO 'public'
+AS $function$
+  UPDATE zane_daily_logs
+     SET adherence = p_adherence,
+         targets_snap = p_targets_snap
+   WHERE user_id = auth.uid()
+     AND date = p_date;
+$function$;
+
+-- Grant hygiene (docs/database.md, "Grant-Fallen"): CREATE FUNCTION hands
+-- EXECUTE to PUBLIC, which anon inherits. Revoke first, then grant only what
+-- the app needs. SECURITY INVOKER plus the auth.uid() predicate means RLS still
+-- applies, but an anon grant would still be wrong on principle.
+REVOKE EXECUTE ON FUNCTION public.update_daily_log_derived(text, numeric, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.update_daily_log_derived(text, numeric, jsonb) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1398,6 +1442,7 @@ AS $function$
     AND e.ex_id IS NOT NULL
     AND s.ended IS NOT NULL
     AND NOT s.is_deload
+    AND NOT s.is_cleanup
     AND ex.movement_type IS DISTINCT FROM 'assisted'
     AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
     AND COALESCE(
@@ -1419,7 +1464,7 @@ AS $function$
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
-        'timeSec', st.time_sec,
+        'timeSec', st.time_sec, 'addedKg', st.added_kg, 'hornLoads', st.horn_loads,
         'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
         'technique', st.technique, 'drops', st.drops
       ) ORDER BY st.set_idx)
@@ -2201,7 +2246,7 @@ AS $function$
   WHERE zane_meso_states.updated_at < EXCLUDED.updated_at;
 $function$;
 
--- ── Status periods (migration 0083; deload mode added 0108) ─────────────────────
+-- ── Status periods (migration 0083; deload mode 0108, cleanup mode 0251) ───────
 -- Historical log of sick/vacation/deload periods (ended_at NULL = active). Mirror
 -- of zane_user_settings.status_mode/status_mode_since (that's the fast current
 -- cache; this table is the full history for the stats "Missed Workouts" cards).
@@ -2209,7 +2254,7 @@ $function$;
 CREATE TABLE zane_status_periods (
   id         text        PRIMARY KEY,
   user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  mode       text        NOT NULL CHECK (mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text])),
+  mode       text        NOT NULL CHECK (mode = ANY (ARRAY['sick'::text, 'vacation'::text, 'deload'::text, 'cleanup'::text])),
   started_at timestamptz NOT NULL,
   ended_at   timestamptz
 );
@@ -2793,6 +2838,11 @@ CREATE TABLE zane_medication_logs (
   time             text        NOT NULL,           -- HH:MM (local time)
   dose_qty         numeric     NOT NULL,
   planned          boolean     NOT NULL DEFAULT false,
+  -- 0257: removed from the timeline on purpose. The row stays so the cron's
+  -- "already materialised" check keeps seeing it and cannot re-create the dose;
+  -- planned=false keeps it out of reminders and tallies. Distinct from a plain
+  -- planned=false, which means taken.
+  skipped          boolean     NOT NULL DEFAULT false,
   schedule_slot_id text        REFERENCES public.zane_medication_schedule_slots(id) ON DELETE SET NULL,
   reminder_sent_at timestamptz,                    -- last nudge time, written by the medication-reminder cron (migration 0246)
   reminder_count   integer     NOT NULL DEFAULT 0, -- nudges sent for this row, capped at 2 by the cron (migration 0246)
@@ -3255,7 +3305,7 @@ $function$;
 REVOKE EXECUTE ON FUNCTION public.get_founding_seats() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_founding_seats() TO anon, authenticated;
 
--- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
+-- ── Ops: schema inventory for the db-drift workflow (Migrations 0142, 0258) ─
 
 CREATE OR REPLACE FUNCTION public.admin_schema_inventory()
 RETURNS jsonb
@@ -3276,6 +3326,7 @@ AS $$
                'f', p.proname,
                'sig', p.oid::regprocedure::text,
                'anon_exec', has_function_privilege('anon', p.oid, 'execute'),
+               'authenticated_exec', has_function_privilege('authenticated', p.oid, 'execute'),
                'definer', p.prosecdef)
              ORDER BY p.proname)
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.709';
+const CACHE = 'zane-v2.733';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
@@ -45,6 +45,18 @@ const ASSETS = [
   BASE + '/icons/icon-180.png',
 ];
 
+// Public pages that live outside the app shell (CLAUDE.md, "Public-Seiten"),
+// plus the one script only they load. Never precached, and never served from
+// cache while the network is reachable, see the fetch handler. Matched against
+// the request path, so a new public page has to be listed here as well as kept
+// out of ASSETS.
+const PUBLIC_PAGES = [
+  BASE + '/welcome.html',
+  BASE + '/features.html',
+  BASE + '/autoreg.html',
+  BASE + '/src/autoreg-guide-page.js',
+];
+
 // Decorative background photos + their index. Purely cosmetic, and their file
 // names/extensions drift (e.g. .png vs .PNG on case-sensitive hosting), so a
 // single 404 here must NOT abort the whole SW install. Precached best-effort
@@ -61,6 +73,7 @@ const PHOTO_ASSETS = [
   BASE + '/Background/Brettski.PNG',
   BASE + '/Background/IMG_6950.png',
   BASE + '/Background/Diane.PNG',
+  BASE + '/Background/JClow.png',
   BASE + '/Background/index.json',
 ];
 
@@ -88,6 +101,13 @@ function precacheAll(cache, urls) {
   return Promise.all(urls.map(url =>
     fetch(url, { cache: 'no-store' }).then(res => {
       if (!res.ok) throw new Error(`Precache failed: ${url} (${res.status})`);
+      // A host that redirects this URL (e.g. Cloudflare's clean-URL handling
+      // turning /index.html into /) hands back a Response with redirected
+      // === true, and Cache Storage preserves that flag on the stored entry.
+      // Serving such an entry later via respondWith() for a navigation is
+      // rejected by the browser ("Response served by service worker has
+      // redirections"), so rebuild a plain Response before storing it.
+      if (res.redirected) res = new Response(res.body, res);
       return cache.put(url, res);
     })
   ));
@@ -189,6 +209,23 @@ self.addEventListener('fetch', e => {
       e.respondWith(fetch(e.request.url, { cache: 'no-store' }).catch(() => offlineResponse()));
       return;
     }
+    // The standalone public pages (welcome/features/autoreg and the JS only
+    // they load) are deliberately NOT in ASSETS: they carry their own ?v=
+    // busters and are meant to update the moment they are redeployed, without
+    // waiting for a service worker cycle. Being outside ASSETS did not keep
+    // them out of the cache, though. Every same-origin GET falls into the
+    // stale-while-revalidate block below, which caches whatever it fetches, so
+    // the first visit put them in the versioned CACHE and every later visit was
+    // answered from it: a marketing page frozen at whatever it said the day the
+    // user first opened it, which is the exact failure the busters exist to
+    // prevent. Network-first, cache only as an offline fallback.
+    if (PUBLIC_PAGES.some(p => url.pathname === p || url.pathname.endsWith(p))) {
+      e.respondWith(
+        fetch(e.request, { cache: 'no-store' })
+          .catch(() => caches.match(e.request).then(c => c || offlineResponse()))
+      );
+      return;
+    }
     // App shell: stale-while-revalidate, serve cache instantly, refresh in background.
     // { cache: 'no-store' } on the network fetch matters a lot more than it looks:
     // after a deliberate cache wipe (LB.clearCachesAndReload / "Clear cache &
@@ -202,6 +239,10 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       caches.match(e.request).then(cached => {
         const network = fetch(e.request, { cache: 'no-store' }).then(res => {
+          // Same reasoning as precacheAll above: a redirected same-origin
+          // response (e.g. Cloudflare turning /index.html into /) can't be
+          // respondWith()'d for a navigation as-is, rebuild it first.
+          if (res.redirected) res = new Response(res.body, res);
           if (res.ok) {
             const clone = res.clone();
             // A photo that missed precaching (e.g. a transient 404 during

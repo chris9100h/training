@@ -7,6 +7,13 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
+// Ceiling on how many windowed-out sessions the post-workout recap pulls back
+// per mount, across all batches. One comparison needs at most one prior session
+// per exercise, so a healthy walk stops well under this; the cap is there so a
+// pathological one cannot drag years of history into the store. Mirrors
+// RECENT_HYDRATE_CAP in screens-lib.jsx.
+const RECAP_HYDRATE_CAP = 24;
+
 // Renders text on a single line, scaling the font size down so it always fits
 // the parent's width (used for the hero day name, which varies in length).
 function FitText({ text, max, min, style }) {
@@ -1557,6 +1564,21 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return LB.getPlanDaysForDate(sch, dStr)?.length || dayCount;
   }, [sch, sessionDate, dayCount]);
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
+  // A cleanup is activated ahead of time and pinned to the next cycle start, so
+  // statusMode alone is not enough to label the strip: between activating and
+  // that day the plan still trains at full load and must still read that way.
+  const cleanupShowing = LB.cleanupStarted(store);
+  // A cleanup that is activated but pinned to a future cycle start needs to say
+  // so up here, next to the meso/auto chips: the plan otherwise looks completely
+  // untouched for the rest of the current cycle and the Plan tab is the only
+  // place that knows something is queued. Same DD.MM format and same muted
+  // "not running yet" styling as the pending meso badge below.
+  const cleanupPendingDay = (store.statusMode === 'cleanup' && !cleanupShowing && store.statusModeSince)
+    ? (() => {
+        const d = new Date(store.statusModeSince);
+        return isNaN(d) ? null : `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })()
+    : null;
 
   const periodLabel = useMemo(() => {
     if (LB.is531Plan(sch)) {
@@ -1567,9 +1589,18 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const c531 = LB.current531Cycle(sch, store.sessions) + 1;
       const w531 = LB.current531Week(sch, store.sessions) || 1;
       const dl531 = w531 === 4 || (store.statusMode === 'deload' && weekOffset === 0);
-      return dl531 ? `CYCLE ${c531} · DELOAD` : `CYCLE ${c531} · WEEK ${w531}`;
+      // This branch returns before the general status-mode line below ever
+      // runs, so a cleanup week needs its own check here or a 5/3/1 plan would
+      // show no hint at all while its assistance work IS reduced. Deload wins
+      // when both apply (w531 === 4 is a built-in deload week, independent of
+      // statusMode); statusMode itself can only ever hold one of the two.
+      const cl531 = cleanupShowing && weekOffset === 0;
+      if (dl531) return `CYCLE ${c531} · DELOAD`;
+      if (cl531) return `CYCLE ${c531} · CLEANUP`;
+      return `CYCLE ${c531} · WEEK ${w531}`;
     }
     if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
+    if (cleanupShowing && weekOffset === 0) return 'CLEANUP';
     // Flex has no calendar week; the meaningful counter is how many times you've
     // been through the rotation (position, advances on a session OR a skip).
     // weekOffset lets the strip page back to earlier passes, so mirror the cycle
@@ -1607,14 +1638,22 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode, store.sessions]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode, cleanupShowing, store.sessions]);
 
   const cardLabel = useMemo(() => {
-    // During a deload, today's label reads DELOAD instead of TODAY/NEXT UP so
-    // the strip clearly signals the light week. Reverts automatically on end.
-    const todayWord = (isViewingToday && store.statusMode === 'deload') ? 'DELOAD' : 'TODAY';
+    // During a deload or a cleanup week, today's label reads DELOAD / CLEANUP
+    // instead of TODAY/NEXT UP so the strip clearly signals the reduced week.
+    // Reverts automatically on end.
+    const todayWord = !isViewingToday ? 'TODAY'
+      : store.statusMode === 'deload' ? 'DELOAD'
+      : cleanupShowing ? 'CLEANUP'
+      : 'TODAY';
     if (isFlex) {
-      return `${isViewingToday ? (store.statusMode === 'deload' ? 'DELOAD · ' : 'NEXT UP · ') : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      const flexPrefix = !isViewingToday ? ''
+        : store.statusMode === 'deload' ? 'DELOAD · '
+        : cleanupShowing ? 'CLEANUP · '
+        : 'NEXT UP · ';
+      return `${flexPrefix}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     // For versioned cycle plans with cycleOffset, planPos is the plan day index;
     // for all other cycle plans planPos is absent and selectedSlot equals plan position.
@@ -1634,7 +1673,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${dayNum} OF ${viewedDayCount}`;
-  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode, cleanupShowing]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1684,7 +1723,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // ONCE instead of re-spreading and re-sorting the whole history per entry
     // (was O(entries x n log n), the single heaviest computation on Home).
     return [...store.sessions]
-      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload)
+      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload && !x.isCleanup)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   }, [doneSession, store.sessions]);
 
@@ -1701,6 +1740,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     let improvements = 0, regressions = 0;
     const neededIds = new Set();
     doneSession.entries.forEach(e => {
+      // A deload, or a cleanup week's reduced load, must not count toward
+      // either arrow: the drop is deliberate, not lost strength. Mirrors the
+      // live training screen's isDeloadSession gate and the same reducedLoad
+      // check in SessionDetailScreen/SessionCompareScreen (screens-lib.jsx),
+      // off the one shared LB.cleanupAppliesToExercise. Skipped before the
+      // prior-session search below so a reduced exercise never queues an
+      // unnecessary lazy fetch for a comparison its result gets discarded.
+      const reducedLoad = doneSession.isDeload
+        || (doneSession.isCleanup && !doneSession.cleanupOptOuts?.[e.exId] && LB.cleanupAppliesToExercise(store, e.exId, doneSession.dayId));
+      if (reducedLoad) return;
       let prevSession = null;
       for (const x of priorSessions) {
         if (!(x.entries || []).length) {
@@ -1732,7 +1781,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (regressed) regressions++;
     });
     return { improvementCount: improvements, regressionCount: regressions, neededPriorSessionIds: [...neededIds] };
-  }, [doneSession, priorSessions]);
+  }, [doneSession, priorSessions, store.exercises, store.schedules]);
 
   // A prior session used by the comparison above may sit outside the boot
   // history window (aggExercises > 0, entries not loaded locally yet). Fetch
@@ -1740,16 +1789,38 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // empty at merge time so a concurrent update never gets clobbered. Same
   // idiom as fetchSessionEntries usage in SessionDetailScreen /
   // SessionCompareScreen (screens-lib.jsx).
+  //
+  // Bail when nothing actually merged, and cap the walk. neededPriorSessionIds
+  // is memoized off store.sessions, so handing back a fresh sessions array
+  // re-runs the memo and re-arms this effect. A session the server answers
+  // with no rows (aggregate claims sets, the entries table disagrees) used to
+  // do exactly that forever: `bySession[x.id]` is truthy for an empty array,
+  // so the map rebuilt the object, the identity changed, the id stayed in the
+  // needed list and the fetch fired again on the next render. Same failure the
+  // Recent-tab hydration had (RECENT_HYDRATE_CAP, screens-lib.jsx), and the
+  // cost is the same: syncStore re-uploads every hydrated entry with a fresh
+  // updated_at and the boot merge keeps them, defeating History-Windowing on
+  // this device for good.
+  const recapHydrated = useRef(0);
   useEffect(() => {
     if (!neededPriorSessionIds.length) return;
+    const budget = RECAP_HYDRATE_CAP - recapHydrated.current;
+    if (budget <= 0) return;
+    const ids = neededPriorSessionIds.slice(0, budget);
+    recapHydrated.current += ids.length;
     let on = true;
-    LB.fetchSessionEntries(neededPriorSessionIds)
+    LB.fetchSessionEntries(ids)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };
@@ -1861,9 +1932,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const selectedDayStatusMode = useMemo(() => {
     if (isFutureSlot) return null;
-    if (isViewingToday) return store.statusMode ?? null;
+    if (isViewingToday) {
+      // A cleanup pinned to the next cycle start is not running yet, so the
+      // card must not announce it on the days before it begins.
+      if (store.statusMode === 'cleanup' && !cleanupShowing) return null;
+      return store.statusMode ?? null;
+    }
     return statusPeriodModeFor(sessionDate);
-  }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
+  }, [isViewingToday, isFutureSlot, store.statusMode, cleanupShowing, statusPeriodModeFor, sessionDate]);
 
   const handleClearStatus = () => {
     // "Back to normal" is the primary way a break ends, offer to realign the
@@ -1978,6 +2054,34 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
+  // Same auto-end for a cleanup week (migration 0251), same shape and same
+  // reasoning as the deload one above. Ending it matters more here than for a
+  // deload: while it runs, the seed history is windowed to hide the cleanup's
+  // own sessions, and it is exactly that ending which turns them into the new
+  // baseline the next week builds up from.
+  const cleanupEndChecked = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode !== 'cleanup') { cleanupEndChecked.current = false; return; }
+    if (cleanupEndChecked.current) return;
+    if (LB.cleanupElapsed(store)) {
+      cleanupEndChecked.current = true;
+      LB.endCleanup(userId, store, setStore);
+    }
+  }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
+
+  // A cleanup start pinned to the next cycle boundary belongs to the plan it
+  // was computed against. Switching plans or editing the day count moves that
+  // boundary, so re-pin while the window is still pending. Keyed on the plan
+  // signature rather than the schedules array so an unrelated plan edit does
+  // not re-run it; repinCleanupStart is a no-op once the date already matches.
+  const cleanupPlanKey = sch
+    ? `${sch.id}|${LB.isFlexPlan(sch) ? 'flex' : LB.isWeekdayPlan(sch) ? 'weekday' : 'cycle'}|${(LB.getPlanDaysForDate(sch, LB.todayISO()) || []).length}`
+    : '';
+  useEffect(() => {
+    if (store?.statusMode !== 'cleanup' || !cleanupPlanKey) return;
+    LB.repinCleanupStart(userId, store, setStore);
+  }, [cleanupPlanKey, store?.statusMode]);
+
   // 5/3/1 cycle-end: once a cycle completes, bump each main lift's Training Max
   // per its AMRAP results (Wendler's rule), announce it, and, only for a plan
   // with no built-in deload, offer to insert a deload week first. program_data
@@ -2048,7 +2152,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // offer to start Meso 2, continue as a regular cycle, or deactivate the plan.
   const pendingMeso2Checked = useRef(false);
   useEffect(() => {
-    if (store?.statusMode === 'deload') { pendingMeso2Checked.current = false; return; }
+    // A cleanup week defers the offer for the same reason a deload does: the
+    // user is mid-overlay, and starting a new block under it would either
+    // cancel the overlay or run week 1 at reduced loads.
+    if (store?.statusMode === 'deload' || store?.statusMode === 'cleanup') { pendingMeso2Checked.current = false; return; }
     if (pendingMeso2Checked.current) return;
     if (store?.inProgress) return;
     if (!sch) return;
@@ -2168,6 +2275,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const anchorTS = store?.deloadPromptDismissedAt ? new Date(store.deloadPromptDismissedAt) : new Date(0);
       const spw = sch.sessions_per_week || 3;
       const goal = spw * 8;
+      // Cleanup sessions DO count here: a cleanup week is a normal training week
+      // at a reduced load, not a break. Only deloads (no training stimulus at
+      // all) are dropped. (Only the flex path can filter this way, the
+      // weekday/cycle paths below are calendar-based and count elapsed time.)
       const count = (store.sessions || []).filter(
         s => s.ended && !s.isDeload && new Date(s.ended) >= anchorTS,
       ).length;
@@ -2482,7 +2593,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
       // Load-only autoregulate plans never apply set deltas (weight is tuned,
       // set count stays authored), this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
@@ -2735,7 +2846,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null, 3, occ);
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, plannedProgressionOffset: it.progressionOffset ?? null, plannedTechniques: it.plannedTechniques ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
@@ -3016,6 +3127,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
+            {/* Wrapper so a queued cleanup can sit alongside whichever chip the
+                plan type renders below (bounded meso, or cycle label + AUTO),
+                wrapping to its own line when the pair gets too wide. */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
             {sch.mesocycle_weeks ? (() => {
               // A deload following the meso is a recovery week, show DELOAD, not
               // the (now-frozen, possibly beyond-failure) meso RIR target.
@@ -3093,6 +3208,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 )}
               </div>
             )}
+            {cleanupPendingDay && weekOffset === 0 && (
+              <span title="Your cleanup week is queued for the start of the next cycle. Until then everything trains at full load." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '2px 8px' }}>
+                Cleanup → {cleanupPendingDay}
+              </span>
+            )}
+            </div>
           </div>
           {!isFlex && (
             <button onClick={goForward} disabled={weekOffset >= 1} style={{
@@ -3243,10 +3364,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
-              {selectedDayStatusMode === 'sick' ? 'SICK.' : selectedDayStatusMode === 'vacation' ? 'AWAY.' : 'RECOVER.'}
+              {selectedDayStatusMode === 'sick' ? 'SICK.' : selectedDayStatusMode === 'vacation' ? 'AWAY.' : selectedDayStatusMode === 'cleanup' ? 'CLEANUP.' : 'RECOVER.'}
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
-              {selectedDayStatusMode === 'sick' ? 'Rest up. Training can still be logged.' : selectedDayStatusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : 'Recovery is part of the plan.'}
+              {selectedDayStatusMode === 'sick' ? 'Rest up. Training can still be logged.' : selectedDayStatusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : selectedDayStatusMode === 'cleanup' ? 'Lighter loads, sharper technique.' : 'Recovery is part of the plan.'}
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
@@ -3264,7 +3385,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             {selectedDayStatusMode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <span className="micro" style={{ color: UI.inkFaint }}>
-                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : selectedDayStatusMode === 'deload' ? 'Deload mode active' : 'Vacation mode active'}
+                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : selectedDayStatusMode === 'deload' ? 'Deload mode active' : selectedDayStatusMode === 'cleanup' ? 'Cleanup week active' : 'Vacation mode active'}
                 </span>
                 {isViewingToday && (
                   <button onClick={handleClearStatus} style={{

@@ -1038,6 +1038,71 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const [coachForm, setCoachForm] = useStateH({});
   const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
   const [confirmEl, confirm] = useConfirm();
+
+  // The two training overlays in the status picker below. They are not plain
+  // status flips like sick/vacation: each owns a whole cycle, carries its own
+  // start alignment and coaching note, and a cleanup also reads the stored
+  // reduction, so both go through their LB start/end functions rather than
+  // onSetStatus. The wording mirrors the Plan tab's own buttons so the two
+  // entry points cannot drift apart.
+  // Every pick in the status row confirms first: the buttons are icon-only, so
+  // a mistap has no label to catch it, and switching away from a status ends
+  // whatever was running. Named in prose here so the prompts can say which one.
+  const statusName = (m) => m === 'sick' ? 'sick day' : m === 'vacation' ? 'vacation'
+    : m === 'deload' ? 'deload week' : m === 'cleanup' ? 'cleanup week' : 'normal training';
+  const pickPlainStatus = async (mode) => {
+    const backdate = date < todayISO ? date : null;
+    const current = dayMode;
+    // Leaving an overlay runs its own end function so the coaching thread gets
+    // the closing note; that path does its own confirm.
+    if (mode === null && (store.statusMode === 'deload' || store.statusMode === 'cleanup') && date === todayISO) { endOverlayStatus(); return; }
+    const ends = current ? ` This will end your ${statusName(current)}.` : '';
+    const msg = mode === null
+      ? `Set status to normal.${ends}`
+      : `Mark this day as ${statusName(mode)}.${ends}`;
+    if (!await confirm(msg, { title: mode === null ? 'Back to normal' : `Set ${statusName(mode)}`, ok: 'Set' })) return;
+    onSetStatus(mode, backdate);
+  };
+
+  // Cleanup opens the same sheet the Plan tab uses (CleanupStartBody, ui.jsx),
+  // so the reduction can be picked here too rather than silently reusing
+  // whatever was chosen last.
+  const [cleanupSheet, setCleanupSheet] = useStateH(false);
+  const [cleanupDraftPct, setCleanupDraftPct] = useStateH(20);
+  const cleanupStartISO = LB.nextCleanupStartISO(store);
+  const startOverlayStatus = async (mode) => {
+    const lead = store.statusMode ? `This will end your ${statusName(store.statusMode)}. ` : '';
+    if (mode === 'cleanup') {
+      if (store.statusMode && !await confirm(`${lead}Start a cleanup week instead?`,
+        { title: 'Start cleanup', ok: 'Continue' })) return;
+      setCleanupDraftPct(Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20))));
+      setCleanupSheet(true);
+      return;
+    }
+    if (!await confirm(`${lead}Train your normal plan at ~50% load for one cycle. Weights pre-fill light and the week is excluded from progression. Start now?`,
+      { title: 'Start deload week', ok: 'Start deload' })) return;
+    await LB.startDeload(userId, store, setStore);
+  };
+  const startCleanupWithPct = async () => {
+    const pct = Math.min(30, Math.max(10, Math.round(cleanupDraftPct)));
+    setCleanupSheet(false);
+    setStore(s => ({ ...s, settings: { ...s.settings, cleanupPercent: pct } }));
+    // Re-resolved here rather than reusing the render-time value: the sheet can
+    // sit open across midnight, which would move the boundary.
+    await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore, LB.nextCleanupStartISO(store));
+  };
+  const endOverlayStatus = async () => {
+    const isCleanup = store.statusMode === 'cleanup';
+    const running = !isCleanup || LB.cleanupStarted(store);
+    const what = isCleanup ? 'cleanup' : 'deload';
+    const [msg, ok] = running
+      ? [`End the ${what} week and return to normal training?`, `End ${what}`]
+      : [`Call off the ${what} week before it starts?`, 'Call it off'];
+    if (!await confirm(msg, { title: running ? `End ${what}` : `Cancel ${what}`, ok })) return;
+    if (isCleanup) await LB.endCleanup(userId, store, setStore);
+    else await LB.endDeload(userId, store, setStore);
+  };
+
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
 
@@ -1478,26 +1543,58 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       {onSetStatus && (
         <div style={{ marginBottom: 18 }}>
+          {/* Five states, icon-only: SICK, CLEANUP, NORMAL, DELOAD, VACATION,
+              with NORMAL centred so the two training overlays sit either side
+              of it and the two away-from-training ones on the outside.
+              Sick/vacation are plain status flips and can be backdated; the
+              two overlays are not, they own a whole cycle and are started
+              through their own functions (alignment, percentage, coaching
+              note), so they are today-only and confirm first. */}
           <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-            {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
+            {[
+              { mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' },
+              { mode: 'cleanup', label: 'Cleanup week', icon: 'fa-broom', overlay: true },
+              { mode: null, label: 'Normal', icon: 'fa-circle-check' },
+              { mode: 'deload', label: 'Deload week', icon: 'fa-battery-quarter', overlay: true },
+              { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' },
+            ].map(({ mode, label, icon, overlay }, i) => {
               const active = dayMode === mode;
+              // An overlay can only be started for today: backdating one would
+              // claim a cycle's worth of reduced training that never happened.
+              const disabled = !!overlay && date !== todayISO;
               return (
-                <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
-                  flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
+                <button key={String(mode)} aria-label={label} title={disabled ? `${label} can only be started for today` : label}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled || active) return;
+                    if (overlay) { startOverlayStatus(mode); return; }
+                    pickPlainStatus(mode);
+                  }} style={{
+                  flex: 1, padding: '14px 4px', cursor: disabled ? 'default' : 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   textShadow: active ? 'none' : 'var(--text-lift)',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: disabled ? 0.35 : 1,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
-                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
-                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? 'var(--accent-ink)' : UI.inkFaint }}>{label}</span>
+                  <i className={`fa-solid ${icon}`} style={{ fontSize: 15, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />
                 </button>
               );
             })}
           </div>
-          {dayMode && date === todayISO && (() => {
+          {/* A cleanup's start is pinned to the next cycle, so it is shown, not
+              edited: the input below caps at today and would render an
+              out-of-range value for a start that is still ahead. */}
+          {dayMode === 'cleanup' && date === todayISO && store.statusModeSince && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span className="micro" style={{ color: UI.inkGhost }}>{LB.cleanupStarted(store) ? 'SINCE' : 'STARTS'}</span>
+              <span className="num" style={{ color: 'var(--accent)', fontSize: 12 }}>
+                {new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              </span>
+            </div>
+          )}
+          {dayMode && dayMode !== 'cleanup' && date === todayISO && (() => {
             const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return LB.fmtISO(d); })();
             // LB.fmtISO(new Date(...)), not a bare slice: statusModeSince is a
             // UTC timestamp, slicing its first 10 chars gives the UTC date,
@@ -1930,6 +2027,19 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
       </div>
+      {/* Outside the scrolling section on purpose: Sheet positions itself fixed
+          and is not portaled, so nesting it inside a scroll container invites
+          clipping. zIndex above this screen's own 100, the same bump the other
+          sheets stacked on top of a full-page screen use. */}
+      <Sheet open={cleanupSheet} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
+        <CleanupStartBody
+          percent={cleanupDraftPct}
+          onPercent={setCleanupDraftPct}
+          startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
+          onCancel={() => setCleanupSheet(false)}
+          onStart={startCleanupWithPct}
+        />
+      </Sheet>
     </Screen>
   );
 }
@@ -2493,7 +2603,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
             </div>
           )}
         </>
-      ), null, <Toggle on={!!form.proteinFixed} onToggle={() => setForm(f => ({ ...f, proteinFixed: !f.proteinFixed }))} />)}
+      ), null, <Toggle on={!!form.proteinFixed} onToggle={() => setForm(f => ({ ...f, proteinFixed: !f.proteinFixed }))} label="Fixed protein" />)}
 
       {/* Auto: 25% of calories, floored at FAT_FLOOR_PER_KG. Per kg: fat lands
           on a fixed amount per unit of bodyweight and everything it frees
@@ -3323,36 +3433,77 @@ function hlHasLogContent(l) {
 }
 
 // ─── AI Daily Summary card ──────────────────────────────────────────────────
-// User-triggered (button, never automatic) once-a-day AI read on yesterday's
-// tracked data. readOnly (the coach view) renders no button at all: a
-// coach's own tap would resolve server-side to the COACH's own identity, not
-// the client's, and silently write into the wrong account's row rather than
-// erroring loudly, so the affordance simply must not exist there.
-function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }) {
+// User-triggered (button, never automatic) AI read on a tracked day, for
+// whichever day is selected in the Health tab's date-strip (selectedDate),
+// not hardcoded to yesterday: browsing the strip now browses summaries too.
+// The server (ai-daily-summary) independently caps how far back a request
+// can go (its own "today" +/- 3 days), daysAgo's [1,3] range below mirrors
+// that with a little slack for timezone skew between client and server.
+// readOnly (the coach view) renders no button at all: a coach's own tap
+// would resolve server-side to the COACH's own identity, not the client's,
+// and silently write into the wrong account's row rather than erroring
+// loudly, so the affordance simply must not exist there.
+// key={selectedDate} at both call sites remounts this on every date-strip
+// navigation, so busy/error (below) always start fresh for whichever day is
+// now showing instead of carrying a stale spinner or error over from a day
+// the user has since browsed away from. A request still in flight at that
+// point keeps running (setStore below is the parent's, unaffected by this
+// component unmounting) and still saves correctly if it succeeds; its own
+// setBusy/setError calls land on the now-discarded instance and are dropped,
+// same as any React 18 state update on an unmounted component.
+//
+// aiSummaryInFlightDates: module-level, NOT component state, exactly because
+// of that remount. A plain useState(false) busy flag has no memory across a
+// fresh mount, so navigating away mid-request and back to the SAME date
+// before it resolves showed an idle, clickable button again, letting a
+// second generate() fire for that date. For a regular user the server's own
+// atomic claim (ai-daily-summary) still stops any real double-write, just
+// surfaces a spurious "Already generated" error; for admin, the claim AND
+// quota check are both intentionally skipped, so a double-fire meant two
+// real model calls racing the final upsert. Read at render (inFlight below)
+// so a remounted instance immediately shows the correct state instead of
+// only the instance that actually started the request knowing about it.
+const aiSummaryInFlightDates = new Set();
+function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, readOnly = false }) {
   const [busy, setBusy] = useStateH(false);
   const [error, setError] = useStateH(null);
   // Same admin identity as Settings/Feature Map: gates the Retry button below,
   // the server independently enforces the same bypass (ai-daily-summary), this
   // is purely so a non-admin never even sees an affordance that would 409.
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const yesterday = LB.shiftDate(LB.todayISO(), -1);
-  const log = (store.dailyLogs || []).find(l => l.date === yesterday) || null;
-  const isEmpty = LB.dailySummaryDayIsEmpty(store, yesterday);
+  const today = LB.todayISO();
+  // Always the day BEFORE whichever day the strip is on, uniformly, not the
+  // strip's own day: the strip selects "which vantage point", the card is
+  // always that vantage point's own "yesterday". Strip on today -> real
+  // yesterday (the original one-tap flow, unchanged). Strip on yesterday ->
+  // the day before that. And so on, however far back the strip goes.
+  const date = LB.shiftDate(selectedDate, -1);
+  const daysAgo = Math.round((new Date(today + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
+  const label = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : LB.fmtDayLabel(date, { weekday: 'short', day: 'numeric', month: 'short' });
+  const log = (store.dailyLogs || []).find(l => l.date === date) || null;
+  const isEmpty = LB.dailySummaryDayIsEmpty(store, date);
   const { headline, body } = LB.splitHeadlineBody(log?.aiSummary || '');
+  // See aiSummaryInFlightDates above: local busy still drives the instant
+  // disable/label on the tap that actually started the request, this only
+  // adds the cross-remount case on top of it.
+  const inFlight = busy || aiSummaryInFlightDates.has(date);
 
   async function generate() {
+    if (aiSummaryInFlightDates.has(date)) return;
+    aiSummaryInFlightDates.add(date);
     setBusy(true);
     setError(null);
-    const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, yesterday));
+    const res = await LB.generateDailySummary(LB.buildDailySummaryPayload(store, date));
+    aiSummaryInFlightDates.delete(date);
     setBusy(false);
     if (!res.ok) { setError(res.error || 'Could not generate summary. Try again.'); return; }
     setStore(s => {
-      const exists = (s.dailyLogs || []).some(l => l.date === yesterday);
+      const exists = (s.dailyLogs || []).some(l => l.date === date);
       return {
         ...s,
         dailyLogs: exists
-          ? s.dailyLogs.map(l => l.date === yesterday ? { ...l, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt } : l)
-          : [...(s.dailyLogs || []), { id: LB.uid(), date: yesterday, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt }],
+          ? s.dailyLogs.map(l => l.date === date ? { ...l, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt } : l)
+          : [...(s.dailyLogs || []), { id: LB.uid(), date, aiSummary: res.summary, aiSummaryGeneratedAt: res.generatedAt }],
       };
     });
   }
@@ -3361,30 +3512,36 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, readOnly = false }
     <Card style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Yesterday's Summary</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{label}'s Summary</span>
         <i className="fa-solid fa-wand-magic-sparkles" style={{ fontSize: 12, color: UI.inkFaint }} />
       </div>
       {log?.aiSummaryGeneratedAt ? (
         <div>
           {headline && <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 6 }}>{headline}</div>}
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: '20px', whiteSpace: 'pre-wrap' }}>{body}</div>
-          {isAdmin && !readOnly && (
+          {isAdmin && !readOnly && daysAgo >= 1 && daysAgo <= 3 && (
             <div style={{ marginTop: 10 }}>
-              <Btn kind="ghost" onClick={generate} disabled={busy} style={{ padding: '6px 14px', fontSize: 11 }}>
-                <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{busy ? 'Retrying…' : 'Retry'}
+              <Btn kind="ghost" onClick={generate} disabled={inFlight} style={{ padding: '6px 14px', fontSize: 11 }}>
+                <i className="fa-solid fa-rotate-right" style={{ marginRight: 6 }} />{inFlight ? 'Retrying…' : 'Retry'}
               </Btn>
               {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
             </div>
           )}
         </div>
+      ) : daysAgo < 0 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing to summarize yet.</div>
+      ) : daysAgo === 0 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>That day isn't over yet, check back tomorrow.</div>
+      ) : daysAgo > 3 ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Summaries are only available for the last few days.</div>
       ) : readOnly ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Not generated yet.</div>
       ) : isEmpty ? (
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged yesterday.</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '18px' }}>Nothing logged that day.</div>
       ) : (
         <div>
-          <Btn onClick={generate} disabled={busy} style={{ width: '100%' }}>
-            {busy ? 'Generating…' : 'Get yesterday\'s AI summary'}
+          <Btn onClick={generate} disabled={inFlight} style={{ width: '100%' }}>
+            {inFlight ? 'Generating…' : `Get ${daysAgo === 1 ? 'yesterday' : label}'s AI summary`}
           </Btn>
           {error && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: '16px' }}>{error}</div>}
         </div>
@@ -4391,10 +4548,19 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // persisted this row with its own timestamp; re-sending the reconciled
         // adherence with that SAME timestamp would be silently dropped server-
         // side, leaving the coach/check-in with null/stale adherence forever.
-        reconciled.set(log.date, { ...log, adherence, targetsSnap, updatedAt: new Date().toISOString() });
+        // No updatedAt bump: a recompute is not an edit of the day. It used
+        // to need one to get past sync_daily_logs_batch's staleness guard,
+        // which is exactly what let it carry this device's stale weight,
+        // steps, measurements and macros over another device's newer ones.
+        // The derived pair now has its own two-column write below.
+        reconciled.set(log.date, { ...log, adherence, targetsSnap });
       });
       if (!reconciled.size) return s;
       const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
+      // Persist the derived pair on its own. Fire and forget on purpose: these
+      // values are recomputed on every boot, so a failed write costs nothing
+      // and must not block the recompute the user can already see.
+      reconciled.forEach(l => { LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap); });
       return { ...s, dailyLogs: nextLogs };
     });
   }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, coachingId, coachingMacrosLoaded]);
@@ -4450,8 +4616,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
         const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
         changed = true;
-        return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+        return { ...l, adherence, targetsSnap };  // derived only, see the food reconciler above
       });
+      if (changed) {
+        nextLogs.forEach((l, i) => {
+          if (l !== s.dailyLogs[i]) LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap);
+        });
+      }
       return changed ? { ...s, dailyLogs: nextLogs } : s;
     });
   }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive, coachingId, coachingMacrosLoaded]);
@@ -4694,7 +4865,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
-    aiSummary: <AiSummaryCard dragHandle={handle} store={store} setStore={setStore} userId={userId} />,
+    aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
     // as a whole, see fullWidthCardIds.
@@ -4801,11 +4972,19 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent',
         }}>
-          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : store.statusMode === 'deload' ? 'fa-battery-quarter' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
+          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : store.statusMode === 'deload' ? 'fa-battery-quarter' : store.statusMode === 'cleanup' ? 'fa-broom' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-              {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : 'Vacation'}
-              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}` : ''}
+              {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : store.statusMode === 'cleanup' ? 'Cleanup' : 'Vacation'}
+              {/* "Since" only once it has actually begun. A cleanup week is
+                  activated ahead of time and pinned to the next cycle start, so
+                  on the days before it starts this used to read "Since 8 Aug"
+                  on the 7th, dating a status that had not begun. */}
+              {store.statusModeSince ? (
+                store.statusMode === 'cleanup' && !LB.cleanupStarted(store)
+                  ? ` → ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+                  : ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+              ) : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
           </div>
@@ -5019,7 +5198,7 @@ function HealthClientLogs({ clientStore }) {
     // Read-only: no Generate button here at all, a coach's own tap would
     // resolve server-side to the COACH's own identity, not the client's, see
     // AiSummaryCard's own comment.
-    aiSummary: <AiSummaryCard dragHandle={handle} store={clientStore || {}} readOnly />,
+    aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={clientStore || {}} selectedDate={selectedDate} readOnly />,
     macroGroup: (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
         {adherenceCard}

@@ -695,6 +695,60 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
   );
 }
 
+// ─── CleanupStartBody ───────────────────────────────────────────────
+// Contents of the "start a cleanup week" prompt, shared by the Plan tab and
+// the day log so the two entry points cannot describe the same feature
+// differently. Rendered INSIDE whichever sheet the calling screen already
+// uses (MiniSheet there, Sheet here), rather than bringing its own, so
+// neither screen's existing sheet behaviour changes.
+// Presentational on purpose: the caller owns the percentage state, resolves
+// the start day and performs the start, which keeps this file free of store
+// and LB logic like the rest of ui.jsx.
+function CleanupStartBody({ percent, onPercent, startLabel, onCancel, onStart }) {
+  const stepBtn = (delta, disabled, label, glyph) => (
+    <button onClick={() => onPercent(Math.min(30, Math.max(10, percent + delta)))}
+      disabled={disabled} aria-label={label}
+      style={{
+        width: 34, height: 34, borderRadius: 4, cursor: disabled ? 'default' : 'pointer',
+        border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+        color: disabled ? UI.hairStrong : UI.inkSoft, fontSize: 16, lineHeight: 1,
+      }}>{glyph}</button>
+  );
+  return (
+    <>
+      <div style={{ fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.inkSoft, marginBottom: 12 }}>
+        Train your normal plan with lighter weights for one full cycle, so you can rebuild clean technique. Unlike a deload, the reduced weights carry forward: the cycle after builds back up from them. You can put any single exercise back on full load while training.
+      </div>
+      {/* The single most surprising thing about this, so it gets its own line
+          rather than a clause buried in the paragraph above: it does NOT start
+          today. A cleanup covers a whole cycle, so it waits for the next one to
+          begin and leaves the rest of this one at full load. */}
+      <div style={{
+        fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.5, color: UI.gold, marginBottom: 18,
+        background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.goldSoft}`,
+        borderRadius: 6, padding: '8px 10px',
+      }}>
+        <i className="fa-solid fa-calendar-day" style={{ marginRight: 7 }} />
+        {startLabel
+          ? <>Starts <strong>{startLabel}</strong>, the first day of your next cycle. The rest of this one still trains at full load.</>
+          : <>Starts right away and runs for one full rotation.</>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
+        <span className="label" style={{ color: UI.inkFaint }}>Reduce by</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {stepBtn(-5, percent <= 10, 'Less reduction', '−')}
+          <span className="num" style={{ fontSize: 22, color: UI.gold, minWidth: 58, textAlign: 'center' }}>{percent}%</span>
+          {stepBtn(5, percent >= 30, 'More reduction', '+')}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={onCancel} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={onStart} style={{ flex: 1 }}>Start</Btn>
+      </div>
+    </>
+  );
+}
+
 // ─── Pill ───────────────────────────────────────────────────────────
 // Always 9px (the border-radius scale's own micro-badge threshold, see
 // CLAUDE.md), so the radius itself follows that scale's "interactive or
@@ -721,11 +775,36 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 // disabled: for a switch whose state is dictated by something else (e.g. the
 // coaching tab while a relationship is active). Renders muted and stops
 // tapping, instead of springing back and looking broken.
-function Toggle({ on, onToggle, disabled = false }) {
+//
+// A real <button role="switch">, not a div with an onClick. The div version
+// was unreachable by keyboard and invisible to assistive tech: no focus, no
+// Space/Enter, and nothing announcing that it was a control or which way it
+// was set. The element brings all of that for free, so there is no key
+// handler here on purpose.
+//
+// label names the control. Every switch in this app sits next to its text in
+// a row, and that text is not associated with anything, so without a name a
+// screen reader reads "switch, on" and nothing else. The settings Row injects
+// its own label automatically (see there); pass it by hand anywhere else.
+//
+// Buttons come with their own padding, font, background and border, so those
+// are reset explicitly rather than inherited from the UA. display: block
+// keeps the box identical to the div this replaced, so no caller's layout
+// shifts. The 13px track radius is the one documented exception to the radius
+// scale (CLAUDE.md), the switch is deliberately pill-shaped at 44x26.
+function Toggle({ on, onToggle, disabled = false, label }) {
   return (
-    <div onClick={disabled ? undefined : onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!on}
+      aria-label={label || undefined}
+      disabled={disabled}
+      onClick={disabled ? undefined : onToggle}
+      style={{ display: 'block', padding: 0, margin: 0, font: 'inherit', appearance: 'none', WebkitAppearance: 'none', width: 44, height: 26, borderRadius: 13, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}
+    >
       <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
-    </div>
+    </button>
   );
 }
 
@@ -1330,6 +1409,49 @@ UI.waterQuickAdds = () => UI.waterInFloz() ? [8, 16] : [250, 500];
 // Summary tile display: imperial shows whole fl oz, else litres (1 decimal).
 UI.waterSummaryUnit = (u) => UI.waterInFloz(u) ? 'fl oz' : 'L';
 UI.waterSummaryValue = (ml, u) => UI.waterInFloz(u) ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
+
+// Food masses (portions, ingredients, cooked weights, shopping quantities) are
+// stored canonically in grams; imperial (lbs) users see ounces and pounds. Same
+// split as the water block above, and for the same reason: the DB never learns
+// about the viewer's unit. The arithmetic and the rounding grids live in
+// store.js (LB.formatMassG / LB.roundShoppingQty) so the tests can reach them,
+// these are only the wrappers that supply the viewer's unit. ui.jsx runs first
+// in the loader's SOURCES, ahead of every screen, but these are the file's only
+// LB references and they all sit inside function bodies: store.js is a plain
+// <script> in index.html and has long since set window.LB by the time any of
+// them is actually called, so the ordering never comes into it.
+//
+// MACROS ARE NOT MASSES here: protein/carbs/fat/fibre/sugar/sat fat stay grams
+// and sodium stays mg for everyone. A US nutrition label prints grams too, so
+// converting those would be wrong rather than helpful. Never route a macro
+// field through these.
+//
+// No `u` override (unlike water): nothing in the app renders someone else's
+// food masses. Coaches only read meal-plan NAMES and write macro targets, so
+// there is no client-unit path to plumb. Add the parameter when one appears,
+// not before. A shared recipe opened by a signed-out viewer has no settings at
+// all and falls back to grams, which is the right answer for an unknown viewer.
+// A per-module opt-out lives on top of the global unit: an imperial user can
+// still keep the food tracker specifically in grams (settings.foodForceGrams,
+// mirrored to window.__FOOD_FORCE_GRAMS by app.jsx same as __UNIT itself).
+// US nutrition labels are printed in grams too, so staying metric here is a
+// legitimate choice independent of preferring lbs for bodyweight/water.
+UI.massInOz = () => UI.unit() === 'lbs' && !(typeof window !== 'undefined' && window.__FOOD_FORCE_GRAMS);
+UI.massEntryUnit = () => UI.massInOz() ? 'oz' : 'g';
+// Stored grams -> the value shown in an entry field, in the viewer's unit.
+// Two decimals in oz, one in grams: 0.1 oz is a 2.8 g step, which would put
+// spice-sized amounts out of reach (see fdDecimalFilter's own cap).
+UI.massToEntry = (g) => g == null ? '' : String(UI.massInOz()
+  ? Math.round(LB.gToOz(g) * 100) / 100
+  : Math.round(g * 10) / 10);
+// Entry value (viewer's unit) -> canonical grams, rounded to the one decimal
+// the food module works in throughout.
+UI.massEntryToG = (v) => {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  if (n == null || isNaN(n)) return null;
+  return Math.round((UI.massInOz() ? LB.ozToG(n) : n) * 10) / 10;
+};
+UI.formatMass = (g) => LB.formatMassG(g, UI.massInOz());
 
 // Styled stand-in for window.alert(). The app has useConfirm() for anything
 // that asks a question, but a plain "this failed" message forced a component

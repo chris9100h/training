@@ -22,6 +22,55 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.732',
+    date: '2026-08-09',
+    title: 'Machines with many horns, and a lot of housekeeping',
+    items: [
+      'Log every loading horn \u{1F529} Got one of those plate-loaded machines with three or four weight horns? Open the exercise, or create a new one, set the equipment to Machine (or plates, or cable) and "Loading horns" appears: name them once, the way they are arranged on the machine. From then on, tapping the weight during training opens a sheet with one field per horn. The app adds it up, remembers the setup, and starts your next session with it already filled in. It also knows that 20/20 is not the same as 40/0, so it will not hand you a fake record for just moving plates around.',
+      'Plan Mode is on for everyone. Plan your meals ahead and tick them off once you have actually eaten them. It used to be a switch you had to go find. If you would rather not, it is still under Settings, Health.',
+      'Finish stops guessing. Left a set unticked because the lift failed or you cut the session short? The app used to quietly log it as done, using the numbers it had pencilled in for you. Now it asks, and it defaults to skipping them. Your history says what you did, not what was planned.',
+      'A long list of things that should never have happened. Weighted pull-ups no longer invent phantom kilos, and they pre-fill your belt weight again. Abandoned workouts are no longer deleted on the server. Signing out on a bad connection no longer eats your last sets. Your library stops claiming you have never logged anything after a break. And the daily weight reminder actually sends again.',
+    ],
+  },
+  {
+    id: 'v2.728',
+    date: '2026-08-08',
+    title: 'Switch units without leaving the log 🔄',
+    items: [
+      "🔄 The Amount field on Search and the recipe ingredient picker now has its own g/oz switch, right next to the field. Flip it whenever, it starts on whatever your Food setting says and sticks for the rest of your session.",
+    ],
+  },
+  {
+    id: 'v2.727',
+    date: '2026-08-08',
+    title: 'Grams-only, if you want it ⚖️',
+    items: [
+      "⚖️ Prefer lbs everywhere except food? Settings → Health → Food now has a \"Grams instead of oz/lb\" toggle, only shows up when your unit is lbs. Flip it and the food tracker stays in grams while your bodyweight/water stay imperial.",
+    ],
+  },
+  {
+    id: 'v2.724',
+    date: '2026-08-08',
+    title: 'We forgot to flip the switch 🤦',
+    items: [
+      "⚖️ Confession: imperial units for the food tracker were built and just... never turned on. That's on us. Fixed now: set your unit to lbs in Settings and portions, ingredients, cooked weights, package sizes and the shopping list all go imperial. Macros stay in grams either way, that's what the label says.",
+      "🩹 The Daily Log's status row covers all five now: sick, cleanup week, normal, deload week, vacation. Every pick confirms first, and going back to normal tells you which status it's ending.",
+    ],
+  },
+  {
+    id: 'v2.713',
+    date: '2026-08-07',
+    title: 'Cleanup weeks, cook-along steps, and recipes inside recipes 🧹',
+    items: [
+      "🧹 Back after a break, or just tired of ugly reps? Start a Cleanup Week from the Plan tab: weights pre-fill 10 to 30% lighter for one cycle (20% by default). Unlike a deload, next week builds back up from those numbers. Tap an exercise's chip to put that one back on full load, and nothing that week counts as a decline or a missed rep.",
+      "👩‍🍳 Recipes can be cooked in steps. Drag ingredients into a numbered step in the editor, add an instruction, and Cooking Mode walks you through it with a Step 2/5 counter. Recipes without steps behave exactly as before.",
+      "🥘 Put a recipe inside a recipe. The ingredient picker has a Recipes tab: pick one and it drops in as scaled ingredient rows you can still tweak. It's a copy, not a link, so editing the original later won't rewrite your new recipe.",
+      "🔢 Units stick to your ingredients. Add 4 wraps instead of 248 grams and rows read \"248g (4 pcs)\" everywhere, from the editor to the poster. Rescale and the count follows.",
+      "🤖 The daily summary follows the day you're looking at. Browse back on the Health tab and you get that day's summary, not always yesterday's. Works up to three days back.",
+      "🚪 The front door works again. After the hosting move, the app could greet you with \"Safari can't open the page\" instead of, well, opening. Fixed.",
+    ],
+  },
+  {
     id: 'v2.707',
     date: '2026-08-06',
     title: 'One very busy day: measurements, fasting, and food that lands 🚀',

@@ -186,7 +186,14 @@ async function materializeDueDoses(userId: string, dateISOs: string[]) {
   if (!toInsert.length) return;
   const insRes = await dbFetch('zane_medication_logs', {
     method: 'POST',
-    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    // ignore-duplicates, NOT merge-duplicates. The id is deterministic
+    // (md_<date>_<slot>), so an upsert here overwrites a row that already
+    // exists for that slot and day, and the only reason one exists is that the
+    // user already acted on it: taking a dose sets planned false, and
+    // merge-duplicates flipped it straight back to true, reopening a dose the
+    // user had ticked off. Materialisation only ever needs to CREATE the
+    // missing rows; it has no business updating one.
+    headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
     body: JSON.stringify(toInsert),
   });
   if (!insRes.ok) console.error(`[medication-reminder] materialize insert failed for ${userId}: ${insRes.status} ${await insRes.text().catch(() => '')}`);

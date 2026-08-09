@@ -256,8 +256,24 @@ async function signUp(email, password, name, unit = null) {
   return data;
 }
 
+// Returns the client's { error } rather than swallowing it. Sign-out is not
+// purely local: on a network failure the client returns before it removes the
+// session, so nothing is signed out and no SIGNED_OUT fires. Callers that do
+// anything after it (navigate, reload, wipe) have to be able to tell.
+// Writes ONLY the derived adherence pair for a day, leaving updated_at alone so
+// a recompute cannot win last-write-wins for the whole row (migration 0256).
+// Resolves to false on failure rather than throwing: the values are derived and
+// recomputed on the next boot, so a failed write must not take down the caller.
+async function updateDailyLogDerived(date, adherence, targetsSnap) {
+  const { error } = await _supabase.rpc('update_daily_log_derived', {
+    p_date: date, p_adherence: adherence ?? null, p_targets_snap: targetsSnap ?? null,
+  });
+  if (error) { console.error('update_daily_log_derived failed', error); return false; }
+  return true;
+}
+
 async function signOut() {
-  await _supabase.auth.signOut();
+  return await _supabase.auth.signOut();
 }
 
 async function signInWithPasskey() {
@@ -428,7 +444,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), horn_labels: e.horn_labels ?? null, user_id: userId };
   });
   // Exercises got fresh ids above, everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -486,7 +502,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     equipment_config: convEquipmentConfig(sett.equipmentConfig),
     weight_fill_down: sett.weightFillDown ?? true,
     net_carbs: sett.netCarbs ?? false,
-    plan_mode: sett.planMode ?? false,
+    food_force_grams: sett.foodForceGrams ?? false,
+    plan_mode: sett.planMode ?? true,
     hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
@@ -506,6 +523,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     temp_unit: sett.tempUnit ?? null,
     hidden_health_cards: sett.hiddenHealthCards ?? null,
     fever_threshold_c: sett.feverThresholdC ?? 38,
+    cleanup_percent: sett.cleanupPercent ?? 20,
     watermark_opacity: sett.watermarkOpacity ?? null,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
@@ -858,7 +876,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_medication_logs').upsert(
       backup.medicationLogs.map(l => ({
         id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
-        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned, skipped: !!l.skipped,
         schedule_slot_id: l.scheduleSlotId ?? null,
         reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
         snoozed_until: l.snoozedUntil ?? null,
@@ -1002,7 +1020,7 @@ async function exportBackup(store, userId) {
     // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
     // deletes every zane_medication_logs row first, so exporting only the
     // windowed copy would silently drop every dose logged before the window.
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   if (allCoachingIds.length) {
@@ -1048,7 +1066,7 @@ async function exportBackup(store, userId) {
     medicationLogs: (medicationLogsRes.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      planned: !!l.planned, skipped: !!l.skipped, scheduleSlotId: l.schedule_slot_id ?? null,
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
@@ -1162,6 +1180,7 @@ function mapEntryRows(entryRows) {
         warmup: st.warmup,
         technique: st.technique ?? null,
         drops: st.drops ?? null,
+        hornLoads: st.horn_loads ?? null,
       })),
   }));
 }
@@ -1204,11 +1223,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
     _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight, cycle_pos')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -1310,7 +1329,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
-    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
     isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
@@ -1517,6 +1536,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_bonus     ? { isBonus:     true } : {}),
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
+        ...(s.is_cleanup   ? { isCleanup:   true } : {}),
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
@@ -1635,7 +1655,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      planned: !!l.planned, skipped: !!l.skipped, scheduleSlotId: l.schedule_slot_id ?? null,
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
@@ -1722,7 +1742,12 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
         netCarbs: sett.net_carbs ?? false,
-        planMode: sett.plan_mode ?? false,
+        foodForceGrams: sett.food_force_grams ?? false,
+        // Plan Mode is the default experience (migration 0253). The column is
+        // NOT NULL, so this fallback only fires for a user whose settings row
+        // does not exist yet, which must match the column default rather than
+        // the pre-0253 opt-in value.
+        planMode: sett.plan_mode ?? true,
         hideFoodCategories: sett.hide_food_categories ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
@@ -1747,6 +1772,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tempUnit: sett.temp_unit ?? null,
         hiddenHealthCards: normalizeHiddenHealthCards(sett.hidden_health_cards),
         feverThresholdC: sett.fever_threshold_c ?? 38,
+        cleanupPercent: sett.cleanup_percent ?? 20,
         watermarkOpacity: sett.watermark_opacity ?? null,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
@@ -1898,7 +1924,8 @@ function normSet(s) {
   return [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
           s.timeSec ?? null, s.addedKg ?? null,
           s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
-          s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
+          s.technique ?? '', JSON.stringify(s.drops ?? null),
+          JSON.stringify(s.hornLoads ?? null)].join('|');
 }
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
@@ -1969,6 +1996,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
             warmup: set.warmup ?? false,
             technique: set.technique ?? null,
             drops: set.drops ?? null,
+            horn_loads: set.hornLoads ?? null,
             updated_at: now,
           });
         }
@@ -2012,8 +2040,13 @@ function sessionToRow(s, userId) {
   // (saveToLocal/mergeSessions), same treatment as currentExIdx/restStart/
   // restDuration below. Leaving it in `rest` would spread an unknown column
   // into the upsert and fail the whole write.
+  // cleanupOptOuts is local-only for the same reason and by the same mechanism:
+  // it only rescales what the CURRENT session displays, so losing it on another
+  // device costs nothing. Its session-level sibling isCleanup DOES have a
+  // column (migration 0251), since that one drives PR/regression baselines
+  // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, progressionBumps, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -2021,6 +2054,7 @@ function sessionToRow(s, userId) {
   row.is_bonus = !!isBonus;
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
+  row.is_cleanup = !!isCleanup;
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;
@@ -2057,7 +2091,7 @@ async function syncStore(prev, next, userId) {
       return !p || (p !== e && JSON.stringify(p) !== JSON.stringify(e));
     });
     const removed = prev.exercises.filter(e => !nextExIds.has(e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, horn_labels: e.horn_labels ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -2340,7 +2374,7 @@ async function syncStore(prev, next, userId) {
       // sets the columns present in the payload, so omitting them leaves
       // the server's values untouched.
       const row = { id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
-        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned, skipped: !!l.skipped,
         schedule_slot_id: l.scheduleSlotId ?? null };
       // Send snoozed_until only when THIS device's value CHANGED since its
       // last known state (set: null -> ISO, or cancel: ISO -> null). An
@@ -2436,9 +2470,21 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.dailyLogs !== next.dailyLogs) {
+    // adherence and targetsSnap are DERIVED and have their own narrow write
+    // path (updateDailyLogDerived, migration 0256). They are excluded from the
+    // change test so a pure recompute never marks the row dirty: it used to,
+    // and since sync_daily_logs_batch drops a write that is not newer, the
+    // recompute had to bump updated_at to land, which then let it carry this
+    // device's stale weight, steps, measurements and macros over another
+    // device's newer ones. They are still SENT in the payload below, so a row
+    // pushed for a real reason keeps carrying its current values.
+    const normDaily = (l) => {
+      const { adherence, targetsSnap, ...rest } = l || {};
+      return JSON.stringify(rest);
+    };
     const upsert = (next.dailyLogs || []).filter(l => {
       const p = (prev.dailyLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
+      return !p || normDaily(p) !== normDaily(l);
     });
     const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
     // Batch RPC resolves conflicts on (user_id, date) keeping the existing id,
@@ -2504,6 +2550,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
+    prev.settings?.foodForceGrams     !== next.settings?.foodForceGrams     ||
     prev.settings?.planMode           !== next.settings?.planMode           ||
     prev.settings?.hideFoodCategories !== next.settings?.hideFoodCategories ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
@@ -2528,6 +2575,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
     prev.settings?.feverThresholdC        !== next.settings?.feverThresholdC        ||
+    prev.settings?.cleanupPercent         !== next.settings?.cleanupPercent         ||
     prev.settings?.watermarkOpacity       !== next.settings?.watermarkOpacity       ||
     JSON.stringify(prev.settings?.hiddenHealthCards) !== JSON.stringify(next.settings?.hiddenHealthCards) ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
@@ -2575,7 +2623,8 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
       net_carbs: next.settings?.netCarbs ?? false,
-      plan_mode: next.settings?.planMode ?? false,
+      food_force_grams: next.settings?.foodForceGrams ?? false,
+      plan_mode: next.settings?.planMode ?? true,
       hide_food_categories: next.settings?.hideFoodCategories ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
@@ -2605,6 +2654,7 @@ async function syncStore(prev, next, userId) {
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       temp_unit: next.settings?.tempUnit ?? null,
       fever_threshold_c: next.settings?.feverThresholdC ?? 38,
+      cleanup_percent: next.settings?.cleanupPercent ?? 20,
       watermark_opacity: next.settings?.watermarkOpacity ?? null,
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
@@ -2888,6 +2938,13 @@ function e1rm(kg, reps) {
 function isImprovement(curr, prev) {
   // done=true wins: if both done+skipped are set, treat as done
   if (!prev || !curr || !curr.done) return false;
+  // Multi-horn machines: two sets can sum to the same kg and be different work,
+  // because the distribution across the loading horns decides both the leverage
+  // and where in the range the resistance peaks. Whether one is "better" than
+  // the other is not answerable, so neither arrow is drawn. Gated here rather
+  // than at the call sites so the session detail, the recent trend, the home
+  // comparison and both coach views are covered by one rule.
+  if (!sameHornLoad(curr, prev)) return false;
   // Time-based sets carry a duration, not kg x reps: a longer hold beats a
   // shorter one (planks, dead hangs, wall sits). Both sides must be timed.
   if (curr.timeSec != null || prev.timeSec != null) {
@@ -2909,6 +2966,7 @@ function isDecline(curr, prev) {
   if (!prev || !curr || (curr.skipped && !curr.done)) return false;
   if (prev.skipped && !prev.done) return false; // prev was already skipped, no baseline to decline from
   if (!curr.done) return false;
+  if (!sameHornLoad(curr, prev)) return false;  // see isImprovement: not comparable across splits
   // Time-based sets: a shorter hold than last time is a decline.
   if (curr.timeSec != null || prev.timeSec != null) {
     return curr.timeSec != null && prev.timeSec != null && curr.timeSec < prev.timeSec;
@@ -2933,7 +2991,9 @@ function isDecline(curr, prev) {
 function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    // isCleanup joins isDeload here (and in the two mirrors below): a cleanup
+    // week's loads are deliberately reduced, so they are not a PR baseline.
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -2956,7 +3016,7 @@ function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null)
 function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
   let best = null;
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -2975,7 +3035,7 @@ function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
 function bestTimeForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = null;
   for (const s of state.sessions || []) {
-    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || s.isCleanup || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -3201,6 +3261,75 @@ function setLoadLabel(st) {
   return st?.kg != null ? String(st.kg) : null;
 }
 
+// ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────────
+// The exercise names its loading horns (zane_exercises.horn_labels), a set
+// records what went on each of them (zane_sets.horn_loads, [{label, kg}]), and
+// kg carries the plain SUM. No leverage math: the ratios are model-specific and
+// unpublished, so any "effective load" would be an invented number feeding
+// e1RM, PRs, volume and the autoreg grades.
+function exerciseHornLabels(ex) {
+  const l = ex?.horn_labels;
+  return Array.isArray(l) && l.length ? l : null;
+}
+function isMultiHorn(ex) {
+  return !!exerciseHornLabels(ex);
+}
+// Sum of the loaded horns, null when nothing is loaded at all (an untouched set
+// must stay empty rather than reading as a real 0 kg lift).
+function hornLoadTotal(loads) {
+  if (!Array.isArray(loads) || !loads.length) return null;
+  const nums = loads.map(h => h?.kg).filter(v => v != null && !isNaN(v));
+  if (!nums.length) return null;
+  return Math.round(nums.reduce((a, b) => a + b, 0) * 100) / 100;
+}
+// Breakdown for detail views, e.g. "20 / 10 / 10". The row itself keeps showing
+// the sum via setLoadLabel, the split needs more room than a set row has.
+function hornLoadLabel(st) {
+  if (!Array.isArray(st?.hornLoads) || !st.hornLoads.length) return null;
+  return st.hornLoads.map(h => (h?.kg == null ? '0' : String(h.kg))).join(' / ');
+}
+// Do two sets carry the same load DISTRIBUTION? Two splits can sum to the same
+// kg and be genuinely different work (20/20 versus 40/0 changes the leverage and
+// moves where the resistance peaks), so the comparison logic must not call those
+// equal and hand out a PR for moving plates outward.
+//
+// Compared by SHAPE, not by kilos: 20/20 and 30/30 are the same setup with more
+// weight on it, which is ordinary progression and must still register. Comparing
+// raw values would make every single load increase "not comparable" and suppress
+// progression on these machines completely, which is the opposite of the point.
+//
+// Keyed by label rather than position, because horn_loads is self-describing and
+// an exercise's horn list can be reordered without touching old sets.
+function sameHornLoad(a, b) {
+  const la = Array.isArray(a?.hornLoads) ? a.hornLoads : null;
+  const lb = Array.isArray(b?.hornLoads) ? b.hornLoads : null;
+  if (!la && !lb) return true;      // neither is a multi-horn set
+  if (!la || !lb) return false;     // one side switched loading style
+  const shape = (l) => {
+    const total = hornLoadTotal(l);
+    if (total == null || total === 0) return '';
+    // Per-mille of the total, so the comparison is float-safe.
+    return l.filter(h => h?.kg != null)
+      .map(h => `${h.label ?? ''}:${Math.round((h.kg / total) * 1000)}`)
+      .sort().join('|');
+  };
+  return shape(la) === shape(lb);
+}
+
+// What a chain round (drop set, myo-rep, AMRAP variation) should SHOW for a
+// given set. The rounds persist their kg in total space, because drops[0]
+// mirrors the parent set's kg, but a plus_load set displays belt load
+// everywhere else, so the two must not sit side by side in different meanings.
+// The base is frozen in the set itself (kg minus addedKg), so a later weigh-in
+// cannot rewrite an old round.
+function chainRoundKg(st, roundKg) {
+  if (roundKg == null) return null;
+  const added = st?.addedKg ?? null;
+  if (added == null || st?.kg == null) return roundKg;
+  const base = st.kg - added;
+  return Math.round((roundKg - base) * 100) / 100;
+}
+
 // Split a stored set back into what the user typed and what carried it, for a
 // plus_load exercise. `added` is the belt load, `base` the bodyweight frozen at
 // logging time. Falls back to treating the whole thing as bodyweight when a set
@@ -3248,10 +3377,33 @@ function buildTimeSeedSets(it, last) {
   return Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false }));
 }
 
+// Does a cleanup week's reduction apply to this exercise at all? Single source
+// of truth for "was this lift actually reduced", shared by the live training
+// screen's per-exercise opt-out chip (screens-train.jsx) and the post-hoc
+// PR/improvement/regression suppression in session detail/compare
+// (screens-lib.jsx): a set that a cleanup week never touched must never be
+// treated as reduced just because the session overall is a cleanup week.
+// Mirrors buildSeedSets' own exemptions (bodyweight, assisted, cardio,
+// non-weight log modes), plus the one buildSeedSets never sees: a 5/3/1 main
+// lift is seeded straight off its Training Max in buildSessionEntries and
+// never reaches buildSeedSets, so its wave is already at full prescription.
+function cleanupAppliesToExercise(store, exId, dayId) {
+  if (!exId) return false;
+  const ex = (store?.exercises || []).find(x => x.id === exId);
+  if (!ex) return false;
+  if (ex.movement_type === 'cardio' || isAssisted(ex)) return false;
+  // Pure bodyweight carries no load to reduce, but plus_load does: the belt is
+  // exactly the part a cleanup week is supposed to take off.
+  if (ex.equipment === 'bodyweight' && !isBodyweightPlusLoad(ex)) return false;
+  if (exerciseLogMode(ex) !== 'weight') return false; // time / reps-only / checkbox carry no load
+  if (is531MainLift(store, exId, dayId)) return false;
+  return true;
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
-function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null) {
+function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null, cleanupOpts = null) {
   // Time-based exercises have no weight/rep progression: seed target durations
   // instead. This is the path the in-session exercise swap takes; the normal
   // session-start builders branch to buildTimeSeedSets themselves.
@@ -3267,11 +3419,43 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   const deloadActive = deloadOverride != null
     ? deloadOverride === true
     : (typeof window !== 'undefined' && window.__DELOAD === true);
+  // Cleanup week (migration 0251): same overlay idea, but a user-set reduction
+  // instead of a deload's fixed half, and opt-out-able per exercise mid-session.
+  // Unlike __DELOAD this global is an OBJECT ({ percent, sinceISO } | null), not
+  // a boolean, so it can carry the percentage: test it for null, never === true.
+  // cleanupOpts overrides it for the same reason deloadOverride exists (a coach
+  // previewing a client's seeds must see the CLIENT's cleanup, not their own).
+  // Three states, and the difference matters: omitted/null falls back to the
+  // global, an object IS the subject's cleanup, and `false` means "this subject
+  // is explicitly NOT in a cleanup". A caller previewing someone else has to
+  // pass false rather than null for the negative case, or the viewer's own
+  // global leaks into the subject's seeds.
+  const cleanupCfg = cleanupOpts == null
+    ? (typeof window !== 'undefined' && window.__CLEANUP != null ? window.__CLEANUP : null)
+    : (cleanupOpts || null);
   // Assisted exercises store a negative load, so halving it would REDUCE the
   // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
   const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
-  const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
-  const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
+  const plusLoadItemEx = isBodyweightPlusLoad((store?.exercises || []).find(e => e.id === it.exId));
+  // bodyweightKg == null is how the reduction gates recognise "there is a load
+  // to reduce". It is the right test for a pull-bodyweight exercise, whose kg
+  // IS the body, but plus_load callers also pass a bodyweight (to rebuild the
+  // total), which switched both reductions off for exactly the exercises that
+  // do carry a reducible load. withPlusLoad below applies the factor itself.
+  const loadIsReducible = bodyweightKg == null || plusLoadItemEx;
+  const deload = deloadActive && loadIsReducible && !isAssistedEx;
+  // Same exemptions as deload, plus this exercise's own opt-out: the user can
+  // flip a single lift back to full load from the exercise header without
+  // ending the cleanup week for everything else.
+  const cleanup = !deload && cleanupCfg != null && loadIsReducible && !isAssistedEx
+    && !(cleanupCfg.optOuts && cleanupCfg.optOuts[it.exId]);
+  // Clamped here rather than trusting the caller: the value round-trips through
+  // the DB and a backup restore, so a hand-edited row can't seed a 90% cut.
+  const cleanupFactor = cleanup
+    ? (100 - Math.min(30, Math.max(10, Math.round(cleanupCfg.percent ?? 20)))) / 100
+    : null;
+  const factor = deload ? 0.5 : cleanupFactor;
+  const dl = (kg) => (factor != null && kg != null) ? Math.round((kg * factor) / 2.5) * 2.5 : kg;
 
   // A plus_load exercise seeds the load that was on the BELT, not last session's
   // total: bodyweight may have moved since, and repeating a stale total would
@@ -3284,12 +3468,39 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     return seeded.map((st, i) => {
       const prevAdded = workingSets[i]?.addedKg ?? null;
       if (prevAdded == null) return { ...st, kg: null, addedKg: null };
-      const total = plusLoadBw == null ? null : Math.round((plusLoadBw + prevAdded) * 100) / 100;
-      return { ...st, kg: total, addedKg: prevAdded };
+      const bw = plusLoadBw ?? null;
+      if (bw == null) return { ...st, kg: null, addedKg: prevAdded };
+      // A deload or cleanup reduces what the lifter actually moves, which here
+      // is bodyweight PLUS belt, not the belt on its own. Taking the factor off
+      // the belt alone would cut a 100 kg weighted pull-up to 96 while every
+      // barbell lift in the same session starts at 80. So reduce the TOTAL and
+      // derive the belt from it, floored at 0: once the target drops below
+      // bodyweight there is nothing left to take off, and a bare pull-up is
+      // exactly what a deload week means for this lift. Never negative, that
+      // would read as assistance the exercise does not have.
+      const fullTotal = Math.round((bw + prevAdded) * 100) / 100;
+      const target = factor != null ? Math.round((fullTotal * factor) / 2.5) * 2.5 : fullTotal;
+      const belt = Math.max(0, Math.round((target - bw) * 100) / 100);
+      return { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
     });
   };
 
-  return withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
+  // A multi-horn set repeats the DISTRIBUTION, not just the total: carrying the
+  // sum alone would leave the user re-deriving which horn held what, which is
+  // the whole reason the breakdown is stored. kg is rebuilt from the carried
+  // horns so the two can never drift apart.
+  const multiHornEx = isMultiHorn((store?.exercises || []).find(e => e.id === it.exId));
+  const withHornLoads = (seeded) => {
+    if (!multiHornEx) return seeded;
+    return seeded.map((st, i) => {
+      const prevHorns = workingSets[i]?.hornLoads ?? null;
+      if (!Array.isArray(prevHorns) || !prevHorns.length) return { ...st, kg: null, hornLoads: null };
+      const carried = prevHorns.map(h => ({ label: h.label, kg: dl(h.kg ?? null) }));
+      return { ...st, kg: hornLoadTotal(carried), hornLoads: carried };
+    });
+  };
+
+  return withHornLoads(withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
     // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
@@ -3300,7 +3511,8 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
       // During a deload, halve the ACTUAL last-session weight (prev.kg), not the
       // progression-suggested next weight. Without this, a 100 kg lift with a
       // +5 kg suggestion would seed 52.5 kg instead of the correct 50 kg.
-      const baseKg = deload && prev?.kg != null ? prev.kg : suggestion.kg;
+      // A cleanup week reduces off the same base for the same reason.
+      const baseKg = (deload || cleanup) && prev?.kg != null ? prev.kg : suggestion.kg;
       const seedReps = targetReps ?? suggestion.reps;
       return isUni
         ? { kg: dl(baseKg), repsL: seedReps, repsR: seedReps, done: false }
@@ -3333,7 +3545,7 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     return isUni
       ? { kg: dl(seedKg), repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
       : { kg: dl(seedKg), reps: prev?.reps ?? null, done: false };
-  }));
+  })));
 }
 
 function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
@@ -3343,9 +3555,22 @@ function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
 // Deload sessions are excluded so a deliberately light week never seeds the next
 // session's weights or skews progression/regression.
+//
+// Cleanup weeks are the deliberate opposite: their reduced loads DO seed the
+// next session (that is the whole point, the week after builds back up from
+// them), so isCleanup is NOT filtered out here. What must not happen is
+// compounding WITHIN the week: session 2 seeding off session 1's already-reduced
+// load would stack 0.8 x 0.8. buildSeedSets only ever sees sets, never the
+// session they came from, so the guard has to live here: while a cleanup is
+// active, sessions started since it began are hidden from the seed history, and
+// every cleanup session therefore seeds from the same full pre-cleanup base with
+// the factor applied exactly once. The moment the cleanup ends, the filter stops
+// applying and those same sessions become the new base.
 function recentSessionsForExercise(state, exId, dayId = null, limit = 3, occ = 0) {
+  const cleanupSince = state.statusMode === 'cleanup' ? (state.statusModeSince ?? null) : null;
   const sessions = (state.sessions || [])
     .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
+    .filter(s => !(cleanupSince != null && s.startedAt != null && s.startedAt >= cleanupSince))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const hasData = (e) => (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null);
@@ -3387,10 +3612,20 @@ function bestEntryFromSetLists(perSession) {
     }
     // Time-based sets carry no kg/reps to compare, so `best` stays the most
     // recent set, pass its duration through as the reference / seed.
-    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, done: false, skipped: false, warmup: false };
+    // Carry the fields that describe HOW the load was made up, not just its
+    // size. This rebuilds set objects from an explicit field list, so anything
+    // not named here is silently dropped before buildSeedSets ever sees it:
+    // that is why the belt load of a plus_load exercise and the horn
+    // distribution of a multi-horn machine never seeded, the seeder was reading
+    // fields this function had already thrown away.
+    const carry = {
+      ...(best.addedKg != null ? { addedKg: best.addedKg } : {}),
+      ...(Array.isArray(best.hornLoads) && best.hornLoads.length ? { hornLoads: best.hornLoads } : {}),
+    };
+    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, ...carry, done: false, skipped: false, warmup: false };
     return (best.repsL != null || best.repsR != null)
-      ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
-      : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
+      ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, ...carry, done: false, skipped: false, warmup: false }
+      : { kg: curKg, reps: best.reps ?? null, ...carry, done: false, skipped: false, warmup: false };
   });
   return { entry: { sets } };
 }
@@ -3449,8 +3684,15 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
       // the server RPC doesn't know about is_deload and may return them. Guard by
       // checking server rows against locally-known deload session ids.
       const deloadIds = new Set((state.sessions || []).filter(s => s.isDeload).map(s => s.id));
+      // Same for the in-cleanup window (see recentSessionsForExercise): the
+      // server half of the merge has to hide the same sessions the local half
+      // does, or a cleanup session that already synced would come back through
+      // this door and compound the reduction. Matched on `ended` rather than
+      // `started_at` because get_exercise_history doesn't return the latter.
+      const cleanupSince = state.statusMode === 'cleanup' ? (state.statusModeSince ?? null) : null;
       const merged = [...local];
       for (const row of rows) {
+        if (cleanupSince != null && row.ended != null && row.ended >= cleanupSince) continue;
         if (!merged.some(m => m.sessionId === row.sessionId) && !deloadIds.has(row.sessionId)) merged.push(row);
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
@@ -3609,7 +3851,7 @@ async function fetchFoodLogsSince(userId, sinceDateISO) {
 // Same idea as fetchFoodLogsSince above, for the Medications Inventory tab.
 async function fetchMedicationLogsSince(userId, sinceDateISO) {
   const { data, error } = await _supabase.from('zane_medication_logs')
-    .select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
+    .select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
   return (data || []).map(l => ({
@@ -4703,6 +4945,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // never has it: carry the cached value forward the same way, otherwise a
       // reload right after answering the toast would silently forget it.
       ...(mem.progressionBumps ? { progressionBumps: mem.progressionBumps } : {}),
+      // cleanupOptOuts is local-only for the same reason (see sessionToRow), so
+      // carry it forward too: without this, a reload mid-cleanup-session would
+      // forget which exercises the user had switched back to full load and the
+      // per-exercise chip would flip back to showing them as reduced.
+      ...(mem.cleanupOptOuts ? { cleanupOptOuts: mem.cleanupOptOuts } : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -5162,6 +5409,25 @@ async function reloadCoachingState(userId) {
     _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').not('id', 'like', 'support_%').maybeSingle(),
   ]);
+
+  // A failed query resolves with { error } and data null, and every field
+  // below reads through `?.` into a default: no coach, no clients, no unread
+  // notes. One dropped request during a realtime reconnect therefore looked
+  // exactly like "your coach ended the relationship", and the callers wrote
+  // that emptiness into the store. Throw instead. All seven call sites sit in
+  // try/catch (or a .catch), so a failure now leaves the previous coaching
+  // state standing, which is the honest answer to "I could not check".
+  //
+  // PGRST116 stays tolerated: maybeSingle raises it when MORE than one row
+  // matches, and both those queries are already narrowed against the case
+  // that used to cause it (the support_% comment above). If a duplicate row
+  // ever appears anyway, that is one uncertain field, not a reason to blank
+  // the whole relationship.
+  const soft = (res) => !res?.error || res.error.code === 'PGRST116';
+  const firstErr = [coachInfoRes, coachClientsRes, unreadRes].find(r => r?.error)?.error
+    || [coachingRowRes, selfRowRes].find(r => !soft(r))?.error;
+  if (firstErr) throw firstErr;
+
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
       id: coachInfoRes.data[0].coaching_id,
@@ -5442,7 +5708,19 @@ function checkinWeekStart() {
 
 // responses = plain object with snake_case keys matching the form schema fields.
 // Writes both the responses jsonb column and backward-compat fixed columns.
-async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false, schema = null) {
+// existingRef: the row being edited, or a falsy value for a first submission.
+// A string is taken as that row's id and REUSED, which is the whole point:
+// the upsert below resolves on (coaching_id, week_start), so an edit lands on
+// the existing row but used to hand it a brand-new random id. The primary key
+// of a stored check-in silently changed on every save, and everything holding
+// the old one, a coaching note's entity_id, the ai_opinion row the edge
+// function is writing back to, the coach's open selection, was pointing at an
+// id that no longer existed. Any other truthy value still means "this is an
+// edit" (the label below) but generates a fresh id, so an older caller that
+// passes a bare boolean keeps its previous behaviour rather than writing
+// `true` into the key.
+async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, existingRef = false, schema = null) {
+  const isEdit = !!existingRef;
   // Free-text fields have no length bound in the UI (a plain textarea) or
   // guaranteed anywhere upstream: cap them here too, as defense in depth
   // independent of the edge function's own cap (ai-checkin-opinion's
@@ -5457,7 +5735,9 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     general_note: clampCheckinText(responses.general_note),
   };
   const weekStart = weekStartArg || checkinWeekStart();
-  const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const id = (typeof existingRef === 'string' && existingRef)
+    ? existingRef
+    : 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {
     id,
     coaching_id: coachingId,
@@ -6709,6 +6989,196 @@ async function endDeload(userId, store, setStore) {
   }
 }
 
+// ─── CLEANUP WEEK ───────────────────────────────────────────────────────────
+// Overlay sibling of the deload block above (migration 0251). Same lifecycle
+// (start / auto-end / end), different intent: a deload is recovery and drops
+// out of the progression chain, a cleanup week is a deliberate technique
+// rebuild whose reduced loads STAY in the chain so the next week climbs from
+// them. The length rules are identical, so these four reuse deloadPlanDays /
+// deloadFlexGoal rather than cloning them.
+
+// Whole CALENDAR days from the day `sinceISO` fell on to the day `now` falls
+// on, both in local time. Deliberately not a (now - since) / 86400000 floor:
+// that anchors the window to the clock TIME of activation, so a cleanup begun
+// on day 1 at 20:00 was still running the next cycle's day 1 until 20:00, and
+// a session trained that morning seeded reduced even though the overlay was
+// supposed to be over. Counting days instead makes the window flip at local
+// midnight, so "one cycle" ends exactly when the next one starts. Noon
+// anchoring is the same DST-safe idiom the rest of this file uses for date
+// differences (a 23- or 25-hour day never rounds to the wrong day from noon).
+function calendarDaysSince(sinceISO, now = new Date()) {
+  const a = new Date(sinceISO); if (isNaN(a)) return 0;
+  a.setHours(12, 0, 0, 0);
+  const b = new Date(now); b.setHours(12, 0, 0, 0);
+  return Math.round((b - a) / 86400000);
+}
+
+// When a cleanup week should BEGIN. A cleanup is a whole cycle of rebuilding,
+// so it always starts at the next cycle / week boundary rather than mid-cycle:
+// starting it on day 5 would otherwise reduce the tail of the current cycle
+// and hand back full load partway through the next one, and neither cycle
+// would read as a clean unit afterwards. Same idea the deload nudge already
+// uses (screens-home.jsx), generalised here so every entry point shares it.
+//
+// Returns an ISO timestamp at LOCAL MIDNIGHT of that day, or null when there
+// is nothing to align to and the cleanup should just start now. Midnight
+// matters: cleanupElapsed counts calendar days, so a start pinned to a day
+// boundary makes the window cover exactly that cycle.
+function nextCleanupStartISO(store, now = new Date()) {
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (!sch) return null;
+  // A flex plan's rotation advances per logged SESSION, not per calendar day,
+  // and its cleanup ends on a session count too (see cleanupElapsed), so there
+  // is no date boundary that could drift out of alignment. Start now.
+  if (isFlexPlan(sch)) return null;
+  const todayStr = fmtISO(now);
+  const atMidnight = (daysAhead) => {
+    const d = new Date(todayStr + 'T00:00:00');
+    d.setDate(d.getDate() + daysAhead);
+    return d.toISOString();
+  };
+  // Weekday plans run on the calendar week, which starts Monday (isoWd).
+  if (isWeekdayPlan(sch)) return atMidnight(7 - isoWd(now));
+  const cycleLen = (getPlanDaysForDate(sch, todayStr) || []).length;
+  if (!cycleLen) return null;
+  // Versioned plans carry their own offset per version; unversioned ones are
+  // anchored on store.cycleStartDate. Same split the deload nudge makes.
+  const pos = sch.versions?.length
+    ? getCyclePosForDate(sch, todayStr)
+    : (store.cycleStartDate ? cyclePosFromStartDate(store.cycleStartDate, cycleLen, todayStr) : null);
+  if (pos == null) return null;
+  return atMidnight(cycleLen - pos);
+}
+
+// A cleanup start pinned to "the next cycle boundary" is only meaningful for
+// the plan it was computed against. Switching the active plan, or editing the
+// current one's day count, moves that boundary, and the pin stayed where it
+// was: a cleanup activated under a 5-day cycle and then switched to a 3-day
+// plan starts mid-cycle, which is precisely the misalignment nextCleanupStartISO
+// exists to prevent. Recompute and persist.
+//
+// Only while the window has NOT started. Once it is running the start date is
+// history: it is what cleanupElapsed counts from and what the logged cleanup
+// sessions sit inside, so moving it would retroactively change which sessions
+// belong to the week.
+async function repinCleanupStart(userId, store, setStore, now = new Date()) {
+  if (store?.statusMode !== 'cleanup' || !store?.statusModeSince) return;
+  if (cleanupStarted(store, now)) return;
+  // A null means "nothing to align to, start now", which is also what a fresh
+  // activation would do. Take it, so switching from a date-based plan to a flex
+  // one does not leave the cleanup pinned to a boundary the new plan has no
+  // concept of.
+  const next = nextCleanupStartISO(store, now) || new Date(now).toISOString();
+  if (next === store.statusModeSince) return;
+  // The period row is the durable record and has no retry path in syncStore,
+  // so it goes first; the scalar only follows once that succeeded.
+  try { await updateStatusPeriodStart(userId, next); }
+  catch (e) { console.error('repinCleanupStart: status period write failed', e); return; }
+  setStore(s => (s.statusMode === 'cleanup' ? {
+    ...s,
+    statusModeSince: next,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt: next } : p),
+  } : s));
+}
+
+// True once an activated cleanup has actually BEGUN. The start can sit in the
+// future (aligned to the next cycle above), and until that day arrives NOTHING
+// about the overlay may apply, least of all the seed reduction: the days
+// between activating and the cycle rolling over are still normal training.
+function cleanupStarted(store, now = new Date()) {
+  if (store?.statusMode !== 'cleanup' || !store?.statusModeSince) return false;
+  return calendarDaysSince(store.statusModeSince, now) >= 0;
+}
+
+// True once the active cleanup has run its course (one cycle / week elapsed,
+// or, for flex, the weekly session goal of cleanup sessions has been logged).
+// Checked on the home screen for the auto-end.
+function cleanupElapsed(store, now = new Date()) {
+  if (store.statusMode !== 'cleanup' || !store.statusModeSince) return false;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (sch && isFlexPlan(sch)) {
+    const since = new Date(store.statusModeSince);
+    const done = (store.sessions || []).filter(s => s.ended && s.isCleanup && new Date(s.ended) >= since).length;
+    return done >= deloadFlexGoal(sch);
+  }
+  const days = deloadPlanDays(store) || 7;
+  return calendarDaysSince(store.statusModeSince, now) >= days;
+}
+
+// Days remaining in the current cleanup (null for flex, counts sessions, not
+// days). Same calendar-day basis as cleanupElapsed so the "Nd left" label and
+// the auto-end can never disagree about which day the week ends on.
+function cleanupDaysRemaining(store, now = new Date()) {
+  if (store.statusMode !== 'cleanup' || !store.statusModeSince) return null;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (sch && isFlexPlan(sch)) return null;
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.max(0, calendarDaysSince(store.statusModeSince, now));
+  return Math.max(0, days - elapsed);
+}
+
+// Start a cleanup week: switch status mode to 'cleanup' and open a status
+// period. Same optimistic-write-plus-rollback shape as startDeload, and the
+// same reason for it (statusPeriods has no syncStore retry path).
+// sinceISO: when the week should actually begin, normally the next cycle start
+// from nextCleanupStartISO. Until that day the overlay is inert (cleanupStarted
+// gates it), so the rest of the current cycle still trains at full load.
+async function startCleanup(userId, store, setStore, sinceISO = null) {
+  const startedAt = sinceISO || new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
+  setStore(s => ({
+    ...s, statusMode: 'cleanup', statusModeSince: startedAt,
+    statusPeriods: [{ id: '_pending', mode: 'cleanup', startedAt, endedAt: null },
+      ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: startedAt })],
+  }));
+  try { await openStatusPeriod(userId, 'cleanup', startedAt); }
+  catch (e) {
+    console.error('startCleanup: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not start cleanup week. Please try again.');
+    return;
+  }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      const pct = Math.min(30, Math.max(10, Math.round(store.settings?.cleanupPercent ?? 20)));
+      // Say WHEN when it is aligned to a future cycle start, so a coach reading
+      // this doesn't expect reduced loads in the sessions before then.
+      const when = calendarDaysSince(startedAt, new Date()) < 0
+        ? ` from ${fmtISO(new Date(startedAt))}`
+        : '';
+      await addCoachingNote(coachingId, 'general', null, null, `Status: Cleanup week${when}, training at ${100 - pct}% to rebuild technique.`, userId, threadId);
+    } catch (_) {}
+  }
+}
+
+// End a cleanup week: close the status period at `now` so today onward is
+// normal again. From here the cleanup sessions become the new seed baseline.
+async function endCleanup(userId, store, setStore) {
+  if (store.statusMode !== 'cleanup') return;
+  const endedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: endedAt } : p),
+  }));
+  try { await closeStatusPeriod(userId, endedAt); }
+  catch (e) {
+    console.error('endCleanup: status period write failed', e);
+    setStore(s => ({ ...s, ...prevStatus }));
+    UI.alert('Could not end cleanup week. Please try again.');
+    return;
+  }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Cleanup week finished, building back up.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
 async function refreshHealthLogs(userId) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   // Medications (migration 0218/0221) mirrors the exact SELECT/mapping
@@ -6730,7 +7200,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
     _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ]);
@@ -6807,7 +7277,7 @@ async function refreshHealthLogs(userId) {
     medicationLogs: (medicationLogsRes?.data || []).map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-      planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+      planned: !!l.planned, skipped: !!l.skipped, scheduleSlotId: l.schedule_slot_id ?? null,
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
@@ -6912,6 +7382,13 @@ function dsCardioForDay(store, dateISO) {
 // baseline for the same reason recentSessionsForExercise excludes them (a
 // deliberately light week is not a fair progress reference); a dayId-less
 // (freestyle) session has nothing of the same shape to compare against.
+//
+// Cleanup weeks are deliberately NOT excluded here, unlike almost everywhere
+// else isCleanup appears. A cleanup week's loads stay in the progression chain
+// (that is the point: the next week builds up from them), so comparing the
+// rebuild days against the pre-cleanup session instead would report the whole
+// rebuild as one long drop rather than the climb it actually is. Don't "fix"
+// this by adding !s.isCleanup to match the neighbouring filters.
 function dsPreviousSessionForDay(store, dayId, dateISO, excludeSessionId) {
   if (!dayId) return null;
   return (store.sessions || [])
@@ -6953,16 +7430,28 @@ function dsExerciseHighlights(store, session, prevSession) {
 // the already-loaded store, same accepted degradation as elsewhere (also
 // means highlights silently come back empty against such a session, there
 // are no entries to diff).
+//
+// Deload/cleanup sessions intentionally load lighter. Feeding the summary
+// model a volume comparison against the last full run always looks like a
+// "dip" and Qwen then invents "still loading even though tonnage dropped"
+// no matter how firmly the system prompt forbids it. Cap the data: flag the
+// mode, omit comparison + highlights. (dsPreviousSessionForDay still keeps
+// cleanup sessions as a baseline for OTHER days' rebuild comparisons; that
+// is intentional and unrelated to summarizing a cleanup day itself.)
 function dsTrainingEntryForSession(store, session, dateISO) {
-  const prev = dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
+  const isDeload = !!session.isDeload;
+  const isCleanup = !!session.isCleanup;
+  const skipCompare = isDeload || isCleanup;
+  const prev = skipCompare ? null : dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
   return {
     dayName: session.dayName || (session.isFreestyle ? 'Freestyle' : null),
     durationMinutes: session.durationMinutes ?? null,
     feel: session.feel ?? null,
-    isDeload: !!session.isDeload,
+    isDeload,
+    isCleanup,
     volumeKg: Math.round(totalVolume(session, store.exercises, store.dailyLogs)),
     doneSets: doneSetCount(session),
-    highlights: dsExerciseHighlights(store, session, prev),
+    highlights: prev ? dsExerciseHighlights(store, session, prev) : [],
     comparison: prev ? {
       date: prev.date,
       volumeKg: Math.round(totalVolume(prev, store.exercises, store.dailyLogs)),
@@ -6988,10 +7477,19 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
+  // Sick/vacation/deload still drop out (routine + hydration swing, same
+  // idea as estimateAdaptiveTdee). Cleanup does NOT: it is intentional
+  // lighter lifting with normal eating, and dropping those weigh-ins
+  // flattens a real bulk/cut trend so the summary model narrates "weight
+  // flat" against a chart that still shows the move.
   const weightTrend = (store.dailyLogs || [])
     .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
-    .filter(l => !statusModeForDate(store, l.date))
-    .map(l => ({ date: l.date, weight: l.weight }))
+    .filter(l => {
+      const m = statusModeForDate(store, l.date);
+      return m !== 'sick' && m !== 'vacation' && m !== 'deload';
+    })
+    .map(l => ({ date: l.date, weight: Number(l.weight) }))
+    .filter(l => Number.isFinite(l.weight))
     .sort((a, b) => a.date.localeCompare(b.date));
   const foodItems = (store.foodLogs || [])
     .filter(l => l.date === dateISO && !l.planned)
@@ -7001,8 +7499,18 @@ function buildDailySummaryPayload(store, dateISO) {
     .filter(s => s.ended && (s.date || '').slice(0, 10) === dateISO)
     .map(s => dsTrainingEntryForSession(store, s, dateISO));
   const cardio = dsCardioForDay(store, dateISO);
+  // Client-local day count: the server independently computes its own
+  // dayDiff from UTC purely as a sanity bound (see ai-daily-summary), but
+  // the LABEL it puts in the prompt ("yesterday" vs "N days ago") uses this
+  // value when present, since only the client actually knows the caller's
+  // local calendar day. Without it, a caller ahead of or behind UTC during
+  // the hours their local day and UTC's day disagree gets a mislabeled
+  // summary (the button said "yesterday", the generated text says "that
+  // day" or "2 days ago") even though nothing was actually wrong.
+  const daysAgo = Math.round((new Date(todayISO() + 'T12:00:00') - new Date(dateISO + 'T12:00:00')) / 86400000);
   return {
     date: dateISO,
+    daysAgo,
     weight: log?.weight ?? null,
     weightTrend,
     goal: store.settings?.macroCalc?.goal ?? null,
@@ -7438,6 +7946,11 @@ function mesoGateSetsFromAnswers(answers, loadOnly) {
 // (sessions finished before the feature shipped lack them) and blocks while a
 // session for the plan is in progress (it would flush over the edit). Pure.
 function isMesoSessionEditable(session, allSessions, mesoState) {
+  // isCleanup is NOT excluded here, unlike isDeload: a cleanup session is asked
+  // the same questions and its answers move the same deltas/growthCounts, so its
+  // recap has to stay correctable like any other session's. What the edit must
+  // not do is flip its signalWeight to 'discounted', and the readiness branch in
+  // screens-lib.jsx pins that separately.
   if (!session || !mesoState || !session.ended || session.isDeload) return false;
   if (!session.mesoRecap || !session.mesoRecap.raw || !session.mesoRecap.raw.answers) return false;
   if (mesoState.startedAt && (session.ended || '') < mesoState.startedAt) return false;
@@ -7484,10 +7997,10 @@ function _commitContribInto(deltas, negOwner, prevContrib, questionType, newCont
 // A 'joint' edit is the per-exercise feedback: it can carry answer (joint) plus weight
 // and pump (both per exId now). A 'volume' edit is the per-muscle workload answer only.
 // `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
-// `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
-// + the answer record + negOwner; weight boosts are re-earned separately
-// (reearnMesoBoostsFromAnswers) since they also need the objective rep outcome.
-// Pure: returns { mesoState, raw }.
+// `ctx` = { dayId, loadOnly, atCeilingMuscles }. Touches
+// deltas/growthCounts/pumpLowCounts/jointFlags + the answer record + negOwner;
+// weight boosts are re-earned separately (reearnMesoBoostsFromAnswers) since they
+// also need the objective rep outcome. Pure: returns { mesoState, raw }.
 function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   const dayId = ctx.dayId;
   const loadOnly = !!ctx.loadOnly;
@@ -8657,8 +9170,14 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   // Full-signal exposures of this exercise, newest-first (mirror detectOverreach's
   // filter: ended && !isDeload && this plan && signalWeight full). Build the best
   // e1RM per session over completed weighted working sets, effReps for unilateral.
+  // !isCleanup is a SEPARATE condition from the signalWeight check, not a
+  // duplicate of it: a cleanup session deliberately keeps signalWeight 'full'
+  // (so detectOverreach's own baseline moves down with the reduced loads and
+  // the rebuild weeks don't read as a regression), which means signalWeight
+  // cannot distinguish it here. Without this the flat, deliberately reduced
+  // e1RM of a cleanup week would read as a stall and suggest swapping the lift.
   const qualifying = (sessions || [])
-    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
+    .filter(s => s && s.ended && !s.isDeload && !s.isCleanup && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const series = [];
   for (const s of qualifying) {
@@ -8833,6 +9352,73 @@ function volumeAnswerAllowsBump(volume, loadOnly) {
   return !!loadOnly && volume === 'pushed';
 }
 
+// ─── Food masses: grams canonical, oz/lb for imperial viewers ────────────────
+// Every mass in the food tracker is STORED in grams, always: quantity_g, recipe
+// weights, package sizes, the per-100g rate every food is scaled from. These
+// helpers are a display/entry layer on top of that, the same shape the water
+// tracker uses for ml -> fl oz (UI.waterInFloz and friends in ui.jsx).
+//
+// They live here rather than next to their UI wrappers because the rounding
+// grids below are the only genuinely tricky part of the feature and this file
+// is the one tools/test/store.test.cjs can load. ui.jsx keeps one-line wrappers
+// that supply `inOz` from window.__UNIT.
+//
+// MACROS ARE NOT MASSES for this purpose: protein/carbs/fat/fibre/sugar/sat fat
+// stay grams and sodium stays mg for everyone, US nutrition labels are printed
+// in grams too. Only portions, ingredients, cooked weights and shopping
+// quantities convert.
+const OZ_G = 28.349523125; // avoirdupois ounce
+const LB_G = 453.59237;
+function gToOz(g) { return (g || 0) / OZ_G; }
+function ozToG(oz) { return (oz || 0) * OZ_G; }
+
+// Display string for a stored gram figure. Metric steps up to kg at 1000g,
+// imperial to lb at 16oz, both with one decimal and no trailing zero.
+// Both branches round to their display precision BEFORE testing the step-up
+// threshold, not after: deciding off the raw value let 999.96g print as
+// "1000g" (it rounds to 1000 but tested as < 1000) instead of "1kg".
+function formatMassG(g, inOz) {
+  const v = g || 0;
+  if (inOz) {
+    const oz = Math.round(gToOz(v) * 100) / 100;
+    if (Math.abs(oz) >= 16) return `${parseFloat((oz / 16).toFixed(2))} lb`;
+    return `${oz} oz`;
+  }
+  const grams = Math.round(v * 10) / 10;
+  if (Math.abs(grams) >= 1000) return `${parseFloat((grams / 1000).toFixed(3))}kg`;
+  return `${grams}g`;
+}
+
+// Shopping-list quantity: an ESTIMATE, so it is rounded to a grid you can
+// actually shop on, unlike a package size (a printed fact, formatMassG above).
+// Metric keeps its long-standing 5g/25g grid. Imperial gets its own native grid
+// rather than a converted one: running the metric result through gToOz would
+// print "0.2 oz" and "8.8 oz", and a shoppable number is the entire point of
+// rounding in the first place.
+//   metric:   <50g -> nearest 5g, else nearest 25g, >=1000g shown as kg
+//   imperial: <2oz -> nearest 0.25oz, <16oz -> nearest 0.5oz, else 0.25 lb
+// Returns { grams, text } so callers that need the rounded mass back (the
+// buy-quantity used for inventory) do not have to re-parse the label.
+function roundShoppingQty(g, inOz) {
+  if (!(g > 0)) return { grams: 0, text: inOz ? '0 oz' : '0g' };
+  if (inOz) {
+    const oz = gToOz(g);
+    if (oz >= 16) {
+      const lb = Math.round((oz / 16) / 0.25) * 0.25 || 0.25;
+      return { grams: lb * LB_G, text: `${parseFloat(lb.toFixed(2))} lb` };
+    }
+    const step = oz < 2 ? 0.25 : 0.5;
+    const rounded = Math.round(oz / step) * step || step;
+    return { grams: ozToG(rounded), text: `${parseFloat(rounded.toFixed(2))} oz` };
+  }
+  // Round FIRST, then decide g vs kg off the rounded value: deciding off the
+  // raw one let something like 990g round up to 1000g but still print "1000g".
+  const step = g < 50 ? 5 : 25;
+  const rounded = Math.round(g / step) * step || step;
+  if (rounded >= 1000) return { grams: rounded, text: `${Math.round((rounded / 1000) * 10) / 10}kg` };
+  return { grams: rounded, text: `${rounded}g` };
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -8870,6 +9456,96 @@ function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
 // the delIds filter the first didn't need. Local-only/server-only handling
 // (never-synced rows, resurrection guards) stays with each caller since it
 // varies per collection, this covers just the shared id-matched half.
+// ── Boot merge: the store's top-level scalars ────────────────────────────────
+// Everything here lives in zane_user_settings and reaches the store as a plain
+// top-level field. The boot merge used to resolve only the plan-position tuple
+// and the active meal plan and let `...fresh` decide the rest, so an unsynced
+// offline edit to any other one was dropped, permanently: app.jsx points
+// syncBase at the pristine server state BEFORE it commits the merged store, so
+// the discarded value matches the diff base, the follow-up flush sees nothing
+// to push, and it is never retried. Same rule the settings object already
+// applies to every one of its keys, just never extended up here.
+//
+// The test is "did THIS device change it since the last confirmed sync", never
+// a blind "the local cache wins". Unlike darkMode or accentColor, every field
+// here can be written by someone else: a coach pushing and activating a plan
+// writes the plan position through syncStore from their own session. Trusting
+// the cache outright reverted that activation on this device's next boot, and
+// the following flush then pushed the stale value back over the coach's write.
+//
+// Grouped, not per-field, because some of these are written together and mean
+// nothing apart. Activating a weekday plan co-writes activeScheduleId and
+// weekPlanStartDate; resolving them separately can keep the new plan id and
+// take the server's old start date, a plan position that never existed on
+// either device, which the missed-day math then reads as fact. statusMode and
+// statusModeSince are a pair for the same reason.
+const BOOT_SCALAR_GROUPS = [
+  ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'weekPlanStartDate', 'lastAdvancedDate'],
+  ['activeMealTemplateId'],
+  ['statusMode', 'statusModeSince'],
+  ['activeCardioPlanId'],
+  ['deloadPromptDismissedAt'],
+  ['customDayTypes'],
+];
+
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// fresh = server state, cur = local cache, base = last confirmed sync (null on a
+// legacy cache). statusPeriods = the ALREADY MERGED period rows, see below.
+function mergeBootScalars(fresh, cur, base, statusPeriods) {
+  const out = {};
+  for (const group of BOOT_SCALAR_GROUPS) {
+    // A cache written before one of these fields existed carries it as
+    // undefined. Keeping that would blank a real server value, so those fields
+    // individually fall back to the server. It can split a group on exactly one
+    // boot of a legacy cache, which is no worse than today's behaviour (the
+    // server won for all of them anyway) and heals as soon as the cache is
+    // rewritten in the current shape.
+    const present = group.filter(f => cur && cur[f] !== undefined);
+    // No base means the rule cannot tell an unsynced edit from a stale value.
+    // Keep the local side, the same fallback the plan tuple already used and
+    // the same bias as mergeSessions' cachedDiffersFromBase: in doubt, do not
+    // discard this device's data.
+    const localWins = present.length > 0 && (!base || present.some(f => !sameJson(cur[f], base[f])));
+    for (const f of group) {
+      out[f] = (localWins && cur[f] !== undefined) ? cur[f] : fresh?.[f];
+    }
+  }
+  // statusPeriods is written STRAIGHT to Supabase (insert on start, ended_at
+  // update on end), while statusMode rides the ordinary diff queue and can lag
+  // or fail on its own. So the durable record can hold an open sick/vacation
+  // period while the settings row still says normal, and the merge above would
+  // faithfully reproduce that contradiction: the UI shows normal training,
+  // history says sick, and the coach sees a third thing. The period row is the
+  // stronger signal (it is the one that is written synchronously and unwrapped),
+  // so an open period decides the mode.
+  //
+  // The rule has to run in BOTH directions, and only ran in one. Every path
+  // that clears a status (clearStatusMode, endDeload, endCleanup) closes or
+  // deletes the open period with an unwrapped write first, then leaves the
+  // statusMode scalar to the diff queue. So the exact failure the forward rule
+  // exists for has a mirror image that was left standing: the period is
+  // properly closed on the server while the settings row still says sick, and
+  // the merge preserved that. The user is stuck in a sick/deload overlay they
+  // already turned off, with reduced loads and missed days written off, and
+  // nothing in the UI to clear because as far as the period history goes it is
+  // already cleared. No open period means no status, full stop.
+  //
+  // statusPeriods == null means "the caller has no period data", not "there
+  // are none", so it must not clear anything.
+  const open = statusPeriods ? statusPeriods.find(p => p.endedAt == null) : null;
+  if (open) {
+    if (out.statusMode !== open.mode) {
+      out.statusMode = open.mode;
+      out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
+    }
+  } else if (statusPeriods && out.statusMode) {
+    out.statusMode = null;
+    out.statusModeSince = null;
+  }
+  return out;
+}
+
 function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   const curMap = new Map((curRows || []).map(r => [r.id, r]));
   const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
@@ -9089,7 +9765,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
@@ -9097,9 +9773,11 @@ window.LB = {
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
+  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

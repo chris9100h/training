@@ -126,12 +126,22 @@ async function sendReminders() {
     // does not re-fire on the next tick (a duplicate is worse than a miss:
     // the intent was sent at least once). A failed write is logged loudly;
     // the refire risk it leaves is bounded to the next tick, same posture as
-    // the water reminder's throttle write.
-    await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ daily_log_reminder_last_date: localDate }),
-    }).catch(e => console.error(`[daily-log-reminder] throttle write error for ${row.user_id}:`, e));
+    // the water reminder's throttle write. "Logged loudly" has to include a
+    // 4xx/5xx response: fetch resolves on those, so without the status check
+    // a rejected write reads as a successful one and the nudge repeats every
+    // tick for the rest of the day with nothing in the logs to show for it.
+    try {
+      const res = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ daily_log_reminder_last_date: localDate }),
+      });
+      if (!res.ok) {
+        console.error(`[daily-log-reminder] throttle write failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
+      }
+    } catch (e) {
+      console.error(`[daily-log-reminder] throttle write error for ${row.user_id}:`, e);
+    }
   }
 }
 

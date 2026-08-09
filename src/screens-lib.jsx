@@ -124,10 +124,21 @@ function PinNoteToggle({ on, onToggle }) {
         <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
         <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
       </div>
-      <Toggle on={on} onToggle={onToggle} />
+      <Toggle on={on} onToggle={onToggle} label="Pin note" />
     </div>
   );
 }
+
+// Library "Recent" tab: how many exercises the list shows, and the ceiling on
+// how many windowed-out sessions a single hydration pass pulls back. An account
+// with years of history must never fetch all of it to fill a 12-row list, so the
+// walk back through the window happens in batches over successive renders.
+const RECENT_LIMIT = 12;
+const RECENT_HYDRATE_MAX = 12;
+// Total windowed sessions this screen will ever pull back per mount, across all
+// batches. Without it the walk is unbounded on accounts with few distinct
+// exercises, see the effect that uses it.
+const RECENT_HYDRATE_CAP = 36;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
@@ -223,11 +234,38 @@ function LibraryScreen({ store, setStore, go, userId }) {
     go({ name: 'exercise', exId: first, editQueue: rest, editQueueTotal: ordered.length, autoEdit: true });
   };
 
-  const recent = useMemoL(() => {
+  // This list is indexed out of session ENTRIES, but sessions outside the boot
+  // history window carry aggregates only (entries: [], aggExercises > 0, see
+  // docs/internals.md "History-Windowing"). They contribute nothing here, so a
+  // user returning from a break longer than the window, or opening the app on a
+  // reinstalled device, got an empty list, which the tab then presented as a
+  // first-run "nothing logged yet" on top of months of real history. The scan
+  // now stops at the first windowed session and queues it (plus the next ones
+  // behind it, so the walk back is one round trip per batch rather than per
+  // session) for the lazy fetch below, same mechanism as the Home recap.
+  const { items: recent, needIds: recentNeedIds, hasEnded: hasEndedSessions, unloaded: recentUnloaded } = useMemoL(() => {
     const sortedSessions = [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
     const lastTwo = new Map();
     const seenFirst = new Map();
-    sortedSessions.forEach(s => {
+    let blockedAt = -1;
+    for (let i = 0; i < sortedSessions.length; i++) {
+      const s = sortedSessions[i];
+      if (!(s.entries || []).length) {
+        // aggExercises > 0 = windowed out (the server has its sets), 0 = a
+        // session that genuinely holds nothing and is safe to scan past.
+        if ((s.aggExercises || 0) > 0) {
+          // Remember the first one so the fetch below can walk back from here,
+          // but keep scanning. Stopping here withheld exercises that other
+          // screens had already hydrated into the store (session detail, the
+          // comparison screen, stats, the home recap all write entries back),
+          // so the list could come out SHORTER than before this whole fix, and
+          // offline it stayed short. A "last time" date that is one unloaded
+          // session too old heals on the next round trip; a row that is simply
+          // gone reads as lost history, which is the very thing being fixed.
+          if (blockedAt < 0 && seenFirst.size < RECENT_LIMIT) blockedAt = i;
+        }
+        continue;
+      }
       // Per SESSION, not per entry: an exercise trained twice in one session
       // (two entries) used to fill both "last two sessions" slots with that
       // same session, so cur and prev were computed from the same workout and
@@ -242,14 +280,24 @@ function LibraryScreen({ store, setStore, go, userId }) {
           if (arr.length === 0) seenFirst.set(e.exId, s.ended);
         }
       });
-    });
+    }
+    const needIds = [];
+    for (let j = blockedAt; j >= 0 && j < sortedSessions.length && needIds.length < RECENT_HYDRATE_MAX; j++) {
+      const x = sortedSessions[j];
+      if (!(x.entries || []).length && (x.aggExercises || 0) > 0) needIds.push(x.id);
+    }
+    // Working sets only. The caption beside the arrow deliberately shows the
+    // first non-warmup, non-skipped set, so feeding the trend off every set
+    // (a warm-up ramp, or a set the user skipped but that still carries its
+    // seeded numbers) had the arrow rating something the row never displays.
+    // Same filter Home applies before its own comparison (currWorking).
     const e1rm = (entry) => entry
-      ? Math.max(0, ...(entry.sets || []).map(s => { const r = LB.effReps(s); return s.kg && r ? LB.e1rm(s.kg, r) : 0; }), 0)
+      ? Math.max(0, ...(entry.sets || []).filter(s => !s.warmup && !s.skipped).map(s => { const r = LB.effReps(s); return s.kg && r ? LB.e1rm(s.kg, r) : 0; }), 0)
       : 0;
-    return store.exercises
+    const items = store.exercises
       .filter(e => seenFirst.has(e.id))
       .sort((a,b) => (seenFirst.get(b.id)||'').localeCompare(seenFirst.get(a.id)||''))
-      .slice(0, 12)
+      .slice(0, RECENT_LIMIT)
       .map(e => {
         const [sess0, sess1] = lastTwo.get(e.id) || [];
         const lastEntry = sess0?.entries.find(en => en.exId === e.id);
@@ -260,7 +308,51 @@ function LibraryScreen({ store, setStore, go, userId }) {
           : null;
         return { ex: e, last: seenFirst.get(e.id), lastEntry, trend };
       });
+    return { items, needIds, hasEnded: sortedSessions.length > 0, unloaded: blockedAt >= 0 };
   }, [store.exercises, store.sessions]);
+
+  // Pull the windowed sessions the scan ran into into the store, which reruns
+  // the memo and lets it walk further back. Re-checks entries are still empty at
+  // merge time so a concurrent update never gets clobbered, same idiom as
+  // SessionDetailScreen / SessionCompareScreen and the Home recap. The bail-out
+  // when nothing actually merged is this list's own addition and load-bearing:
+  // unlike those one-shot fetches, this effect is re-armed by the very memo it
+  // feeds, so handing back a fresh sessions array for a session the server
+  // answers with no rows (aggregate says it has sets, entries table disagrees)
+  // would re-arm it forever.
+  // Hard ceiling on the whole walk, not just one batch. The old bound was
+  // seenFirst.size < RECENT_LIMIT, but seenFirst counts DISTINCT EXERCISES ever
+  // seen, not rows rendered: an account that only logs main lifts never reaches
+  // twelve, so the loop fetch -> merge -> memo rerun -> fetch never terminated
+  // and would have pulled a multi-year history into the store. That is not a
+  // transient cost. syncStore sees entries [] -> [...] and re-uploads every
+  // entry and set with a fresh updated_at, saveBase/saveToLocal persist two
+  // copies of the inflated store against the localStorage budget, and the boot
+  // merge keeps them, permanently defeating History-Windowing on that device.
+  const recentHydrated = useRefL(0);
+  useEffectL(() => {
+    if (!recentNeedIds.length) return;
+    const budget = RECENT_HYDRATE_CAP - recentHydrated.current;
+    if (budget <= 0) return;
+    const ids = recentNeedIds.slice(0, budget);
+    recentHydrated.current += ids.length;
+    let on = true;
+    LB.fetchSessionEntries(ids)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [recentNeedIds]);
 
   const filtered = useMemoL(() => {
     const ql = q.toUpperCase();
@@ -402,8 +494,25 @@ function LibraryScreen({ store, setStore, go, userId }) {
           );
         })()}
 
+        {/* Ended sessions exist, but none of them could be indexed: either they
+            all sit outside the boot history window and the lazy fetch above has
+            not landed yet (or cannot, offline), or they no longer point at any
+            exercise still in the library. Never the first-run copy in either
+            case, and History reads session metadata, so it stays complete
+            whatever this tab can see. */}
         {tab === 'recent' && recent.length === 0 && (
-          <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
+          hasEndedSessions ? (
+            <Empty
+              title="Nothing recent"
+              sub={recentUnloaded
+                ? 'Your older sessions are not loaded on this device. They fill in from the server as soon as you are online.'
+                : 'Your logged sessions no longer point at an exercise in your library.'}
+              icon={ICON_BARBELL}
+              action={<Btn kind="ghost" onClick={() => go({ name: 'hist' })}>Open history</Btn>}
+            />
+          ) : (
+            <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
+          )
         )}
 
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
@@ -1189,8 +1298,23 @@ function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
-function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight }) {
-  if (!loggingPickerVisible(equipment, movementType)) return null;
+// Loading horns are a plate-loaded MACHINE thing. Nothing without equipment has
+// them, and bodyweight is the plus_load lane, which owns the weight field for
+// its own reason. Everything else that is actually loaded can have them: the
+// pin is the machine, not the category name.
+const HORN_EQUIPMENT = ['machine', 'barbell_dual', 'barbell_single', 'cable'];
+
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight, hornLabels, onHornLabels }) {
+  const pickerVisible = loggingPickerVisible(equipment, movementType);
+  // Loaded equipment always logs weight and reps, which is why the picker is
+  // hidden for it, so read the EFFECTIVE mode the save path will use rather
+  // than the raw state, which is never touched on that route.
+  const effLogMode = pickerVisible ? logMode : 'weight';
+  const showHorns = !!onHornLabels && effLogMode === 'weight' && HORN_EQUIPMENT.includes(equipment);
+  // Bailing out on the picker alone hid the horn block for exactly the
+  // equipment it exists for: loggingPickerVisible is false for every loaded
+  // type, machines included.
+  if (!pickerVisible && !showHorns) return null;
   const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
              : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
@@ -1198,6 +1322,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMod
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
   return (
     <div>
+      {pickerVisible && (<>
       <span className="label">Logging</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
         {LOG_MODES.map(([val, label]) => (
@@ -1224,8 +1349,55 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMod
           )}
         </div>
       )}
+      </>)}
+      {showHorns && (() => {
+        const horns = hornLabels || [];
+        const set = (next) => onHornLabels(next.length ? next : null);
+        return (
+          <div style={{ marginTop: 12 }}>
+            <span className="label">Loading horns</span>
+            <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>
+              For plate-loaded machines with more than one weight horn. Name them once, then log what goes on each horn instead of a single number. The set stores the total, and the split is kept so you can set the machine up the same way next time.
+            </div>
+            {horns.map((h, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                <TextInput value={h} onChange={v => set(horns.map((x, j) => (j === i ? v : x)))} placeholder={`Horn ${i + 1}`} />
+                <button
+                  onClick={() => set(horns.filter((_, j) => j !== i))}
+                  aria-label={`Remove horn ${i + 1}`}
+                  style={{
+                    width: 36, minHeight: 36, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 13, WebkitTapHighlightColor: 'transparent',
+                  }}
+                >&times;</button>
+              </div>
+            ))}
+            <div style={{ marginTop: 8 }}>
+              <Btn kind="ghost" onClick={() => set([...horns, ''])}>Add horn</Btn>
+            </div>
+            {horns.length > 0 && (
+              <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>
+                Renaming or reordering these later leaves sets you already logged untouched: each set keeps the names it was logged with. Trend arrows still work, but no PRs are claimed on these: a stored best is a single number and cannot say which setup produced it.
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
+}
+
+// Empty rows and stray whitespace never reach the DB: an all-blank list means
+// "not a multi-horn exercise" and must store null, otherwise isMultiHorn would
+// flip the whole logging UI over for a machine with no horns named.
+function cleanHornLabels(list, equipment, logMode) {
+  // Same gate the editor renders on, so a list can never be saved for equipment
+  // that never showed the field (switching a machine to bodyweight afterwards
+  // has to drop the horns rather than leave them invisible but active).
+  if (!HORN_EQUIPMENT.includes(equipment) || logMode !== 'weight') return null;
+  const out = (list || []).map(h => String(h ?? '').trim()).filter(Boolean);
+  return out.length ? out : null;
 }
 
 // ── Exercise-creation wizard ────────────────────────────────────────────────
@@ -1444,6 +1616,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
   const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
   const [bwMode, setBwMode] = useStateL(null); // null | 'pull' | 'plus_load'
+  const [hornLabels, setHornLabels] = useStateL(null); // null | ordered horn names
   const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
@@ -1483,7 +1656,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null),
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null), horn_labels: cleanHornLabels(hornLabels, equipment, effLogMode),
       // Written in lockstep so a client still running an older cached build,
       // which only knows the boolean, keeps pre-filling bodyweight.
       pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
@@ -1565,6 +1738,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           equipment={equipment} movementType={movementType}
           logMode={logMode} onLogMode={pickLogMode}
           bwMode={bwMode} onBwMode={setBwMode}
+          hornLabels={hornLabels} onHornLabels={setHornLabels}
           hasLoggedWeight={LB.latestBodyweight(store) != null}
         />
         <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
@@ -1622,6 +1796,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
   const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
   const [editBwMode, setEditBwMode] = useStateL(autoEdit ? LB.bodyweightMode(ex) : null);
+  const [editHornLabels, setEditHornLabels] = useStateL(autoEdit ? (LB.exerciseHornLabels(ex) || null) : null);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
@@ -1654,7 +1829,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), horn_labels: cleanHornLabels(editHornLabels, editEquipment, effLogMode), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1871,6 +2046,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               equipment={editEquipment} movementType={editMovementType}
               logMode={editLogMode} onLogMode={setEditLogMode}
               bwMode={editBwMode} onBwMode={setEditBwMode}
+              hornLabels={editHornLabels} onHornLabels={setEditHornLabels}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
             <Field label="Progression increment (optional)">
@@ -2352,6 +2528,12 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   // but no local entries. If just one of them gets lazy-loaded elsewhere (e.g. opening
   // its own detail view), setsPerMuscle would otherwise sum only that session and
   // silently present a partial cycle total as complete, batch-fetch the rest too.
+  // Bail when nothing merged. thisPeriodSessions is memoized off store.sessions,
+  // so returning a fresh sessions array re-runs the memo and re-arms this
+  // effect. `bySession[x.id]` is truthy for an EMPTY array, so a session the
+  // server answers with no rows (aggregate claims sets, the entries table
+  // disagrees) rebuilt its object on every pass, changed the identity, stayed
+  // in needIds and refetched forever. Same shape as the Recent-tab walk above.
   useEffectL(() => {
     const needIds = thisPeriodSessions
       .filter(s => s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0)
@@ -2361,10 +2543,15 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     LB.fetchSessionEntries(needIds)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };
@@ -2829,9 +3016,26 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [filtersOpen, setFiltersOpen] = useStateL(false);
   const filterCount = [planFilter, periodFilter, dayFilter].filter(Boolean).length;
 
+  // CardioQuickLogSheet creates when editLog is null, so clearing the edit
+  // target IS the create path. Shared by the tab's add button and its empty
+  // state so the two can never drift apart.
+  const openNewCardioLog = () => { setEditingCardioLog(null); setCardioLogOpen(true); };
+
   return (
     <Screen scroll={false}>
-      <TopBar title="History" right={tab === 'workouts' && planOptions.length > 0 ? (
+      <TopBar title="History" right={tab === 'cardio' ? (
+        // The Cardio tab's only other way into the log sheet is the edit pencil
+        // on an existing row, so a fresh account had no create path here at all
+        // and the empty state pointed at a control that only exists on the
+        // Workouts tab. Same add button the exercise library uses.
+        <button onClick={openNewCardioLog} style={{
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
+          color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          WebkitTapHighlightColor: 'transparent',
+        }}>+</button>
+      ) : tab === 'workouts' && planOptions.length > 0 ? (
         <button onClick={() => setFiltersOpen(true)} style={{
           background: filterCount > 0 ? UI.goldFaint : 'transparent',
           border: `1px solid ${filterCount > 0 ? UI.goldSoft : UI.hairStrong}`,
@@ -2917,6 +3121,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>CLEANUP</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
                           {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
@@ -2964,7 +3169,12 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
               {logs.length === 0 && (
-                <Empty title="No cardio logged" sub="Tap the button above to log your first cardio session." icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+                <Empty
+                  title="No cardio logged"
+                  sub="Tap + in the top right, or the button below, to log your first cardio session."
+                  icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />}
+                  action={<Btn onClick={openNewCardioLog}>Log cardio</Btn>}
+                />
               )}
               {(() => {
                 const items = [];
@@ -3186,13 +3396,13 @@ const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
 // Sessions eligible for comparison against `s`: same dayId, ended, excluding
-// itself, newest first. Deload sessions excluded for the same reason as
-// prevEntryMap below (artificially light, not a fair comparison baseline).
-// Shared by the Compare button (SessionDetailScreen) and the session picker
-// (SessionCompareScreen).
+// itself, newest first. Deload and cleanup sessions excluded for the same
+// reason as prevEntryMap below (artificially light, not a fair comparison
+// baseline). Shared by the Compare button (SessionDetailScreen) and the session
+// picker (SessionCompareScreen).
 function sameDaySessions(sessions, s) {
   return sessions
-    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload)
+    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 }
 
@@ -3473,11 +3683,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
       // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
       // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
-      // deload ended mid-session scored 'full' live, so oldSignal must re-derive too,
+      // deload ended mid-session scored 'full' live, so oldCut must re-derive too,
       // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
       // are never deload (isMesoSessionEditable excludes them). #D
-      const oldSignal = LB.deriveSignalWeight(s, !!s.isDeload);
-      const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      // Two values, not one, and only on a cleanup session do they differ.
+      // STORED: a cleanup session is pinned 'full' whatever the readiness says
+      // (mirrors chooseReadiness in screens-train.jsx), because 'discounted' would
+      // drop it out of detectOverreach's exposure chain and its reduced loads
+      // would then never move the detector's baseline, so the rebuild would read
+      // as a regression.
+      // CUT: the rep-miss cut still has to follow the lifter's own answer, exactly
+      // as computeMesoGains does with its cutSignal. Feeding the pinned 'full' to
+      // recomputeMesoRepMissCut on both sides would make every readiness edit on a
+      // cleanup session a same-side no-op, so a rough -> normal correction would
+      // never re-arm the cut it was meant to re-arm.
+      const oldCut = s.isCleanup
+        ? LB.deriveSignalWeight({ readiness: s.readiness }, false)
+        : LB.deriveSignalWeight(s, !!s.isDeload);
+      const newCut = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      const newSignal = s.isCleanup ? 'full' : newCut;
       const earnInputs = fbEarnInputs();
       const repMissBase = fbRaw.repMissBase || null;
       const groups = fbGroupsForStore(fbRaw.answers);
@@ -3488,8 +3712,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // and writing it back wholesale would revert those concurrent fields. #3
       setStore(st => {
         const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
-        // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
-        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldSignal, newSignal);
+        // 1. Recompute the CUT for the readiness flip (no-op on a same-side edit).
+        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldCut, newCut);
         // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
         //    reearn preserves a re-armed cut and drops a frozen one.
         const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
@@ -3625,9 +3849,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // the account's session history actually changes, not on every render
   // (a keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to this data).
-  const prevEntryMap = useMemoL(() => {
+  const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
     const map = {};
+    const pending = {};
+    const needIds = new Set();
     const prevOccSeen = {};
+    // A prior session outside the boot history window carries aggregates only
+    // (entries: [], aggExercises > 0, see docs/internals.md "History-Windowing").
+    // Nothing here can tell whether it holds this exercise, so the candidate
+    // walk must not step past it and hand an older, unrelated session over as
+    // "last time". Mark the entry pending instead (the render suppresses its
+    // improvement and decline arrows, but NOT its PR star, which does not read
+    // the prior), queue the session, and let the fetch below rerun this memo,
+    // same mechanism as the Home recap's prior-session lookup.
+    const windowedGap = (x, idx) => {
+      if ((x.aggExercises || 0) <= 0) return false; // genuinely empty, safe to skip
+      needIds.add(x.id);
+      pending[idx] = true;
+      return true;
+    };
     s.entries.forEach((e, idx) => {
       // The Nth occurrence of an exercise in the day compares against the SAME Nth
       // occurrence of past sessions (audit L3, matching the seed path). Keyed by
@@ -3642,17 +3882,57 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // a false decline). Only the main lift itself: assistance work on a
       // 5/3/1 day still compares against the plain most-recent session below.
       const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
-      const prev = cyclePrev || store.sessions
-        .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
-        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-        .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
+      let prev = null;
+      if (cyclePrev) {
+        // The wave-matched session can be windowed out just as well, and it has
+        // no fallback candidate: without its entries there is simply no prev.
+        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx);
+        else prev = cyclePrev;
+      } else {
+        const candidates = store.sessions
+          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+          .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+        for (const x of candidates) {
+          if (!(x.entries || []).length) {
+            if (windowedGap(x, idx)) break;
+            continue;
+          }
+          if (x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null)) { prev = x; break; }
+        }
+      }
       map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
     });
-    return map;
+    return { prevEntryMap: map, prevPendingMap: pending, prevNeedIds: [...needIds] };
   }, [store.sessions, store.schedules, s]);
 
+  // Load the windowed prior sessions the comparison above ran into, so the
+  // suppressed entries resolve into a real verdict. Same merge guard as
+  // everywhere else: entries are re-checked as still empty at merge time so a
+  // concurrent update never gets clobbered, plus the same bail-out the Library's
+  // Recent list uses, since this effect is likewise re-armed by the memo it
+  // feeds and must not spin on a session the server answers with no rows.
+  useEffectL(() => {
+    if (!prevNeedIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(prevNeedIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [prevNeedIds]);
+
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);
@@ -3708,7 +3988,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // trained that exercise, isPR below tells the two cases apart per exercise
     // via its own fallback rather than a blanket flag, see there.
     const prMap = {};
-    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess => {
+    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload && !x.isCleanup).forEach(sess => {
       sess.entries.forEach(e => e.sets.forEach(st => {
         const val = prValueOf(st, e.exId);
         if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
@@ -3736,6 +4016,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const isPR = (st, exId) => {
       const val = prValueOf(st, exId);
       if (val == null) return false;
+      // No PR claims on a multi-horn exercise. The stored bests (prMap and the
+      // server's exerciseBests) are bare numbers with no record of how the load
+      // was distributed, and on these machines the distribution decides the
+      // leverage and the resistance curve, so "higher than the old best" does
+      // not mean the same work was beaten. Gated here rather than at the badge
+      // so the star and the header's PR count can never disagree. The trend
+      // arrows still work: isImprovement/isDecline compare against a concrete
+      // prior set and know its split.
+      if (LB.isMultiHorn(store.exercises.find(x => x.id === exId))) return false;
       // Tie-break: only the specific set that FIRST reached the session best
       // is credited, see sessionBestSetMap above. Reference equality is safe
       // here, filteredSets/e.sets below are the same array (filtered, not
@@ -3807,8 +4096,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // volDelta below: total volume can land lower than last time even on a
   // session that set new records (fewer sets, a lighter secondary exercise,
   // ...), so leading with the count keeps that from reading as a step back.
+  // Exercises whose prior session is still being fetched back are held out here
+  // too, or the header would advertise a PR the set list below deliberately
+  // leaves unbadged (see noVerdict in renderEntry). isPR does not depend on the
+  // prior session, so a pending fetch must NOT subtract from this: holding the
+  // count back hid the whole PRS chip on exactly the sessions where the badges
+  // below still render, which is the opposite of keeping the two in step.
   const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
-  const showVol = volDelta != null && !s.isDeload;
+  // A cleanup session's volume is down by design, same as a deload's, so the
+  // delta is suppressed there too rather than reading as a step back.
+  const showVol = volDelta != null && !s.isDeload && !s.isCleanup;
 
   const muscleGroups = [...new Set(
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
@@ -3849,6 +4146,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             {s.dayName}
             {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
             {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px', textTransform: 'uppercase' }}>CLEANUP</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3924,6 +4222,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
                   {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 2, padding: '3px 6px' }}>BONUS</span>}
                   {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isCleanup && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 2, padding: '3px 6px' }}>CLEANUP</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -4441,6 +4740,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const prev = prevEntryMap[i];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
+                // A deload, or a cleanup week's reduced load, must not read as an
+                // improvement/decline/PR against the pre-reduction baseline: the
+                // drop is deliberate, not lost strength. Mirrors the live training
+                // screen's isDeloadSession gate (screens-train.jsx) exactly, off the
+                // one shared LB.cleanupAppliesToExercise so the two views can never
+                // disagree about which exercises a cleanup week actually touched.
+                const reducedLoad = s.isDeload
+                  || (s.isCleanup && !s.cleanupOptOuts?.[e.exId] && LB.cleanupAppliesToExercise(store, e.exId, s.dayId));
+                // This entry's real "last time" sits in a windowed-out session
+                // that has not been fetched back yet (see prevEntryMap): the
+                // baseline is unknown, not absent, so hold every verdict until
+                // it lands rather than colouring against whatever older session
+                // would otherwise have stood in for it.
+                const noVerdict = reducedLoad || !!prevPendingMap[i];
 
                 // Cardio entry, show activity summary instead of sets
                 // isCardio may be missing on entries loaded from DB (not a DB column),
@@ -4563,10 +4876,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
-                      const pr = !isWarm && isPR(st, e.exId);
-                      const highlight = !isWarm && (pr || isImprovement(st, prevSet));
-                      const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
-                      const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
+                      // PR is NOT held back by a pending prior: isPR never reads
+                      // prevEntryMap, it compares against store.exerciseBests
+                      // through its own windowing fallback (its comment says so
+                      // outright), and that fallback works offline because the
+                      // bests live in the local cache. Gating it here blanked
+                      // every star on a session whose same-day prior happens to
+                      // be windowed out, which is precisely the returning-user
+                      // case, and offline it never came back.
+                      const pr = !isWarm && !reducedLoad && isPR(st, e.exId);
+                      const cmp = !isWarm && !noVerdict;  // improvement/decline genuinely need the prior
+                      const highlight = pr || (cmp && isImprovement(st, prevSet));
+                      const anyImprovementBefore = filteredSets.slice(0, j).some((st2, k) => !st2.warmup && ((!reducedLoad && isPR(st2, e.exId)) || (cmp && isImprovement(st2, prevWorkingFor(k)))));
+                      const decline = cmp && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
 
                       // Drop set: DS badge + chips connected by arrows
@@ -4597,7 +4919,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     color: chipColor,
                                     opacity: di === 0 ? 1 : 0.75,
                                   }}>
-                                    {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                    {LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
                                     <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
                                     {d.reps ?? '—'}
                                   </span>
@@ -4639,7 +4961,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     color: di === 0 ? chipColor : UI.inkSoft,
                                     opacity: di === 0 ? 1 : 0.7,
                                   }}>
-                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                    {di === 0 && <>{LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
                                     {d.reps ?? '—'}
                                   </span>
                                 </React.Fragment>
@@ -4735,7 +5057,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                       color: chipColor,
                                       opacity: di === 0 ? 1 : 0.75,
                                     }}>
-                                      {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                      {LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
                                       <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
                                       {d.reps ?? '—'}
                                     </span>
@@ -4760,7 +5082,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         }}>
                           {st.timeSec != null ? LB.fmtDuration(st.timeSec) : isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                            {LB.setLoadLabel(st) ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{LB.hornLoadLabel(st) && <span className="num" style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 6 }}>{LB.hornLoadLabel(st)}</span>}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
                         </span>
                       );
@@ -5655,10 +5977,20 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
     LB.fetchSessionEntries(need)
       .then(bySession => {
         if (!on) return;
-        setStore(st => ({
-          ...st,
-          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
-        }));
+        // Same merge guard as the other hydration sites. This effect keys on
+        // stable ids so it cannot spin, but `bySession[x.id]` is truthy for an
+        // empty array: without the length check a session the server answers
+        // with no rows still gets a new object identity, and syncStore then
+        // re-uploads a session nothing changed about.
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
       })
       .catch(() => {});
     return () => { on = false; };
@@ -5762,7 +6094,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
         <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
           {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
+          {/* Both sides get their own line: an explicit compare is just as often
+              "today (post-cleanup) vs a pre-cleanup baseline" as the other way
+              round, and only cmp used to be checked here, so that first case
+              silently lost its context note. */}
+          {s.isDeload && <span style={{ color: UI.inkFaint }}> · today's session was a deload week</span>}
+          {s.isCleanup && <span style={{ color: UI.inkFaint }}> · today's session was a cleanup week</span>}
           {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
+          {cmp.isCleanup && <span style={{ color: UI.inkFaint }}> · compared session was a cleanup week</span>}
         </div>
 
         {capturing ? <KnurlCanvas /> : <div className="knurl" />}
@@ -5789,6 +6128,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const entryVolB = (cmpEntry && !isMobilityEx) ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
               const entryDelta = entryVolA - entryVolB;
               const entryDeltaRounded = Math.round(entryDelta);
+              // Neither side's own reduction may drive a red/gold per-set verdict:
+              // a lighter cleanup set compared against a full-weight baseline (or
+              // the reverse) is not an honest apples-to-apples read. Mirrors
+              // SessionDetailScreen's reducedLoad exactly, checked on both sessions
+              // since either one, not just "today", can be the reduced side here.
+              const reducedInS = s.isDeload || (s.isCleanup && !s.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, s.dayId));
+              const reducedInCmp = cmp.isDeload || (cmp.isCleanup && !cmp.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, cmp.dayId));
+              const reducedLoad = reducedInS || reducedInCmp;
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
@@ -5806,10 +6153,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     const prev = cmpSets[si];
                     if (!curr && !prev) return null;
                     const prevDone = prev && !prev.skipped;
-                    const improved = isImprovement(curr, prev);
-                    const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
+                    const improved = !reducedLoad && isImprovement(curr, prev);
+                    const anyImprovementBefore = !reducedLoad && sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
                     const currSkipped = curr?.skipped && !curr?.done;
-                    const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                    const declined = !reducedLoad && !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
                     // A "+" only signals a real improvement (extra set added to an
                     // exercise you already had a baseline for) when cmpEntry exists.
                     // If the whole exercise is new (NOT LOGGED THEN), there's nothing
