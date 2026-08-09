@@ -276,6 +276,48 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
   });
 
+  // ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────
+  test('hornLoadTotal sums the loaded horns and stays null when nothing is on', () => {
+    assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: 20 }, { label: 'B', kg: 10.5 }]), 30.5);
+    // An untouched set must read empty, not as a real 0 kg lift.
+    assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: null }, { label: 'B', kg: null }]), null);
+    assert.strictEqual(LB.hornLoadTotal([]), null);
+    assert.strictEqual(LB.hornLoadTotal(null), null);
+  });
+  test('hornLoadLabel renders the split, setLoadLabel still renders the sum', () => {
+    const st = { kg: 40, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    assert.strictEqual(LB.hornLoadLabel(st), '20 / 20');
+    assert.strictEqual(LB.setLoadLabel(st), '40');
+    assert.strictEqual(LB.hornLoadLabel({ kg: 40 }), null);
+  });
+  test('setLoadLabel plus_load behaviour is untouched by the horn helpers', () => {
+    assert.strictEqual(LB.setLoadLabel({ kg: 90, addedKg: 10 }), '+10');
+    assert.strictEqual(LB.setLoadLabel({ kg: 90 }), '90');
+    assert.strictEqual(LB.setLoadLabel({}), null);
+  });
+  test('sameHornLoad separates splits that happen to sum alike', () => {
+    const a = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    const b = { hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 0 }] };
+    // Both total 40, but the resistance curve is not the same work.
+    assert.strictEqual(LB.sameHornLoad(a, b), false);
+    assert.strictEqual(LB.sameHornLoad(a, { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] }), true);
+  });
+  test('sameHornLoad compares by label, not position', () => {
+    const a = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'High', kg: 10 }] };
+    const b = { hornLoads: [{ label: 'High', kg: 10 }, { label: 'Std', kg: 20 }] };
+    assert.strictEqual(LB.sameHornLoad(a, b), true);
+  });
+  test('sameHornLoad treats two plain sets as equal and a switch of style as not', () => {
+    assert.strictEqual(LB.sameHornLoad({ kg: 40 }, { kg: 60 }), true);
+    assert.strictEqual(LB.sameHornLoad({ kg: 40, hornLoads: [{ label: 'A', kg: 40 }] }, { kg: 40 }), false);
+  });
+  test('isMultiHorn reads the exercise horn list', () => {
+    assert.strictEqual(LB.isMultiHorn({ horn_labels: ['Std', 'Mid'] }), true);
+    assert.strictEqual(LB.isMultiHorn({ horn_labels: [] }), false);
+    assert.strictEqual(LB.isMultiHorn({}), false);
+    assert.deepStrictEqual(LB.exerciseHornLabels({ horn_labels: ['Std'] }), ['Std']);
+  });
+
   // ── mergeBootScalars: top-level scalar resolution at boot ────────────────
   // The boot merge is where this project's most expensive mistakes have been
   // made, and app.jsx has no test harness, so the decision itself lives in

@@ -109,7 +109,11 @@ CREATE TABLE public.zane_exercises (
   bodyweight_mode text CHECK (bodyweight_mode IS NULL OR bodyweight_mode IN ('pull', 'plus_load')),
   youtube_url text,
   note_pinned boolean NOT NULL DEFAULT false,
-  progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0)
+  progression_increment numeric CHECK (progression_increment IS NULL OR progression_increment > 0),
+  -- Migration 0254. Ordered horn names for a multi-horn plate-loaded machine,
+  -- e.g. ["Standard","Mid","High"]. Non-empty = log a weight per horn. No
+  -- second mode column on purpose (see no_weight_reps vs log_mode).
+  horn_labels jsonb
 );
 
 CREATE TABLE public.zane_schedules (
@@ -197,6 +201,11 @@ CREATE TABLE public.zane_sets (
   -- this is only what the user typed. Implied bodyweight = kg - added_kg, which
   -- freezes it at logging time.
   added_kg numeric,
+  -- Migration 0254. Per-horn breakdown for a multi-horn machine,
+  -- [{"label":"Mid","kg":20}, ...]. Self-describing rather than positional so
+  -- reordering an exercise's horns cannot re-label sets already in history.
+  -- kg holds the plain SUM; no leverage math, the ratios are unpublished.
+  horn_loads jsonb,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -1059,7 +1068,8 @@ $function$;
 -- added_kg (plus_load belt/dip-belt load, Migration 0243) added to all three
 -- lists in Migration 0245: unreferenced jsonb keys are silently ignored, so
 -- every set synced through this RPC (i.e. every write after the first boot
--- import) had it dropped to NULL until then.
+-- import) had it dropped to NULL until then. horn_loads (Migration 0254) was
+-- added to all three lists from the start for that reason.
 CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1068,7 +1078,7 @@ AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
     set_idx, kg, reps, reps_l, reps_r, time_sec, added_kg,
-    done, skipped, warmup, technique, drops, updated_at
+    done, skipped, warmup, technique, drops, horn_loads, updated_at
   )
   SELECT
     s->>'id',
@@ -1087,6 +1097,7 @@ AS $function$
     COALESCE((s->>'warmup')::boolean,  false),
     NULLIF(s->>'technique', ''),
     CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
+    CASE WHEN s->'horn_loads' IS NOT NULL AND s->'horn_loads' != 'null'::jsonb THEN s->'horn_loads' ELSE NULL END,
     LEAST(COALESCE((s->>'updated_at')::timestamptz, now()), now())
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
@@ -1101,6 +1112,7 @@ AS $function$
     warmup     = EXCLUDED.warmup,
     technique  = EXCLUDED.technique,
     drops      = EXCLUDED.drops,
+    horn_loads = EXCLUDED.horn_loads,
     updated_at = EXCLUDED.updated_at
   WHERE zane_sets.updated_at < EXCLUDED.updated_at;
 $function$;

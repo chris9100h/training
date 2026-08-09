@@ -432,7 +432,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), horn_labels: e.horn_labels ?? null, user_id: userId };
   });
   // Exercises got fresh ids above, everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -1168,6 +1168,7 @@ function mapEntryRows(entryRows) {
         warmup: st.warmup,
         technique: st.technique ?? null,
         drops: st.drops ?? null,
+        hornLoads: st.horn_loads ?? null,
       })),
   }));
 }
@@ -1210,7 +1211,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
     _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
@@ -1911,7 +1912,8 @@ function normSet(s) {
   return [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
           s.timeSec ?? null, s.addedKg ?? null,
           s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
-          s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
+          s.technique ?? '', JSON.stringify(s.drops ?? null),
+          JSON.stringify(s.hornLoads ?? null)].join('|');
 }
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
@@ -1982,6 +1984,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
             warmup: set.warmup ?? false,
             technique: set.technique ?? null,
             drops: set.drops ?? null,
+            horn_loads: set.hornLoads ?? null,
             updated_at: now,
           });
         }
@@ -2076,7 +2079,7 @@ async function syncStore(prev, next, userId) {
       return !p || (p !== e && JSON.stringify(p) !== JSON.stringify(e));
     });
     const removed = prev.exercises.filter(e => !nextExIds.has(e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, horn_labels: e.horn_labels ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -3226,6 +3229,48 @@ function setLoadLabel(st) {
   return st?.kg != null ? String(st.kg) : null;
 }
 
+// ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────────
+// The exercise names its loading horns (zane_exercises.horn_labels), a set
+// records what went on each of them (zane_sets.horn_loads, [{label, kg}]), and
+// kg carries the plain SUM. No leverage math: the ratios are model-specific and
+// unpublished, so any "effective load" would be an invented number feeding
+// e1RM, PRs, volume and the autoreg grades.
+function exerciseHornLabels(ex) {
+  const l = ex?.horn_labels;
+  return Array.isArray(l) && l.length ? l : null;
+}
+function isMultiHorn(ex) {
+  return !!exerciseHornLabels(ex);
+}
+// Sum of the loaded horns, null when nothing is loaded at all (an untouched set
+// must stay empty rather than reading as a real 0 kg lift).
+function hornLoadTotal(loads) {
+  if (!Array.isArray(loads) || !loads.length) return null;
+  const nums = loads.map(h => h?.kg).filter(v => v != null && !isNaN(v));
+  if (!nums.length) return null;
+  return Math.round(nums.reduce((a, b) => a + b, 0) * 100) / 100;
+}
+// Breakdown for detail views, e.g. "20 / 10 / 10". The row itself keeps showing
+// the sum via setLoadLabel, the split needs more room than a set row has.
+function hornLoadLabel(st) {
+  if (!Array.isArray(st?.hornLoads) || !st.hornLoads.length) return null;
+  return st.hornLoads.map(h => (h?.kg == null ? '0' : String(h.kg))).join(' / ');
+}
+// Do two sets carry the same distribution? Two splits can sum to the same kg
+// and be genuinely different work (20/20 versus 40/0 shifts where the
+// resistance peaks), so the comparison logic must not call them equal and hand
+// out a PR for moving plates outward. Compared by label, not position, because
+// horn_loads is self-describing and an exercise's horn list can be reordered.
+function sameHornLoad(a, b) {
+  const la = Array.isArray(a?.hornLoads) ? a.hornLoads : null;
+  const lb = Array.isArray(b?.hornLoads) ? b.hornLoads : null;
+  if (!la && !lb) return true;      // neither is a multi-horn set
+  if (!la || !lb) return false;     // one side switched loading style
+  const norm = (l) => l.filter(h => h?.kg != null)
+    .map(h => `${h.label ?? ''}:${h.kg}`).sort().join('|');
+  return norm(la) === norm(lb);
+}
+
 // Split a stored set back into what the user typed and what carried it, for a
 // plus_load exercise. `added` is the belt load, `base` the bodyweight frozen at
 // logging time. Falls back to treating the whole thing as bodyweight when a set
@@ -3360,7 +3405,22 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     });
   };
 
-  return withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
+  // A multi-horn set repeats the DISTRIBUTION, not just the total: carrying the
+  // sum alone would leave the user re-deriving which horn held what, which is
+  // the whole reason the breakdown is stored. kg is rebuilt from the carried
+  // horns so the two can never drift apart.
+  const multiHornEx = isMultiHorn((store?.exercises || []).find(e => e.id === it.exId));
+  const withHornLoads = (seeded) => {
+    if (!multiHornEx) return seeded;
+    return seeded.map((st, i) => {
+      const prevHorns = workingSets[i]?.hornLoads ?? null;
+      if (!Array.isArray(prevHorns) || !prevHorns.length) return { ...st, kg: null, hornLoads: null };
+      const carried = prevHorns.map(h => ({ label: h.label, kg: dl(h.kg ?? null) }));
+      return { ...st, kg: hornLoadTotal(carried), hornLoads: carried };
+    });
+  };
+
+  return withHornLoads(withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
     // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
@@ -3405,7 +3465,7 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
     return isUni
       ? { kg: dl(seedKg), repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
       : { kg: dl(seedKg), reps: prev?.reps ?? null, done: false };
-  }));
+  })));
 }
 
 function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
@@ -9532,7 +9592,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
