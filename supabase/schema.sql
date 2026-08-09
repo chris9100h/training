@@ -1123,6 +1123,32 @@ $function$;
 -- updated_at is newer (no stale clobber). Migration 0096. updated_at is
 -- clamped to LEAST(client value, now()) since migration 0238, same
 -- clock-skew guard as sync_sets_batch above.
+-- Derived-only write for a day's adherence pair (migration 0256): two columns,
+-- no updated_at, so a recompute cannot win last-write-wins for the whole row.
+CREATE OR REPLACE FUNCTION public.update_daily_log_derived(
+  p_date text,
+  p_adherence numeric DEFAULT NULL,
+  p_targets_snap jsonb DEFAULT NULL
+)
+RETURNS void
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path TO 'public'
+AS $function$
+  UPDATE zane_daily_logs
+     SET adherence = p_adherence,
+         targets_snap = p_targets_snap
+   WHERE user_id = auth.uid()
+     AND date = p_date;
+$function$;
+
+-- Grant hygiene (docs/database.md, "Grant-Fallen"): CREATE FUNCTION hands
+-- EXECUTE to PUBLIC, which anon inherits. Revoke first, then grant only what
+-- the app needs. SECURITY INVOKER plus the auth.uid() predicate means RLS still
+-- applies, but an anon grant would still be wrong on principle.
+REVOKE EXECUTE ON FUNCTION public.update_daily_log_derived(text, numeric, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.update_daily_log_derived(text, numeric, jsonb) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
  RETURNS void
  LANGUAGE sql

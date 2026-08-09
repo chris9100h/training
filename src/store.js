@@ -260,6 +260,18 @@ async function signUp(email, password, name, unit = null) {
 // purely local: on a network failure the client returns before it removes the
 // session, so nothing is signed out and no SIGNED_OUT fires. Callers that do
 // anything after it (navigate, reload, wipe) have to be able to tell.
+// Writes ONLY the derived adherence pair for a day, leaving updated_at alone so
+// a recompute cannot win last-write-wins for the whole row (migration 0256).
+// Resolves to false on failure rather than throwing: the values are derived and
+// recomputed on the next boot, so a failed write must not take down the caller.
+async function updateDailyLogDerived(date, adherence, targetsSnap) {
+  const { error } = await _supabase.rpc('update_daily_log_derived', {
+    p_date: date, p_adherence: adherence ?? null, p_targets_snap: targetsSnap ?? null,
+  });
+  if (error) { console.error('update_daily_log_derived failed', error); return false; }
+  return true;
+}
+
 async function signOut() {
   return await _supabase.auth.signOut();
 }
@@ -2458,9 +2470,21 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.dailyLogs !== next.dailyLogs) {
+    // adherence and targetsSnap are DERIVED and have their own narrow write
+    // path (updateDailyLogDerived, migration 0256). They are excluded from the
+    // change test so a pure recompute never marks the row dirty: it used to,
+    // and since sync_daily_logs_batch drops a write that is not newer, the
+    // recompute had to bump updated_at to land, which then let it carry this
+    // device's stale weight, steps, measurements and macros over another
+    // device's newer ones. They are still SENT in the payload below, so a row
+    // pushed for a real reason keeps carrying its current values.
+    const normDaily = (l) => {
+      const { adherence, targetsSnap, ...rest } = l || {};
+      return JSON.stringify(rest);
+    };
     const upsert = (next.dailyLogs || []).filter(l => {
       const p = (prev.dailyLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
+      return !p || normDaily(p) !== normDaily(l);
     });
     const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
     // Batch RPC resolves conflicts on (user_id, date) keeping the existing id,
@@ -9667,7 +9691,7 @@ window.LB = {
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted,
-  loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,

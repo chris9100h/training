@@ -4548,10 +4548,19 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // persisted this row with its own timestamp; re-sending the reconciled
         // adherence with that SAME timestamp would be silently dropped server-
         // side, leaving the coach/check-in with null/stale adherence forever.
-        reconciled.set(log.date, { ...log, adherence, targetsSnap, updatedAt: new Date().toISOString() });
+        // No updatedAt bump: a recompute is not an edit of the day. It used
+        // to need one to get past sync_daily_logs_batch's staleness guard,
+        // which is exactly what let it carry this device's stale weight,
+        // steps, measurements and macros over another device's newer ones.
+        // The derived pair now has its own two-column write below.
+        reconciled.set(log.date, { ...log, adherence, targetsSnap });
       });
       if (!reconciled.size) return s;
       const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
+      // Persist the derived pair on its own. Fire and forget on purpose: these
+      // values are recomputed on every boot, so a failed write costs nothing
+      // and must not block the recompute the user can already see.
+      reconciled.forEach(l => { LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap); });
       return { ...s, dailyLogs: nextLogs };
     });
   }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, coachingId, coachingMacrosLoaded]);
@@ -4607,8 +4616,13 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           ? LB.dailyLogAdherence(l, effectiveTargets, newType === 'training').adherence : null;
         const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
         changed = true;
-        return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
+        return { ...l, adherence, targetsSnap };  // derived only, see the food reconciler above
       });
+      if (changed) {
+        nextLogs.forEach((l, i) => {
+          if (l !== s.dailyLogs[i]) LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap);
+        });
+      }
       return changed ? { ...s, dailyLogs: nextLogs } : s;
     });
   }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive, coachingId, coachingMacrosLoaded]);
