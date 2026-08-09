@@ -50,6 +50,12 @@
 // pre-read/write against zane_daily_logs, which bypasses RLS: see the
 // comment above upsertSummary for why that's needed here specifically, not
 // just convenient).
+//
+// Weight trend for the prompt is half-vs-half over the client-supplied
+// series (same split as estimateAdaptiveTdee), with first-to-last as
+// secondary. The client keeps cleanup-week weigh-ins in that series
+// (only sick/vacation/deload drop out); labeling is UP/DOWN/FLAT with a
+// signed kg figure so the model cannot re-read a real move as "flat".
 
 import { ADMIN_EMAIL, jsonResponse, preflight, resolveUser, withinQuota } from '../_shared/edge.ts';
 import { callModel, callModelWithFallback, isProviderId, stripEmDash } from '../_shared/ai.ts';
@@ -95,10 +101,12 @@ HOW TO READ THE DAY
 
 WEIGHT AND GOAL
 You may be told the user's goal: cutting, gaining, or maintaining, or that no goal was specified.
+The weight trend line is authoritative and already labeled UP, DOWN, or FLAT with a signed kg figure. Restate that direction; never recompute it, never call an UP or DOWN trend flat, and never call a FLAT trend a gain or loss.
 - Cut: decrease is desired; increase is what to flag.
 - Gain: increase is desired; decrease is what to flag.
 - Maintain: flat is success; a material move in EITHER direction is worth a mention.
 - No goal: report weight trend as plain fact only (number and direction). Never call it good, bad, on track, or the wrong direction.
+- Never invent a reason for the weight move (food volume, water, sodium, stress, "not reading yet", etc.). The only allowed exception is the cardio water-weight note below.
 
 NUTRITION
 Judge macro misses relative to the goal when one is given. A modest calorie underage on a cut is less concerning than the same underage on a bulk; reverse for a surplus. Protein shortfalls matter in every phase. Food names, when listed, are context only: do not rate food quality or praise "clean eating".
@@ -141,26 +149,40 @@ function dayPhraseFor(dayDiff: number): string {
   return 'that day';
 }
 
-// First-half-average vs second-half-average, NOT first-vs-last: a single
-// noisy weigh-in on either end of the window (water, timing) would otherwise
-// swing the whole read. Same smoothing src/store.js's estimateAdaptiveTdee
-// already uses for this exact 14-day weight signal (the weekly check-in
-// feature), kept consistent rather than quietly inventing a second,
-// disagreeing definition of "trend" for the same underlying number. On an
-// odd count the single middle entry is dropped from both halves rather than
-// assigned to either, same as there. Prompt wording stays method-light on
-// purpose: "smoothed multi-day trend" is enough for the model; spelling out
-// first-half vs second-half only invited methodology commentary.
+// First-half-average vs second-half-average as the primary signal, NOT
+// first-vs-last alone: a single noisy weigh-in on either end (water, timing)
+// would otherwise swing the whole read. Same half-split
+// estimateAdaptiveTdee uses for the weekly check-in weight signal. On an
+// odd count the middle entry is dropped from both halves. First-to-last is
+// still reported as secondary context, and if smoothed is near-zero but
+// ends clearly moved, we surface the end-to-end move instead of calling
+// the window "flat" (that false flat was narrated back to bulking users).
+// Direction words (UP/DOWN/FLAT) are explicit so the model cannot re-read
+// a +0.7 as flat.
 function fmtWeightTrend(trend: Array<{ date: string; weight: number }>): string {
   if (!Array.isArray(trend) || trend.length < 2) return 'no weight trend available (fewer than 2 points logged recently)';
   const n = trend.length;
   const half = Math.floor(n / 2);
   if (half < 1) return 'no weight trend available (fewer than 2 points logged recently)';
-  const avgOf = (list: Array<{ weight: number }>) => list.reduce((s, l) => s + l.weight, 0) / list.length;
-  const delta = avgOf(trend.slice(n - half)) - avgOf(trend.slice(0, half));
-  const days = n;
-  if (Math.abs(delta) < 0.3) return `flat over the last ${days} logged days (smoothed multi-day trend)`;
-  return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} kg over the last ${days} logged days (smoothed multi-day trend, not day-to-day)`;
+  const avgOf = (list: Array<{ weight: number }>) =>
+    list.reduce((s, l) => s + Number(l.weight), 0) / list.length;
+  const smoothed = avgOf(trend.slice(n - half)) - avgOf(trend.slice(0, half));
+  const firstLast = Number(trend[n - 1].weight) - Number(trend[0].weight);
+  if (!Number.isFinite(smoothed) || !Number.isFinite(firstLast)) {
+    return 'no weight trend available (could not compute from logged points)';
+  }
+  const fmt = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} kg`;
+  // Smoothed near-flat but ends clearly moved: report the end-to-end move
+  // rather than "flat" (users read the chart ends; calling that flat is wrong).
+  if (Math.abs(smoothed) < 0.3 && Math.abs(firstLast) >= 0.5) {
+    const dir = firstLast > 0 ? 'UP' : 'DOWN';
+    return `${dir} ${fmt(firstLast)} first-to-last over ${n} logged days (smoothed half-vs-half was only ${fmt(smoothed)}, ends moved more). Direction is ${dir}, not flat. Do not recompute.`;
+  }
+  if (Math.abs(smoothed) < 0.3) {
+    return `FLAT over ${n} logged days (smoothed ${fmt(smoothed)}, first-to-last ${fmt(firstLast)}). Direction is FLAT, not up or down. Do not recompute.`;
+  }
+  const dir = smoothed > 0 ? 'UP' : 'DOWN';
+  return `${dir} ${fmt(smoothed)} smoothed over ${n} logged days (first-to-last ${fmt(firstLast)}). Direction is ${dir}, not flat. Do not recompute.`;
 }
 
 function daysBetween(earlierISO: string, laterISO: string): number {
@@ -276,7 +298,11 @@ function buildUserPrompt(p: Record<string, any>, dayPhrase: string): string {
   lines.push(goalText ? `User's current goal: ${goalText}.` : `User's current goal: not specified, do not assume one.`);
   const weight = num(p.weight);
   if (weight != null) {
-    lines.push(`Weight: ${weight} kg logged that day. Trend: ${fmtWeightTrend(p.weightTrend)}`);
+    // "Trend (authoritative…)" is intentional: models have re-narrated an
+    // explicit +0.7 kg move as "flat" and invented food/water causes. The
+    // direction word and ban on recomputing are the load-bearing bits.
+    lines.push(`Weight: ${weight} kg logged that day.`);
+    lines.push(`Weight trend (authoritative, do not recompute or relabel): ${fmtWeightTrend(p.weightTrend)}`);
   } else {
     lines.push('Weight: not logged that day.');
   }

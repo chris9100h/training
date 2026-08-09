@@ -7255,10 +7255,19 @@ function dsTrainingEntryForSession(store, session, dateISO) {
 function buildDailySummaryPayload(store, dateISO) {
   const log = (store.dailyLogs || []).find(l => l.date === dateISO) || null;
   const trendStart = dsShiftDate(dateISO, -13);
+  // Sick/vacation/deload still drop out (routine + hydration swing, same
+  // idea as estimateAdaptiveTdee). Cleanup does NOT: it is intentional
+  // lighter lifting with normal eating, and dropping those weigh-ins
+  // flattens a real bulk/cut trend so the summary model narrates "weight
+  // flat" against a chart that still shows the move.
   const weightTrend = (store.dailyLogs || [])
     .filter(l => l.date >= trendStart && l.date <= dateISO && l.weight != null)
-    .filter(l => !statusModeForDate(store, l.date))
-    .map(l => ({ date: l.date, weight: l.weight }))
+    .filter(l => {
+      const m = statusModeForDate(store, l.date);
+      return m !== 'sick' && m !== 'vacation' && m !== 'deload';
+    })
+    .map(l => ({ date: l.date, weight: Number(l.weight) }))
+    .filter(l => Number.isFinite(l.weight))
     .sort((a, b) => a.date.localeCompare(b.date));
   const foodItems = (store.foodLogs || [])
     .filter(l => l.date === dateISO && !l.planned)
