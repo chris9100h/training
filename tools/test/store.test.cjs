@@ -1517,6 +1517,25 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.statusModeForDate(state, null), null);
   });
 
+  test('isNutritionUnscoredMode: only sick and vacation blank a day', () => {
+    // Being ill or away is an exceptional state for eating, so the day carries
+    // no meaningful score. A deload or cleanup week only modulates TRAINING
+    // load: the macro targets are unchanged and the day is scored like any
+    // other. Treating all four alike blanked adherence for whole deload and
+    // cleanup weeks, in the card, the coach view, the check-in prefill and the
+    // adherence trend.
+    assert.strictEqual(LB.isNutritionUnscoredMode('sick'), true);
+    assert.strictEqual(LB.isNutritionUnscoredMode('vacation'), true);
+    assert.strictEqual(LB.isNutritionUnscoredMode('deload'), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode('cleanup'), false);
+    // No status at all is not "unscored", it is an ordinary day.
+    assert.strictEqual(LB.isNutritionUnscoredMode(null), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode(undefined), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode(''), false);
+    // A mode nobody has taught it about must NOT inherit the blanking.
+    assert.strictEqual(LB.isNutritionUnscoredMode('taper'), false);
+  });
+
   test('dailyLogsWeekPrefill: today weight + week sum/averages', () => {
     const today = LB.todayISO(); // weight_today is sourced from TODAY's log
     const logs = [

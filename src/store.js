@@ -6527,6 +6527,27 @@ function statusModeForDate(state, dateStr) {
   return hit ? hit.mode : null;
 }
 
+// Which status modes make a day genuinely unscoreable for NUTRITION. Only two
+// of the four do. Being ill or away is an exceptional state for eating: there
+// is no target anyone is really trying to hit, so a percentage measures
+// nothing and the day is deliberately left blank.
+//
+// A deload or a cleanup week is not that. Both modulate TRAINING load and say
+// nothing at all about food: the macro targets are unchanged and the user eats
+// to them like any other day. Treating all four the same nulled adherence for
+// the whole of every deload and every cleanup week, in the daily card, in the
+// coach view, in the check-in prefill and in the adherence trend, with nothing
+// on screen explaining the gap. That is the stretch where a coach most wants
+// to see whether nutrition held.
+//
+// Deliberately keyed on the MODE, not on "is there a status at all", so a mode
+// added later has to make this decision explicitly instead of inheriting the
+// blanking by default.
+const NUTRITION_UNSCORED_MODES = ['sick', 'vacation'];
+function isNutritionUnscoredMode(mode) {
+  return !!mode && NUTRITION_UNSCORED_MODES.includes(mode);
+}
+
 // ── Adaptive TDEE recalibration (weekly check-in, migration-free) ──────────
 // estimateTdee above is a formula run once from static inputs (height/weight/
 // age/activity) and never revisited. This is the opposite approach and the
@@ -9784,7 +9805,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee,

@@ -2761,6 +2761,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // write it). Status is not on the row, so undeclaring still has to ask
   // statusModeForDate itself, or un-marking on a sick/vacation day would hand
   // it a real score, the same hole those two call sites had before Phase 2.4.
+  // Via isNutritionUnscoredMode, so a deload/cleanup day un-marks back to a
+  // real score rather than staying blank.
   // Marking on needs no such check: mealOfChoice alone already forces
   // dailyLogAdherence's result to null.
   async function setMealOfChoice(on, name, hour) {
@@ -2781,7 +2783,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
       const isTraining = LB.isTrainingDayForDate(s, curDate);
-      const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      const unscored = !on && LB.isNutritionUnscoredMode(LB.statusModeForDate(s, curDate));
       // A past day already scored keeps the target it was scored against
       // (same dayTargetOverride contract dayTarget above and the
       // HealthScreen food reconciler use): without this, toggling Meal of

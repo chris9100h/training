@@ -3305,7 +3305,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, isStatusDay, mealOfChoiceOrdinal, weightUnit }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -3322,9 +3322,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   // This also has to suppress the FALLBACK below, not just the stored value,
   // or the card would helpfully re-derive the score the save path discarded.
   const isMealOfChoice = !!log?.mealOfChoice;
-  const unscoredDay = isStatusDay || isMealOfChoice;
+  const unscoredDay = nutritionUnscored || isMealOfChoice;
   // On a sick/vacation day adherence is intentionally nulled at save (no target
-  // to hit), so don't recompute it from the raw macros here.
+  // to hit), so don't recompute it from the raw macros here. A deload or
+  // cleanup day is NOT one of those (LB.isNutritionUnscoredMode): it eats to
+  // the same targets as any other day, so it scores and the fallback below
+  // still runs for it.
   const adh = (storedAdh != null && !isMealOfChoice)
     ? storedAdh
     : (!unscoredDay && log && dayTarget ? LB.macroAdherence({ protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget) : null);
@@ -3712,10 +3715,17 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
   // Flex Training|Rest override for the selected day (header slider). Only in the
   // user's own tab (setStore present, not the read-only coach view), only for a
-  // flex plan, and hidden when the day is under a status mode or already has a
-  // logged session (training is then settled).
+  // flex plan, and hidden when the day is unscored for nutrition or already has
+  // a logged session (training is then settled).
+  //
+  // Unscored, not "under any status mode": the slider picks which macro target
+  // the day is measured against, so it only becomes pointless where the day
+  // carries no score at all, which is sick and vacation only
+  // (LB.isNutritionUnscoredMode). A deload or cleanup day IS scored, and hiding
+  // the control there left a flex user unable to correct a day the plan derived
+  // as the wrong type, with a visibly wrong percentage and no way to fix it.
   const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
-  const selDayStatus = flexActive ? (selectedDate === today
+  const selDayUnscored = flexActive ? LB.isNutritionUnscoredMode(selectedDate === today
     ? (store.statusMode ?? null)
     : ((store.statusPeriods || []).find(p => {
         const ts = new Date(selectedDate + 'T12:00:00').getTime();
@@ -3723,7 +3733,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
         const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
         return ts >= start && ts <= end;
       })?.mode || null)) : null;
-  const showDayType = !!setStore && flexActive && !selDayStatus && !LB.isLoggedTrainingDay(store.sessions, selectedDate);
+  const showDayType = !!setStore && flexActive && !selDayUnscored && !LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const selDayType = LB.isTrainingDayForDate(store, selectedDate) ? 'training' : 'rest';
   const setFlexDayType = (type) => {
     const existing = (store.dailyLogs || []).find(l => l.date === selectedDate);
@@ -3743,7 +3753,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     // below on purpose: unlike dailyLogAdherence this site persists a
     // snapshot even for a day with no macros yet, because the dayType has
     // to survive regardless. That asymmetry is this call site's whole job.
-    const unscored = !!LB.statusModeForDate(store, selectedDate);
+    const unscored = LB.isNutritionUnscoredMode(LB.statusModeForDate(store, selectedDate));
     const adherence = (dayTarget && hasMacros && !unscored)
       ? LB.dailyLogAdherence(existing, targets, isTraining).adherence : null;
     const targetsSnap = dayTarget ? { ...dayTarget, dayType: type } : { dayType: type };
@@ -4535,19 +4545,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // own dayTarget memo makes the exact same assumption for today.
         const snap = log.date !== today ? log.targetsSnap : null;
         const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
-        let { adherence, targetsSnap } = dayMode
+        // Only sick and vacation blank the day, not every status: see
+        // LB.isNutritionUnscoredMode. A deload or cleanup week eats to the
+        // same targets as any other week and gets scored like one.
+        const dayUnscored = LB.isNutritionUnscoredMode(dayMode);
+        let { adherence, targetsSnap } = dayUnscored
           ? { adherence: null, targetsSnap: null }
           : LB.dailyLogAdherence(log, effectiveTargets, isTraining, storedTarget);
-        if (!dayMode && flexActive && !targetsSnap) {
+        if (!dayUnscored && flexActive && !targetsSnap) {
           const dt = log.targetsSnap?.dayType;
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
         }
         if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
-        // Bump updatedAt so sync_daily_logs_batch's `updated_at < EXCLUDED`
-        // staleness guard accepts this write. The Food-Tracker rollup already
-        // persisted this row with its own timestamp; re-sending the reconciled
-        // adherence with that SAME timestamp would be silently dropped server-
-        // side, leaving the coach/check-in with null/stale adherence forever.
         // No updatedAt bump: a recompute is not an edit of the day. It used
         // to need one to get past sync_daily_logs_batch's staleness guard,
         // which is exactly what let it carry this device's stale weight,
@@ -4608,7 +4617,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // Same hole as setFlexDayType: this rewrote a score onto days that
         // must not carry one. The flag is on the row so dailyLogAdherence
         // sees it; status has to be asked for.
-        const unscored = l.mealOfChoice || !!LB.statusModeForDate(s, l.date);
+        const unscored = l.mealOfChoice || LB.isNutritionUnscoredMode(LB.statusModeForDate(s, l.date));
         // Unlike the food reconciler this genuinely needs the CURRENT targets:
         // the day type itself changed, and the old snapshot only holds the
         // target for the type that turned out to be wrong.
@@ -4829,7 +4838,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // can be today (see dayLabel above), and today has to answer from the live
   // statusMode cache rather than scanning statusPeriods, since a just-started
   // period may not have landed there yet.
-  const selectedIsStatusDay = !!LB.statusModeForDate(store, selectedDate);
+  const selectedNutritionUnscored = LB.isNutritionUnscoredMode(LB.statusModeForDate(store, selectedDate));
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see the onExpand wiring per card and
   // expandableCards further down, which the sheet renders from by this id).
@@ -4863,7 +4872,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
     aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
