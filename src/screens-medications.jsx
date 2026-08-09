@@ -1858,7 +1858,15 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   <>
                     {renderSearchAndFilterRow()}
                     {!mainInventoryList.length ? (
-                      <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                      // Three different empties behind one empty list. Blaming a
+                      // filter that is not set is the reachable wrong one: the
+                      // Stock empty state's own button creates a medication, and
+                      // openMedSheet leaves Track Medication Stock OFF, so two
+                      // taps from that button land here with nothing tracked and
+                      // no filter at all.
+                      stockFilterActiveCount > 0
+                        ? <div style={mdEmptyHint}>Nothing matches this filter.</div>
+                        : <div style={mdEmptyHint}>No medication has stock tracking switched on yet. Open one under Medications and turn on Track Medication Stock.</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {mainInventoryList.map(renderMedRow)}
@@ -2235,8 +2243,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
           sees upfront whether doses keep firing after the move, no separate
           confirm dialog needed since nothing is destroyed, only relocated. */}
       <Sheet open={movePlanOpen} onClose={() => setMovePlanOpen(false)} title="Move to plan" titleColor="var(--accent)">
+        {/* The empty branch deliberately does not name a fix: the list is also
+            empty when other plans DO exist but none is eligible (this
+            medication is already in them, or they sit in the other template
+            bucket), so "create a plan" would be wrong advice as often as it is
+            right. */}
         {moveTargetPlans.length === 0 ? (
-          <div style={mdEmptyHint}>No other plan to move this into yet. Go back to the plan list and tap New plan first.</div>
+          <div style={mdEmptyHint}>No other plan can take this medication right now.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {moveTargetPlans.map(p => (
@@ -2556,7 +2569,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
           // No navigation offered: this screen is a fixed overlay with only
           // its own back button, so it names where doses come from rather
           // than promising a jump it can't make.
-          <div style={mdEmptyHint}>Nothing to pack this week. Doses show up here once a medication has scheduled times in an active plan (Schedule tab).</div>
+          <div style={mdEmptyHint}>Nothing to pack this week. Doses show up here once a medication has scheduled times in an active plan (Schedule tab) and is not set to "Exclude from pillbox".</div>
         ) : compartmentGroups.map(g => (
           // Compartment first, then the days due within it: filling a real
           // pillbox goes compartment by compartment across the whole week

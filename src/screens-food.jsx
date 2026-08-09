@@ -2966,7 +2966,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // lands planned neither warns about overwriting manual macros nor gets a
     // patchDaily (which would null them).
     const targetIsFuture = targetDate > today;
-    const targetLandsPlanned = targetIsFuture || (planMode && targetDate === today);
+    // With Plan Mode off there is no planned state to land in: nothing renders
+    // the check-off box or the planned/logged switch, so a planned row would
+    // sit outside dayTotals, the daily log and the adherence score forever.
+    // Copying onto a future date therefore lands logged, exactly like the add
+    // sheets do on a future day once Plan Mode is off.
+    const targetLandsPlanned = planMode && (targetIsFuture || targetDate === today);
     if (!targetLandsPlanned) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
@@ -3545,12 +3550,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (editingEntry) {
       // Editing an entry to Logged (qtyEditPlanned false) can be the first
       // logged entry claiming a day that carries manual Health-tab macros; warn
-      // before patchDaily overwrites them, same as the checkbox flip.
-      if (!qtyEditPlanned) {
+      // before patchDaily overwrites them, same as the checkbox flip. With Plan
+      // Mode off the entry cannot stay planned at all (see confirmRecipeLog's
+      // edit branch for the full reasoning): nothing renders a way back out of
+      // that state, so saving an edit is the repair path for an orphaned row.
+      const savePlanned = planMode && qtyEditPlanned;
+      if (!savePlanned) {
         const ok = await warnIfOverwritingManualMacros(editingEntry.date);
         if (!ok) return;
       }
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
@@ -4226,11 +4235,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // edit path. Editing to Logged can be the first logged entry claiming a
       // day with manual Health-tab macros, so warn before patchDaily overwrites
       // them, same as commitEntries / the checkbox flip.
-      if (!qtyEditPlanned) {
+      // With Plan Mode off, planned is not a state this screen can represent:
+      // neither the check-off box nor the planned/logged switch renders. Saving
+      // an edit therefore REPAIRS an entry that got orphaned as planned (by an
+      // older build, or by a copy onto a future date) rather than writing it
+      // back planned with no way out. The manual-macro warning runs for the
+      // same reason it runs on a Logged edit: the day's totals now include it.
+      const savePlanned = planMode && qtyEditPlanned;
+      if (!savePlanned) {
         const ok = await warnIfOverwritingManualMacros(editingEntry.date);
         if (!ok) return;
       }
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };

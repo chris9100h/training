@@ -1577,7 +1577,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         { title: 'Sign out anyway?', ok: 'Sign out anyway', danger: true }
       );
       if (!ok) return;
-      await LB.signOut();
+      // Check the result before acting on it. The most common reason the flush
+      // failed is being offline, and offline signOut returns { error } BEFORE
+      // it removes the session, so nothing is signed out and no SIGNED_OUT
+      // fires. Reloading regardless booted straight back into the signed-in
+      // app: the user confirmed a red dialog and the only visible effect was
+      // losing their place. Say so instead.
+      const { error: signOutErr } = (await LB.signOut()) || {};
+      if (signOutErr) {
+        await confirm(
+          'Signing out needs a connection, and there is none right now. Your data is safe on this device. Try again once you are back online.',
+          { title: "Couldn't sign out", ok: 'OK', cancel: null }
+        );
+        return;
+      }
       // Reload so the user actually lands on the login screen: the involuntary
       // SIGNED_OUT path deliberately leaves the app on screen (it also covers
       // a flaky refresh while you keep training), which after a tapped sign-out

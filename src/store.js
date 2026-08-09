@@ -256,8 +256,12 @@ async function signUp(email, password, name, unit = null) {
   return data;
 }
 
+// Returns the client's { error } rather than swallowing it. Sign-out is not
+// purely local: on a network failure the client returns before it removes the
+// session, so nothing is signed out and no SIGNED_OUT fires. Callers that do
+// anything after it (navigate, reload, wipe) have to be able to tell.
 async function signOut() {
-  await _supabase.auth.signOut();
+  return await _supabase.auth.signOut();
 }
 
 async function signInWithPasskey() {

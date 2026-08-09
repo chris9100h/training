@@ -1196,6 +1196,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   // What the input and the set rows should show for a set.
   const dispWeight = (st) => (isPlusLoad ? (st?.addedKg ?? null) : (st?.kg ?? null));
+  // The intensity-technique sheets (drop-set, myo-reps, AMRAP variations) edit
+  // one kg per chain row and seed row 0 from the parent set's TOTAL, so their
+  // write-back arrives in total space, not typed space. Re-derive the belt
+  // figure from it: writing kg alone left addedKg stale, so the row went on
+  // rendering "+20" while volume, e1RM and the PR checks had already moved to
+  // the new total, and tapping that weight cell then seeded 20 and reverted kg
+  // on confirm. Bodyweight is folded in at write time here for the same reason
+  // weightPatch does it, a later weigh-in must not rewrite a finished set.
+  const totalToPatch = (total) => {
+    if (!isPlusLoad) return { kg: total };
+    if (total == null) return { kg: null, addedKg: null };
+    return { kg: total, addedKg: Math.round((total - (plusLoadBw ?? 0)) * 100) / 100 };
+  };
 
   const prValOf = (st) => {
     // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
@@ -1963,7 +1976,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...en,
         sets: en.sets.map((st, si) => si !== dropSetIdx ? st : {
           ...st,
-          kg: first.kg,
+          ...totalToPatch(first.kg),
           reps: first.reps,
           // Clear the unilateral seed: LB.effReps prefers repsL/repsR over
           // reps, so leaving the seeded per-side values in place made volume,
@@ -2048,7 +2061,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...en,
         sets: en.sets.map((st, si) => si !== myoSetIdx ? st : {
           ...st,
-          kg: first.kg,
+          ...totalToPatch(first.kg),
           reps: first.reps,
           // See finishDropSet: a stale unilateral seed would outrank `reps`
           // in effReps and score the whole set wrong.
@@ -2122,7 +2135,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...en,
         sets: en.sets.map((st, si) => si !== avSetIdx ? st : {
           ...st,
-          kg: first.kg,
+          ...totalToPatch(first.kg),
           reps: first.reps,
           // See finishDropSet: a stale unilateral seed would outrank `reps`
           // in effReps and score the whole set wrong.
@@ -2206,9 +2219,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
           const last = e.sets[e.sets.length - 1];
+          // A plus_load set is only valid carrying BOTH the total and the typed
+          // belt load, the rule buildSeedSets already follows (store.js: a seed
+          // with no previous addedKg comes back with kg null too). Cloning kg
+          // alone produced a row that renders empty, since dispWeight reads
+          // addedKg, while its total still fed volume, e1RM and the PR checks.
+          const plusLoad = LB.isBodyweightPlusLoad(ex);
+          const carryKg = plusLoad && last?.addedKg == null ? null : (last?.kg ?? bwKg ?? null);
+          const carryAdded = plusLoad ? { addedKg: last?.addedKg ?? null } : null;
           const newSet = uni
-            ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
-            : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
+            ? { kg: carryKg, ...carryAdded, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+            : { kg: carryKg, ...carryAdded, reps: last?.reps ?? null, done: false };
           return { ...e, sets: [...e.sets, newSet] };
         }),
       };
@@ -5139,7 +5160,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const oldEx = LB.findExercise(s, e.exId);
         const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
         const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
-        if (modeChanged || assistChanged) {
+        // Crossing into or out of bodyweight-plus-load changes what the kg
+        // column MEANS (total moved mass versus the number typed on the belt),
+        // so the old sets cannot pass through verbatim: swapping a 100 kg row
+        // to a weighted pull-up used to leave {kg:100} with no addedKg, a row
+        // that renders empty while 100 kg still counted toward volume and PRs.
+        // buildSeedSets below carries addedKg correctly, so reuse that path.
+        const plusLoadChanged = LB.isBodyweightPlusLoad(oldEx) !== LB.isBodyweightPlusLoad(newEx);
+        if (modeChanged || assistChanged || plusLoadChanged) {
           const isUni = newEx?.movement_type === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
           const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
