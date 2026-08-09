@@ -125,11 +125,23 @@ async function sendReminders() {
       await sendWebPush(row.user_id, title, message);
     }
 
-    await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ water_last_push_at: new Date(now).toISOString() }),
-    }).catch(e => console.error(`[water-reminder] throttle write error for ${row.user_id}:`, e));
+    // Stamp the throttle. fetch only rejects on transport failure, so a
+    // PATCH that comes back 4xx/5xx resolves like a success and the write
+    // silently never happened. Check the status explicitly, the same way
+    // medication-reminder checks its state patch, otherwise a broken throttle
+    // looks exactly like a working one in the logs.
+    try {
+      const res = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ water_last_push_at: new Date(now).toISOString() }),
+      });
+      if (!res.ok) {
+        console.error(`[water-reminder] throttle write failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
+      }
+    } catch (e) {
+      console.error(`[water-reminder] throttle write error for ${row.user_id}:`, e);
+    }
   }
 }
 

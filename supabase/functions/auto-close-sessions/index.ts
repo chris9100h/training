@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
     for (const sess of sessions) {
       // User settings
       const settRes = await dbFetch(
-        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id,status_mode`
+        `zane_user_settings?user_id=eq.${sess.user_id}&select=session_timeout_minutes,push_enabled,pushover_user_key,use_pushover,in_progress_session_id,status_mode,status_mode_since`
       );
       // Same non-2xx-reply hazard as sessRes above (an error OBJECT, not the
       // malformed-body fallback): left unchecked, `sett` silently resolves to
@@ -151,6 +151,11 @@ Deno.serve(async (req) => {
         // multi-million-minute duration.
         const startedAt = sess.started_at ? new Date(sess.started_at) : null;
         const durationMinutes = startedAt ? Math.round((lastActivity.getTime() - startedAt.getTime()) / 60000) : null;
+        const cleanupSince = sett?.status_mode === 'cleanup' && sett?.status_mode_since
+          ? new Date(sett.status_mode_since) : null;
+        const cleanupAtSessionStart = !!cleanupSince && !isNaN(cleanupSince.getTime())
+          && cleanupSince.getTime() <= now.getTime()
+          && !!startedAt && startedAt.getTime() >= cleanupSince.getTime();
         const closeResp = await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
           method: 'PATCH',
           headers: { 'Prefer': 'return=minimal' },
@@ -161,7 +166,17 @@ Deno.serve(async (req) => {
           // feed detectStall and the PR baselines with its deliberately
           // reduced loads and report a stall on a lift that was only ever
           // meant to be light.
-          body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}), ...(sett?.status_mode === 'cleanup' ? { is_cleanup: true } : {}) }),
+          //
+          // Stamp it on the same PREDICATE the client uses, though, not on
+          // status_mode alone. status_mode is read here, now, at close time,
+          // while the session itself ran earlier: switching cleanup on after
+          // training would otherwise retroactively flag that workout, and its
+          // full-effort loads would be excluded from exactly the signals the
+          // paragraph above wants protected. So require that cleanup had
+          // actually started (status_mode_since set, not in the future,
+          // mirroring the client's calendarDaysSince >= 0) and that the
+          // session began at or after that point.
+          body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}), ...(cleanupAtSessionStart ? { is_cleanup: true } : {}) }),
         });
         // Unlike the three read queries above, this write was never checked:
         // a transient non-2xx here (still `ok`-checkable, dbFetch never
