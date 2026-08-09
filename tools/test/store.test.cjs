@@ -276,6 +276,95 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
   });
 
+  // ── mergeBootScalars: top-level scalar resolution at boot ────────────────
+  // The boot merge is where this project's most expensive mistakes have been
+  // made, and app.jsx has no test harness, so the decision itself lives in
+  // store.js purely so these can exist.
+  const bs = {
+    activeScheduleId: 'srv', cycleIndex: 3, cycleStartDate: '2026-06-01',
+    weekPlanStartDate: '2026-06-01', lastAdvancedDate: '2026-06-05',
+    activeMealTemplateId: null, statusMode: null, statusModeSince: null,
+    activeCardioPlanId: null, deloadPromptDismissedAt: null, customDayTypes: [],
+  };
+  test('mergeBootScalars keeps an unsynced local plan switch', () => {
+    const cur = { ...bs, activeScheduleId: 'local', cycleIndex: 0 };
+    const out = LB.mergeBootScalars(bs, cur, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.cycleIndex, 0);
+  });
+  test('mergeBootScalars takes the server value this device never touched', () => {
+    const fresh = { ...bs, activeScheduleId: 'srv2', cycleIndex: 9 };
+    const out = LB.mergeBootScalars(fresh, { ...bs }, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'srv2');
+    assert.strictEqual(out.cycleIndex, 9);
+  });
+  test('mergeBootScalars never splits the plan tuple (weekPlanStartDate rides with the plan id)', () => {
+    const cur = { ...bs, activeScheduleId: 'local', weekPlanStartDate: '2026-06-08' };
+    const fresh = { ...bs, weekPlanStartDate: '2026-05-01' };
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-08');
+  });
+  test('mergeBootScalars keeps an offline weekPlanStartDate edit on its own', () => {
+    const cur = { ...bs, weekPlanStartDate: '2026-06-15' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-15');
+  });
+  test('mergeBootScalars resolves statusMode and statusModeSince as one pair', () => {
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const fresh = { ...bs, statusModeSince: '2026-01-01T00:00:00Z' };
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars keeps offline activeCardioPlanId and deloadPromptDismissedAt', () => {
+    const cur = { ...bs, activeCardioPlanId: 'cp1', deloadPromptDismissedAt: '2026-06-09' };
+    const fresh = { ...bs, activeCardioPlanId: 'other', deloadPromptDismissedAt: null };
+    const out = LB.mergeBootScalars(fresh, cur, { ...bs }, []);
+    assert.strictEqual(out.activeCardioPlanId, 'cp1');
+    assert.strictEqual(out.deloadPromptDismissedAt, '2026-06-09');
+  });
+  test('mergeBootScalars compares customDayTypes by value, not identity', () => {
+    const untouched = LB.mergeBootScalars({ ...bs, customDayTypes: ['Rehab'] }, { ...bs, customDayTypes: [] }, { ...bs, customDayTypes: [] }, []);
+    assert.deepStrictEqual(untouched.customDayTypes, ['Rehab']);
+    const edited = LB.mergeBootScalars({ ...bs, customDayTypes: ['Rehab'] }, { ...bs, customDayTypes: ['Mobility'] }, { ...bs, customDayTypes: [] }, []);
+    assert.deepStrictEqual(edited.customDayTypes, ['Mobility']);
+  });
+  test('mergeBootScalars keeps the local side when there is no base (legacy cache)', () => {
+    const cur = { ...bs, activeScheduleId: 'local', statusMode: 'vacation' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, null, []);
+    assert.strictEqual(out.activeScheduleId, 'local');
+    assert.strictEqual(out.statusMode, 'vacation');
+  });
+  test('mergeBootScalars never writes undefined for a field the cache predates', () => {
+    const cur = { ...bs, activeScheduleId: 'local' };
+    delete cur.weekPlanStartDate;   // cache written before the column existed
+    delete cur.customDayTypes;
+    const out = LB.mergeBootScalars({ ...bs, weekPlanStartDate: '2026-06-01', customDayTypes: ['Rehab'] }, cur, null, []);
+    assert.strictEqual(out.weekPlanStartDate, '2026-06-01');
+    assert.deepStrictEqual(out.customDayTypes, ['Rehab']);
+  });
+  test('mergeBootScalars lets an open status period override a stale statusMode', () => {
+    // Period rows are written straight to Supabase, statusMode rides the diff
+    // queue, so the durable record can say sick while the settings row does not.
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-06-09T08:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars({ ...bs }, { ...bs }, { ...bs }, periods);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars leaves statusMode alone when the open period agrees', () => {
+    const fresh = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-06-01T00:00:00Z', endedAt: null }];
+    const out = LB.mergeBootScalars(fresh, { ...fresh }, { ...fresh }, periods);
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars ignores closed status periods', () => {
+    const periods = [{ id: 'p1', mode: 'sick', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-08T00:00:00Z' }];
+    const out = LB.mergeBootScalars({ ...bs }, { ...bs }, { ...bs }, periods);
+    assert.strictEqual(out.statusMode, null);
+  });
+
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────
   const now = new Date('2026-06-10T12:00:00Z');
   test('mergeSessions drops sessions the server no longer has (old ones)', () => {

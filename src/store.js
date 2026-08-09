@@ -9242,6 +9242,77 @@ function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
 // the delIds filter the first didn't need. Local-only/server-only handling
 // (never-synced rows, resurrection guards) stays with each caller since it
 // varies per collection, this covers just the shared id-matched half.
+// ── Boot merge: the store's top-level scalars ────────────────────────────────
+// Everything here lives in zane_user_settings and reaches the store as a plain
+// top-level field. The boot merge used to resolve only the plan-position tuple
+// and the active meal plan and let `...fresh` decide the rest, so an unsynced
+// offline edit to any other one was dropped, permanently: app.jsx points
+// syncBase at the pristine server state BEFORE it commits the merged store, so
+// the discarded value matches the diff base, the follow-up flush sees nothing
+// to push, and it is never retried. Same rule the settings object already
+// applies to every one of its keys, just never extended up here.
+//
+// The test is "did THIS device change it since the last confirmed sync", never
+// a blind "the local cache wins". Unlike darkMode or accentColor, every field
+// here can be written by someone else: a coach pushing and activating a plan
+// writes the plan position through syncStore from their own session. Trusting
+// the cache outright reverted that activation on this device's next boot, and
+// the following flush then pushed the stale value back over the coach's write.
+//
+// Grouped, not per-field, because some of these are written together and mean
+// nothing apart. Activating a weekday plan co-writes activeScheduleId and
+// weekPlanStartDate; resolving them separately can keep the new plan id and
+// take the server's old start date, a plan position that never existed on
+// either device, which the missed-day math then reads as fact. statusMode and
+// statusModeSince are a pair for the same reason.
+const BOOT_SCALAR_GROUPS = [
+  ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'weekPlanStartDate', 'lastAdvancedDate'],
+  ['activeMealTemplateId'],
+  ['statusMode', 'statusModeSince'],
+  ['activeCardioPlanId'],
+  ['deloadPromptDismissedAt'],
+  ['customDayTypes'],
+];
+
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// fresh = server state, cur = local cache, base = last confirmed sync (null on a
+// legacy cache). statusPeriods = the ALREADY MERGED period rows, see below.
+function mergeBootScalars(fresh, cur, base, statusPeriods) {
+  const out = {};
+  for (const group of BOOT_SCALAR_GROUPS) {
+    // A cache written before one of these fields existed carries it as
+    // undefined. Keeping that would blank a real server value, so those fields
+    // individually fall back to the server. It can split a group on exactly one
+    // boot of a legacy cache, which is no worse than today's behaviour (the
+    // server won for all of them anyway) and heals as soon as the cache is
+    // rewritten in the current shape.
+    const present = group.filter(f => cur && cur[f] !== undefined);
+    // No base means the rule cannot tell an unsynced edit from a stale value.
+    // Keep the local side, the same fallback the plan tuple already used and
+    // the same bias as mergeSessions' cachedDiffersFromBase: in doubt, do not
+    // discard this device's data.
+    const localWins = present.length > 0 && (!base || present.some(f => !sameJson(cur[f], base[f])));
+    for (const f of group) {
+      out[f] = (localWins && cur[f] !== undefined) ? cur[f] : fresh?.[f];
+    }
+  }
+  // statusPeriods is written STRAIGHT to Supabase (insert on start, ended_at
+  // update on end), while statusMode rides the ordinary diff queue and can lag
+  // or fail on its own. So the durable record can hold an open sick/vacation
+  // period while the settings row still says normal, and the merge above would
+  // faithfully reproduce that contradiction: the UI shows normal training,
+  // history says sick, and the coach sees a third thing. The period row is the
+  // stronger signal (it is the one that is written synchronously and unwrapped),
+  // so an open period decides the mode.
+  const open = (statusPeriods || []).find(p => p.endedAt == null);
+  if (open && out.statusMode !== open.mode) {
+    out.statusMode = open.mode;
+    out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
+  }
+  return out;
+}
+
 function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   const curMap = new Map((curRows || []).map(r => [r.id, r]));
   const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
@@ -9472,7 +9543,7 @@ window.LB = {
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted,
   loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
