@@ -8861,7 +8861,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
               <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
             </div>
-            <Toggle on={exNotePinned} onToggle={() => setExNotePinned(v => !v)} />
+            <Toggle on={exNotePinned} onToggle={() => setExNotePinned(v => !v)} label="Pin note" />
           </div>
         )}
         <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>

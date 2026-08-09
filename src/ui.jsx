@@ -775,11 +775,36 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 // disabled: for a switch whose state is dictated by something else (e.g. the
 // coaching tab while a relationship is active). Renders muted and stops
 // tapping, instead of springing back and looking broken.
-function Toggle({ on, onToggle, disabled = false }) {
+//
+// A real <button role="switch">, not a div with an onClick. The div version
+// was unreachable by keyboard and invisible to assistive tech: no focus, no
+// Space/Enter, and nothing announcing that it was a control or which way it
+// was set. The element brings all of that for free, so there is no key
+// handler here on purpose.
+//
+// label names the control. Every switch in this app sits next to its text in
+// a row, and that text is not associated with anything, so without a name a
+// screen reader reads "switch, on" and nothing else. The settings Row injects
+// its own label automatically (see there); pass it by hand anywhere else.
+//
+// Buttons come with their own padding, font, background and border, so those
+// are reset explicitly rather than inherited from the UA. display: block
+// keeps the box identical to the div this replaced, so no caller's layout
+// shifts. The 13px track radius is the one documented exception to the radius
+// scale (CLAUDE.md), the switch is deliberately pill-shaped at 44x26.
+function Toggle({ on, onToggle, disabled = false, label }) {
   return (
-    <div onClick={disabled ? undefined : onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!on}
+      aria-label={label || undefined}
+      disabled={disabled}
+      onClick={disabled ? undefined : onToggle}
+      style={{ display: 'block', padding: 0, margin: 0, font: 'inherit', appearance: 'none', WebkitAppearance: 'none', width: 44, height: 26, borderRadius: 13, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1, flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `var(--hair-width) solid ${on ? 'var(--hair-accent)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}
+    >
       <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
-    </div>
+    </button>
   );
 }
 

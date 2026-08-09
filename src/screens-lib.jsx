@@ -124,7 +124,7 @@ function PinNoteToggle({ on, onToggle }) {
         <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
         <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
       </div>
-      <Toggle on={on} onToggle={onToggle} />
+      <Toggle on={on} onToggle={onToggle} label="Pin note" />
     </div>
   );
 }

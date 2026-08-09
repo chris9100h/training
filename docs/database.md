@@ -16,7 +16,7 @@ in `schema.sql` und dieser Datei nachgezogen wurden. `tools/check-db-live.cjs`
 (`.github/workflows/db-drift.yml`, wöchentlich + manuell) vergleicht zusätzlich
 die echte Datenbank. Mit Service-Key (GitHub-Secret `SUPABASE_SERVICE_ROLE_KEY`):
 volles Inventar via `admin_schema_inventory()` (Spalten in beide Richtungen,
-anon-EXECUTE-Grants, Realtime-Publikation). Ohne Key: Existenz-Probe aller
+anon- und authenticated-EXECUTE-Grants, Realtime-Publikation). Ohne Key: Existenz-Probe aller
 `schema.sql`-Spalten per anonymer Read-only-Selects. (Die PostgREST-OpenAPI-Spec
 unter `/rest/v1/` wäre die schlankere Quelle, ist bei Supabase aber nur noch mit
 dem service_role-Key abrufbar.)
@@ -47,6 +47,20 @@ der Nutzer den Workflow re-runnt (Actions → „DB drift check" → Run workflo
     echte Grant-Falle: REVOKE-Migration nach dem Muster von 0141 nachschieben.
     Fehlt umgekehrt der Grant für eine gelistete Ausnahme, ist der Live-Grant
     kaputt (Migration erneut prüfen), nicht die Doku.
+  - *`has_function_privilege('authenticated', ...) = true` auf einer
+    service-role-only Funktion:* eine echte Grant-Falle, und zwar die Hälfte,
+    die noch offen ist (siehe „Grant-Fallen" unten): die
+    `ALTER DEFAULT PRIVILEGES`-Regel vergibt `EXECUTE` bei jedem
+    `CREATE FUNCTION` weiter direkt an `authenticated`. Fix ist ein explizites
+    `REVOKE EXECUTE ... FROM authenticated` als Migration, Muster: 0208. Soll die
+    Funktion in Wahrheit für eingeloggte User da sein, stattdessen die Signatur
+    aus `EXPECTED_NO_AUTHENTICATED_EXEC` in `tools/check-db-live.cjs` entfernen.
+  - *„service-role-only function ... is absent":* die Funktion wurde umbenannt,
+    gelöscht oder ihre Signatur hat sich geändert. Erst klären, dann die
+    Signatur in `EXPECTED_NO_AUTHENTICATED_EXEC` nachziehen.
+  - *„authenticated_exec not reported" (nur ein Hinweis, kein Fehler):*
+    Migration 0258 ist live noch nicht eingespielt, der authenticated-Teil des
+    Grant-Checks läuft bis dahin nicht.
   - *Unerwartete App-Tabelle in der Realtime-Publikation:* Wenn gewollt, die
     Realtime-Doku (hier + CLAUDE.md) **und** `EXPECTED_REALTIME` in
     `tools/check-db-live.cjs` nachziehen; sonst Publikation bereinigen lassen.
@@ -662,7 +676,8 @@ Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, option
 - **`handle_new_user()`** → `trigger` (SECURITY DEFINER): legt beim Anlegen eines Auth-Users die `zane_user_settings`-Zeile an (ON CONFLICT DO NOTHING); Trigger `on_auth_user_created` auf `auth.users`.
 - **VIP-Backgrounds** (Migration 0103): **`get_user_vip_backgrounds()`** → `TABLE(email text, bg_key text)` (Admin, alle gesetzten Backgrounds) / **`set_user_vip_background(p_email text, p_bg_key text)`** → `text` (Admin, setzt `zane_user_settings.vip_background` für den User per Email; leerer Key = löschen).
 - **`get_force_update_nonce()`** → `text` / **`admin_force_update()`** → `void` (setzen/lesen nur `zane_app_config.force_update_nonce`, Admin-Setter): pusht das „New version available"-Update-Banner an **alle** verbundenen Clients, ohne dass ein `sw.js`-Cache-Bump nötig ist (der laut Deployment-Regeln nur auf ausdrückliche Aufforderung passiert, die meisten Deploys lösen also keinen Banner aus). `app.jsx`s `checkForceUpdate` pollt die Nonce im selben Rhythmus wie den bestehenden `sw.js`-Text-Versions-Check (`checkSwUpdate`) und vergleicht sie gegen den localStorage-Key `logbook-force-nonce-seen`, nach demselben „erstes Sichten = Baseline, kein Banner"-Prinzip, damit ein brandneues Gerät nie fälschlich ein Update angezeigt bekommt. Ein Klick auf „Update" führt über `applyUpdate`/`LB.clearCachesAndReload()` immer zu einem echten frischen Reload, unabhängig davon, ob wirklich ein neuer Service Worker existiert. Migration 0131. Admin-UI: Settings → Admin → „Force refresh all users". Daneben „Test update banner" (kein Server-Call, setzt nur lokal `updateAvailable=true` zum Testen der Banner-UI).
-- **`admin_schema_inventory()`** → `jsonb` (STABLE SECURITY DEFINER, **internal/ops-only**): liefert das komplette Schema-Inventar für den wöchentlichen Drift-Check (`tools/check-db-live.cjs` via `.github/workflows/db-drift.yml`): alle public-Spalten (`information_schema`), je Funktion `has_function_privilege('anon', ...)` und die `supabase_realtime`-Publikation. Kein Grant für `anon`/`authenticated`, nur `service_role` (Aufruf per PostgREST mit dem Service-Key aus dem GitHub-Actions-Secret `SUPABASE_SERVICE_ROLE_KEY`). Migration 0142.
+- **`admin_schema_inventory()`** → `jsonb` (STABLE SECURITY DEFINER, **internal/ops-only**): liefert das komplette Schema-Inventar für den wöchentlichen Drift-Check (`tools/check-db-live.cjs` via `.github/workflows/db-drift.yml`): alle public-Spalten (`information_schema`), je Funktion `has_function_privilege('anon', ...)` **und** `has_function_privilege('authenticated', ...)` (Feld `authenticated_exec`, seit Migration 0258) sowie die `supabase_realtime`-Publikation. Kein Grant für `anon`/`authenticated`, nur `service_role` (Aufruf per PostgREST mit dem Service-Key aus dem GitHub-Actions-Secret `SUPABASE_SERVICE_ROLE_KEY`). Migrationen 0142, 0258.
+  - `authenticated_exec` speist die Liste `EXPECTED_NO_AUTHENTICATED_EXEC` im Drift-Tool: eine kleine Allowlist von Funktionen, die **kein** eingeloggter User ausführen darf (aktuell `bump_api_usage`, `collapse_water_logs`, `admin_schema_inventory`). Grund ist die zweite Hälfte der Grant-Fallen unten: die `ALTER DEFAULT PRIVILEGES`-Regel vergibt `EXECUTE` weiterhin direkt an `authenticated`, und genau diese Regression (0207 → 0208 bei `bump_api_usage`) hatte bisher kein Signal. Neue service-role-only Funktion: Signatur dort eintragen.
 - **`auto-close-sessions`** (Edge Function): schließt abgelaufene offene Sessions. Keine Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 - **Cron-Auth (Migration 0230):** `reminder`/`water-reminder`/`meal-reminder`/`medication-reminder`/`daily-log-reminder`/`auto-close-sessions` sind reine Cron-Trigger-Ziele ohne eigene Caller-Auflösung (anders als `pushover`, siehe dessen `resolveCaller`); sie verlangen seit Migration 0230 einen `Authorization: Bearer <CRON_SECRET>`-Header (Edge-Function-Secret `CRON_SECRET`, geprüft vor jeder eigentlichen Arbeit, fail-closed bei leerem Secret). Die fünf per pg_cron geschedulten Jobs lesen den Wert zur Laufzeit aus Supabase Vault (`vault.decrypted_secrets`); `auto-close-sessions` ist nur per Dashboard geschedult und braucht denselben Header dort manuell nachgetragen.
 

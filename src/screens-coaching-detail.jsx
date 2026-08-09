@@ -914,7 +914,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
     </div>
   );
   const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `var(--hair-width) solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, textShadow: active ? 'var(--text-lift)' : 'none', color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
-  const renderToggle = (on, onToggle) => <Toggle on={on} onToggle={onToggle} />;
+  const renderToggle = (on, onToggle, label) => <Toggle on={on} onToggle={onToggle} label={label} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' };
   const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 };
@@ -1017,7 +1017,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               </div>
               {renderHelp('required')}
             </div>
-            {renderToggle(fd.required, () => set('required', !fd.required))}
+            {renderToggle(fd.required, () => set('required', !fd.required), 'Required')}
           </div>
 
           <div>
@@ -1039,7 +1039,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                     Client logs this field daily, weekly aggregate prefills the check-in
                   </div>
                 </div>
-                {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log))}
+                {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log), 'Track daily in health log')}
               </div>
               {fd.show_in_health_log && (
                 <div>
@@ -1545,7 +1545,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
           <i className="fa-solid fa-sliders" />
         </button>
         <div style={{ opacity: toggling ? 0.6 : 1 }}>
-          <Toggle on={checkinEnabled} onToggle={onToggle} />
+          <Toggle on={checkinEnabled} onToggle={onToggle} label="Weekly check-ins" />
         </div>
       </div>
     </div>

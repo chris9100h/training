@@ -3305,7 +3305,7 @@ $function$;
 REVOKE EXECUTE ON FUNCTION public.get_founding_seats() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_founding_seats() TO anon, authenticated;
 
--- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
+-- ── Ops: schema inventory for the db-drift workflow (Migrations 0142, 0258) ─
 
 CREATE OR REPLACE FUNCTION public.admin_schema_inventory()
 RETURNS jsonb
@@ -3326,6 +3326,7 @@ AS $$
                'f', p.proname,
                'sig', p.oid::regprocedure::text,
                'anon_exec', has_function_privilege('anon', p.oid, 'execute'),
+               'authenticated_exec', has_function_privilege('authenticated', p.oid, 'execute'),
                'definer', p.prosecdef)
              ORDER BY p.proname)
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

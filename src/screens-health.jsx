@@ -2603,7 +2603,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
             </div>
           )}
         </>
-      ), null, <Toggle on={!!form.proteinFixed} onToggle={() => setForm(f => ({ ...f, proteinFixed: !f.proteinFixed }))} />)}
+      ), null, <Toggle on={!!form.proteinFixed} onToggle={() => setForm(f => ({ ...f, proteinFixed: !f.proteinFixed }))} label="Fixed protein" />)}
 
       {/* Auto: 25% of calories, floored at FAT_FLOOR_PER_KG. Per kg: fat lands
           on a fixed amount per unit of bodyweight and everything it frees

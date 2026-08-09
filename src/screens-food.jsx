@@ -5892,7 +5892,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </Field>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
-              <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} />
+              <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} label="Save as reusable recipe" />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20, maxHeight: 220, overflowY: 'auto' }}>
               {fdSortIngredientsByQty(byHour[recipeBlockHour] || []).map(e => (

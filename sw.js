@@ -45,6 +45,18 @@ const ASSETS = [
   BASE + '/icons/icon-180.png',
 ];
 
+// Public pages that live outside the app shell (CLAUDE.md, "Public-Seiten"),
+// plus the one script only they load. Never precached, and never served from
+// cache while the network is reachable, see the fetch handler. Matched against
+// the request path, so a new public page has to be listed here as well as kept
+// out of ASSETS.
+const PUBLIC_PAGES = [
+  BASE + '/welcome.html',
+  BASE + '/features.html',
+  BASE + '/autoreg.html',
+  BASE + '/src/autoreg-guide-page.js',
+];
+
 // Decorative background photos + their index. Purely cosmetic, and their file
 // names/extensions drift (e.g. .png vs .PNG on case-sensitive hosting), so a
 // single 404 here must NOT abort the whole SW install. Precached best-effort
@@ -195,6 +207,23 @@ self.addEventListener('fetch', e => {
     // _v=timestamp requests are version-check probes, always hit network, never cache
     if (url.searchParams.has('_v')) {
       e.respondWith(fetch(e.request.url, { cache: 'no-store' }).catch(() => offlineResponse()));
+      return;
+    }
+    // The standalone public pages (welcome/features/autoreg and the JS only
+    // they load) are deliberately NOT in ASSETS: they carry their own ?v=
+    // busters and are meant to update the moment they are redeployed, without
+    // waiting for a service worker cycle. Being outside ASSETS did not keep
+    // them out of the cache, though. Every same-origin GET falls into the
+    // stale-while-revalidate block below, which caches whatever it fetches, so
+    // the first visit put them in the versioned CACHE and every later visit was
+    // answered from it: a marketing page frozen at whatever it said the day the
+    // user first opened it, which is the exact failure the busters exist to
+    // prevent. Network-first, cache only as an offline fallback.
+    if (PUBLIC_PAGES.some(p => url.pathname === p || url.pathname.endsWith(p))) {
+      e.respondWith(
+        fetch(e.request, { cache: 'no-store' })
+          .catch(() => caches.match(e.request).then(c => c || offlineResponse()))
+      );
       return;
     }
     // App shell: stale-while-revalidate, serve cache instantly, refresh in background.

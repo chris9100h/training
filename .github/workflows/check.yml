@@ -34,3 +34,7 @@ jobs:
       # House rule: no em-dashes anywhere. A sweep removed 926 of them; this
       # keeps them from creeping back in via app text or changelog entries.
       - run: node tools/check-emdash.cjs
+      # Every source index.html loads must also be in sw.js ASSETS. A file
+      # missing there boots fine on a warm cache and blanks the app offline
+      # or mid-deploy, when it is the only fetch that has to hit the network.
+      - run: node tools/check-asset-parity.cjs

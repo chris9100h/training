@@ -886,7 +886,7 @@ function WaterBottleTrackerBody({ settings, patchSettings, onClose }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: bottleEnabled ? 12 : 20 }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Count emptied bottles</span>
-        <Toggle on={bottleEnabled} onToggle={() => patchSettings({ waterBottleEnabled: !bottleEnabled })} />
+        <Toggle on={bottleEnabled} onToggle={() => patchSettings({ waterBottleEnabled: !bottleEnabled })} label="Count emptied bottles" />
       </div>
       {bottleEnabled && (
         <Field label="Bottle size (ml)" style={{ marginBottom: 20 }}>
@@ -905,7 +905,7 @@ function WaterRemindersBody({ settings, patchSettings, go, onClose }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Nudge me when I fall behind</span>
-        <Toggle on={reminderOn} onToggle={() => patchSettings({ waterReminderEnabled: !reminderOn })} />
+        <Toggle on={reminderOn} onToggle={() => patchSettings({ waterReminderEnabled: !reminderOn })} label="Nudge me when I fall behind" />
       </div>
       {reminderOn && !pushOn && (
         <button onClick={() => { onClose(); go({ name: 'settings' }); }} style={{ width: '100%', textAlign: 'left', fontSize: 12, color: UI.warn, fontFamily: UI.fontUi, background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 0 4px' }}>

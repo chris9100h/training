@@ -110,6 +110,27 @@ const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes', 'zane
 // reads the founding-seat count.
 const EXPECTED_ANON_EXEC = new Set(['get_public_feature_map()', 'get_founding_seats()']);
 
+// Functions that must NOT be callable by a logged-in user either: ops and
+// service-role-only entry points, keyed on the full signature like the set
+// above. This exists because the anon half of the Grant-Fallen problem is the
+// half that was already fixed. An ALTER DEFAULT PRIVILEGES rule still grants
+// EXECUTE directly to `authenticated` on every newly created function (0132
+// removed only the anon equivalent), which is how 0207 shipped bump_api_usage
+// callable by any signed-in user despite granting only service_role, and why
+// 0208 had to revoke it by hand. Nothing watched for the next one.
+//
+// Deliberately an allowlist of the sensitive few rather than "every function
+// must be false": most RPCs here are meant for authenticated callers, so a
+// blanket rule would be all noise. Add a signature when a new function is
+// service-role or ops only. Needs the authenticated_exec field from migration
+// 0258; without it the check reports itself as unavailable instead of passing
+// silently, which would be the same blind spot with extra confidence.
+const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
+  'bump_api_usage(uuid, text, integer)',
+  'collapse_water_logs()',
+  'admin_schema_inventory()',
+]);
+
 // ── Config ───────────────────────────────────────────────────────────────────
 
 function fromStoreJs(re, label) {
@@ -273,6 +294,30 @@ async function inventoryMode(invFile) {
         errors.push(`inventory: expected anon-exec function ${f} is absent from the live function inventory (dropped or renamed?)`);
       } else {
         errors.push(`inventory: expected anon EXECUTE on ${f} is missing (see docs/database.md, "Grant-Fallen")`);
+      }
+    }
+  }
+
+  // The authenticated half of the same check. `authenticated_exec` arrives with
+  // migration 0258; an inventory without it is reported as unavailable rather
+  // than passing, since "no function reported true" and "no function reported
+  // at all" look identical from here and only one of them is good news.
+  const hasAuthExec = (inv.functions || []).some((fn) => 'authenticated_exec' in fn);
+  if (!hasAuthExec) {
+    infos.push('inventory: authenticated_exec not reported, service-role-only grants unchecked (apply migration 0258)');
+  } else {
+    const seenNoAuth = new Set();
+    for (const fn of inv.functions || []) {
+      const sig = fnSig(fn);
+      if (!EXPECTED_NO_AUTHENTICATED_EXEC.has(sig)) continue;
+      seenNoAuth.add(sig);
+      if (fn.authenticated_exec) {
+        errors.push(`inventory: has_function_privilege('authenticated', '${sig}') = true (service-role only, see docs/database.md "Grant-Fallen": needs an explicit REVOKE, the default-privileges rule re-grants it)`);
+      }
+    }
+    for (const f of [...EXPECTED_NO_AUTHENTICATED_EXEC].sort()) {
+      if (!seenNoAuth.has(f)) {
+        errors.push(`inventory: service-role-only function ${f} is absent from the live function inventory (dropped, renamed, or its signature changed?)`);
       }
     }
   }

@@ -5232,14 +5232,14 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Assistance work</div>
               <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A few extra exercises per day</div>
             </div>
-            <Toggle on={assistanceOn} onToggle={() => setAssistanceOn(v => !v)} />
+            <Toggle on={assistanceOn} onToggle={() => setAssistanceOn(v => !v)} label="Assistance work" />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Deload week</div>
               <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A light week 4 (40/50/60%) each cycle</div>
             </div>
-            <Toggle on={includeDeload} onToggle={() => setIncludeDeload(v => !v)} />
+            <Toggle on={includeDeload} onToggle={() => setIncludeDeload(v => !v)} label="Deload week" />
           </div>
         </Card>
 

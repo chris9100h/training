@@ -92,12 +92,21 @@ function UserArchivedSection({ tickets, renderTicket }) {
 }
 
 function Row({ label, children, first = false }) {
+  // The row's text is the switch's name, but nothing associates the two: a
+  // screen reader on a bare Toggle reads "switch, on" with no idea of what.
+  // Hand the label down rather than repeating it at eighty call sites. Only
+  // for a Toggle that has none of its own, so an explicit label always wins.
+  const named = React.Children.map(children, c => (
+    (React.isValidElement(c) && c.type === Toggle && !c.props.label && typeof label === 'string')
+      ? React.cloneElement(c, { label })
+      : c
+  ));
   return (
     <>
       {!first && <div className="knurl" />}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }}>
         <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-        {children}
+        {named}
       </div>
     </>
   );
