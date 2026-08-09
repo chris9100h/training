@@ -1298,20 +1298,31 @@ function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
+// Loading horns are a plate-loaded MACHINE thing. Nothing without equipment has
+// them, and bodyweight is the plus_load lane, which owns the weight field for
+// its own reason. Everything else that is actually loaded can have them: the
+// pin is the machine, not the category name.
+const HORN_EQUIPMENT = ['machine', 'barbell_dual', 'barbell_single', 'cable'];
+
 function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMode, onBwMode, hasLoggedWeight, hornLabels, onHornLabels }) {
-  if (!loggingPickerVisible(equipment, movementType)) return null;
+  const pickerVisible = loggingPickerVisible(equipment, movementType);
+  // Loaded equipment always logs weight and reps, which is why the picker is
+  // hidden for it, so read the EFFECTIVE mode the save path will use rather
+  // than the raw state, which is never touched on that route.
+  const effLogMode = pickerVisible ? logMode : 'weight';
+  const showHorns = !!onHornLabels && effLogMode === 'weight' && HORN_EQUIPMENT.includes(equipment);
+  // Bailing out on the picker alone hid the horn block for exactly the
+  // equipment it exists for: loggingPickerVisible is false for every loaded
+  // type, machines included.
+  if (!pickerVisible && !showHorns) return null;
   const info = logMode === 'reps' ? 'Tracks reps only, no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off, no reps or weight, 0 volume.'
              : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
              : null;
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
-  // Multi-horn is a loaded-machine thing and mutually exclusive with the
-  // bodyweight modes above: plus_load already means "the number you type is not
-  // the total", and stacking a second such rule onto the same field is exactly
-  // the space confusion that produced three defects there.
-  const showHorns = !!onHornLabels && logMode === 'weight' && equipment !== 'bodyweight';
   return (
     <div>
+      {pickerVisible && (<>
       <span className="label">Logging</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
         {LOG_MODES.map(([val, label]) => (
@@ -1338,6 +1349,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMod
           )}
         </div>
       )}
+      </>)}
       {showHorns && (() => {
         const horns = hornLabels || [];
         const set = (next) => onHornLabels(next.length ? next : null);
@@ -1380,7 +1392,10 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, bwMod
 // "not a multi-horn exercise" and must store null, otherwise isMultiHorn would
 // flip the whole logging UI over for a machine with no horns named.
 function cleanHornLabels(list, equipment, logMode) {
-  if (equipment === 'bodyweight' || logMode !== 'weight') return null;
+  // Same gate the editor renders on, so a list can never be saved for equipment
+  // that never showed the field (switching a machine to bodyweight afterwards
+  // has to drop the horns rather than leave them invisible but active).
+  if (!HORN_EQUIPMENT.includes(equipment) || logMode !== 'weight') return null;
   const out = (list || []).map(h => String(h ?? '').trim()).filter(Boolean);
   return out.length ? out : null;
 }
