@@ -302,6 +302,22 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.sameHornLoad(a, b), false);
     assert.strictEqual(LB.sameHornLoad(a, { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] }), true);
   });
+  test('sameHornLoad compares the shape, so loading the same setup heavier still counts', () => {
+    // The whole point: 20/20 to 30/30 is the same machine setup with more weight
+    // on it. Comparing raw kilos would call that "not comparable" and suppress
+    // progression on multi-horn machines entirely.
+    const light = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    const heavy = { hornLoads: [{ label: 'Std', kg: 30 }, { label: 'Mid', kg: 30 }] };
+    assert.strictEqual(LB.sameHornLoad(light, heavy), true);
+    // An uneven bias kept in proportion is also the same setup.
+    assert.strictEqual(LB.sameHornLoad(
+      { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 10 }] },
+      { hornLoads: [{ label: 'Std', kg: 40 }, { label: 'Mid', kg: 20 }] }), true);
+    // Shifting the bias is not.
+    assert.strictEqual(LB.sameHornLoad(
+      { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 10 }] },
+      { hornLoads: [{ label: 'Std', kg: 10 }, { label: 'Mid', kg: 20 }] }), false);
+  });
   test('sameHornLoad compares by label, not position', () => {
     const a = { hornLoads: [{ label: 'Std', kg: 20 }, { label: 'High', kg: 10 }] };
     const b = { hornLoads: [{ label: 'High', kg: 10 }, { label: 'Std', kg: 20 }] };
@@ -310,6 +326,22 @@ async function testAsync(name, fn) {
   test('sameHornLoad treats two plain sets as equal and a switch of style as not', () => {
     assert.strictEqual(LB.sameHornLoad({ kg: 40 }, { kg: 60 }), true);
     assert.strictEqual(LB.sameHornLoad({ kg: 40, hornLoads: [{ label: 'A', kg: 40 }] }, { kg: 40 }), false);
+  });
+  test('isImprovement and isDecline stay silent across different horn splits', () => {
+    const heavier = { kg: 60, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 60 }, { label: 'Mid', kg: 0 }] };
+    const lighter = { kg: 40, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    // More total weight, but on a different distribution: not comparable.
+    assert.strictEqual(LB.isImprovement(heavier, lighter), false);
+    assert.strictEqual(LB.isDecline(lighter, heavier), false);
+    // Same split, more weight: the normal verdict still fires.
+    const sameSplitUp = { kg: 60, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 30 }, { label: 'Mid', kg: 30 }] };
+    const sameSplitLo = { kg: 40, reps: 10, done: true, hornLoads: [{ label: 'Std', kg: 20 }, { label: 'Mid', kg: 20 }] };
+    assert.strictEqual(LB.isImprovement(sameSplitUp, sameSplitLo), true);
+    assert.strictEqual(LB.isDecline(sameSplitLo, sameSplitUp), true);
+  });
+  test('the horn gate is transparent for ordinary sets', () => {
+    assert.strictEqual(LB.isImprovement({ kg: 100, reps: 5, done: true }, { kg: 95, reps: 5, done: true }), true);
+    assert.strictEqual(LB.isDecline({ kg: 90, reps: 5, done: true }, { kg: 100, reps: 5, done: true }), true);
   });
   test('isMultiHorn reads the exercise horn list', () => {
     assert.strictEqual(LB.isMultiHorn({ horn_labels: ['Std', 'Mid'] }), true);

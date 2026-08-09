@@ -2914,6 +2914,13 @@ function e1rm(kg, reps) {
 function isImprovement(curr, prev) {
   // done=true wins: if both done+skipped are set, treat as done
   if (!prev || !curr || !curr.done) return false;
+  // Multi-horn machines: two sets can sum to the same kg and be different work,
+  // because the distribution across the loading horns decides both the leverage
+  // and where in the range the resistance peaks. Whether one is "better" than
+  // the other is not answerable, so neither arrow is drawn. Gated here rather
+  // than at the call sites so the session detail, the recent trend, the home
+  // comparison and both coach views are covered by one rule.
+  if (!sameHornLoad(curr, prev)) return false;
   // Time-based sets carry a duration, not kg x reps: a longer hold beats a
   // shorter one (planks, dead hangs, wall sits). Both sides must be timed.
   if (curr.timeSec != null || prev.timeSec != null) {
@@ -2935,6 +2942,7 @@ function isDecline(curr, prev) {
   if (!prev || !curr || (curr.skipped && !curr.done)) return false;
   if (prev.skipped && !prev.done) return false; // prev was already skipped, no baseline to decline from
   if (!curr.done) return false;
+  if (!sameHornLoad(curr, prev)) return false;  // see isImprovement: not comparable across splits
   // Time-based sets: a shorter hold than last time is a decline.
   if (curr.timeSec != null || prev.timeSec != null) {
     return curr.timeSec != null && prev.timeSec != null && curr.timeSec < prev.timeSec;
@@ -3256,19 +3264,32 @@ function hornLoadLabel(st) {
   if (!Array.isArray(st?.hornLoads) || !st.hornLoads.length) return null;
   return st.hornLoads.map(h => (h?.kg == null ? '0' : String(h.kg))).join(' / ');
 }
-// Do two sets carry the same distribution? Two splits can sum to the same kg
-// and be genuinely different work (20/20 versus 40/0 shifts where the
-// resistance peaks), so the comparison logic must not call them equal and hand
-// out a PR for moving plates outward. Compared by label, not position, because
-// horn_loads is self-describing and an exercise's horn list can be reordered.
+// Do two sets carry the same load DISTRIBUTION? Two splits can sum to the same
+// kg and be genuinely different work (20/20 versus 40/0 changes the leverage and
+// moves where the resistance peaks), so the comparison logic must not call those
+// equal and hand out a PR for moving plates outward.
+//
+// Compared by SHAPE, not by kilos: 20/20 and 30/30 are the same setup with more
+// weight on it, which is ordinary progression and must still register. Comparing
+// raw values would make every single load increase "not comparable" and suppress
+// progression on these machines completely, which is the opposite of the point.
+//
+// Keyed by label rather than position, because horn_loads is self-describing and
+// an exercise's horn list can be reordered without touching old sets.
 function sameHornLoad(a, b) {
   const la = Array.isArray(a?.hornLoads) ? a.hornLoads : null;
   const lb = Array.isArray(b?.hornLoads) ? b.hornLoads : null;
   if (!la && !lb) return true;      // neither is a multi-horn set
   if (!la || !lb) return false;     // one side switched loading style
-  const norm = (l) => l.filter(h => h?.kg != null)
-    .map(h => `${h.label ?? ''}:${h.kg}`).sort().join('|');
-  return norm(la) === norm(lb);
+  const shape = (l) => {
+    const total = hornLoadTotal(l);
+    if (total == null || total === 0) return '';
+    // Per-mille of the total, so the comparison is float-safe.
+    return l.filter(h => h?.kg != null)
+      .map(h => `${h.label ?? ''}:${Math.round((h.kg / total) * 1000)}`)
+      .sort().join('|');
+  };
+  return shape(la) === shape(lb);
 }
 
 // Split a stored set back into what the user typed and what carried it, for a
