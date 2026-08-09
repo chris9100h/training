@@ -4908,7 +4908,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     color: chipColor,
                                     opacity: di === 0 ? 1 : 0.75,
                                   }}>
-                                    {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                    {LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
                                     <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
                                     {d.reps ?? '—'}
                                   </span>
@@ -4950,7 +4950,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     color: di === 0 ? chipColor : UI.inkSoft,
                                     opacity: di === 0 ? 1 : 0.7,
                                   }}>
-                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                    {di === 0 && <>{LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
                                     {d.reps ?? '—'}
                                   </span>
                                 </React.Fragment>
@@ -5046,7 +5046,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                       color: chipColor,
                                       opacity: di === 0 ? 1 : 0.75,
                                     }}>
-                                      {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                      {LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
                                       <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
                                       {d.reps ?? '—'}
                                     </span>

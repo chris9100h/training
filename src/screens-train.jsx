@@ -1211,6 +1211,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // One rule, in activateKb, so the row tap cannot drift from every other path.
   const activateWeight = (setIdx) => activateKb(setIdx, 'kg');
 
+  // Intensity-technique chains (drop sets, myo-reps, AMRAP variations) persist
+  // their rounds as drops[{kg, reps}], and drops[0] mirrors the parent set's kg
+  // (docs/database.md), so the STORED value has to stay in total space or old
+  // and new history stop being comparable. Only the input moves: the user types
+  // the belt load here too, the same meaning every other weight field on this
+  // exercise has. Without that the sheet silently switched spaces mid-flow, and
+  // typing 20 instead of 100 on a 80 kg body produced addedKg -60.
+  const dispChainKg = (kg) => (isPlusLoad && kg != null ? Math.round((kg - (plusLoadBw ?? 0)) * 100) / 100 : kg);
+  const chainKgFromTyped = (typed) => (isPlusLoad && typed != null ? Math.round(((plusLoadBw ?? 0) + typed) * 100) / 100 : typed);
+
   const totalToPatch = (total) => {
     if (!isPlusLoad) return { kg: total };
     if (total == null) return { kg: null, addedKg: null };
@@ -4832,7 +4842,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const activateDropKb = (dropIdx, field) => {
     const d = dropDropsRef.current[dropIdx];
     const val = field === 'kg'
-      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
       : (d?.reps != null ? String(d.reps) : '');
     kbFieldRef.current = { setIdx: 'drop', dropIdx, field };
     kbRawRef.current = val;
@@ -4845,7 +4855,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const activateMyo = (dropIdx, field) => {
     const d = myoDropsRef.current[dropIdx];
     const val = field === 'kg'
-      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
       : (d?.reps != null ? String(d.reps) : '');
     kbFieldRef.current = { setIdx: 'myo', dropIdx, field };
     kbRawRef.current = val;
@@ -4858,7 +4868,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const activateAvKb = (dropIdx, field) => {
     const d = avDropsRef.current[dropIdx];
     const val = field === 'kg'
-      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
       : (d?.reps != null ? String(d.reps) : '');
     kbFieldRef.current = { setIdx: 'av', dropIdx, field };
     kbRawRef.current = val;
@@ -4933,7 +4943,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (typeof dropIdx !== 'number') return;
       if (field === 'kg') {
         const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
-        if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+        if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(num ?? null) } : d));
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
@@ -4945,7 +4955,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (typeof dropIdx !== 'number') return;
       if (field === 'kg') {
         const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
-        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(num ?? null) } : d));
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
@@ -4957,7 +4967,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (typeof dropIdx !== 'number') return;
       if (field === 'kg') {
         const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
-        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(num ?? null) } : d));
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
@@ -5071,7 +5081,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
-        setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+        setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(next) } : d));
       } else {
         const cur = parseInt(kbRawRef.current, 10) || 0;
         const next = Math.max(0, cur + dir);
@@ -5091,7 +5101,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
-        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(next) } : d));
       } else {
         const cur = parseInt(kbRawRef.current, 10) || 0;
         const next = Math.max(0, cur + dir);
@@ -5111,7 +5121,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
-        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: chainKgFromTyped(next) } : d));
       } else {
         const cur = parseInt(kbRawRef.current, 10) || 0;
         const next = Math.max(0, cur + dir);
@@ -7671,7 +7681,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           }}>↓</div>
                           <div />
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '—'}</span>
                           </div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
@@ -7699,7 +7709,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             }}><i className="fa-solid fa-shuffle" style={{ fontSize: 9 }} /></div>
                             <div />
                             <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '—'}</span>
                             </div>
                             <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
@@ -7724,7 +7734,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           }}>↺</div>
                           <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>myo {di + 1}</div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '—'}</span>
                           </div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
@@ -8468,7 +8478,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {di === 0 ? 'top' : `drop ${di}`}
                     </div>
                     <KbCell
-                      text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                      text={isKgA ? kbRaw : (dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')}
                       placeholder="—"
                       onActivate={() => activateDropKb(di, 'kg')}
                       style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
@@ -8571,7 +8581,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
                       <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>round {di + 1}</div>
                       <KbCell
-                        text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                        text={isKgA ? kbRaw : (dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')}
                         placeholder="—"
                         onActivate={() => activateAvKb(di, 'kg')}
                         style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
@@ -8716,7 +8726,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {/* kg, editable for activation (myo only), read-only for match activation + all minis */}
                       {isActiv && myoTechnique === 'myorep' ? (
                         <KbCell
-                          text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                          text={isKgA ? kbRaw : (dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')}
                           placeholder="—"
                           onActivate={() => activateMyo(di, 'kg')}
                           style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}

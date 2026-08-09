@@ -308,6 +308,17 @@ async function testAsync(name, fn) {
     assert.strictEqual(plain[0].kg, 120);
   });
 
+  test('chainRoundKg shows a chain round in the same space as its set', () => {
+    // 80 kg body, 20 kg belt: the set stores kg 100 / addedKg 20 and renders
+    // "+20", so a drop round stored as 90 must render as 10, not 90.
+    const st = { kg: 100, addedKg: 20 };
+    assert.strictEqual(LB.chainRoundKg(st, 90), 10);
+    assert.strictEqual(LB.chainRoundKg(st, null), null);
+    // An ordinary set is untouched, and so is a legacy set with no belt figure.
+    assert.strictEqual(LB.chainRoundKg({ kg: 100 }, 90), 90);
+    assert.strictEqual(LB.chainRoundKg({ kg: null, addedKg: 20 }, 90), 90);
+  });
+
   // ── Multi-horn loading (PRIME-style plate-loaded machines) ───────────────
   test('hornLoadTotal sums the loaded horns and stays null when nothing is on', () => {
     assert.strictEqual(LB.hornLoadTotal([{ label: 'A', kg: 20 }, { label: 'B', kg: 10.5 }]), 30.5);
