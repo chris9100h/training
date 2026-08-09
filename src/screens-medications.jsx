@@ -503,7 +503,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   const activeMedications = useMemoMd(() => medications.filter(m => !m.archived).sort((a, b) => a.name.localeCompare(b.name)), [medications]);
   const medicationPlans = store.medicationPlans || [];
   const scheduleSlots = store.medicationScheduleSlots || [];
-  const medicationLogs = store.medicationLogs || [];
+  // Tombstones (see deleteLogEntry) exist only so the materialisers stop
+  // re-creating the dose. Everything that renders or counts must not see them.
+  // mdAutoFillToday reads store.medicationLogs directly on purpose, so it does.
+  const medicationLogs = (store.medicationLogs || []).filter(l => !l.skipped);
   const medicationPlanItems = store.medicationPlanItems || [];
 
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
@@ -670,7 +673,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
   async function deleteLogEntry(entry) {
     if (!await confirm('Remove this entry from the timeline?', { title: 'Delete entry', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
-    setStore(s => ({ ...s, medicationLogs: (s.medicationLogs || []).filter(l => l.id !== entry.id) }));
+    // A slot-materialised row cannot simply be removed: both materialisers, the
+    // reminder cron and mdAutoFillToday, only ask whether a row exists for this
+    // slot and date, so a hard delete came straight back on the next run with
+    // its reminder counters reset. Leave a tombstone instead. A hand-logged
+    // dose has no slot, nothing re-creates it, so that one really goes.
+    setStore(s => ({
+      ...s,
+      medicationLogs: entry.scheduleSlotId
+        ? (s.medicationLogs || []).map(l => l.id === entry.id ? { ...l, skipped: true, planned: false } : l)
+        : (s.medicationLogs || []).filter(l => l.id !== entry.id),
+    }));
   }
 
   const [logDraft, setLogDraft] = useStateMd(null); // { medicationId, doseQtyStr, hour } | null

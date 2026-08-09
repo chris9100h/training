@@ -2838,6 +2838,11 @@ CREATE TABLE zane_medication_logs (
   time             text        NOT NULL,           -- HH:MM (local time)
   dose_qty         numeric     NOT NULL,
   planned          boolean     NOT NULL DEFAULT false,
+  -- 0257: removed from the timeline on purpose. The row stays so the cron's
+  -- "already materialised" check keeps seeing it and cannot re-create the dose;
+  -- planned=false keeps it out of reminders and tallies. Distinct from a plain
+  -- planned=false, which means taken.
+  skipped          boolean     NOT NULL DEFAULT false,
   schedule_slot_id text        REFERENCES public.zane_medication_schedule_slots(id) ON DELETE SET NULL,
   reminder_sent_at timestamptz,                    -- last nudge time, written by the medication-reminder cron (migration 0246)
   reminder_count   integer     NOT NULL DEFAULT 0, -- nudges sent for this row, capped at 2 by the cron (migration 0246)
