@@ -135,6 +135,10 @@ function PinNoteToggle({ on, onToggle }) {
 // walk back through the window happens in batches over successive renders.
 const RECENT_LIMIT = 12;
 const RECENT_HYDRATE_MAX = 12;
+// Total windowed sessions this screen will ever pull back per mount, across all
+// batches. Without it the walk is unbounded on accounts with few distinct
+// exercises, see the effect that uses it.
+const RECENT_HYDRATE_CAP = 36;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
@@ -250,12 +254,15 @@ function LibraryScreen({ store, setStore, go, userId }) {
         // aggExercises > 0 = windowed out (the server has its sets), 0 = a
         // session that genuinely holds nothing and is safe to scan past.
         if ((s.aggExercises || 0) > 0) {
-          // Stop either way: dating an exercise off an OLDER session while this
-          // one sits unloaded right here would be a lie. Only worth fetching
-          // while the list is still short, once it is full the unloaded
-          // sessions could at most add a trend arrow, never a row.
-          if (seenFirst.size < RECENT_LIMIT) blockedAt = i;
-          break;
+          // Remember the first one so the fetch below can walk back from here,
+          // but keep scanning. Stopping here withheld exercises that other
+          // screens had already hydrated into the store (session detail, the
+          // comparison screen, stats, the home recap all write entries back),
+          // so the list could come out SHORTER than before this whole fix, and
+          // offline it stayed short. A "last time" date that is one unloaded
+          // session too old heals on the next round trip; a row that is simply
+          // gone reads as lost history, which is the very thing being fixed.
+          if (blockedAt < 0 && seenFirst.size < RECENT_LIMIT) blockedAt = i;
         }
         continue;
       }
@@ -313,10 +320,24 @@ function LibraryScreen({ store, setStore, go, userId }) {
   // feeds, so handing back a fresh sessions array for a session the server
   // answers with no rows (aggregate says it has sets, entries table disagrees)
   // would re-arm it forever.
+  // Hard ceiling on the whole walk, not just one batch. The old bound was
+  // seenFirst.size < RECENT_LIMIT, but seenFirst counts DISTINCT EXERCISES ever
+  // seen, not rows rendered: an account that only logs main lifts never reaches
+  // twelve, so the loop fetch -> merge -> memo rerun -> fetch never terminated
+  // and would have pulled a multi-year history into the store. That is not a
+  // transient cost. syncStore sees entries [] -> [...] and re-uploads every
+  // entry and set with a fresh updated_at, saveBase/saveToLocal persist two
+  // copies of the inflated store against the localStorage budget, and the boot
+  // merge keeps them, permanently defeating History-Windowing on that device.
+  const recentHydrated = useRefL(0);
   useEffectL(() => {
     if (!recentNeedIds.length) return;
+    const budget = RECENT_HYDRATE_CAP - recentHydrated.current;
+    if (budget <= 0) return;
+    const ids = recentNeedIds.slice(0, budget);
+    recentHydrated.current += ids.length;
     let on = true;
-    LB.fetchSessionEntries(recentNeedIds)
+    LB.fetchSessionEntries(ids)
       .then(bySession => {
         if (!on) return;
         setStore(st => {
@@ -3750,10 +3771,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // the account's session history actually changes, not on every render
   // (a keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to this data).
-  const { prevEntryMap, prevPendingMap, prevPendingExIds, prevNeedIds } = useMemoL(() => {
+  const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
     const map = {};
     const pending = {};
-    const pendingExIds = new Set();
     const needIds = new Set();
     const prevOccSeen = {};
     // A prior session outside the boot history window carries aggregates only
@@ -3761,13 +3781,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // Nothing here can tell whether it holds this exercise, so the candidate
     // walk must not step past it and hand an older, unrelated session over as
     // "last time". Mark the entry pending instead (the render suppresses its
-    // arrows and PR star), queue the session, and let the fetch below rerun
-    // this memo, same mechanism as the Home recap's prior-session lookup.
-    const windowedGap = (x, idx, exId) => {
+    // improvement and decline arrows, but NOT its PR star, which does not read
+    // the prior), queue the session, and let the fetch below rerun this memo,
+    // same mechanism as the Home recap's prior-session lookup.
+    const windowedGap = (x, idx) => {
       if ((x.aggExercises || 0) <= 0) return false; // genuinely empty, safe to skip
       needIds.add(x.id);
       pending[idx] = true;
-      pendingExIds.add(exId);
       return true;
     };
     s.entries.forEach((e, idx) => {
@@ -3788,7 +3808,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       if (cyclePrev) {
         // The wave-matched session can be windowed out just as well, and it has
         // no fallback candidate: without its entries there is simply no prev.
-        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx, e.exId);
+        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx);
         else prev = cyclePrev;
       } else {
         const candidates = store.sessions
@@ -3796,7 +3816,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
         for (const x of candidates) {
           if (!(x.entries || []).length) {
-            if (windowedGap(x, idx, e.exId)) break;
+            if (windowedGap(x, idx)) break;
             continue;
           }
           if (x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null)) { prev = x; break; }
@@ -3804,7 +3824,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       }
       map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
     });
-    return { prevEntryMap: map, prevPendingMap: pending, prevPendingExIds: pendingExIds, prevNeedIds: [...needIds] };
+    return { prevEntryMap: map, prevPendingMap: pending, prevNeedIds: [...needIds] };
   }, [store.sessions, store.schedules, s]);
 
   // Load the windowed prior sessions the comparison above ran into, so the
@@ -3991,8 +4011,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // ...), so leading with the count keeps that from reading as a step back.
   // Exercises whose prior session is still being fetched back are held out here
   // too, or the header would advertise a PR the set list below deliberately
-  // leaves unbadged (see noVerdict in renderEntry).
-  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => !prevPendingExIds.has(exId) && isPR(st, exId)).length;
+  // leaves unbadged (see noVerdict in renderEntry). isPR does not depend on the
+  // prior session, so a pending fetch must NOT subtract from this: holding the
+  // count back hid the whole PRS chip on exactly the sessions where the badges
+  // below still render, which is the opposite of keeping the two in step.
+  const prCount = Object.entries(sessionBestSetMap).filter(([exId, st]) => isPR(st, exId)).length;
   // A cleanup session's volume is down by design, same as a deload's, so the
   // delta is suppressed there too rather than reading as a step back.
   const showVol = volDelta != null && !s.isDeload && !s.isCleanup;
@@ -4766,10 +4789,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
-                      const pr = !isWarm && !noVerdict && isPR(st, e.exId);
-                      const highlight = !isWarm && !noVerdict && (pr || isImprovement(st, prevSet));
-                      const anyImprovementBefore = !isWarm && !noVerdict && filteredSets.slice(0, j).some((st2, k) => !st2.warmup && (isPR(st2, e.exId) || isImprovement(st2, prevWorkingFor(k))));
-                      const decline = !isWarm && !noVerdict && !anyImprovementBefore && isDecline(st, prevSet);
+                      // PR is NOT held back by a pending prior: isPR never reads
+                      // prevEntryMap, it compares against store.exerciseBests
+                      // through its own windowing fallback (its comment says so
+                      // outright), and that fallback works offline because the
+                      // bests live in the local cache. Gating it here blanked
+                      // every star on a session whose same-day prior happens to
+                      // be windowed out, which is precisely the returning-user
+                      // case, and offline it never came back.
+                      const pr = !isWarm && !reducedLoad && isPR(st, e.exId);
+                      const cmp = !isWarm && !noVerdict;  // improvement/decline genuinely need the prior
+                      const highlight = pr || (cmp && isImprovement(st, prevSet));
+                      const anyImprovementBefore = filteredSets.slice(0, j).some((st2, k) => !st2.warmup && ((!reducedLoad && isPR(st2, e.exId)) || (cmp && isImprovement(st2, prevWorkingFor(k)))));
+                      const decline = cmp && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
 
                       // Drop set: DS badge + chips connected by arrows

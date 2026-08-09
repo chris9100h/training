@@ -2085,6 +2085,7 @@ function useCoachClientSync(clientId, scheduleId) {
   const isDirty = useRefC(false);
   const pendingSync = useRefC(null);  // in-flight syncStore promise, so callers can wait for the write
   const syncOk = useRefC(true);       // ref twin of syncErr: readable after an await, unlike the state a callback closed over
+  const writeIntent = useRefC(0);     // writes asked for but not yet settled, raised synchronously (see setClientStore)
 
   useEffectC(() => {
     let on = true;
@@ -2119,13 +2120,23 @@ function useCoachClientSync(clientId, scheduleId) {
   const setClientStoreRef = useRefC(null);
   if (!setClientStoreRef.current) {
     setClientStoreRef.current = (updater) => {
+      // Flags are raised HERE, not inside the updater: React only evaluates an
+      // updater eagerly when the fiber has no pending lanes, so on a second
+      // save (or after any setSyncErr) the body below runs at render time,
+      // which is after a caller that navigates in the same tick has already
+      // read them. writeIntent is what lets flushClientSync tell "queued but
+      // not started" apart from "nothing to do", and syncOk drops to false on
+      // intent so an unanswered write can never be reported as landed.
+      writeIntent.current += 1;
+      syncOk.current = false;
+      isDirty.current = true;
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
-        isDirty.current = true;
         latestClientStore.current = next;
         pendingSync.current = LB.syncStore(prevClientStore.current, next, clientId)
           .then(() => { prevClientStore.current = next; syncOk.current = true; setSyncErr(false); })
-          .catch(e => { console.error('Coach sync failed', e); syncOk.current = false; setSyncErr(true); });
+          .catch(e => { console.error('Coach sync failed', e); syncOk.current = false; setSyncErr(true); })
+          .finally(() => { writeIntent.current = Math.max(0, writeIntent.current - 1); });
         return next;
       });
     };
@@ -2137,12 +2148,19 @@ function useCoachClientSync(clientId, scheduleId) {
   // the client their program changed has to wait for the answer first. A fresh
   // write can start while we wait, so loop until none is left.
   const flushClientSync = async () => {
+    // Give React a turn to run an updater it has queued but not yet evaluated,
+    // otherwise pendingSync is still null here and the loop below would report
+    // the PREVIOUS write's verdict for this save.
+    if (writeIntent.current > 0 && !pendingSync.current) await new Promise(r => setTimeout(r, 0));
     while (pendingSync.current) {
       const p = pendingSync.current;
       await p;
       if (pendingSync.current === p) pendingSync.current = null;
     }
-    return syncOk.current;
+    // Still queued after all that: unknowable, so report failure. Saying "not
+    // saved" about a write that did land costs the coach one dialog; the other
+    // direction tells a client their program changed when it did not.
+    return writeIntent.current === 0 && syncOk.current;
   };
 
   return { clientStore, loadError, syncErr, setClientStore: setClientStoreRef.current, latestClientStore, initialSchedule, isDirty, flushClientSync };
@@ -2172,10 +2190,25 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   const { clientStore, loadError, syncErr, setClientStore, latestClientStore, initialSchedule, isDirty, flushClientSync } = useCoachClientSync(clientId, scheduleId);
   const [confirmEl, confirm] = useConfirm();
 
+  // Guards re-entry while the block below is awaiting. The editor stays mounted
+  // and interactive across those awaits: SAVE (screens-schedule.jsx) carries no
+  // busy state, and Back skips its discard confirm because the optimistic save
+  // already cleared the editor's own dirty flag. Nothing on screen changes while
+  // we wait, which is exactly what provokes a second tap on a slow connection.
+  // Without this, a second entry read isDirty as still true and posted the note
+  // a second time: addCoachingNote mints a fresh id per call and does not dedup,
+  // so the client got two identical "Updated plan" rows and two pushes. The old
+  // code got this for free by clearing isDirty synchronously; waiting for the
+  // write means it can no longer be cleared that early, so the guard is explicit.
+  const coachGoBusy = useRefC(false);
+
   // Intercept go: notify client via Changes thread if plan was modified, then return to plan tab
   const coachGo = async (route) => {
     if (route.name === 'plan-view' || route.name === 'plan') {
+      if (coachGoBusy.current) return;
       if (isDirty.current) {
+        coachGoBusy.current = true;
+        try {
         // Wait for the write before saying a word to the client: the note is
         // built from the local store, so without this the client got told
         // "updated plan" while the server still held the old one.
@@ -2193,7 +2226,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
           if (stillEditable && !await confirm(
             `The changes did not reach ${clientName || 'the client'}, so they have not been notified. Tap SAVE to try again, or leave and lose them.`,
             { title: "Couldn't save", ok: 'Leave anyway', cancel: 'Keep editing', danger: true }
-          )) return;
+          )) { coachGoBusy.current = false; return; }
         } else if (scheduleId === latestClientStore.current?.activeScheduleId) {
           try {
             const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
@@ -2210,6 +2243,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
         } else {
           isDirty.current = false;  // nothing to announce for a plan they aren't running
         }
+        } finally { coachGoBusy.current = false; }
       }
       go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'setup:plan' });
     } else {
