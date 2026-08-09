@@ -7208,16 +7208,28 @@ function dsExerciseHighlights(store, session, prevSession) {
 // the already-loaded store, same accepted degradation as elsewhere (also
 // means highlights silently come back empty against such a session, there
 // are no entries to diff).
+//
+// Deload/cleanup sessions intentionally load lighter. Feeding the summary
+// model a volume comparison against the last full run always looks like a
+// "dip" and Qwen then invents "still loading even though tonnage dropped"
+// no matter how firmly the system prompt forbids it. Cap the data: flag the
+// mode, omit comparison + highlights. (dsPreviousSessionForDay still keeps
+// cleanup sessions as a baseline for OTHER days' rebuild comparisons; that
+// is intentional and unrelated to summarizing a cleanup day itself.)
 function dsTrainingEntryForSession(store, session, dateISO) {
-  const prev = dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
+  const isDeload = !!session.isDeload;
+  const isCleanup = !!session.isCleanup;
+  const skipCompare = isDeload || isCleanup;
+  const prev = skipCompare ? null : dsPreviousSessionForDay(store, session.dayId, dateISO, session.id);
   return {
     dayName: session.dayName || (session.isFreestyle ? 'Freestyle' : null),
     durationMinutes: session.durationMinutes ?? null,
     feel: session.feel ?? null,
-    isDeload: !!session.isDeload,
+    isDeload,
+    isCleanup,
     volumeKg: Math.round(totalVolume(session, store.exercises, store.dailyLogs)),
     doneSets: doneSetCount(session),
-    highlights: dsExerciseHighlights(store, session, prev),
+    highlights: prev ? dsExerciseHighlights(store, session, prev) : [],
     comparison: prev ? {
       date: prev.date,
       volumeKg: Math.round(totalVolume(prev, store.exercises, store.dailyLogs)),

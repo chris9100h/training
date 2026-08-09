@@ -25,7 +25,10 @@
 // the days-since-last-session figure: putting "7 days earlier" in the prompt
 // made Qwen invent "good session even after a week off" no matter how firmly
 // the system prompt forbade gap narratives, so buildTrainingLines omits the
-// day count and date entirely and only passes sets/volume/delta.
+// day count and date entirely and only passes sets/volume/delta. Same pattern
+// for cleanup/deload: the client omits comparison+highlights (see
+// LB.dsTrainingEntryForSession) and the prompt flags the mode explicitly,
+// otherwise a ~20% intentional load cut looks like a mystery tonnage dip.
 //
 // Qwen writes the summary, for the cost; Claude is the automatic fallback if
 // Qwen itself is unreachable, same PRIMARY_PROVIDER/FALLBACK_PROVIDER +
@@ -102,8 +105,8 @@ Judge macro misses relative to the goal when one is given. A modest calorie unde
 
 TRAINING
 - Session-level read only. You may get up to two pre-identified highlight movements (one volume up, one volume down), already computed. These are optional color, not a checklist: mention AT MOST ONE of them, briefly, in the whole response, and only if it adds something the session-level read did not already say. If there is no comparison to a previous session, there are no highlights to mention.
-- Deload week: deliberately lighter by design. Read it that way, not as a regression.
-- Modest volume or load differences vs last time this same session was done, in either direction, and the same for any single highlight, are normal on their own. Heavier weight for fewer reps lowers total volume even on a harder, better session; lighter weight for more reps raises it. Neither means anything by itself. Only mention a volume or load comparison when the difference is large AND paired with another concrete signal that something is actually off (e.g. reported bad feel, or working sets themselves dropping sharply). If volume only dipped or rose slightly and feel or effort were fine, do not mention the volume change at all, not even to reassure. Otherwise leave the comparison out entirely rather than talking around a number that was never a problem.
+- Deload week OR cleanup week: deliberately lighter by design. Cleanup reduces loads on purpose for technique and control, then the following week rebuilds from there. Read either mode that way, never as a regression, stall, lost strength, or "still loading despite lower volume". Do not mention volume dips, tonnage drops, or comparisons to a normal week. Do not give a tip to "keep pushing intensity" or "handle the load" as if this were a hard progressive day. Judge effort, execution, and that the lighter plan was done well.
+- When a volume comparison IS present (normal training days only): modest volume or load differences vs last time this same session was done, in either direction, and the same for any single highlight, are normal on their own. Heavier weight for fewer reps lowers total volume even on a harder, better session; lighter weight for more reps raises it. Neither means anything by itself. Only mention a volume or load comparison when the difference is large AND paired with another concrete signal that something is actually off (e.g. reported bad feel, or working sets themselves dropping sharply). If volume only dipped or rose slightly and feel or effort were fine, do not mention the volume change at all, not even to reassure. Never describe a multi-hundred-kg swing as "slight". Otherwise leave the comparison out entirely rather than talking around a number that was never a problem.
 
 CARDIO
 Cardio is its own activity, separate from any strength session. Report it as such (type, duration, distance, effort). Do not fold it into the strength verdict.
@@ -177,6 +180,9 @@ function daysBetween(earlierISO: string, laterISO: string): number {
 // Same for days-since / comparison.date: those numbers made Qwen invent gap
 // narratives ("solid session even after a week") despite system-prompt bans,
 // so only sets, volume, and volume delta go into the comparison line.
+// Client also omits comparison/highlights when the session itself is deload
+// or cleanup (intentional lighter loads); the mode flag below is the only
+// signal the model needs for those days.
 function buildTrainingLines(training: any[], dayPhrase: string): string[] {
   if (!Array.isArray(training) || !training.length) return [];
   // Capped the same way foodItems/note further down are: any authenticated
@@ -190,14 +196,23 @@ function buildTrainingLines(training: any[], dayPhrase: string): string[] {
     const bits = [`${s.doneSets ?? '?'} working sets`, `~${s.volumeKg ?? '?'}kg total volume`];
     if (s.durationMinutes != null) bits.push(`${s.durationMinutes} min`);
     if (s.feel) bits.push(`felt ${s.feel}`);
-    lines.push(`- ${label}${s.isDeload ? ' (deload week, deliberately lighter)' : ''}: ${bits.join(', ')}`);
-    if (s.comparison) {
+    const modeNote = s.isDeload
+      ? ' (deload week, deliberately lighter, not a regression)'
+      : s.isCleanup
+        ? ' (cleanup week, loads deliberately reduced for technique, not a regression)'
+        : '';
+    lines.push(`- ${label}${modeNote}: ${bits.join(', ')}`);
+    if (s.isDeload || s.isCleanup) {
+      // No comparison line: client should already omit it; belt-and-suspenders
+      // so a stale payload cannot reintroduce a fake "volume dip" story.
+      lines.push('  Intentionally lighter session. Do not compare volume or load to a normal week.');
+    } else if (s.comparison) {
       const delta = (s.volumeKg != null && s.comparison.volumeKg != null) ? Math.round(s.volumeKg - s.comparison.volumeKg) : null;
       lines.push(`  Last time this same session ("${label}") was done: ${s.comparison.doneSets ?? '?'} working sets, ~${s.comparison.volumeKg ?? '?'}kg total volume${delta != null ? ` (${delta >= 0 ? '+' : ''}${delta}kg vs ${dayPhrase})` : ''}.`);
     } else {
       lines.push(`  No previous "${label}" session on record to compare against.`);
     }
-    if (Array.isArray(s.highlights) && s.highlights.length) {
+    if (!s.isDeload && !s.isCleanup && Array.isArray(s.highlights) && s.highlights.length) {
       lines.push('  Optional color, mention AT MOST ONE briefly if it actually adds something, never both, never as a list:');
       for (const h of s.highlights) lines.push(`    ${h.name} trending ${h.pct > 0 ? 'up' : 'down'} ~${Math.abs(h.pct)}% in volume vs last time`);
     }
