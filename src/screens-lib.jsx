@@ -3331,14 +3331,6 @@ const FEEL_LEVELS = [
   { key: 'max',       label: 'MAX',       color: '#ef4444', colorLight: '#b91c1c' },
 ];
 
-// Generic light-canvas detector (works for 'light', 'paper', or any future
-// light theme): perceived luminance of the live --bg-rgb, no theme-name
-// checks to keep in sync.
-function isLightCanvasActive() {
-  const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
-  if (parts.length !== 3 || parts.some(isNaN)) return false;
-  return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
-}
 function feelColorOf(f) {
   return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint;
 }

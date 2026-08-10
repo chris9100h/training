@@ -3,7 +3,7 @@
    Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
    btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
    Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
-   NumInput, Field, TextInput. */
+   NumInput, Field, TextInput, isLightCanvasActive. */
 
 const UI = {
   bg:       'var(--bg)',
@@ -34,6 +34,16 @@ const UI = {
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
   fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',
 };
+
+// Generic light-canvas detector (works for 'light', 'paper', or any future
+// light theme): perceived luminance of the live --bg-rgb, no theme-name
+// checks to keep in sync. This lives in the critical UI module because lazy
+// screens use it before the library module has necessarily loaded.
+function isLightCanvasActive() {
+  const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return false;
+  return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
 
 // ─── Screen ─────────────────────────────────────────────────────────
 function Screen({ children, scroll = true, style = {} }) {
