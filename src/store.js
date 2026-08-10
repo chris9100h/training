@@ -2790,7 +2790,10 @@ function cancelPushover(settings, userId) {
   } else {
     fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
   }
-  navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
+  // No postMessage to the service worker here: an SW-side rest timer slot
+  // existed once, but nothing ever armed it, so the CANCEL message cleared a
+  // timer that could not exist. Rest timers live in the app (setTimeout in
+  // screens-train.jsx); the server-side push cancel above is the real cancel.
 }
 
 // Admin-only: send a one-off email to a user via the admin-send-email edge

@@ -38,3 +38,8 @@ jobs:
       # missing there boots fine on a warm cache and blanks the app offline
       # or mid-deploy, when it is the only fetch that has to hit the network.
       - run: node tools/check-asset-parity.cjs
+      # sw.js had no runtime coverage anywhere, which is how a branch comparing
+      # an absolute URL to a pathname shipped as dead code through six green
+      # gates. This loads the real sw.js in a node vm and drives real requests
+      # through the fetch handler: routing, offline fallbacks, waitUntil.
+      - run: node tools/check-sw.cjs

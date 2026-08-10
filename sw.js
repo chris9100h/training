@@ -158,17 +158,8 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Slot for the active SW-managed rest timer (one at a time).
-const _restTimer = { id: null, resolve: null };
-
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
-
-  if (e.data?.type === 'CANCEL_REST_TIMER') {
-    clearTimeout(_restTimer.id); _restTimer.id = null;
-    if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
-    return;
-  }
 });
 
 self.addEventListener('push', e => {
@@ -235,8 +226,35 @@ self.addEventListener('fetch', e => {
     // deliberately not part of it, welcome.html takes ?share=<token> deep links.
     if (PUBLIC_PAGES.some(p => url.pathname === p || url.pathname.endsWith(p))) {
       e.respondWith(
-        fetch(e.request, { cache: 'no-store' })
-          .catch(() => caches.match(e.request).then(c => c || offlineResponse()))
+        fetch(e.request, { cache: 'no-store' }).then(res => {
+          // These pages are NAVIGATIONS, and the browser refuses to serve a
+          // redirected response for one ("response has redirections"). The
+          // shell branch below has defended against that since the Cloudflare
+          // clean-URL incident (see precacheAll); this branch serves the same
+          // kind of request and needs the same rebuild, or a host-side
+          // redirect would stop these pages loading at all, online included.
+          if (res.redirected) res = new Response(res.body, res);
+          // Write-through, read only as an offline fallback. The first
+          // network-first version skipped the cache entirely, which fixed the
+          // staleness and silently emptied the offline path with it:
+          // activate() wipes the previous cache generation on every bump and
+          // nothing refilled these pages, so an offline open after any bump
+          // got a blank 504 instead of the page from the last online visit.
+          // Freshness is unchanged: the cache is only read when the network
+          // is unreachable.
+          if (res.ok) {
+            const clone = res.clone();
+            e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
+          }
+          return res;
+        }).catch(() =>
+          // Exact URL first, then the query-less page: welcome.html carries
+          // ?share=<token> deep links and the cache keys on the full URL, so
+          // the plain page from a previous visit beats a blank 504.
+          caches.match(e.request)
+            .then(c => c || caches.match(url.origin + url.pathname))
+            .then(c => c || offlineResponse())
+        )
       );
       return;
     }
@@ -266,10 +284,31 @@ self.addEventListener('fetch', e => {
             // PHOTOS_CACHE, not the short-lived versioned CACHE: otherwise
             // it'd get wiped again on the next deploy.
             const target = url.pathname.includes('/Background/') ? PHOTOS_CACHE : CACHE;
-            caches.open(target).then(c => c.put(e.request, clone));
+            e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
           }
           return res;
-        }).catch(() => cached || offlineResponse());
+        }).catch(() => {
+          if (cached) return cached;
+          // A navigation can miss the cache on its query string alone: the
+          // recipe-share deep link opens the app root as "/?share=<token>",
+          // CacheStorage keys on the full URL, and the shell is stored
+          // without one. The app reads the token from location.search after
+          // boot either way, so the cached shell is the right answer, and a
+          // blank 504 for a user carrying the entire app in their cache is
+          // not. Public pages never reach this branch (matched above), so
+          // this cannot make welcome.html impersonate the app.
+          if (e.request.mode === 'navigate') return caches.match(BASE + '/').then(c => c || offlineResponse());
+          return offlineResponse();
+        });
+        // The background refresh has to OUTLIVE respondWith. When the cached
+        // copy is served (the normal, warm case) nothing else keeps this
+        // worker alive, and a worker torn down early takes the revalidation
+        // and its cache.put with it, so the stale copy survives until the
+        // NEXT visit and the app stays one deploy behind for longer than the
+        // stale-while-revalidate contract implies. Registered synchronously
+        // inside the respondWith chain, which also keeps the event extendable
+        // for the put's own waitUntil above.
+        e.waitUntil(network.catch(() => {}));
         return cached || network;
       })
     );
@@ -287,7 +326,11 @@ self.addEventListener('fetch', e => {
       return fetch(e.request.url, { mode: 'cors', cache: 'no-store' }).then(res => {
         if (res.ok) {
           const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
+          // waitUntil for the same reason as the shell branch: the response
+          // is served immediately, and without an extension the worker can be
+          // torn down before the put lands, leaving the library uncached for
+          // the next offline boot.
+          e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
         }
         return res;
       }).catch(() => offlineResponse());
