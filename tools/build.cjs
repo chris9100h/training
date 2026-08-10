@@ -61,10 +61,12 @@ function copy(rel) {
 }
 
 function compile(rel, source) {
-  if (rel === 'src/supabase.js') return source;
-  const presets = rel.endsWith('.jsx')
-    ? ['react', ['env', { targets: { esmodules: true } }]]
-    : [['env', { targets: { esmodules: true } }]];
+  // Plain-JS core files already run directly in the no-build app. Keep them
+  // byte-identical in the preview core too: Babel is only needed for JSX, and
+  // transforming store.js would unnecessarily change the Supabase auth/write
+  // path between the source fallback and the built preview.
+  if (!rel.endsWith('.jsx')) return source;
+  const presets = ['react', ['env', { targets: { esmodules: true } }]];
   return Babel.transform(source, {
     presets,
     sourceType: 'script',
