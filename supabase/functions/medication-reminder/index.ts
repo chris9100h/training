@@ -1,4 +1,6 @@
 // Medication reminder cron function (Medications feature). Mirrors the meal
+import { localClock } from '../_shared/time.ts';
+
 // reminder's channel mechanics (opted-in users, push via Pushover or Web
 // Push) but firing is STATE-BASED rather than window-based since the
 // follow-up feature (2026-08, migration 0246): each still-planned dose row
@@ -104,6 +106,7 @@ interface Row {
   user_id: string;
   pushover_user_key: string | null;
   use_pushover: boolean | null;
+  time_zone: string | null;
   tz_offset_minutes: number | null;
 }
 
@@ -204,7 +207,7 @@ async function sendReminders() {
   // Gating on meds_enabled here means turning the whole feature off silently
   // stops the nudges too, without also having to flip the reminder toggle.
   const r = await dbFetch(
-    'zane_user_settings?medication_reminder_enabled=eq.true&meds_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,tz_offset_minutes'
+    'zane_user_settings?medication_reminder_enabled=eq.true&meds_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,time_zone,tz_offset_minutes'
   );
   // A non-2xx PostgREST response is still valid JSON (an error object, not an
   // array), so `.json().catch(...)` alone never catches it: `rows` would be
@@ -215,18 +218,14 @@ async function sendReminders() {
   const now = Date.now();
 
   for (const row of rows) {
-    // Shift "now" into the user's local wall clock via their UTC offset. The
-    // shifted Date's UTC fields then read as local time / local date.
-    const tz = row.tz_offset_minutes ?? 0;
-    const shifted = new Date(now + tz * 60000);
-    const localDate = shifted.toISOString().slice(0, 10);
+    const local = localClock(now, row.time_zone, row.tz_offset_minutes);
+    const localDate = local.date;
     // Yesterday's local date too: a dose at/after 23:00 has its (time + 1h
     // grace) land AFTER local midnight, i.e. on the next local day, where the
     // row is no longer "today". Querying yesterday as well lets those late
     // doses fire in the first tick(s) after midnight instead of never.
-    const yesterday = new Date(shifted.getTime() - DAY_MS).toISOString().slice(0, 10);
-    const localMsSinceMidnight =
-      (shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds()) * 1000;
+    const yesterday = local.yesterday;
+    const localMsSinceMidnight = local.msSinceMidnight;
 
     // Fill in whatever the client hasn't materialized itself yet (see
     // materializeDueDoses above) before asking what's still due below.

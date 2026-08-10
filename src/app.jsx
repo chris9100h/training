@@ -444,7 +444,7 @@ function App() {
     }
   }, [store?.settings?.darkMode]);
 
-  // Keeps settings.tzOffsetMinutes fresh for every reminder cron (medication,
+  // Keeps the reminder clock fresh for every reminder cron (medication,
   // water, meal, daily-log) that places "now" on the user's local clock. Used
   // to be three separate per-screen writers (Water: only while that tab is
   // open, Food: only in Plan Mode, Meds: only while that tab is open), so a
@@ -467,7 +467,13 @@ function App() {
     // store, not the one captured here, and only write when it changed.
     const sync = () => {
       const off = -new Date().getTimezoneOffset();
-      setStore(s => (s && s.settings?.tzOffsetMinutes !== off ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+      let zone = null;
+      try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) {}
+      setStore(s => {
+        if (!s) return s;
+        if (s.settings?.tzOffsetMinutes === off && s.settings?.timeZone === zone) return s;
+        return { ...s, settings: { ...s.settings, tzOffsetMinutes: off, timeZone: zone } };
+      });
     };
     sync();
     // 5-minute poll: the crons fire on fixed UTC schedules, so a longer

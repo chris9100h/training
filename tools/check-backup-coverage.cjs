@@ -71,6 +71,7 @@ const EXCLUDED = {
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',
   zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
+  zane_meal_reminder_deliveries: 'server-side reminder delivery ledger, derived provider state rather than user content',
 };
 
 // Columns that legitimately never round-trip.
@@ -83,11 +84,11 @@ const PER_TABLE_ALLOW = {
   // sw_version: internal client marker. auto_close_notify / manual_calories: not
   // part of the store model (never loaded/synced), so nothing to round-trip; add
   // them to loadFromSupabase + the store if they ever become real settings.
-  // tz_offset_minutes: environment-derived, auto-set by the client on load.
+  // tz_offset_minutes/time_zone: environment-derived, auto-set by the client on load.
   // water_last_push_at: server-written throttle for the water reminder cron.
   // daily_log_reminder_last_date: server-written per-day throttle for the
   // daily-log-reminder cron, same status as water_last_push_at.
-  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at', 'daily_log_reminder_last_date']),
+  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'time_zone', 'water_last_push_at', 'daily_log_reminder_last_date']),
   // tier / tier_granted_at: server-authored, granted by grant_lifetime_if_qualified()
   // and reverted on any client write by zane_profiles_protect_tier. Deliberately
   // NOT restorable: a backup file is user-editable, so importing it would be a

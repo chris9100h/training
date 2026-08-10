@@ -59,27 +59,28 @@ export async function resolveUser(req: Request): Promise<Caller | null> {
 }
 
 // Advisory per-user daily quota (zane_api_usage/bump_api_usage, migration
-// 0207). Fails OPEN on purpose: if the RPC errors, times out or the migration
-// has not run yet, the call goes through. A problem with the quota mechanism
-// must never be the reason someone cannot log their food, and the point of it
-// is catching a runaway account, not enforcing a contract.
+// 0207). Expensive model-backed endpoints fail CLOSED when the quota service
+// cannot answer, because otherwise a transient RPC outage removes the only
+// spend guard. Callers that are ordinary food lookups can explicitly opt into
+// fail-open behaviour because availability matters more than a soft counter.
 //
 // `kind` is per FEATURE, not per provider: switching the model a feature runs
 // on must not multiply the effective quota, so all three meal parsers share
 // 'meal_parse' and all three label scanners share 'scan'.
-export async function withinQuota(userId: string, kind: string, limit: number): Promise<boolean> {
+export async function withinQuota(userId: string, kind: string, limit: number, options: { failOpen?: boolean } = {}): Promise<boolean> {
+  const failOpen = options.failOpen ?? false;
   try {
     const base = Deno.env.get('SUPABASE_URL') ?? '';
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    if (!base || !key) return true;
+    if (!base || !key) return failOpen;
     const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
     });
-    if (!r.ok) return true;
+    if (!r.ok) return failOpen;
     return (await r.json()) !== false;
   } catch (_) {
-    return true;
+    return failOpen;
   }
 }

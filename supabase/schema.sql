@@ -339,6 +339,7 @@ CREATE TABLE public.zane_user_settings (
   water_reminder_enabled boolean NOT NULL DEFAULT false,
   water_last_push_at timestamp with time zone,
   tz_offset_minutes integer,
+  time_zone text,
   meal_reminder_enabled boolean NOT NULL DEFAULT false,
   meds_enabled boolean NOT NULL DEFAULT false,
   medication_reminder_enabled boolean NOT NULL DEFAULT false,
@@ -2539,6 +2540,24 @@ CREATE POLICY "coaches read client food logs"
 -- ── Food Tracker quick-add (migration 0187) ─────────────────────────────────────
 -- Both simple owned collections (mirrors zane_workout_templates), no coach
 -- visibility, not part of the Health tab's live-refresh polling.
+
+-- Server-only ledger for meal reminder delivery attempts. It is derived
+-- provider state, not personal content, and is intentionally excluded from
+-- user backups (migration 0259).
+CREATE TABLE zane_meal_reminder_deliveries (
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_log_id     text NOT NULL,
+  last_attempt_at timestamptz,
+  delivered_at    timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, food_log_id)
+);
+
+CREATE INDEX zane_meal_reminder_deliveries_user_idx
+  ON public.zane_meal_reminder_deliveries USING btree (user_id, delivered_at);
+
+ALTER TABLE zane_meal_reminder_deliveries ENABLE ROW LEVEL SECURITY;
+-- No policies: only the service role may read or write delivery state.
 
 CREATE TABLE zane_food_favorites (
   id          text        PRIMARY KEY,

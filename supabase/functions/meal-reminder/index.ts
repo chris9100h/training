@@ -1,20 +1,15 @@
 // Meal reminder cron function (Plan Mode). Mirrors the water reminder: for each
+import { sendNotification } from '../_shared/notifications.ts';
+import { localClock } from '../_shared/time.ts';
+
 // opted-in user it finds today's PLANNED (not-yet-checked-off) food entries and
 // nudges when one is still unchecked an hour past its planned time. The 8:00
 // meal fires at 9:00 if you haven't logged it by then.
 //
-// Fire-once is achieved by a window equal to the cron cadence instead of a
-// throttle column: a meal only fires on the single cron tick where "now" first
-// crosses (planned time + grace), i.e. the overdue moment landed within the last
-// interval. The cron runs hourly and the window is 1h, so a meal's threshold
-// falls inside exactly one tick's window and there is no re-nag and no per-entry
-// bookkeeping. Planned meals sit on the hour (a template slot's time is HH:00),
-// so an on-the-hour meal fires precisely at its +1h point; a manually-planned
-// off-the-hour meal fires at the following hourly tick, which is fine for a
-// "you forgot to log this" nudge. Both today and yesterday are queried: a meal
-// at/after 23:00 has its +1h threshold land after local midnight, so it is
-// measured against "now + a full day" and fires in the first tick(s) of the
-// next local day rather than never.
+// A server-side delivery ledger makes the event retryable: provider failures
+// leave the meal undelivered and later hourly ticks retry it, while a successful
+// handoff is never sent again. The retry horizon is one local day, so a stale
+// planned entry cannot nag forever.
 //
 // Scheduled via pg_cron (migration 0201_meal_reminder.sql), POST with an empty
 // body, same pattern as the training/water reminders (migrations 0028/0182).
@@ -25,10 +20,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a planned meal is this far past its time
-const WINDOW_MS = 60 * 60 * 1000;     // = cron cadence (hourly): the meal fires on the tick that crosses the grace threshold
+const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RETRY_COOLDOWN_MS = 50 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-meal (>=23:00) day-boundary look-back
 
 function dbFetch(path: string, options: RequestInit = {}) {
@@ -45,19 +39,11 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
-async function sendWebPush(userId: string, title: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, title, message }),
-  }).catch(e => console.error(`[meal-reminder] web-push error for ${userId}:`, e));
-}
-
 interface Row {
   user_id: string;
   pushover_user_key: string | null;
   use_pushover: boolean | null;
+  time_zone: string | null;
   tz_offset_minutes: number | null;
 }
 
@@ -66,7 +52,7 @@ async function sendReminders() {
   // on plan_mode here means turning Plan Mode off silently stops the nudges
   // without having to also flip the reminder toggle.
   const r = await dbFetch(
-    'zane_user_settings?meal_reminder_enabled=eq.true&plan_mode=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,tz_offset_minutes'
+    'zane_user_settings?meal_reminder_enabled=eq.true&plan_mode=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,time_zone,tz_offset_minutes'
   );
   // A non-2xx PostgREST response is still valid JSON (an error object, not an
   // array), so `.json().catch(...)` alone never catches it: `rows` would be
@@ -77,38 +63,43 @@ async function sendReminders() {
   const now = Date.now();
 
   for (const row of rows) {
-    // Shift "now" into the user's local wall clock via their UTC offset. The
-    // shifted Date's UTC fields then read as local time / local date.
-    const tz = row.tz_offset_minutes ?? 0;
-    const shifted = new Date(now + tz * 60000);
-    const localDate = shifted.toISOString().slice(0, 10);
+    const local = localClock(now, row.time_zone, row.tz_offset_minutes);
+    const localDate = local.date;
     // Yesterday's local date too: a meal at/after 23:00 has its (time + 1h grace)
     // land AFTER local midnight, i.e. on the next local day, where the row is no
     // longer "today". Querying yesterday as well lets those late meals fire in
     // the first tick(s) after midnight instead of never (an earlier bug).
-    const yesterday = new Date(shifted.getTime() - DAY_MS).toISOString().slice(0, 10);
-    const localMsSinceMidnight =
-      (shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds()) * 1000;
+    const yesterday = local.yesterday;
+    const localMsSinceMidnight = local.msSinceMidnight;
 
     // Still-planned (unchecked) entries for today and yesterday. A failed fetch
     // must not be read as "nothing planned", so skip this user rather than guess.
     const eRes = await dbFetch(
-      `zane_food_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=date,time,food_name`
+      `zane_food_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=id,date,time,food_name`
     );
     if (!eRes.ok) { console.error(`[meal-reminder] food log query failed for ${row.user_id}: ${eRes.status}`); continue; }
-    const entries: { date: string | null; time: string | null; food_name: string | null }[] = await eRes.json().catch(() => []);
+    const entries: { id: string; date: string | null; time: string | null; food_name: string | null }[] = await eRes.json().catch(() => []);
+    const ids = entries.map(entry => entry.id);
+    if (!ids.length) continue;
+    const deliveryRes = await dbFetch(`zane_meal_reminder_deliveries?user_id=eq.${row.user_id}&food_log_id=in.(${ids.join(',')})&select=food_log_id,last_attempt_at,delivered_at`);
+    if (!deliveryRes.ok) {
+      console.error(`[meal-reminder] delivery ledger query failed for ${row.user_id}: ${deliveryRes.status}`);
+      continue;
+    }
+    const deliveries: { food_log_id: string; last_attempt_at: string | null; delivered_at: string | null }[] = await deliveryRes.json().catch(() => []);
+    const deliveryById = new Map(deliveries.map(delivery => [delivery.food_log_id, delivery]));
 
-    // A meal is due for a nudge if its (planned time + grace) crossed the current
-    // clock within the last cron interval: 0 <= now - (mealTime + grace) < WINDOW.
-    // A yesterday row is measured against "now + a full day" so a 23:00 meal's
-    // threshold (24:00 = today 00:00) is reached exactly at the first tick today;
-    // an ordinary yesterday meal is then far past the window and never re-fires.
+    // A meal is due once its planned time plus grace has passed. The ledger
+    // below handles retries and suppresses already delivered reminders.
     const due = entries.filter(e => {
       const [h, m] = (e.time ?? '0:0').split(':').map(Number);
       const mealMs = ((h || 0) * 3600 + (m || 0) * 60) * 1000;
       const dayOffset = e.date === localDate ? 0 : DAY_MS;
       const past = localMsSinceMidnight + dayOffset - mealMs - GRACE_MS;
-      return past >= 0 && past < WINDOW_MS;
+      const delivery = deliveryById.get(e.id);
+      if (delivery?.delivered_at) return false;
+      if (delivery?.last_attempt_at && now - new Date(delivery.last_attempt_at).getTime() < RETRY_COOLDOWN_MS) return false;
+      return past >= 0 && past < RETRY_WINDOW_MS;
     });
     if (!due.length) continue;
 
@@ -121,20 +112,50 @@ async function sendReminders() {
     // and a key set) send only Pushover, otherwise send native Web Push. This
     // matches the use_pushover "instead of Web Push" semantics used elsewhere,
     // so the user never gets the same nudge on both channels.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
-        });
-        console.log(`[meal-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        console.error(`[meal-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      await sendWebPush(row.user_id, title, message);
+    const dueIds = due.map(entry => entry.id);
+    const attemptRes = await dbFetch('zane_meal_reminder_deliveries', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify(dueIds.map(food_log_id => ({ user_id: row.user_id, food_log_id }))),
+    });
+    if (!attemptRes.ok) {
+      console.error(`[meal-reminder] delivery ledger seed failed for ${row.user_id}: ${attemptRes.status}`);
+      continue;
+    }
+    // Claim only rows whose previous attempt is old enough. PostgREST applies
+    // this PATCH atomically, so a concurrent cron invocation receives an empty
+    // representation instead of sending a duplicate notification.
+    const cutoff = new Date(now - RETRY_COOLDOWN_MS).toISOString();
+    const claimRes = await dbFetch(`zane_meal_reminder_deliveries?user_id=eq.${row.user_id}&food_log_id=in.(${dueIds.join(',')})&delivered_at=is.null&or=(last_attempt_at.is.null,last_attempt_at.lt.${cutoff})`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ last_attempt_at: new Date(now).toISOString() }),
+    });
+    if (!claimRes.ok) {
+      console.error(`[meal-reminder] delivery claim failed for ${row.user_id}: ${claimRes.status}`);
+      continue;
+    }
+    const claimed: { food_log_id: string }[] = await claimRes.json().catch(() => []);
+    const claimedIds = new Set(claimed.map(entry => entry.food_log_id));
+    if (!claimedIds.size) continue;
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'meal-reminder',
+      ttl: 10800,
+    });
+    if (!delivered) continue;
+
+    const deliveredRes = await dbFetch(`zane_meal_reminder_deliveries?user_id=eq.${row.user_id}&food_log_id=in.(${[...claimedIds].join(',')})`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ delivered_at: new Date(now).toISOString() }),
+    });
+    if (!deliveredRes.ok) {
+      console.error(`[meal-reminder] delivery success ledger write failed for ${row.user_id}: ${deliveredRes.status} (the next tick may retry)`);
     }
   }
 }

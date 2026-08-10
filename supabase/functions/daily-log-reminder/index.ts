@@ -1,3 +1,6 @@
+import { sendNotification } from '../_shared/notifications.ts';
+import { localClock } from '../_shared/time.ts';
+
 // Daily log reminder cron function. Nudges once per local day when the user
 // has NOT logged a weight for that day yet: after the user's chosen time
 // (daily_log_reminder_time, HH:MM in their local wall clock via
@@ -17,8 +20,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const DEFAULT_REMINDER_TIME = '19:00';
 
 function dbFetch(path: string, options: RequestInit = {}) {
@@ -35,15 +36,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
-async function sendWebPush(userId: string, title: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, title, message }),
-  }).catch(e => console.error(`[daily-log-reminder] web-push error for ${userId}:`, e));
-}
-
 // '19:00' -> milliseconds since local midnight. Malformed/empty falls back to
 // DEFAULT_REMINDER_TIME, mirroring water-reminder's hhmmToDecimal leniency.
 function hhmmToMs(t: string): number {
@@ -55,6 +47,7 @@ interface Row {
   user_id: string;
   pushover_user_key: string | null;
   use_pushover: boolean | null;
+  time_zone: string | null;
   tz_offset_minutes: number | null;
   daily_log_reminder_time: string | null;
   daily_log_reminder_last_date: string | null;
@@ -62,7 +55,7 @@ interface Row {
 
 async function sendReminders() {
   const r = await dbFetch(
-    'zane_user_settings?daily_log_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,tz_offset_minutes,daily_log_reminder_time,daily_log_reminder_last_date'
+    'zane_user_settings?daily_log_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,time_zone,tz_offset_minutes,daily_log_reminder_time,daily_log_reminder_last_date'
   );
   // A non-2xx PostgREST response is still valid JSON (an error object, not an
   // array), so `.json().catch(...)` alone never catches it: `rows` would be
@@ -73,13 +66,9 @@ async function sendReminders() {
   const now = Date.now();
 
   for (const row of rows) {
-    // Shift "now" into the user's local wall clock via their UTC offset. The
-    // shifted Date's UTC fields then read as local time / local date.
-    const tz = row.tz_offset_minutes ?? 0;
-    const shifted = new Date(now + tz * 60000);
-    const localDate = shifted.toISOString().slice(0, 10);
-    const localMsSinceMidnight =
-      (shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds()) * 1000;
+    const local = localClock(now, row.time_zone, row.tz_offset_minutes);
+    const localDate = local.date;
+    const localMsSinceMidnight = local.msSinceMidnight;
 
     // Already nudged on this local date: the daily throttle. null means never
     // fired, which must NOT skip the user.
@@ -106,25 +95,19 @@ async function sendReminders() {
     // and a key set) send only Pushover, otherwise send native Web Push. This
     // matches the use_pushover "instead of Web Push" semantics used elsewhere,
     // so the user never gets the same nudge on both channels.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 43200 }),
-        });
-        console.log(`[daily-log-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        console.error(`[daily-log-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      await sendWebPush(row.user_id, title, message);
-    }
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'daily-log-reminder',
+      ttl: 43200,
+    });
+    if (!delivered) continue;
 
-    // Stamp the daily throttle regardless of push success so the same nudge
-    // does not re-fire on the next tick (a duplicate is worse than a miss:
-    // the intent was sent at least once). A failed write is logged loudly;
+    // Stamp the daily throttle only after a successful handoff so provider
+    // failures remain retryable on the next tick. A failed write is logged loudly;
     // the refire risk it leaves is bounded to the next tick, same posture as
     // the water reminder's throttle write. "Logged loudly" has to include a
     // 4xx/5xx response: fetch resolves on those, so without the status check

@@ -150,7 +150,7 @@ function makeWorld(scope) {
     for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 0)); await Promise.all([...ev.ext]); }
   };
   const cacheBody = (cacheName, url) => stores.get(cacheName)?.get(url)?.body;
-  return { handlers, stores, net, seed, hit, settle, cacheBody, scope };
+  return { handlers, stores, net, clients: sandbox.clients, seed, hit, settle, cacheBody, scope };
 }
 
 // ── Scenarios ───────────────────────────────────────────────────────────────
@@ -164,6 +164,25 @@ const scenarios = [
     check('supabase', !(await w.hit('https://xyz.supabase.co/rest/v1/zane_sets')).ev.responded, 'respondWith was called for a supabase request');
     check('post', !(await w.hit(S + 'src/store.js', { method: 'POST' })).ev.responded, 'respondWith was called for a POST');
     check('foreign', !(await w.hit('https://example.com/a.js')).ev.responded, 'respondWith was called for a foreign origin');
+  }],
+
+  ['notification click: an existing app window navigates before focus', async () => {
+    const w = makeWorld(S);
+    const calls = { navigated: null, focused: 0 };
+    const client = {
+      url: S,
+      navigate: async (url) => { calls.navigated = url; client.url = url; return client; },
+      focus: async () => { calls.focused++; return client; },
+    };
+    w.clients.matchAll = async () => [client];
+    let done;
+    w.handlers.notificationclick({
+      notification: { data: { url: S + 'health?from=push' }, close: () => {} },
+      waitUntil: promise => { done = Promise.resolve(promise); },
+    });
+    await done;
+    check('notification-navigate', calls.navigated === S + 'health?from=push', `existing client stayed on ${calls.navigated}`);
+    check('notification-focus', calls.focused === 1, 'existing client was not focused after navigation');
   }],
 
   ['version probe: ?_v= hits the network and is never cached', async () => {

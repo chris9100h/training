@@ -1,11 +1,10 @@
+import { sendNotification } from '../_shared/notifications.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
-
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -19,15 +18,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
       ...(options.headers ?? {}),
     },
   });
-}
-
-async function sendWebPush(userId: string, title: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, title, message }),
-  }).catch(e => console.error(`[reminder] web-push error for ${userId}:`, e));
 }
 
 async function sendReminders() {
@@ -57,30 +47,20 @@ async function sendReminders() {
     // BOTH whenever a key existed, so a Pushover user got the same reminder
     // twice. Matches the water/meal reminder "Pushover instead of Web Push"
     // semantics.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 43200 }),
-        });
-        console.log(`[reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        console.error(`[reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      await sendWebPush(row.user_id, title, message);
-    }
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'reminder',
+      ttl: 43200,
+    });
+    if (!delivered) continue;
 
-    // Clear next_reminder_at regardless of push success so we don't retry
-    // endlessly. A failed clear (network reject OR a non-2xx PostgREST
-    // reply, which .catch alone never sees) leaves next_reminder_at stale
-    // in the past, and this function runs every minute (migration
-    // 0028_reminder_cron.sql), so the same reminder keeps re-sending until
-    // the separate oneHourAgo staleness cutoff above finally skips the row.
-    // Not retried here (that cutoff is the existing backstop), just logged
-    // properly instead of looking identical to a successful clear.
+    // Only clear after the provider accepted the handoff. A failed delivery
+    // remains due and can retry on the next cron tick until the one-hour
+    // staleness backstop expires.
     const clearResp = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
       method: 'PATCH',
       headers: { 'Prefer': 'return=minimal' },

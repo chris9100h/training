@@ -99,7 +99,7 @@ function TopBar({ title, sub, onBack, right }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12 }}>
         {onBack && (
-          <button onClick={onBack} style={{
+          <button type="button" onClick={onBack} aria-label="Back" style={{
             width: 32, height: 32, borderRadius: 4,
             border: `1px solid ${UI.hairStrong}`, background: 'transparent',
             color: UI.gold, cursor: 'pointer',
@@ -135,7 +135,7 @@ function SubTabBar({ tabs, active, onChange, style = {} }) {
       {tabs.map(t => {
         const on = t.id === active;
         return (
-          <button key={t.id} onClick={() => !on && onChange(t.id)} style={{
+          <button key={t.id} onClick={() => !on && onChange(t.id)} aria-current={on ? 'page' : undefined} style={{
             flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
             background: on ? UI.goldFaint : 'transparent',
             border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
@@ -371,7 +371,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
               const badge = t.id === 'coaching' ? coachingBadge : null;
               const { healthSlot, iconKey, label } = t;
               return (
-                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} aria-current={on ? 'page' : undefined} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -495,6 +495,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
             return (
               <button key={t.id} data-tour={`tab-${t.id}`}
                 onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
+                aria-current={on ? 'page' : undefined}
                 onPointerDown={isHealthTab ? healthOnPointerDown : undefined}
                 onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
                 onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
@@ -671,7 +672,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
   const round = (v) => Math.round(v * 1000) / 1000;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-      <button onClick={() => onChange(Math.max(min, round((+value || 0) - step)))} style={{
+      <button type="button" aria-label="Decrease" onClick={() => onChange(Math.max(min, round((+value || 0) - step)))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
         borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
@@ -683,7 +684,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
         fontSize: big ? 36 : 22, color: UI.ink, minWidth: big ? 100 : 64,
         fontVariantNumeric: 'tabular-nums',
       }}>{value ?? '—'}{suffix && <span style={{ fontSize: big ? 14 : 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}</div>
-      <button onClick={() => onChange(max != null ? Math.min(max, round((+value || 0) + step)) : round((+value || 0) + step))} style={{
+      <button type="button" aria-label="Increase" onClick={() => onChange(max != null ? Math.min(max, round((+value || 0) + step)) : round((+value || 0) + step))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
         borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
@@ -832,6 +833,14 @@ function Toggle({ on, onToggle, disabled = false, label }) {
 function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  const panelNodeRef = React.useRef(null);
+  const previousFocusRef = React.useRef(null);
+  const titleIdRef = React.useRef(`sheet-title-${Math.random().toString(36).slice(2)}`);
+  const setPanelRef = (node) => {
+    panelNodeRef.current = node;
+    if (typeof panelRef === 'function') panelRef(node);
+    else if (panelRef) panelRef.current = node;
+  };
   // Every sheet opens with the keyboard down, full stop: a field left
   // focused from wherever the user was before (a background screen, or a
   // sheet this one replaces/covers) would otherwise keep the OS keyboard
@@ -847,8 +856,31 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   React.useLayoutEffect(() => {
     if (!open) return;
     const active = document.activeElement;
+    previousFocusRef.current = active;
     if (active && active !== document.body && active.blur) active.blur();
+    // Focus the dialog container, never a child input. This gives screen
+    // readers a stable entry point while preserving the deliberate
+    // "keyboard stays down until the user taps a field" behaviour.
+    panelNodeRef.current?.focus?.({ preventScroll: true });
+    return () => {
+      const previous = previousFocusRef.current;
+      const current = document.activeElement;
+      const isTextEntry = previous && (previous.tagName === 'INPUT' || previous.tagName === 'TEXTAREA' || previous.isContentEditable);
+      if (previous && !isTextEntry && document.contains(previous) && (current === document.body || panelNodeRef.current?.contains?.(current))) {
+        try { previous.focus({ preventScroll: true }); } catch (_) { previous.focus(); }
+      }
+    };
   }, [open]);
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape' || !onClose) return;
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -914,7 +946,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
     // all (a separate OS/browser compositing layer), so there's nothing
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
-    <div onClick={onClose} style={{
+    <div onClick={onClose} aria-hidden={false} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
@@ -937,7 +969,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
         {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
-        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
+        <div ref={setPanelRef} role="dialog" aria-modal="true" aria-labelledby={title ? titleIdRef.current : undefined} aria-label={title ? undefined : 'Dialog'} tabIndex={-1} onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
@@ -994,13 +1026,13 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (titleRight ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div id={titleIdRef.current} style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {title}
               </div>
               <div style={{ flexShrink: 0 }}>{titleRight}</div>
             </div>
           ) : (
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
+            <div id={titleIdRef.current} style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
               {title}
             </div>
           ))}
@@ -1016,15 +1048,21 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
 // the close button) to dismiss. src is nullable, render unconditionally
 // and pass the tapped image's URL, or null to keep it closed.
 function ImageLightbox({ src, onClose }) {
+  React.useEffect(() => {
+    if (!src) return;
+    const onKeyDown = (event) => { if (event.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [src, onClose]);
   if (!src) return null;
   return (
-    <div onClick={onClose} style={{
+    <div role="dialog" aria-modal="true" aria-label="Image preview" onClick={onClose} style={{
       position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
     }}>
       <img src={src} alt="" style={{ maxWidth: '92%', maxHeight: '88vh', objectFit: 'contain', borderRadius: 4 }} />
-      <button onClick={onClose} style={{
+      <button type="button" onClick={onClose} aria-label="Close image preview" style={{
         position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 16,
         width: 36, height: 36, borderRadius: '50%', border: 'none',
         background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 20, lineHeight: 1,
@@ -1244,7 +1282,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         {onBack && (
-          <button onClick={onBack} style={{
+          <button type="button" onClick={onBack} aria-label="Back" style={{
             width: 32, height: 32, borderRadius: 4,
             border: `1px solid ${UI.hairStrong}`, background: 'transparent',
             color: UI.gold, cursor: 'pointer',
@@ -1365,7 +1403,6 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
         <button
           type="button"
           onClick={onToggleReveal}
-          tabIndex={-1}
           aria-label={reveal ? 'Hide password' : 'Show password'}
           style={{
             flexShrink: 0, background: 'none', border: 'none', padding: '0 2px', cursor: 'pointer',

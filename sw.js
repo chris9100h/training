@@ -182,12 +182,24 @@ self.addEventListener('push', e => {
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = e.notification.data?.url || BASE + '/';
+  const requestedUrl = e.notification.data?.url || BASE + '/';
+  let targetUrl = new URL(BASE + '/', self.location.href).href;
+  try {
+    const candidate = new URL(requestedUrl, targetUrl);
+    // Push payloads are app-controlled. Still constrain navigation to this
+    // origin and registration scope so a malformed/stale payload cannot turn
+    // a notification click into an external redirect.
+    if (candidate.origin === self.location.origin && candidate.href.startsWith(BASE + '/')) {
+      targetUrl = candidate.href;
+    }
+  } catch (_) {}
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
       const match = cs.find(c => c.url.startsWith(BASE));
-      if (match) return match.focus();
-      return clients.openWindow(url);
+      if (match) {
+        return match.navigate(targetUrl).catch(() => null).then(() => match.focus());
+      }
+      return clients.openWindow(targetUrl);
     })
   );
 });

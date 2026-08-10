@@ -1788,6 +1788,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         waterReminderEnabled: sett.water_reminder_enabled ?? false,
         mealReminderEnabled: sett.meal_reminder_enabled ?? false,
         tzOffsetMinutes: sett.tz_offset_minutes ?? null,
+        timeZone: sett.time_zone ?? null,
         medsEnabled: sett.meds_enabled ?? false,
         medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
         dailyLogReminderEnabled: sett.daily_log_reminder_enabled ?? false,
@@ -2596,6 +2597,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
     prev.settings?.mealReminderEnabled    !== next.settings?.mealReminderEnabled ||
     prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
+    prev.settings?.timeZone               !== next.settings?.timeZone             ||
     prev.settings?.medsEnabled            !== next.settings?.medsEnabled       ||
     prev.settings?.medicationReminderEnabled !== next.settings?.medicationReminderEnabled ||
     prev.settings?.dailyLogReminderEnabled  !== next.settings?.dailyLogReminderEnabled  ||
@@ -2661,6 +2663,7 @@ async function syncStore(prev, next, userId) {
       next_reminder_at: next.nextReminderAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
       tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
+      time_zone: next.settings?.timeZone ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
     // multi-device clobber: on a whole-row upsert a device syncing an unrelated
