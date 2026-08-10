@@ -566,7 +566,7 @@ Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
 - weight_rate_kg_week (numeric), day_span (integer), calorie_days/weigh_ins (integer): Wochenrate und Transparenzwerte zur Datenbasis
 - decision (applied | skipped | reconstructed): Apply, Skip oder aus den vorhandenen Logs nachgebaut
 - source (live | reconstructed): beim Check-in live berechnet oder nachträglich rekonstruiert
-- targets_snapshot (jsonb, nullable): eingefrorene Makroziele des Apply-Schritts; bei Skip und reinen Rekonstruktionen leer
+- targets_snapshot (jsonb, nullable): eingefrorener Check-in-Vorschlag mit Training/Rest-Zielen, Wochenmittel, deltaKcal, Ziel und Rate; decision zeigt, ob er angewendet oder übersprungen wurde
 - calculated_at, decided_at, created_at, updated_at (timestamptz)
 - Store field: store.adaptiveTdeeHistory. Die bestehende zane_user_settings.macro_calc-Shape bleibt der aktuelle Formular-/Check-in-Zustand; die Historie wird nicht in dieses JSONB hineingeschrieben.
 - RLS: ausschließlich eigene Zeilen, kein Coach-Zugriff. Data-API-Rechte sind ausdrücklich auf authenticated beschränkt.

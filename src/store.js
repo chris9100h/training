@@ -6835,10 +6835,29 @@ function reconstructAdaptiveTdeeHistory(store, userId, dates) {
   return uniqueDates.map(asOfDate => {
     const wasApplied = calc.lastAppliedAt === asOfDate;
     const wasHandled = calc.lastCheckinAt === asOfDate;
-    return adaptiveTdeeHistoryRow(store, userId, asOfDate, {
+    const row = adaptiveTdeeHistoryRow(store, userId, asOfDate, {
       decision: wasApplied ? 'applied' : wasHandled ? 'skipped' : 'reconstructed',
       targetsSnapshot: wasApplied ? (calc.lastAppliedTargets ?? null) : null,
     });
+    // Older applied points predate the richer target snapshot. The exact
+    // training/rest values are still available in macroCalc, so add the
+    // comparable weekly average when the training split is known.
+    if (row && wasApplied && calc.lastAppliedTargets && calc.trainingDays != null) {
+      const targetCalories = weeklyAverageCalories(
+        calc.lastAppliedTargets.caloriesTraining,
+        calc.lastAppliedTargets.caloriesRest,
+        calc.trainingDays,
+      );
+      row.targetsSnapshot = {
+        ...calc.lastAppliedTargets,
+        weeklyAverageCalories: targetCalories,
+        deltaKcal: targetCalories - row.tdee,
+        trainingDays: calc.trainingDays,
+        goal: calc.goal ?? null,
+        rateKgPerWeek: calc.rateKgPerWeek ?? null,
+      };
+    }
+    return row;
   }).filter(Boolean);
 }
 

@@ -463,7 +463,7 @@ const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every
 // and stays at the default (false) below, no explicit "expanded" wrap needed.
 const ChartCompactContext = React.createContext(false);
 
-function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false }) {
+function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false, plotTop = CHART_PLOT_TOP, plotH = CHART_PLOT_H }) {
   const wrapRef = useRefH(null);
   const [active, setActive] = useStateH(null);
   const compact = React.useContext(ChartCompactContext);
@@ -514,7 +514,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       )}
       {p && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
+          <div style={{ position: 'absolute', left: leftPct + '%', top: (plotTop / H) * 100 + '%', height: (plotH / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
@@ -3095,14 +3095,23 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
 }
 
 function AdaptiveTdeeChart({ history }) {
-  const points = (history || []).slice().sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+  const isLbs = UI.unit() === 'lbs';
+  const displayWeight = kg => {
+    const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
+    return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+  };
+  const points = (history || []).slice().sort((a, b) => a.asOfDate.localeCompare(b.asOfDate)).map(row => ({
+    ...row,
+    targetCalories: Number(row.targetsSnapshot?.weeklyAverageCalories),
+  }));
   if (!points.length) return null;
   const W = 320, padL = 38, padR = 10, padTop = 10, plotH = 112, padBottom = 20;
   const H = padTop + plotH + padBottom;
   const plotW = W - padL - padR;
-  const values = points.flatMap(p => [Number(p.tdee), Number(p.avgCalories)]).filter(Number.isFinite);
+  const values = points.flatMap(p => [Number(p.tdee), Number(p.avgCalories), Number(p.targetCalories)]).filter(Number.isFinite);
   const min = Math.min(...values);
   const max = Math.max(...values);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
   const range = Math.max(100, max - min);
   const domainMin = Math.floor((min - range * 0.12) / 50) * 50;
   const domainMax = Math.ceil((max + range * 0.12) / 50) * 50;
@@ -3112,15 +3121,43 @@ function AdaptiveTdeeChart({ history }) {
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = date => padL + healthDayDiff(from, date) / totalDays * plotW;
   const yOf = value => padTop + (1 - (value - domainMin) / domainRange) * plotH;
-  const line = key => points.map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(p[key]).toFixed(1)).join(' ');
+  const line = key => points.filter(p => Number.isFinite(Number(p[key])))
+    .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
   const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
+  const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
+  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+  const signed = value => value == null ? null : (value > 0 ? '+' : '') + String(value);
+  const hoverPoints = points.map(p => {
+    const weight = displayWeight(p.weightEndKg);
+    const rate = displayWeight(p.weightRateKgWeek);
+    const rows = [
+      { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
+      { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
+    ];
+    if (Number.isFinite(p.targetCalories)) {
+      const delta = Number(p.targetsSnapshot?.deltaKcal);
+      rows.push({
+        label: 'Target',
+        value: String(p.targetCalories) + ' kcal' + (Number.isFinite(delta) ? ' (' + (delta > 0 ? '+' : '') + String(delta) + ')' : ''),
+        color: UI.gold,
+      });
+    }
+    const sub = [
+      statusLabel(p),
+      weight != null ? 'weight ' + String(weight) + (isLbs ? 'lbs' : 'kg') : null,
+      rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
+    ].filter(Boolean).join(' · ');
+    return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
+  });
   return (
     <div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
         <span><i className="fa-solid fa-minus" style={{ color: 'var(--accent)', marginRight: 5 }} />Auto TDEE</span>
         <span><i className="fa-solid fa-minus" style={{ color: UI.inkSoft, marginRight: 5 }} />Avg intake</span>
+        {hasTarget && <span><i className="fa-solid fa-minus" style={{ color: UI.gold, marginRight: 5 }} />Suggested target</span>}
       </div>
-      <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display: 'block', overflow: 'visible' }} role="img" aria-label="Adaptive TDEE and average calorie intake history">
+      <ChartHover W={W} H={H} points={hoverPoints} markerColor="var(--accent)" plotTop={padTop} plotH={plotH}>
+      <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display: 'block', overflow: 'visible' }} role="img" aria-label="Adaptive TDEE, calorie target and average calorie intake history">
         {grid.map((value, i) => (
           <g key={i}>
             {i > 0 && <line x1={padL} y1={yOf(value)} x2={W - padR} y2={yOf(value)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -3132,23 +3169,27 @@ function AdaptiveTdeeChart({ history }) {
           <>
             <polyline points={line('avgCalories')} fill="none" stroke={UI.inkSoft} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.9" />
             <polyline points={line('tdee')} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {hasTarget && <polyline points={line('targetCalories')} fill="none" stroke={UI.gold} strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.95" />}
           </>
         )}
         {points.map((p, i) => (
           <g key={p.asOfDate}>
             <circle cx={xOf(p.asOfDate)} cy={yOf(p.tdee)} r={i === points.length - 1 ? 3 : 2} fill="var(--accent)" />
             <circle cx={xOf(p.asOfDate)} cy={yOf(p.avgCalories)} r="2" fill={UI.inkSoft} />
+            {Number.isFinite(p.targetCalories) && <circle cx={xOf(p.asOfDate)} cy={yOf(p.targetCalories)} r="2" fill={UI.gold} />}
           </g>
         ))}
         <text x={padL} y={H - 3} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{LB.fmtDayLabel(from, { day: 'numeric', month: 'short' })}</text>
         {points.length > 1 && <text x={W - padR} y={H - 3} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{LB.fmtDayLabel(to, { day: 'numeric', month: 'short' })}</text>}
       </svg>
+      </ChartHover>
     </div>
   );
 }
 
 function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
   const history = LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || []);
+  const [chartMode, setChartMode] = useStateH('calories');
   const isLbs = UI.unit() === 'lbs';
   const displayWeight = kg => {
     const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
@@ -3164,21 +3205,28 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
-            TDEE is the accent line. The dashed line is what you actually averaged in calories. The separate weight chart shows the scale signal used to explain the difference.
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 10 }}>
+            Drag across the chart to inspect each estimate. TDEE is the accent line, the gold line is the suggested intake, and the dashed line is what you actually averaged. Weight is included in the inspected point.
           </div>
-          <AdaptiveTdeeChart history={history} />
-          {weightSeries.length > 0 && (
-            <div style={{ marginTop: 18, paddingTop: 14, borderTop: 'var(--hair-width) solid ' + UI.hair }}>
-              <div className="micro" style={{ marginBottom: 5 }}>Average weight signal for each estimate window</div>
-              <HealthLineChart series={weightSeries} from={weightSeries[0].date} to={weightSeries[weightSeries.length - 1].date}
+          <div style={{ display: 'flex', width: '100%', marginBottom: 10, border: 'var(--hair-width) solid ' + UI.hairStrong, borderRadius: 4, overflow: 'hidden' }}>
+            {['calories', 'weight'].map(mode => (
+              <button key={mode} onClick={() => setChartMode(mode)} style={{ flex: 1, padding: '5px 8px', border: 'none', cursor: 'pointer', background: chartMode === mode ? 'var(--accent)' : 'transparent', color: chartMode === mode ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>
+                {mode}
+              </button>
+            ))}
+          </div>
+          {chartMode === 'calories'
+            ? <AdaptiveTdeeChart history={history} />
+            : weightSeries.length > 0
+              ? <HealthLineChart series={weightSeries} from={weightSeries[0].date} to={weightSeries[weightSeries.length - 1].date}
                 format={v => String(v) + (isLbs ? 'lbs' : 'kg')} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
-            </div>
-          )}
+              : <HealthChartEmpty label="No weight signal in this history yet" />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
             {history.map(row => {
               const weight = displayWeight(row.weightEndKg);
               const rate = displayWeight(row.weightRateKgWeek);
+              const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
+              const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
               return (
                 <div key={row.asOfDate} style={{ background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderRadius: 6, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 5 }}>
@@ -3193,6 +3241,11 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
                     <span>weight {weight != null ? String(weight) + (isLbs ? 'lbs' : 'kg') : 'n/a'}</span>
                     <span>trend {rate == null ? 'n/a' : (rate > 0.05 ? '+' : '') + String(rate) + (isLbs ? 'lbs' : 'kg') + '/wk'}</span>
                   </div>
+                  {Number.isFinite(target) && (
+                    <div style={{ marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.gold }}>
+                      suggested {String(target)} kcal/day{Number.isFinite(targetDelta) ? ' · ' + (targetDelta > 0 ? '+' : '') + String(targetDelta) + ' vs TDEE' : ''}
+                    </div>
+                  )}
                   {row.source === 'reconstructed' && (
                     <div style={{ marginTop: 5, fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>Recalculated from the logs available for that date.</div>
                   )}
@@ -3271,6 +3324,15 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
   // actually has (calc.trainingDays), same reasoning weeklyAverageCalories
   // exists for everywhere else in the app.
   const algoAvg = newTargets ? LB.weeklyAverageCalories(newTargets.caloriesTraining, newTargets.caloriesRest, calc.trainingDays) : null;
+  const targetDeltaKcal = newTargets && algoAvg != null && adaptive?.ok ? algoAvg - adaptive.tdee : null;
+  const targetSnapshot = newTargets && algoAvg != null ? {
+    ...newTargets,
+    weeklyAverageCalories: algoAvg,
+    deltaKcal: targetDeltaKcal,
+    trainingDays: calc.trainingDays,
+    goal: calc.goal ?? null,
+    rateKgPerWeek: calc.rateKgPerWeek ?? null,
+  } : null;
   const coachAvg = (coachHasMacros && LB.hasMacroTargets(coachingMacros))
     ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
     : null;
@@ -3291,7 +3353,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
       ? LB.adaptiveTdeeHistoryRow(store, userId, asOfDate, {
         decision: applyTargets && newTargets ? 'applied' : 'skipped',
         source: 'live',
-        targetsSnapshot: applyTargets && newTargets ? newTargets : null,
+        targetsSnapshot: targetSnapshot,
       })
       : null;
     const historyRows = [...previousRows, currentRow].filter(Boolean);
@@ -3341,12 +3403,17 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     </div>
   );
   const showCoachCompare = coachAvg != null;
-  const avgLine = (value) => (
+  const avgLine = (value, label = 'Average', delta = null) => (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-      <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Average</span>
+      <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
       <span className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 400 }}>
         {value}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
       </span>
+      {delta != null && (
+        <span style={{ fontSize: 10, color: delta >= 0 ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, marginLeft: 2 }}>
+          {delta === 0 ? 'at TDEE' : (delta > 0 ? '+' : '') + String(delta) + (delta > 0 ? ' above TDEE' : ' below TDEE')}
+        </span>
+      )}
     </div>
   );
   // What this whole report is being judged against: without it, "Weekly
@@ -3437,7 +3504,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
                   <div className="micro" style={{ color: UI.inkFaint, margin: '14px 0 4px' }}>The algorithm suggests</div>
                 </>
               )}
-              {avgLine(algoAvg)}
+              {avgLine(algoAvg, 'Suggested target', targetDeltaKcal)}
               {dayRow('Training', 'Training', newTargets, 'algo')}
               <div style={{ height: 0.5, background: UI.hair }} />
               {dayRow('Rest', 'Rest', newTargets, 'algo')}

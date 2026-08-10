@@ -1252,7 +1252,8 @@ async function testAsync(name, fn) {
       settings: { macroCalc: {
         lastCheckinAt: '2025-01-14',
         lastAppliedAt: '2025-01-14',
-        lastAppliedTargets: { caloriesTraining: 2200 },
+        trainingDays: 5,
+        lastAppliedTargets: { caloriesTraining: 2200, caloriesRest: 1800 },
       } },
     };
     const rows = LB.reconstructAdaptiveTdeeHistory(store, 'user-1', [
@@ -1264,6 +1265,8 @@ async function testAsync(name, fn) {
     assert.strictEqual(rows[0].decision, 'applied');
     assert.strictEqual(rows[0].source, 'reconstructed');
     assert.strictEqual(rows[0].targetsSnapshot.caloriesTraining, 2200);
+    assert.strictEqual(rows[0].targetsSnapshot.weeklyAverageCalories, 2086);
+    assert.strictEqual(rows[0].targetsSnapshot.deltaKcal, -506);
   });
 
   test('mergeAdaptiveTdeeHistory: live decisions replace reconstructed rows for the same date', () => {
