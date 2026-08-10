@@ -2998,6 +2998,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // lands LOGGED, which is now a per-clone question. Computed from the store
     // before the setStore below, since that is where the clones are built.
     const anyLandsLogged = (store.foodLogs || []).some(l => ids.includes(l.id) && !clonePlanned(l));
+    // And whether anything LOGGED actually leaves the source day on a move.
+    // Planned entries never counted toward that day's totals, so recomputing it
+    // for them changes nothing it should change, and on a day whose macros were
+    // typed by hand with no logged entries it rewrites them from an empty
+    // rollup, i.e. wipes them. Same shape as the target guard above.
+    const anyLeavesLogged = mode === 'move' && (store.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
     if (anyLandsLogged) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
@@ -3020,7 +3026,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
       if (anyLandsLogged) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
-      if (mode === 'move') {
+      if (anyLeavesLogged) {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
       return { ...s, foodLogs: nextLogs, dailyLogs };

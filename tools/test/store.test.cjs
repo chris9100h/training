@@ -5366,6 +5366,46 @@ async function testAsync(name, fn) {
       cleanupStore, 80, null, { percent: 20 });
     assert.strictEqual(seeded[0].kg, 80);
   });
+  test('buildSeedSets: a reduced plus_load set records the load it was reduced FROM', () => {
+    // The floor in withPlusLoad is lossy: once the belt clamps to 0 the stored
+    // pair is (bodyweight, +0) whatever the real belt was. The cleanup opt-out
+    // has to undo the reduction, and it used to do that by multiplying the
+    // stored total back up, which invents bodyweight * (1/f - 1). At 80 kg and
+    // 20 percent every belt from 0 to 15 came back as +20, so a bare pull-up
+    // was prescribed as a 20 kg weighted one. cleanupFullLoad is the recorded
+    // answer that makes the toggle a lookup instead of a reconstruction.
+    const store = {
+      exercises: [{ id: 'wpu', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' }],
+      dailyLogs: [{ date: LB.todayISO(), weight: 80 }],
+      settings: {}, sessions: [],
+    };
+    const lastWith = (belt) => ({ entry: { sets: [{ warmup: false, kg: 80 + belt, addedKg: belt, reps: 8, done: true }] } });
+    const seed = (belt, cleanupOpts) =>
+      LB.buildSeedSets({ sets: 1, exId: 'wpu', reps: 8 }, lastWith(belt), null, false, store, null, null, cleanupOpts)[0];
+
+    // The invariant the toggle rests on, across the whole floored range and
+    // beyond it: re-applying the factor to the recorded full load has to land
+    // back on exactly what was seeded, and the recorded load has to equal what
+    // the seeder itself produces for the opted-out state.
+    for (const belt of [0, 2.5, 5, 7.5, 10, 15, 20, 25, 30]) {
+      const reduced = seed(belt, { percent: 20 });
+      const full = reduced.cleanupFullLoad;
+      assert.ok(full, `belt +${belt}: no cleanupFullLoad recorded`);
+      const truth = seed(belt, { percent: 20, optOuts: { wpu: true } });
+      assert.strictEqual(full.kg, truth.kg, `belt +${belt}: recorded total`);
+      assert.strictEqual(full.addedKg ?? null, truth.addedKg ?? null, `belt +${belt}: recorded belt`);
+      // And back down again, the arithmetic the toggle runs.
+      const bw = Math.round((full.kg - (full.addedKg ?? 0)) * 100) / 100;
+      const target = Math.round((full.kg * 0.8) / 2.5) * 2.5;
+      const belt2 = Math.max(0, Math.round((target - bw) * 100) / 100);
+      assert.strictEqual(Math.round((bw + belt2) * 100) / 100, reduced.kg, `belt +${belt}: round trip total`);
+      assert.strictEqual(belt2, reduced.addedKg, `belt +${belt}: round trip belt`);
+    }
+    // No reduction, nothing to record: the field must not appear, or the toggle
+    // would restore a "full load" onto a set that was never reduced.
+    assert.strictEqual(seed(10, null).cleanupFullLoad, undefined);
+  });
+
   test('buildSeedSets: a bodyweight lift is exempt however the caller was called', () => {
     // This is the hole the test above could not see. It hands over
     // bodyweightKg = 80, and the old gate inferred "nothing to reduce" from

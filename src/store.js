@@ -3494,7 +3494,23 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
       const fullTotal = Math.round((bw + prevAdded) * 100) / 100;
       const target = factor != null ? Math.round((fullTotal * factor) / 2.5) * 2.5 : fullTotal;
       const belt = Math.max(0, Math.round((target - bw) * 100) / 100);
-      return { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
+      // That floor is LOSSY, and one caller has to undo this: the cleanup
+      // week's per-exercise opt-out. Once the belt clamps to 0 the stored pair
+      // is (bw, 0) whatever the real belt was, so multiplying the total back up
+      // by 1/factor cannot recover it, it invents bw*(1/factor - 1). At 80 kg
+      // and a 20 percent cleanup every belt from 0 to 15 kg came back as +20,
+      // and a bare pull-up was prescribed as a 20 kg weighted one. So record
+      // the un-reduced pair here, where it is still known, instead of asking
+      // the toggle to reconstruct what this line threw away.
+      //
+      // Local-only, exactly like the session's own cleanupOptOuts: the sets
+      // payload is built from an explicit field list (see the sync above), so
+      // this never reaches the server, and for the ACTIVE session the boot
+      // merge keeps the local entries verbatim, so it survives a reload.
+      const reduced = { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
+      return factor != null
+        ? { ...reduced, cleanupFullLoad: { kg: fullTotal, addedKg: prevAdded } }
+        : reduced;
     });
   };
 
@@ -6548,7 +6564,9 @@ function dailyLogAdherence(log, targets, isTraining, dayTargetOverride = null) {
   return { adherence, targetsSnap: { ...dayTarget, dayType: isTraining ? 'training' : 'rest' } };
 }
 
-// Which sick/vacation/deload mode covers a date, or null. Today answers from
+// Which status mode covers a date (sick, vacation, deload or cleanup), or null.
+// Naming a subset here is how the rule drifted before: two callers reduced the
+// list to three and disagreed about which three. Today answers from
 // the live statusMode cache (an optimistic period row may not have landed
 // yet), any other date scans the intervals; an open period runs to now.
 // Extracted from four inline copies in screens-health.jsx so the adherence
@@ -7403,7 +7421,12 @@ function dsShiftDate(dateStr, deltaDays) {
 function dsMedsDueTaken(store, dateISO) {
   const wd = isoWd(new Date(dateISO + 'T12:00:00'));
   const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
-  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO);
+  // Tombstones excluded, like logsForStock in screens-medications.jsx. A
+  // deliberately removed dose is { skipped: true, planned: false }, and `taken`
+  // below counts exactly "a row exists and is not planned", so without this two
+  // deleted doses reported a fully adherent day, extended the streak, and told
+  // the AI summary the user had taken medication they explicitly removed.
+  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO && !l.skipped);
   const medsById = new Map((store.medications || []).map(m => [m.id, m]));
   const dueSlots = (store.medicationScheduleSlots || []).filter(slot => dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
   const taken = dueSlots.filter(slot => {
@@ -9639,13 +9662,23 @@ function mergeBootScalars(fresh, cur, base, statusPeriods) {
   // statusPeriods == null means "the caller has no period data", not "there
   // are none", so it must not clear anything. Defensive only: app.jsx always
   // passes an array, so nothing in production reaches it.
+  //
+  // BOTH branches are gated on the local edit, not just the clear one. The
+  // forward branch has the mirror failure: a period row closed on the server
+  // moments ago can still arrive OPEN in `fresh` (the snapshot predates the
+  // tap) with no local row to beat it in mergeCollectionById, and the rule then
+  // reinstates the very status the user has just cleared, seconds after they
+  // cleared it. Same principle in both directions: a period the server has not
+  // caught up on cannot outrank an edit this device made since the last
+  // confirmed sync, which is exactly what the group rule above is for.
+  const statusIsLocalEdit = !!groupLocalWins.statusMode;
   const open = statusPeriods ? statusPeriods.find(p => p.endedAt == null) : null;
-  if (open) {
+  if (open && !statusIsLocalEdit) {
     if (out.statusMode !== open.mode) {
       out.statusMode = open.mode;
       out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
     }
-  } else if (statusPeriods && out.statusMode && !groupLocalWins.statusMode) {
+  } else if (!open && statusPeriods && out.statusMode && !statusIsLocalEdit) {
     out.statusMode = null;
     out.statusModeSince = null;
   }

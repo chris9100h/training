@@ -1420,12 +1420,20 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     // This hands dailyLogAdherence a synthetic literal rather than the row,
     // so the meal-of-choice flag has to be passed in explicitly: it does not
     // ride along the way it does for the callers that pass the real log.
-    let { adherence, targetsSnap } = dayMode
+    // The SEVENTH writer of this pair, and the one the predicate change missed.
+    // Only sick and vacation blank a day (LB.isNutritionUnscoredMode); a deload
+    // or cleanup day eats to the same targets as any other. Left on raw dayMode
+    // this wrote adherence null AND targetsSnap null for every hand-saved
+    // deload day, which then also dropped the flex day-type the user had just
+    // chosen on the slider, so the day was re-scored against the rest-day
+    // target on the next Health mount.
+    const dayUnscored = LB.isNutritionUnscoredMode(dayMode);
+    let { adherence, targetsSnap } = dayUnscored
       ? { adherence: null, targetsSnap: null }
       : LB.dailyLogAdherence({ protein, carbs, fat, mealOfChoice: existing?.mealOfChoice }, targets, isTraining);
     // Don't let a macro-less save (incomplete macros / no macro targets) wipe an
     // existing flex day-type override off the log.
-    if (!dayMode && flexActive && !targetsSnap) {
+    if (!dayUnscored && flexActive && !targetsSnap) {
       const dt = existing?.targetsSnap?.dayType;
       if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
     }

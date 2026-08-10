@@ -1310,63 +1310,89 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Cleanup week, per-exercise opt-out: flip one lift between the reduced load
-  // and its full one without ending the cleanup for everything else. Rescales
-  // the pending sets (warm-ups included) rather than re-seeding, so the rest of
-  // the exercise stays consistent. Keyed by exId, matching the map
-  // buildSeedSets reads, so an exercise programmed twice in one day flips both
-  // of its slots together instead of leaving the second contradicting the chip.
+  // and its full one without ending the cleanup for everything else. Keyed by
+  // exId, matching the map buildSeedSets reads, so an exercise programmed twice
+  // in one day flips both of its slots together instead of leaving the second
+  // contradicting the chip.
   //
-  // Already-completed sets are deliberately left alone. Rescaling them would
-  // rewrite what the user actually lifted: tick three sets at 80, tap Full, and
+  // Already-completed sets are deliberately left alone. Rewriting them would
+  // change what the user actually lifted: tick three sets at 80, tap Full, and
   // the history would claim 100. That number then feeds volume, e1RM and (once
   // the cleanup ends) the next week's seed base. The toggle changes what is
   // still to come, never what was logged.
   //
-  // Intensity-technique rounds carry their own per-round loads in st.drops, and
-  // st.kg is only a mirror of the first round (see finishDropSet), so they have
-  // to move together or the row would render 80/70/60 while volume counts 100.
+  // Three kinds of load, and only two of them can be rescaled:
   //
-  // The 2.5 rounding is not perfectly reversible (102.5 -> 82 -> 82.5), which is
-  // the same granularity every other seeded load carries; the user can adjust.
+  //   plain      kg is a real load and the reduction was a pure multiply, so
+  //              dividing it back out is right. The 2.5 rounding is not
+  //              perfectly reversible (102.5 -> 82 -> 82.5), the same
+  //              granularity every seeded load carries.
+  //   multi-horn the same multiply, but PER HORN, with kg rebuilt from the sum.
+  //              Rescaling kg alone (what this used to do) broke the
+  //              kg === hornLoadTotal(hornLoads) invariant that buildSeedSets
+  //              and the horn sheet both rely on.
+  //   plus_load  NOT rescalable. withPlusLoad floors the belt at 0, so a set
+  //              whose reduced target fell below bodyweight is stored as
+  //              (bodyweight, +0) whatever the real belt was, and multiplying
+  //              that back up invents bodyweight * (1/f - 1): at 80 kg and 20
+  //              percent, every belt from 0 to 15 kg came back as +20, and a
+  //              bare pull-up was prescribed as a 20 kg weighted one. So the
+  //              seeder records the un-reduced pair (cleanupFullLoad) while it
+  //              still knows it, and this reads it back. No recorded pair means
+  //              the load is left exactly as it is: refusing to answer beats
+  //              fabricating a number the lifter would put on a belt.
+  //
+  // Intensity-technique rounds carry their own per-round loads in st.drops, and
+  // st.kg is only a mirror of the first round (see finishDropSet), so they move
+  // with the set. They follow the RATIO the set actually moved by, not the raw
+  // factor, so they stay proportional even where the set itself did not scale.
   const toggleCleanupOptOut = (exId) => {
     const f = (100 - cleanupPct) / 100;
     const wasOptedOut = !!session.cleanupOptOuts?.[exId];
     // Opting out divides the reduction back out, opting back in re-applies it.
     const scale = wasOptedOut ? f : 1 / f;
     const rescale = (kg) => kg == null ? kg : Math.round((kg * scale) / 2.5) * 2.5;
-    // On a plus_load set kg and addedKg are not independent: kg is the TOTAL,
-    // addedKg the belt, and the frozen bodyweight is what is left between them
-    // (LB.splitBodyweightLoad). Rescaling kg on its own tore that pair apart,
-    // and this row only became reachable for those lifts when
-    // cleanupAppliesToExercise started returning true for plus_load. The set
-    // then rendered its stale "+15" (dispWeight reads addedKg) while volume,
-    // e1RM and the PR check used the rescaled total, and ticking it wrote that
-    // total to zane_sets as next week's base. Toggling back did not heal it:
-    // the reverse pass rescales kg again and addedKg is still stale.
-    //
-    // So rescale the total and re-derive the belt from it, floored at 0, the
-    // same shape LB.withPlusLoad uses when it seeds these sets in the first
-    // place. A set whose belt floored to 0 keeps the bodyweight it was frozen
-    // against rather than inventing a new one.
-    const isPlusLoadEx = LB.isBodyweightPlusLoad((store.exercises || []).find(e => e.id === exId));
-    const rescaleSet = (st) => {
-      const kg = rescale(st.kg);
-      if (!isPlusLoadEx || st.kg == null) return { ...st, kg };
-      const frozenBw = st.addedKg != null ? st.kg - st.addedKg : null;
-      if (frozenBw == null) return { ...st, kg };
-      const belt = Math.max(0, Math.round((kg - frozenBw) * 100) / 100);
-      return { ...st, kg: Math.round((frozenBw + belt) * 100) / 100, addedKg: belt };
+    const ex = (store.exercises || []).find(e => e.id === exId);
+    const isPlusLoadEx = LB.isBodyweightPlusLoad(ex);
+    const isHornEx = LB.isMultiHorn(ex);
+
+    const reshape = (st) => {
+      if (isPlusLoadEx) {
+        const full = st.cleanupFullLoad;
+        if (!full || full.kg == null) return st;
+        if (!wasOptedOut) return { ...st, kg: full.kg, addedKg: full.addedKg ?? null };
+        // Back to reduced: re-apply the factor to the FULL load, the same math
+        // withPlusLoad runs at seed time, so both paths land on one number.
+        const bw = Math.round((full.kg - (full.addedKg ?? 0)) * 100) / 100;
+        const target = Math.round((full.kg * f) / 2.5) * 2.5;
+        const belt = Math.max(0, Math.round((target - bw) * 100) / 100);
+        return { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
+      }
+      if (isHornEx && Array.isArray(st.hornLoads) && st.hornLoads.length) {
+        const horns = st.hornLoads.map(h => ({ ...h, kg: rescale(h.kg ?? null) }));
+        return { ...st, hornLoads: horns, kg: LB.hornLoadTotal(horns) };
+      }
+      return { ...st, kg: rescale(st.kg) };
     };
+
     updateSession(sess => ({
       ...sess,
       cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
       entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
         ...e,
-        sets: e.sets.map(st => (st.done || st.kg == null) ? st : {
-          ...rescaleSet(st),
-          ...(Array.isArray(st.drops) && st.drops.length
-            ? { drops: st.drops.map(d => ({ ...d, kg: rescale(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: rescale(d.stretch.kg) } } : {}) })) }
-            : {}),
+        sets: e.sets.map(st => {
+          if (st.done || st.kg == null) return st;
+          const next = reshape(st);
+          if (!Array.isArray(st.drops) || !st.drops.length) return next;
+          // Ratio the SET moved by, so the chain follows even when reshape used
+          // a recorded full load rather than the raw factor, and stays put when
+          // reshape declined to move the set at all.
+          const ratio = (st.kg && next.kg != null) ? next.kg / st.kg : 1;
+          const r = (kg) => kg == null ? kg : Math.round((kg * ratio) / 2.5) * 2.5;
+          return {
+            ...next,
+            drops: st.drops.map(d => ({ ...d, kg: r(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: r(d.stretch.kg) } } : {}) })),
+          };
         }),
       }),
     }));
