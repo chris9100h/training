@@ -465,13 +465,18 @@ const ChartCompactContext = React.createContext(false);
 
 function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false, plotTop = CHART_PLOT_TOP, plotH = CHART_PLOT_H }) {
   const wrapRef = useRefH(null);
+  const rectRef = useRefH(null);
+  const pointerRef = useRefH(null);
+  const frameRef = useRefH(null);
   const [active, setActive] = useStateH(null);
   const compact = React.useContext(ChartCompactContext);
 
-  const pick = (clientX, clientY) => {
-    const el = wrapRef.current;
-    if (!el || !points.length) return;
-    const rect = el.getBoundingClientRect();
+  const measure = () => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    rectRef.current = rect?.width && rect?.height ? rect : null;
+  };
+  const pick = (clientX, clientY, rect) => {
+    if (!rect || !points.length) return;
     if (!rect.width || !rect.height) return;
     const vbX = ((clientX - rect.left) / rect.width) * W;
     const vbY = ((clientY - rect.top) / rect.height) * H;
@@ -481,15 +486,38 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       const d = mode === 'xy' ? dx * dx + dy * dy : Math.abs(dx);
       if (d < bestD) { bestD = d; best = i; }
     }
-    setActive(best);
+    setActive(current => current === best ? current : best);
+  };
+  const flushPointer = () => {
+    frameRef.current = null;
+    const pointer = pointerRef.current;
+    if (!pointer) return;
+    pick(pointer.clientX, pointer.clientY, rectRef.current);
+  };
+  const queuePoint = e => {
+    if (!rectRef.current) measure();
+    pointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+    if (frameRef.current == null) frameRef.current = requestAnimationFrame(flushPointer);
   };
   // Activate on pointer MOVE only: mouse hover fires move continuously, a touch
   // scrub fires move while the finger drags. Deliberately not on pointerdown, so
   // a tap never flashes the box and starting a vertical scroll on a chart never
-  // flickers one. No pointer capture: touchAction 'pan-y' lets the browser keep
-  // vertical list-scrolling while we get horizontal drags.
-  const onPoint = e => pick(e.clientX, e.clientY);
-  const clear = () => setActive(null);
+  // flickers one. Geometry is measured once per hover or drag gesture, and
+  // pointer moves are coalesced to one lookup per animation frame.
+  const begin = () => measure();
+  const clear = () => {
+    if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pointerRef.current = null;
+    rectRef.current = null;
+    setActive(current => current == null ? current : null);
+  };
+  useEffectH(() => () => {
+    if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pointerRef.current = null;
+    rectRef.current = null;
+  }, []);
 
   // Guard the index: a time-frame switch can shrink `points` while a stale
   // `active` still points past the new end.
@@ -505,7 +533,8 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
   return (
     <div ref={wrapRef} data-reorder-ignore="true"
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
-      onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
+      onPointerEnter={begin} onPointerDown={begin} onPointerMove={queuePoint}
+      onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear} onLostPointerCapture={clear}>
       {children}
       {!p && !compact && !hideHint && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
@@ -2039,15 +2068,17 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           and is not portaled, so nesting it inside a scroll container invites
           clipping. zIndex above this screen's own 100, the same bump the other
           sheets stacked on top of a full-page screen use. */}
-      <Sheet open={cleanupSheet} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
-        <CleanupStartBody
-          percent={cleanupDraftPct}
-          onPercent={setCleanupDraftPct}
-          startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
-          onCancel={() => setCleanupSheet(false)}
-          onStart={startCleanupWithPct}
-        />
-      </Sheet>
+      {cleanupSheet && (
+        <Sheet open={true} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
+          <CleanupStartBody
+            percent={cleanupDraftPct}
+            onPercent={setCleanupDraftPct}
+            startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
+            onCancel={() => setCleanupSheet(false)}
+            onStart={startCleanupWithPct}
+          />
+        </Sheet>
+      )}
     </Screen>
   );
 }
@@ -2990,11 +3021,13 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
       {section('Training', 'Training day', calsTraining)}
       {section('Rest', 'Rest day', calsRest)}
       <Btn onClick={save} style={{ width: '100%' }}>Save targets</Btn>
-      <MacroEstimatorSheet open={estimatorOpen} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
-        onApply={t => setForm({
-          proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
-          proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
-        })} />
+      {estimatorOpen && (
+        <MacroEstimatorSheet open={true} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
+          onApply={t => setForm({
+            proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
+            proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
+          })} />
+      )}
       {confirmEl}
     </Sheet>
   );
@@ -3266,86 +3299,93 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
     {/* Only reached when gain/cut is picked with no rate on file yet, see
         setGoal above: asks once, up front, rather than silently defaulting
         a number the user never chose. */}
-    <Sheet open={!!rateModalGoal} onClose={() => setRateModalGoal(null)} title="How fast?" titleColor="var(--accent)">
-      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
-        Pick a weekly rate for {rateModalGoal === 'gain' ? 'gaining' : 'losing'}. You can fine-tune this any time from the full estimator.
-      </div>
-      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-        {(isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => (
-          <button key={r} onClick={() => confirmGoalRate(isLbs ? r * LBS_TO_KG : r)} style={{
-            flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
-            WebkitTapHighlightColor: 'transparent',
-          }}>{r} {UI.unit()}</button>
-        ))}
-      </div>
-    </Sheet>
+    {rateModalGoal && (
+      <Sheet open={true} onClose={() => setRateModalGoal(null)} title="How fast?" titleColor="var(--accent)">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+          Pick a weekly rate for {rateModalGoal === 'gain' ? 'gaining' : 'losing'}. You can fine-tune this any time from the full estimator.
+        </div>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+          {(isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => (
+            <button key={r} onClick={() => confirmGoalRate(isLbs ? r * LBS_TO_KG : r)} style={{
+              flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
+              color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{r} {UI.unit()}</button>
+          ))}
+        </div>
+      </Sheet>
+    )}
     </>
   );
 }
 
 function AdaptiveTdeeChart({ history }) {
   const isLbs = UI.unit() === 'lbs';
-  const displayWeight = kg => {
-    const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
-    return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
-  };
-  const points = (history || []).slice().sort((a, b) => a.asOfDate.localeCompare(b.asOfDate)).map(row => ({
-    ...row,
-    targetCalories: Number(row.targetsSnapshot?.weeklyAverageCalories),
-  }));
-  if (!points.length) return null;
-  const W = 320, padL = 38, padR = 10, padTop = 10, plotH = 112, padBottom = 20;
-  const H = padTop + plotH + padBottom;
-  const plotW = W - padL - padR;
-  const values = points.flatMap(p => [Number(p.tdee), Number(p.avgCalories), Number(p.targetCalories)]).filter(Number.isFinite);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-  const range = Math.max(100, max - min);
-  const domainMin = Math.floor((min - range * 0.12) / 50) * 50;
-  const domainMax = Math.ceil((max + range * 0.12) / 50) * 50;
-  const domainRange = Math.max(100, domainMax - domainMin);
-  const from = points[0].asOfDate;
-  const to = points[points.length - 1].asOfDate;
-  const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = date => padL + healthDayDiff(from, date) / totalDays * plotW;
-  const yOf = value => padTop + (1 - (value - domainMin) / domainRange) * plotH;
-  const line = key => points.filter(p => Number.isFinite(Number(p[key])))
-    .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
-  const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
-  const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
-  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
-  const signed = value => value == null ? null : (value > 0 ? '+' : '') + String(value);
-  const hoverPoints = points.map(p => {
-    const weightStart = displayWeight(p.weightStartKg);
-    const weightEnd = displayWeight(p.weightEndKg);
-    const rate = displayWeight(p.weightRateKgWeek);
-    const weightUnit = isLbs ? 'lbs' : 'kg';
-    const rows = [
-      { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
-      { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
-    ];
-    if (Number.isFinite(p.targetCalories)) {
-      const delta = Number(p.targetsSnapshot?.deltaKcal);
-      rows.push({
-        label: 'Target',
-        value: String(p.targetCalories) + ' kcal' + (Number.isFinite(delta) ? ' (' + (delta > 0 ? '+' : '') + String(delta) + ')' : ''),
-        color: UI.gold,
-      });
-    }
-    if (weightStart != null || weightEnd != null) {
-      const weightValue = weightStart != null && weightEnd != null
-        ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit
-        : String(weightEnd ?? weightStart) + ' ' + weightUnit;
-      rows.push({ label: 'Weight', value: weightValue, color: UI.inkSoft });
-    }
-    const sub = [
-      statusLabel(p),
-      rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
-    ].filter(Boolean).join(' · ');
-    return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
-  });
+  const model = useMemoH(() => {
+    const points = (history || []).slice().sort((a, b) => a.asOfDate.localeCompare(b.asOfDate)).map(row => ({
+      ...row,
+      targetCalories: Number(row.targetsSnapshot?.weeklyAverageCalories),
+    }));
+    if (!points.length) return null;
+    const W = 320, padL = 38, padR = 10, padTop = 10, plotH = 112, padBottom = 20;
+    const H = padTop + plotH + padBottom;
+    const plotW = W - padL - padR;
+    const values = points.flatMap(p => [Number(p.tdee), Number(p.avgCalories), Number(p.targetCalories)]).filter(Number.isFinite);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const range = Math.max(100, max - min);
+    const domainMin = Math.floor((min - range * 0.12) / 50) * 50;
+    const domainMax = Math.ceil((max + range * 0.12) / 50) * 50;
+    const domainRange = Math.max(100, domainMax - domainMin);
+    const from = points[0].asOfDate;
+    const to = points[points.length - 1].asOfDate;
+    const totalDays = Math.max(1, healthDayDiff(from, to));
+    const xOf = date => padL + healthDayDiff(from, date) / totalDays * plotW;
+    const yOf = value => padTop + (1 - (value - domainMin) / domainRange) * plotH;
+    const line = key => points.filter(p => Number.isFinite(Number(p[key])))
+      .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
+    const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
+    const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
+    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+    const displayWeight = kg => {
+      const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
+      return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+    };
+    const signed = value => value == null ? null : (value > 0 ? '+' : '') + String(value);
+    const hoverPoints = points.map(p => {
+      const weightStart = displayWeight(p.weightStartKg);
+      const weightEnd = displayWeight(p.weightEndKg);
+      const rate = displayWeight(p.weightRateKgWeek);
+      const weightUnit = isLbs ? 'lbs' : 'kg';
+      const rows = [
+        { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
+        { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
+      ];
+      if (Number.isFinite(p.targetCalories)) {
+        const delta = Number(p.targetsSnapshot?.deltaKcal);
+        rows.push({
+          label: 'Target',
+          value: String(p.targetCalories) + ' kcal' + (Number.isFinite(delta) ? ' (' + (delta > 0 ? '+' : '') + String(delta) + ')' : ''),
+          color: UI.gold,
+        });
+      }
+      if (weightStart != null || weightEnd != null) {
+        const weightValue = weightStart != null && weightEnd != null
+          ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit
+          : String(weightEnd ?? weightStart) + ' ' + weightUnit;
+        rows.push({ label: 'Weight', value: weightValue, color: UI.inkSoft });
+      }
+      const sub = [
+        statusLabel(p),
+        rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
+      ].filter(Boolean).join(' · ');
+      return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
+    });
+    return { points, W, H, padL, padR, padTop, plotH, domainMin, domainMax, from, to, xOf, yOf, line, grid, hasTarget, hoverPoints };
+  }, [history, isLbs]);
+  if (!model) return null;
+  const { points, W, H, padL, padR, padTop, plotH, domainMin, domainMax, from, to, xOf, yOf, line, grid, hasTarget, hoverPoints } = model;
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
@@ -3384,15 +3424,20 @@ function AdaptiveTdeeChart({ history }) {
   );
 }
 
-function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', onRetry }) {
-  const history = LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || []);
-  const [chartMode, setChartMode] = useStateH('calories');
+function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', onRetry, chartMode, onChartMode }) {
+  const history = useMemoH(
+    () => LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || []),
+    [store.adaptiveTdeeHistory]
+  );
   const isLbs = UI.unit() === 'lbs';
   const displayWeight = kg => {
     const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
     return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
   };
-  const weightSeries = history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null);
+  const weightSeries = useMemoH(
+    () => history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null),
+    [history, isLbs]
+  );
   const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
   const loading = loadStatus === 'loading' && !history.length;
   const loadError = loadStatus === 'error' && !history.length;
@@ -3418,7 +3463,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
           </div>
           <div style={{ display: 'flex', width: '100%', marginBottom: 10, border: 'var(--hair-width) solid ' + UI.hairStrong, borderRadius: 4, overflow: 'hidden' }}>
             {['calories', 'weight'].map(mode => (
-              <button key={mode} onClick={() => setChartMode(mode)} style={{ flex: 1, padding: '5px 8px', border: 'none', cursor: 'pointer', background: chartMode === mode ? 'var(--accent)' : 'transparent', color: chartMode === mode ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>
+              <button key={mode} onClick={() => onChartMode(mode)} style={{ flex: 1, padding: '5px 8px', border: 'none', cursor: 'pointer', background: chartMode === mode ? 'var(--accent)' : 'transparent', color: chartMode === mode ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>
                 {mode}
               </button>
             ))}
@@ -4703,8 +4748,10 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [checkinOpen, setCheckinOpen] = useStateH(false);
   const [tdeeHistoryOpen, setTdeeHistoryOpen] = useStateH(false);
+  const [tdeeHistoryChartMode, setTdeeHistoryChartMode] = useStateH('calories');
   const [tdeeHistoryStatus, setTdeeHistoryStatus] = useStateH('loading');
   const [tdeeHistoryRetry, setTdeeHistoryRetry] = useStateH(0);
+  const tdeeHistoryRetrySeen = useRefH(0);
   // Reached directly from MacroSourceCard's "Adjust automation settings",
   // skipping the manual-numbers MacroTargetSheet layer: apply() below commits
   // straight to macroTargets the same way that sheet's own Save does, so this
@@ -4715,22 +4762,57 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // straight away is the whole point of that trip, arriving on the Health tab
   // with nothing open would just make them hunt for the card.
   useEffectH(() => { if (openMacroTargets) setTargetOpen(true); }, [openMacroTargets]);
-  useEffectH(() => {
-    let cancelled = false;
-    if (!userId) return;
-    setTdeeHistoryStatus('loading');
+  // Build the history fingerprint only while the sheet is open. The selected
+  // fields are exactly the inputs used by the adaptive estimate and target
+  // enrichment, so unrelated store updates do not reconstruct the history.
+  const tdeeHistoryInputKey = useMemoH(() => {
+    if (!tdeeHistoryOpen) return null;
     const calc = store.settings?.macroCalc || {};
-    const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
-    LB.loadAdaptiveTdeeHistory(userId).then(serverRows => {
+    return JSON.stringify({
+      logs: (store.dailyLogs || []).map(log => [log.date, log.calories ?? null, log.weight ?? null]),
+      statusMode: store.statusMode ?? null,
+      statusPeriods: (store.statusPeriods || []).map(period => [period.mode, period.startedAt, period.endedAt ?? null]),
+      unit: store.settings?.unit ?? null,
+      calc: [
+        calc.lastCheckinAt ?? null,
+        calc.lastAppliedAt ?? null,
+        calc.lastAppliedTargets ?? null,
+        calc.trainingDays ?? null,
+        calc.goal ?? null,
+        calc.rateKgPerWeek ?? null,
+      ],
+    });
+  }, [tdeeHistoryOpen, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit, store.settings?.macroCalc]);
+  useEffectH(() => {
+    if (!tdeeHistoryOpen || !tdeeHistoryInputKey || !userId) return;
+    let cancelled = false;
+    const forceServerReload = tdeeHistoryRetrySeen.current !== tdeeHistoryRetry;
+    tdeeHistoryRetrySeen.current = tdeeHistoryRetry;
+    const calc = store.settings?.macroCalc || {};
+    const cache = window.__lbAdaptiveTdeeHistorySessionCache
+      || (window.__lbAdaptiveTdeeHistorySessionCache = new Map());
+    const cached = cache.get(userId);
+
+    if (!forceServerReload && cached?.inputKey === tdeeHistoryInputKey) {
+      setTdeeHistoryStatus('ready');
+      if (cached.history?.length && !(store.adaptiveTdeeHistory || []).length) {
+        setStore(s => s ? { ...s, adaptiveTdeeHistory: cached.history } : s);
+      }
+      return;
+    }
+
+    const processRows = serverRows => {
       if (cancelled) return;
       if (serverRows == null) {
         setTdeeHistoryStatus('error');
         return;
       }
       const rawServerHistory = serverRows || [];
+      const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
       const refreshedServerHistory = rawServerHistory.map(row => LB.refreshAdaptiveTdeeHistoryEstimate(store, row));
       const serverHistory = refreshedServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
-      setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(serverHistory, rebuilt, s.adaptiveTdeeHistory || []) } : s);
+      const mergedHistory = LB.mergeAdaptiveTdeeHistory(serverHistory, rebuilt, store.adaptiveTdeeHistory || []);
+      setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(mergedHistory, s.adaptiveTdeeHistory || []) } : s);
       const serverDates = new Set(rawServerHistory.map(row => row.asOfDate));
       const missing = rebuilt.filter(row => !serverDates.has(row.asOfDate));
       const repaired = serverHistory.filter((row, index) => {
@@ -4742,17 +4824,30 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           && raw?.targetsSnapshot?.weeklyAverageCalories == null;
       });
       const toSave = LB.mergeAdaptiveTdeeHistory(missing, repaired);
+      cache.set(userId, {
+        inputKey: tdeeHistoryInputKey,
+        serverRows: LB.mergeAdaptiveTdeeHistory(rawServerHistory, toSave),
+        history: mergedHistory,
+      });
       if (toSave.length) {
         LB.saveAdaptiveTdeeHistory(userId, toSave).catch(error => console.error('adaptive TDEE backfill failed:', error));
       }
       setTdeeHistoryStatus('ready');
-    }).catch(error => {
+    };
+
+    if (!forceServerReload && cached?.serverRows) {
+      processRows(cached.serverRows);
+      return () => { cancelled = true; };
+    }
+
+    setTdeeHistoryStatus('loading');
+    LB.loadAdaptiveTdeeHistory(userId).then(processRows).catch(error => {
       if (cancelled) return;
       console.error('adaptive TDEE history refresh failed:', error);
       setTdeeHistoryStatus('error');
     });
     return () => { cancelled = true; };
-  }, [userId, tdeeHistoryRetry, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit, store.settings?.macroCalc?.lastCheckinAt, store.settings?.macroCalc?.lastAppliedAt]);
+  }, [tdeeHistoryOpen, tdeeHistoryInputKey, tdeeHistoryRetry, userId]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-
@@ -5541,14 +5636,25 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
-      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
-      <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <AdaptiveTdeeHistorySheet open={tdeeHistoryOpen} onClose={() => setTdeeHistoryOpen(false)} store={store}
-        loadStatus={tdeeHistoryStatus} onRetry={() => setTdeeHistoryRetry(value => value + 1)} />
-      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} userId={userId} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
-        onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
-      <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
-        onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
+      {logOpen && (
+        <DailyLogScreen open={true} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
+      )}
+      {targetOpen && (
+        <MacroTargetSheet open={true} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
+      )}
+      {tdeeHistoryOpen && (
+        <AdaptiveTdeeHistorySheet open={true} onClose={() => setTdeeHistoryOpen(false)} store={store}
+          loadStatus={tdeeHistoryStatus} onRetry={() => setTdeeHistoryRetry(value => value + 1)}
+          chartMode={tdeeHistoryChartMode} onChartMode={setTdeeHistoryChartMode} />
+      )}
+      {checkinOpen && (
+        <WeeklyCheckinSheet open={true} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} userId={userId} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
+          onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
+      )}
+      {automationSettingsOpen && (
+        <MacroEstimatorSheet open={true} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
+          onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
+      )}
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );
@@ -5835,6 +5941,7 @@ function ExportSheet({ open, onClose, store, userId }) {
   const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
   const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
+  if (!open) return null;
 
   const applyPreset = (days) => {
     setFrom(LB.shiftDate(today, -(days - 1)));

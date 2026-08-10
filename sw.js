@@ -270,7 +270,38 @@ self.addEventListener('fetch', e => {
       );
       return;
     }
-    // App shell: stale-while-revalidate, serve cache instantly, refresh in background.
+    // The active worker's app-shell cache is immutable for its generation.
+    // install() populated it with no-store requests, and a newly activated
+    // worker owns a newly populated generation. Serving these exact assets
+    // cache-first avoids a network request and cache write for every JSX file
+    // the boot loader reads on every warm start. The explicit _v probe above
+    // remains network-only and is what discovers a newer worker.
+    const appAssetUrl = url.origin + url.pathname;
+    const isAppAsset = !url.search && ASSETS.includes(appAssetUrl);
+    const isBackgroundPhoto = url.pathname.includes('/Background/');
+    if (isAppAsset || isBackgroundPhoto) {
+      e.respondWith(
+        caches.match(e.request).then(cached => {
+          if (cached) return cached;
+          return fetch(e.request, { cache: 'no-store' }).then(res => {
+            if (res.redirected) res = new Response(res.body, res);
+            if (res.ok) {
+              const clone = res.clone();
+              const target = isBackgroundPhoto ? PHOTOS_CACHE : CACHE;
+              e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
+            }
+            return res;
+          }).catch(() => {
+            if (e.request.mode === 'navigate') return caches.match(BASE + '/').then(c => c || offlineResponse());
+            return offlineResponse();
+          });
+        })
+      );
+      return;
+    }
+
+    // Unlisted same-origin resources stay stale-while-revalidate. This covers
+    // runtime-created files without making them part of the immutable shell.
     // { cache: 'no-store' } on the network fetch matters a lot more than it looks:
     // after a deliberate cache wipe (LB.clearCachesAndReload / "Clear cache &
     // reload"), every request here is a CacheStorage miss and falls through to

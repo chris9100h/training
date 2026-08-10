@@ -1252,6 +1252,222 @@ function normalizeHiddenHealthCards(arr) {
   return [...new Set(arr.map(id => (id === 'macros' || id === 'adherence') ? 'macroGroup' : id))];
 }
 
+function mapUserSettings(sett = {}) {
+  return {
+    unit: sett.unit ?? null,
+    restDefault: sett.rest_default || 120,
+    restBig: sett.rest_big || 180,
+    restMedium: sett.rest_medium || 120,
+    restSmall: sett.rest_small || 90,
+    pushEnabled: sett.push_enabled ?? false,
+    pushoverUserKey: sett.pushover_user_key ?? null,
+    usePushover: sett.use_pushover ?? false,
+    cycleWeekView: sett.cycle_week_view ?? false,
+    accentColor: sett.accent_color ?? 'copper',
+    darkMode: sett.dark_mode ?? 'dark',
+    tempoEnabled: sett.tempo_enabled ?? false,
+    tempoEccentric: sett.tempo_eccentric ?? 4,
+    tempoConcentric: sett.tempo_concentric ?? 1,
+    smartProgression: sett.smart_progression ?? false,
+    weightFillDown: sett.weight_fill_down ?? true,
+    netCarbs: sett.net_carbs ?? false,
+    foodForceGrams: sett.food_force_grams ?? false,
+    // Plan Mode is the default experience (migration 0253). The column is
+    // NOT NULL, so this fallback only fires for a user whose settings row
+    // does not exist yet, which must match the column default rather than
+    // the pre-0253 opt-in value.
+    planMode: sett.plan_mode ?? true,
+    hideFoodCategories: sett.hide_food_categories ?? false,
+    progressionRangeTop: sett.progression_range_top ?? 4,
+    equipmentConfig: sett.equipment_config ?? {},
+    reminderEnabled: sett.reminder_enabled ?? false,
+    reminderTime: sett.reminder_time ?? '07:00',
+    showWarmupInSummary: sett.show_warmup_in_summary ?? true,
+    showRegression: sett.show_regression ?? true,
+    pinAllNotes: sett.pin_all_notes ?? false,
+    showCoachingTab: sett.show_coaching_tab ?? false,
+    beYourOwnCoach: sett.be_your_own_coach ?? false,
+    sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
+    defaultCheckinSchema: sett.default_checkin_schema ?? null,
+    macroTargets: sett.macro_targets ?? null,
+    macroCalc: sett.macro_calc ?? null,
+    mealWindows: sett.meal_windows ?? null,
+    fastingProtocol: sett.fasting_protocol ?? null,
+    showHealthTab: sett.show_health_tab ?? false,
+    showWaterTab: sett.show_water_tab ?? false,
+    showFoodTab: sett.show_food_tab ?? false,
+    onboardingCompleted: sett.onboarding_completed ?? false,
+    glucoseUnit: sett.glucose_unit ?? 'mmol',
+    tempUnit: sett.temp_unit ?? null,
+    hiddenHealthCards: normalizeHiddenHealthCards(sett.hidden_health_cards),
+    feverThresholdC: sett.fever_threshold_c ?? 38,
+    cleanupPercent: sett.cleanup_percent ?? 20,
+    watermarkOpacity: sett.watermark_opacity ?? null,
+    vipBackground: sett.vip_background ?? null,
+    swVersion: sett.sw_version ?? null,
+    waterGoalMl: sett.water_goal_ml ?? 2000,
+    waterStartTime: sett.water_start_time ?? '08:00',
+    waterEndTime: sett.water_end_time ?? '22:00',
+    waterBottlesToday: sett.water_bottles_today ?? 0,
+    waterBottlesDate: sett.water_bottles_date ?? null,
+    waterDrinks: Array.isArray(sett.water_drinks) ? sett.water_drinks : [],
+    waterCoffeeSizes: Array.isArray(sett.water_coffee_sizes) ? sett.water_coffee_sizes : null,
+    waterBottleEnabled: sett.water_bottle_enabled ?? true,
+    waterBottleMl: sett.water_bottle_ml ?? 1500,
+    waterReminderEnabled: sett.water_reminder_enabled ?? false,
+    mealReminderEnabled: sett.meal_reminder_enabled ?? false,
+    tzOffsetMinutes: sett.tz_offset_minutes ?? null,
+    timeZone: sett.time_zone ?? null,
+    medsEnabled: sett.meds_enabled ?? false,
+    medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
+    dailyLogReminderEnabled: sett.daily_log_reminder_enabled ?? false,
+    dailyLogReminderTime: sett.daily_log_reminder_time ?? '19:00',
+    pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
+  };
+}
+
+function buildEssentialLoadResult({
+  isCoachLoad, profileRes, exRes, schRes, sessRes, settRes, skipsRes,
+  cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes, mesoStatesRes,
+  authUser, entriesBySession, statsBySession, exerciseBests,
+}) {
+  const sett = settRes.data || {};
+  return {
+    user: {
+      name: profileRes.data?.name || '',
+      email: isCoachLoad ? '' : (authUser?.email || ''),
+      tier: profileRes.data?.tier || 'free',
+    },
+    exercises: exRes.data || [],
+    schedules: (schRes.data || []).map(s => healScheduleWeekdays({
+      ...s,
+      days: Array.isArray(s.days) ? s.days : [],
+      versions: Array.isArray(s.versions) ? s.versions : [],
+    })),
+    sessions: (sessRes.data || []).map(s => {
+      const entryRows = entriesBySession[s.id];
+      const stats = statsBySession[s.id];
+      return {
+        id: s.id,
+        scheduleId: s.schedule_id,
+        dayId: s.day_id,
+        dayName: s.day_name,
+        date: s.date,
+        startedAt: s.started_at ?? null,
+        ended: s.ended,
+        entries: entryRows && entryRows.length > 0 ? mapEntryRows(entryRows) : [],
+        ...(stats ? {
+          aggVolume: stats.volume,
+          aggDoneSets: stats.done_sets,
+          aggExercises: stats.exercise_count,
+        } : {}),
+        durationMinutes: s.duration_minutes ?? null,
+        feel: s.feel ?? null,
+        ...(s.is_bonus ? { isBonus: true } : {}),
+        ...(s.is_freestyle ? { isFreestyle: true } : {}),
+        ...(s.is_deload ? { isDeload: true } : {}),
+        ...(s.is_cleanup ? { isCleanup: true } : {}),
+        ...(s.meso_recap ? { mesoRecap: s.meso_recap } : {}),
+        ...(s.readiness ? { readiness: s.readiness } : {}),
+        ...(s.signal_weight ? { signalWeight: s.signal_weight } : {}),
+        ...(s.cycle_pos != null ? { cyclePos: s.cycle_pos } : {}),
+      };
+    }),
+    skips: (skipsRes.data || []).map(s => ({
+      id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
+      skipReason: s.skip_reason, skippedAt: s.skipped_at,
+    })),
+    cardioLogs: (cardioLogsRes.data || []).map(l => ({
+      id: l.id, date: l.date, type: l.type ?? null,
+      durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null,
+      paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
+      note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
+    })),
+    cardioPlans: (cardioPlansRes.data || []).map(p => ({
+      id: p.id, name: p.name, activityType: p.activity_type,
+      archived: p.archived, mode: p.mode,
+      days: p.days ?? {}, manualTargets: p.manual_targets ?? {},
+      goal: p.goal ?? null, goalDueDate: p.goal_due_date ?? null,
+      startFitness: p.start_fitness ?? null,
+      generatedWeeks: p.generated_weeks ?? [],
+      planStartDate: p.plan_start_date ?? null,
+      createdAt: p.created_at,
+    })),
+    dailyLogs: (dailyLogsRes.data || []).map(l => ({
+      id: l.id, date: l.date,
+      weight: l.weight ?? null, steps: l.steps ?? null,
+      waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+      armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+      bodyFatPct: l.body_fat_pct ?? null,
+      calories: l.calories ?? null, protein: l.protein ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
+      waterMl: l.water_ml ?? null, note: l.note ?? null,
+      offPlanNote: l.off_plan_note ?? null,
+      mealOfChoice: !!l.meal_of_choice,
+      mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
+      coachFields: l.daily_coach_fields ?? null,
+      aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
+      updatedAt: l.updated_at ?? null,
+      createdAt: l.created_at,
+    })),
+    statusPeriods: (statusPeriodsRes.data || []).map(p => ({
+      id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
+    })),
+    mesoStates: (mesoStatesRes.data || []).map(m => ({
+      id: m.id, scheduleId: m.schedule_id, weeks: m.weeks,
+      startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
+      startedAt: m.started_at ?? null,
+      deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
+      pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
+      weightBoostDeclines: m.weight_boost_declines ?? {},
+      growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
+      affinity: m.affinity ?? {}, autoregState: m.autoreg_state ?? null,
+      completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
+      updatedAt: m.updated_at ?? null,
+    })),
+    waterLogs: [],
+    foodLogs: [],
+    foodFavorites: [],
+    foodRecipes: [],
+    foodTemplateSlots: [],
+    foodTemplateDays: [],
+    foodMealPlans: [],
+    foodShoppingPrefs: [],
+    medicationPlans: [],
+    medications: [],
+    medicationScheduleSlots: [],
+    medicationLogs: [],
+    medicationPlanItems: [],
+    medicationPillboxChecks: [],
+    glucoseLogs: [],
+    bloodPressureLogs: [],
+    bodyTempLogs: [],
+    workoutTemplates: [],
+    checkinSchemaTemplates: [],
+    planDrafts: {},
+    adaptiveTdeeHistory: [],
+    exerciseBests,
+    activeScheduleId: sett.active_schedule_id ?? null,
+    activeMealTemplateId: sett.active_meal_template_id ?? null,
+    activeCardioPlanId: sett.active_cardio_plan_id ?? null,
+    cycleIndex: sett.cycle_index ?? 0,
+    cycleStartDate: sett.cycle_start_date ?? null,
+    weekPlanStartDate: sett.week_plan_start_date ?? null,
+    lastAdvancedDate: sett.last_advanced_date ?? null,
+    inProgress: sett.in_progress_session_id ?? null,
+    statusMode: sett.status_mode ?? null,
+    statusModeSince: sett.status_mode_since ?? null,
+    deloadPromptDismissedAt: sett.deload_prompt_dismissed_at ?? null,
+    customDayTypes: sett.custom_day_types ?? [],
+    settings: mapUserSettings(sett),
+    nextReminderAt: sett.next_reminder_at ?? null,
+    coaching: isCoachLoad ? undefined : { asClient: null, asCoach: [], asSelf: null, unreadNotes: [] },
+    supportTickets: [],
+    supportUnread: 0,
+  };
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
@@ -1372,6 +1588,109 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // always for the coming days, never the past.
     isCoachLoad ? null : _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ];
+  // Stage one contains only the data needed to render Home correctly and to
+  // resume or start training. Query builders are lazy, so secondary requests
+  // do not hit the network until the second Promise.all below.
+  const coreQueryIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 23];
+  const medicationQueryIndexes = [34, 35, 36, 37, 38, 39];
+  const queryResults = new Array(queries.length);
+  await Promise.all(coreQueryIndexes.map(async idx => {
+    queryResults[idx] = await queries[idx];
+  }));
+
+  const coreProfileRes = queryResults[0];
+  const coreSettRes = queryResults[4];
+  if (coreProfileRes.error) throw coreProfileRes.error;
+  if (queryResults[1].error) throw queryResults[1].error;
+  if (queryResults[2].error) throw queryResults[2].error;
+  if (queryResults[3].error) throw queryResults[3].error;
+  if (coreSettRes.error) throw coreSettRes.error;
+  if (queryResults[5].error) throw queryResults[5].error;
+  if (queryResults[6].error) throw queryResults[6].error;
+  if (queryResults[14].error) throw queryResults[14].error;
+  if (queryResults[15].error) throw queryResults[15].error;
+  if (queryResults[16].error) throw queryResults[16].error;
+  if (queryResults[17].error) throw queryResults[17].error;
+  if (queryResults[23].error) throw queryResults[23].error;
+
+  // First login after email confirmation, profile not yet created. Do this
+  // before secondary hydration so a brand new account does not wait on data
+  // it cannot have yet.
+  if (!coreProfileRes.data && !isCoachLoad) {
+    if (_depth > 0) throw new Error('User profile setup failed');
+    const { data: { user } } = await _supabase.auth.getUser();
+    const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
+    const unit = user?.user_metadata?.unit ?? null;
+    try {
+      await setupNewUser(userId, name, unit);
+    } catch (setupErr) {
+      await _supabase.auth.signOut();
+      throw new Error('Account not found. Please register again.');
+    }
+    return loadFromSupabase(userId, _depth + 1, _opts);
+  }
+
+  const sett = coreSettRes.data || {};
+  const { data: { session: authSession } } = await _supabase.auth.getSession();
+  const authUser = authSession?.user;
+  const entriesBySession = {};
+  for (const e of (queryResults[6].data || [])) {
+    if (!entriesBySession[e.session_id]) entriesBySession[e.session_id] = [];
+    entriesBySession[e.session_id].push(e);
+  }
+
+  const histInProgId = sett.in_progress_session_id;
+  const histInProgRow = histInProgId ? (queryResults[3].data || []).find(s => s.id === histInProgId) : null;
+  if (histInProgRow && !entriesBySession[histInProgId] && (histInProgRow.date || '').slice(0, 10) < histCutoff) {
+    const { data, error } = await _supabase.from('zane_session_entries')
+      .select('*, sets:zane_sets(*)').eq('session_id', histInProgId).order('entry_idx');
+    if (error) throw error;
+    if (data?.length) entriesBySession[histInProgId] = data;
+  }
+
+  const statsBySession = {};
+  for (const r of (queryResults[8]?.data || [])) statsBySession[r.session_id] = r;
+  const exerciseBests = {};
+  for (const r of (queryResults[7]?.data || [])) {
+    if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
+  }
+
+  const orphanIds = isCoachLoad ? [] : (queryResults[3].data || [])
+    .filter(s => {
+      if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
+      const entryRows = entriesBySession[s.id];
+      const stats = statsBySession[s.id];
+      return !(entryRows && entryRows.length > 0) && !(stats && stats.exercise_count > 0);
+    })
+    .map(s => s.id);
+  if (orphanIds.length) {
+    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
+  }
+
+  if (typeof _opts.onEssential === 'function') {
+    _opts.onEssential(buildEssentialLoadResult({
+      isCoachLoad,
+      profileRes: queryResults[0], exRes: queryResults[1], schRes: queryResults[2], sessRes: queryResults[3],
+      settRes: queryResults[4], skipsRes: queryResults[5],
+      cardioLogsRes: queryResults[14], cardioPlansRes: queryResults[15], dailyLogsRes: queryResults[16],
+      statusPeriodsRes: queryResults[17], mesoStatesRes: queryResults[23],
+      authUser, entriesBySession, statsBySession, exerciseBests,
+    }));
+  }
+
+  // Medication tables are opt-in and can be large. The settings row must be
+  // known before any of these query builders are awaited.
+  const medsEnabledAtLoad = !isCoachLoad && !!coreSettRes.data?.meds_enabled;
+  const deferredQueryIndexes = queries.map((_, idx) => idx)
+    .filter(idx => !coreQueryIndexes.includes(idx))
+    .filter(idx => medsEnabledAtLoad || !medicationQueryIndexes.includes(idx));
+  await Promise.all(deferredQueryIndexes.map(async idx => {
+    queryResults[idx] = await queries[idx];
+  }));
+  for (const idx of medicationQueryIndexes) {
+    if (!queryResults[idx]) queryResults[idx] = { data: [], error: null };
+  }
+
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
@@ -1379,7 +1698,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
          foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes,
-         medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all(queries);
+         medicationPlanItemsRes, medicationPillboxChecksRes] = queryResults;
 
   // A failed request (offline, RLS, server error) also yields no data, bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1435,7 +1754,6 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // these five collections aren't part of the boot merge's resurrection
   // guard either, so a swallowed error on a background refresh would
   // silently blank out medication data that was already visible.
-  const medsEnabledAtLoad = !!settRes.data?.meds_enabled;
   if (medsEnabledAtLoad) {
     if (medicationPlansRes?.error) throw medicationPlansRes.error;
     if (medicationsRes?.error) throw medicationsRes.error;
@@ -1455,84 +1773,6 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
   // on these or such a user can't boot; degrade the banner instead.
-
-  // First login after email confirmation, profile not yet created (skip for coach loads)
-  if (!profileRes.data && !isCoachLoad) {
-    // guard against infinite recursion if setupNewUser silently fails (e.g. RLS)
-    if (_depth > 0) throw new Error('User profile setup failed');
-    const { data: { user } } = await _supabase.auth.getUser();
-    const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
-    const unit = user?.user_metadata?.unit ?? null;
-    try {
-      await setupNewUser(userId, name, unit);
-    } catch (setupErr) {
-      // Profile creation failed (e.g. auth user was deleted externally), sign out cleanly
-      await _supabase.auth.signOut();
-      throw new Error('Account not found. Please register again.');
-    }
-    return loadFromSupabase(userId, _depth + 1);
-  }
-
-  const sett = settRes.data || {};
-
-  // getSession() reads the session straight from local storage (no network);
-  // getUser() revalidates the token against the Auth server, a full round-trip
-  // serialized AFTER the whole query batch, just to read the email (which the
-  // cached session already carries). On the no-cache boot path this sat directly
-  // on the critical path to `ready`.
-  const { data: { session: authSession } } = await _supabase.auth.getSession();
-  const authUser = authSession?.user;
-
-  // Build a lookup map: session_id → entry rows (sorted by entry_idx, already ordered)
-  const entriesBySession = {};
-  for (const e of (entriesRes.data || [])) {
-    if (!entriesBySession[e.session_id]) entriesBySession[e.session_id] = [];
-    entriesBySession[e.session_id].push(e);
-  }
-
-  // An in-progress session that predates the boot window (rare, auto-close
-  // ends stale sessions) still needs its sets so training can resume.
-  const inProgId = sett.in_progress_session_id;
-  const inProgRow = inProgId ? (sessRes.data || []).find(s => s.id === inProgId) : null;
-  if (inProgRow && !entriesBySession[inProgId] && (inProgRow.date || '').slice(0, 10) < histCutoff) {
-    const { data } = await _supabase.from('zane_session_entries')
-      .select('*, sets:zane_sets(*)').eq('session_id', inProgId).order('entry_idx');
-    if (data?.length) entriesBySession[inProgId] = data;
-  }
-
-  // Server aggregates. Tolerate RPC errors (e.g. migration not applied yet),
-  // the maps just stay empty and the client falls back to windowed data.
-  const statsBySession = {};
-  for (const r of (sessionStatsRes?.data || [])) statsBySession[r.session_id] = r;
-  const exerciseBests = {};
-  for (const r of (bestsRes?.data || [])) {
-    if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
-  }
-
-  // Sessions with no ended timestamp that aren't the current in-progress
-  // session are orphans (app crashed / closed mid-session, or a stale local
-  // pointer a multi-device boot merge trusted over the server). Delete only
-  // the ones that are genuinely empty and untouched: a session with real
-  // logged data, entries within the boot window (entriesBySession) or the
-  // exercise_count aggregate for one that fell outside it (get_session_stats,
-  // same aggExercises > 0 signal docs/internals.md's History-Windowing
-  // section uses to tell a windowed-but-real session apart from a genuinely
-  // empty one), is left alone instead of hard-deleted: either a genuinely
-  // active device keeps syncing it, or the auto-close-sessions cron ends it
-  // later via its own timeout. Skip for coach loads, we must not clean up a
-  // client's in-progress session. Runs here (not right after settRes is read)
-  // because it needs entriesBySession/statsBySession, built just above.
-  const orphanIds = isCoachLoad ? [] : (sessRes.data || [])
-    .filter(s => {
-      if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
-      const entryRows = entriesBySession[s.id];
-      const stats = statsBySession[s.id];
-      return !(entryRows && entryRows.length > 0) && !(stats && stats.exercise_count > 0);
-    })
-    .map(s => s.id);
-  if (orphanIds.length) {
-    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
-  }
 
   const result = {
     // tier is server-authored (granted by the founding-member trigger) and never
@@ -1759,77 +1999,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     statusModeSince: sett.status_mode_since ?? null,
     deloadPromptDismissedAt: sett.deload_prompt_dismissed_at ?? null,
     customDayTypes: sett.custom_day_types ?? [],
-    settings: {
-        unit: sett.unit ?? null,
-        restDefault: sett.rest_default || 120,
-        restBig:     sett.rest_big     || 180,
-        restMedium:  sett.rest_medium  || 120,
-        restSmall:   sett.rest_small   || 90,
-        pushEnabled: sett.push_enabled ?? false,
-        pushoverUserKey: sett.pushover_user_key ?? null,
-        usePushover: sett.use_pushover ?? false,
-        cycleWeekView: sett.cycle_week_view ?? false,
-        accentColor: sett.accent_color ?? 'copper',
-        darkMode: sett.dark_mode ?? 'dark',
-        tempoEnabled: sett.tempo_enabled ?? false,
-        tempoEccentric: sett.tempo_eccentric ?? 4,
-        tempoConcentric: sett.tempo_concentric ?? 1,
-        smartProgression: sett.smart_progression ?? false,
-        weightFillDown: sett.weight_fill_down ?? true,
-        netCarbs: sett.net_carbs ?? false,
-        foodForceGrams: sett.food_force_grams ?? false,
-        // Plan Mode is the default experience (migration 0253). The column is
-        // NOT NULL, so this fallback only fires for a user whose settings row
-        // does not exist yet, which must match the column default rather than
-        // the pre-0253 opt-in value.
-        planMode: sett.plan_mode ?? true,
-        hideFoodCategories: sett.hide_food_categories ?? false,
-        progressionRangeTop: sett.progression_range_top ?? 4,
-        equipmentConfig: sett.equipment_config ?? {},
-        reminderEnabled: sett.reminder_enabled ?? false,
-        reminderTime: sett.reminder_time ?? '07:00',
-        showWarmupInSummary: sett.show_warmup_in_summary ?? true,
-        showRegression: sett.show_regression ?? true,
-        pinAllNotes: sett.pin_all_notes ?? false,
-        showCoachingTab: sett.show_coaching_tab ?? false,
-        beYourOwnCoach: sett.be_your_own_coach ?? false,
-        sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
-        defaultCheckinSchema: sett.default_checkin_schema ?? null,
-        macroTargets: sett.macro_targets ?? null,
-        macroCalc: sett.macro_calc ?? null,
-        mealWindows: sett.meal_windows ?? null,
-        fastingProtocol: sett.fasting_protocol ?? null,
-        showHealthTab: sett.show_health_tab ?? false,
-        showWaterTab: sett.show_water_tab ?? false,
-        showFoodTab: sett.show_food_tab ?? false,
-        onboardingCompleted: sett.onboarding_completed ?? false,
-        glucoseUnit: sett.glucose_unit ?? 'mmol',
-        tempUnit: sett.temp_unit ?? null,
-        hiddenHealthCards: normalizeHiddenHealthCards(sett.hidden_health_cards),
-        feverThresholdC: sett.fever_threshold_c ?? 38,
-        cleanupPercent: sett.cleanup_percent ?? 20,
-        watermarkOpacity: sett.watermark_opacity ?? null,
-        vipBackground: sett.vip_background ?? null,
-        swVersion: sett.sw_version ?? null,
-        waterGoalMl: sett.water_goal_ml ?? 2000,
-        waterStartTime: sett.water_start_time ?? '08:00',
-        waterEndTime: sett.water_end_time ?? '22:00',
-        waterBottlesToday: sett.water_bottles_today ?? 0,
-        waterBottlesDate: sett.water_bottles_date ?? null,
-        waterDrinks: Array.isArray(sett.water_drinks) ? sett.water_drinks : [],
-        waterCoffeeSizes: Array.isArray(sett.water_coffee_sizes) ? sett.water_coffee_sizes : null,
-        waterBottleEnabled: sett.water_bottle_enabled ?? true,
-        waterBottleMl: sett.water_bottle_ml ?? 1500,
-        waterReminderEnabled: sett.water_reminder_enabled ?? false,
-        mealReminderEnabled: sett.meal_reminder_enabled ?? false,
-        tzOffsetMinutes: sett.tz_offset_minutes ?? null,
-        timeZone: sett.time_zone ?? null,
-        medsEnabled: sett.meds_enabled ?? false,
-        medicationReminderEnabled: sett.medication_reminder_enabled ?? false,
-        dailyLogReminderEnabled: sett.daily_log_reminder_enabled ?? false,
-        dailyLogReminderTime: sett.daily_log_reminder_time ?? '19:00',
-        pillboxSlots: Array.isArray(sett.pillbox_slots) ? sett.pillbox_slots : [],
-      },
+    settings: mapUserSettings(sett),
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
       asClient: (coachInfoRes?.data?.[0]) ? {
@@ -5071,6 +5241,66 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
 // Returns true on success, false if the write failed (most importantly a
 // QuotaExceededError once the ~5 MB localStorage budget fills up). Callers
 // surface a warning instead of letting the local cache silently stop updating.
+const _localSnapshotState = new Map();
+
+function loadLocalState(userId) {
+  try {
+    const storeKey = `logbook-${userId}`;
+    const baseKey = `logbook-base-${userId}`;
+    const storeRaw = localStorage.getItem(storeKey);
+    if (!storeRaw) return { store: null, base: null };
+    const store = JSON.parse(storeRaw);
+    const storedBaseRaw = localStorage.getItem(baseKey);
+    const baseMatchesStore = !storedBaseRaw || storedBaseRaw === storeRaw;
+    const baseRaw = baseMatchesStore ? null : storedBaseRaw;
+    const base = baseMatchesStore ? store : JSON.parse(storedBaseRaw);
+    _localSnapshotState.set(userId, { storeRef: store, storeRaw, baseRef: base, baseRaw });
+    return { store, base };
+  } catch (_) {
+    return { store: null, base: null };
+  }
+}
+
+// The full base snapshot only exists while local state actually differs from
+// the last confirmed server state. Once synced, absence of the base key means
+// "base equals cache", so the next boot parses one large JSON payload instead
+// of two. Repeated idle saves reuse the previous serialized strings when the
+// immutable store/base references did not change.
+function saveLocalState(store, base, userId) {
+  try {
+    const storeKey = `logbook-${userId}`;
+    const baseKey = `logbook-base-${userId}`;
+    const prev = _localSnapshotState.get(userId) || {};
+    const baseIsStore = !base || base === store;
+    let baseRaw = null;
+
+    // Preserve the confirmed base before replacing the current cache. If the
+    // cache write then fails, the older local store and its base remain a valid
+    // pair rather than becoming an ambiguous partial update.
+    if (!baseIsStore) {
+      baseRaw = prev.baseRef === base && prev.baseRaw ? prev.baseRaw : JSON.stringify(base);
+      if (prev.baseRaw !== baseRaw) localStorage.setItem(baseKey, baseRaw);
+    }
+
+    const storeRaw = prev.storeRef === store && prev.storeRaw ? prev.storeRaw : JSON.stringify(store);
+    if (prev.storeRaw !== storeRaw) localStorage.setItem(storeKey, storeRaw);
+    if (baseIsStore) localStorage.removeItem(baseKey);
+    _localSnapshotState.set(userId, {
+      storeRef: store,
+      storeRaw,
+      baseRef: baseIsStore ? store : base,
+      baseRaw: baseIsStore ? null : baseRaw,
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveSyncedState(store, userId) {
+  return saveLocalState(store, store, userId);
+}
+
 function saveToLocal(store, userId) {
   try {
     localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
@@ -5106,9 +5336,11 @@ function clearLocal(userId) {
     if (userId) {
       localStorage.removeItem(`logbook-${userId}`);
       localStorage.removeItem(`logbook-base-${userId}`);
+      _localSnapshotState.delete(userId);
       return;
     }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
+    _localSnapshotState.clear();
   } catch (_) {}
 }
 
@@ -7560,7 +7792,7 @@ async function endCleanup(userId, store, setStore) {
   }
 }
 
-async function refreshHealthLogs(userId) {
+async function refreshHealthLogs(userId, _opts = {}) {
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   // Medications (migration 0218/0221) mirrors the exact SELECT/mapping
   // loadFromSupabase uses for these 6 tables, kept in sync by hand since
@@ -7569,6 +7801,14 @@ async function refreshHealthLogs(userId) {
   // function was just never extended to include them when it was written,
   // so a coach push or another device's dose log landing in the 30s-30min
   // background window was invisible until a full reload.
+  const medicationQueries = _opts.medsEnabled ? [
+    _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
+  ] : Array.from({ length: 6 }, () => Promise.resolve({ data: [], error: null }));
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
          medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
@@ -7578,16 +7818,12 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
-    _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
+    ...medicationQueries,
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error
       || medicationPlansRes.error || medicationsRes.error || medicationScheduleSlotsRes.error || medicationLogsRes.error || medicationPlanItemsRes.error || medicationPillboxChecksRes.error) return null;
   return {
+    medicationsLoaded: !!_opts.medsEnabled,
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
@@ -10178,7 +10414,7 @@ window.LB = {
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
-  saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
+  saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,

@@ -6,11 +6,21 @@ den passenden Abschnitt lesen; die verbindlichen Grundregeln stehen in CLAUDE.md
 ## Precompile-Loader (Boot-Performance)
 
 - Die `screens-*.jsx`/`ui.jsx`/`app.jsx` werden **nicht** als `<script type="text/babel">` geladen. Ein Loader in `index.html` transpiliert jede Datei **einmal** (Presets `react` + `env` mit `targets: { esmodules: true }`, sourceType `script`), cacht das fertige JS in IndexedDB (`zane-precompile`, Key = Pfad + Content-Hash) und führt bei Folgestarts das gecachte JS direkt aus.
+- **Kritischer Startpfad:** Vor dem ersten React-Mount laufen nur `ui.jsx`, `screens-home.jsx` und `app.jsx`. Alle anderen Screens haben kleine Platzhalter in `window.Screens` und werden beim ersten Routenaufruf als Modul in ihrer festen Quellenreihenfolge geladen. Nach einem erfolgreichen Datenstart beginnt zusätzlich eine einmalige Idle-Vorbereitung. Sie startet bewusst nicht auf dem Login-Screen, damit das Kompilieren großer Training-/Food-Dateien nicht mit der Eingabe konkurriert.
 - Der `esmodules`-Target (statt des ungesetzten ES5-Downlevel-Defaults) ist ca. 5x schneller transpiliert (gemessen) und unkritisch, weil die App wegen IndexedDB/Service Worker/Fetch ohnehin nur auf modernen Evergreen-Browsern läuft.
 - **Babel Standalone wird nur noch bei Cache-Miss** (neue/geänderte Datei) lazy geladen; bei leerem Cache (First Boot / Incognito) wird der Download spekulativ parallel zum JSX-Fetch gestartet statt erst danach. `html2canvas` wird erst beim ersten Screenshot geladen. React läuft als **Production-Build**.
-- Schlägt der Loader fehl, fällt er automatisch auf den alten Pfad „Babel transpiliert alles" zurück.
+- Ein Fehler ist pro Quelldatei isoliert. Bereits geladene, kompilierte oder ausgeführte Quellen werden nicht wiederholt; die betroffene Route zeigt einen Retry-Zustand.
 - Ändert sich `PRESETS`/`PRESET_TAG` im Loader, muss `tools/check-syntax.cjs` mit denselben Presets nachgezogen werden.
-- **Neue `.jsx`-Datei:** in `SOURCES` im Loader (`index.html`, in Ausführungsreihenfolge) und `ASSETS` in `sw.js` eintragen; ein eigenes `<script>`-Tag gibt es nicht (der Loader lädt sie). Der Content-Hash invalidiert den Cache bei jeder Änderung automatisch.
+- **Neue `.jsx`-Datei:** in `SOURCES` im Loader (`index.html`, in Ausführungsreihenfolge), genau einen Bucket (`CRITICAL_SOURCES` oder `MODULES`) und `ASSETS` in `sw.js` eintragen; ein eigenes `<script>`-Tag gibt es nicht. `tools/check-syntax.cjs` erzwingt diese 1:1-Zuordnung. Der Content-Hash invalidiert den Precompile-Cache bei jeder Änderung automatisch.
+- Der Service Worker behandelt die App-Shell innerhalb einer Worker-Generation als unveränderlich und liefert gelistete `ASSETS` cache-first. Eine neue Cache-Version installiert ihre Shell mit `cache: 'no-store'`; die explizite `?_v=`-Probe bleibt network-only und entdeckt weiterhin neue Worker.
+
+## Zweistufiger Daten-Boot und lokale Snapshots
+
+- `loadFromSupabase` wartet bei einem Start ohne lokalen Cache zuerst auf 14 Kernabfragen für Home, Plan und Training. `onEssential` gibt diesen vollständigen Kern sofort an `app.jsx`; Coaching, optionale Tracker, Food-Helfer und weitere Nebendaten hydratisieren danach im selben Load weiter.
+- Der Kernzustand ist zugleich die Merge-Basis. Änderungen, die zwischen erster Anzeige und vollständiger Hydration entstehen, werden mit denselben base-aware Regeln wie ein Offline-Cache in die Serverantwort gemerged. Eine Teilantwort darf deshalb nie als vollständiger Serverzustand in den normalen Delete-Diff gelangen.
+- Die sechs Medication-Abfragen werden erst nach dem Settings-Resultat und nur bei `medsEnabled` gestartet. Ein Wechsel von aus auf an hydratisiert sie einmalig über den koordinierten Foreground-Refresh.
+- `pageshow`, `visibilitychange` und `focus` teilen sich einen In-Flight-Request und ein 30-Sekunden-Frischefenster. Gleiche Resultate behalten ihre bisherigen Array-Referenzen, damit ein reiner Foreground-Wechsel keinen kompletten Screen-Render auslöst.
+- Store und Sync-Basis werden über `saveLocalState` gebündelt und nach Debounce im Browser-Idle serialisiert. Sind Store und bestätigte Basis identisch, existiert nur `logbook-<uid>`; ein fehlender `logbook-base-<uid>` bedeutet dann ausdrücklich „Basis entspricht Store". Nur während lokaler, noch nicht bestätigter Änderungen wird der zweite große Snapshot gehalten. `pagehide` und ein Wechsel in den Hintergrund erzwingen weiterhin einen sofortigen Save.
 
 ## Modal-/Overlay-Landschaft (`Sheet` vs. die Custom-Overlays)
 

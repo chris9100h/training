@@ -92,9 +92,9 @@ function TopBar({ title, sub, onBack, right }) {
       flexShrink: 0,
       padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0',
       position: 'sticky', top: 0,
-      background: 'rgba(var(--bg-rgb),0.92)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
+      background: 'rgba(var(--bg-rgb),0.97)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
       zIndex: 5,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12 }}>
@@ -443,13 +443,13 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     }}>
       <div ref={barRef} style={{
         position: 'relative',
-        background: 'rgba(var(--bg-rgb),0.92)',
-        backdropFilter: 'blur(24px) saturate(130%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        background: 'rgba(var(--bg-rgb),0.97)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
         padding: '7px 6px 4px',
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
       }}>
         {/* knurled top edge, grip texture, signature of the kit */}
         <div className="knurl" style={{ position: 'absolute', top: 7, left: 14, right: 14 }} />
@@ -554,12 +554,12 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
         transformOrigin: 'bottom center',
         display: 'flex', gap: 8, padding: 8,
-        background: 'rgba(var(--bg-rgb),0.92)',
-        backdropFilter: 'blur(24px) saturate(130%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        background: 'rgba(var(--bg-rgb),0.97)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
         animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
         zIndex: 30,
       }}>
@@ -830,7 +830,7 @@ function Toggle({ on, onToggle, disabled = false, label }) {
 // whichever of its Log it/Plan it sheets is currently open as the flight's
 // source rect when it stages an entry, so it needs a real handle on the
 // panel node itself.
-function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
+function Sheet({ open, onClose, title, titleColor, titleRight, children, renderContent, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   const panelNodeRef = React.useRef(null);
@@ -920,6 +920,10 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   }, [open]);
 
   if (!open) return null;
+  // renderContent is the lazy equivalent of children for sheets whose body
+  // contains large lists or expensive derived JSX. Existing children remain
+  // fully supported, so callers opt in without changing Sheet semantics.
+  const content = typeof renderContent === 'function' ? renderContent() : children;
   const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
   // Above a real keyboard (native or this app's custom one), the panel no
   // longer sits flush against the physical bottom edge, it floats above
@@ -934,7 +938,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   // sheet changes.
   const cardLike = floating || center;
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
-  const shadowLayers = [cardLike ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
+  const shadowLayers = [cardLike ? '0 4px 18px rgba(0,0,0,0.4)' : '0 -10px 28px rgba(0,0,0,0.5)'];
   if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
@@ -1036,7 +1040,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
               {title}
             </div>
           ))}
-          {children}
+          {content}
         </div>
       </div>
     </div>

@@ -44,6 +44,7 @@ function loadStore() {
     new Function('window', src)(sandbox.window);
   }
   storeWindow = sandbox.window;
+  storeWindow.__testLocalStorage = sandbox.localStorage;
   return sandbox.window.LB;
 }
 
@@ -65,6 +66,49 @@ async function testAsync(name, fn) {
     const d = new Date();
     const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     assert.strictEqual(LB.todayISO(), expected);
+  });
+
+  test('saveSyncedState stores one snapshot and loadLocalState reuses it as the base', () => {
+    const state = { user: { name: 'A' }, sessions: [] };
+    assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-cache-user'));
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-cache-user'), null);
+    const loaded = LB.loadLocalState('cache-user');
+    assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(state));
+    assert.strictEqual(loaded.base, loaded.store);
+  });
+
+  test('saveLocalState keeps a separate base only while local edits are pending', () => {
+    const base = { settings: { unit: 'kg' }, sessions: [] };
+    const edited = { settings: { unit: 'lbs' }, sessions: [] };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'pending-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'));
+    const pending = LB.loadLocalState('pending-user');
+    assert.strictEqual(pending.store.settings.unit, 'lbs');
+    assert.strictEqual(pending.base.settings.unit, 'kg');
+    assert.strictEqual(LB.saveSyncedState(edited, 'pending-user'), true);
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'), null);
+  });
+
+  await testAsync('refreshHealthLogs does not issue medication reads while the feature is disabled', async () => {
+    const queried = [];
+    testFrom = (table) => {
+      queried.push(table);
+      const result = { data: [], error: null };
+      const query = {
+        select() { return query; }, eq() { return query; }, gte() { return query; }, order() { return query; },
+        then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); },
+      };
+      return query;
+    };
+    const disabled = await LB.refreshHealthLogs('u1', { medsEnabled: false });
+    assert.strictEqual(disabled.medicationsLoaded, false);
+    assert.strictEqual(queried.some(table => table.startsWith('zane_medication')), false);
+
+    queried.length = 0;
+    const enabled = await LB.refreshHealthLogs('u1', { medsEnabled: true });
+    assert.strictEqual(enabled.medicationsLoaded, true);
+    assert.strictEqual(queried.filter(table => table.startsWith('zane_medication')).length, 6);
   });
 
   // ── validateBackup ───────────────────────────────────────────────────────

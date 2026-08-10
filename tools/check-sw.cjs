@@ -10,10 +10,10 @@
    What it pins, per scenario:
      - branch routing under a sub-path scope AND a root scope (supabase and
        foreign origins untouched, ?_v= probes bypass, public pages
-       network-first, app shell stale-while-revalidate, CDN cache-first)
+       network-first, app shell cache-first, CDN cache-first)
      - offline behaviour: warm shell serves, cold shell 504s, public pages
        fall back to the last online copy, a ?share= navigation gets the shell
-     - background work (revalidation, cache.put) is registered via
+     - background cache.put work is registered via
        event.waitUntil, so a worker torn down after respondWith cannot lose it
      - redirected responses are rebuilt before being served or stored
      - install is atomic over ASSETS; activate sweeps old generations but
@@ -107,6 +107,7 @@ function makeWorld(scope) {
   };
   const net = {
     offline: false,
+    calls: [],
     // url -> FakeResponse; default 200 echoing the url so bodies are assertable
     respond: (url) => new FakeResponse('net:' + url, { status: 200 }),
   };
@@ -114,9 +115,11 @@ function makeWorld(scope) {
     // One macrotask of latency: the cache always answers first, as in a real
     // browser. Without this, everything settles in the same microtask sweep
     // and the event-lifetime rule above can never fire.
+    const requestUrl = typeof input === 'string' ? input : input.url;
+    net.calls.push(requestUrl);
     await new Promise(r => setTimeout(r, 0));
     if (net.offline) throw new TypeError('Failed to fetch');
-    return net.respond(typeof input === 'string' ? input : input.url);
+    return net.respond(requestUrl);
   };
   const handlers = {};
   const location = new URL(scope + 'sw.js');
@@ -193,14 +196,24 @@ const scenarios = [
     check('probe-uncached', ![...(w.stores.get(CACHE_NAME) || new Map()).keys()].length, 'the probe landed in the cache');
   }],
 
-  ['app shell: warm cache serves stale, refresh runs under waitUntil', async () => {
+  ['app shell: warm cache is served without network revalidation', async () => {
     const w = makeWorld(S);
     w.seed(CACHE_NAME, S + 'src/store.js', 'old');
     const { ev, res } = await w.hit(S + 'src/store.js');
-    check('swr-stale', res.body === 'old', `served ${res && res.body}, expected the cached copy`);
-    check('swr-waituntil', ev.ext.length >= 1, 'the background refresh is fire-and-forget: a worker torn down after respondWith loses the revalidation and its cache.put');
+    check('shell-cached', res.body === 'old', `served ${res && res.body}, expected the cached copy`);
+    check('shell-no-network', w.net.calls.length === 0, 'a warm versioned app asset still hit the network');
+    check('shell-no-write', ev.ext.length === 0, 'a warm versioned app asset still scheduled a cache write');
     await w.settle(ev);
-    check('swr-refreshed', w.cacheBody(CACHE_NAME, S + 'src/store.js') === 'net:' + S + 'src/store.js', 'the revalidated copy never reached the cache');
+    check('shell-unchanged', w.cacheBody(CACHE_NAME, S + 'src/store.js') === 'old', 'the immutable worker generation rewrote its cached asset');
+  }],
+
+  ['app shell: a cold asset is fetched and written through', async () => {
+    const w = makeWorld(S);
+    const { ev, res } = await w.hit(S + 'src/store.js');
+    check('shell-cold-network', res.body === 'net:' + S + 'src/store.js', `got ${res && res.body}`);
+    check('shell-cold-waituntil', ev.ext.length >= 1, 'the cache.put is not protected by waitUntil');
+    await w.settle(ev);
+    check('shell-cold-cached', w.cacheBody(CACHE_NAME, S + 'src/store.js') === 'net:' + S + 'src/store.js', 'the fetched app asset never reached the cache');
   }],
 
   ['app shell offline: warm serves, cold 504s', async () => {
