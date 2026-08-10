@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.733';
+const CACHE = 'zane-v2.748';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
@@ -50,11 +50,22 @@ const ASSETS = [
 // cache while the network is reachable, see the fetch handler. Matched against
 // the request path, so a new public page has to be listed here as well as kept
 // out of ASSETS.
+// PATHS, not BASE-prefixed URLs. BASE is registration.scope with the trailing
+// slash stripped, and scope is a serialized ABSOLUTE url ("https://host/training"),
+// which is right for ASSETS because CacheStorage is keyed by url. The fetch
+// handler matches these against url.pathname ("/training/welcome.html"), and a
+// path can never equal nor end with a string starting "https:", so the first
+// version of this list was dead on arrival: every public page kept falling
+// through to the stale-while-revalidate branch and kept being frozen in the
+// versioned cache, exactly the behaviour it was added to remove. Keeping them
+// relative to BASE's own path makes the comparison a path-to-path one, and
+// tools/check-asset-parity.cjs now fails the build if they go back to BASE.
+const BASE_PATH = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '');
 const PUBLIC_PAGES = [
-  BASE + '/welcome.html',
-  BASE + '/features.html',
-  BASE + '/autoreg.html',
-  BASE + '/src/autoreg-guide-page.js',
+  BASE_PATH + '/welcome.html',
+  BASE_PATH + '/features.html',
+  BASE_PATH + '/autoreg.html',
+  BASE_PATH + '/src/autoreg-guide-page.js',
 ];
 
 // Decorative background photos + their index. Purely cosmetic, and their file
@@ -147,17 +158,8 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Slot for the active SW-managed rest timer (one at a time).
-const _restTimer = { id: null, resolve: null };
-
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
-
-  if (e.data?.type === 'CANCEL_REST_TIMER') {
-    clearTimeout(_restTimer.id); _restTimer.id = null;
-    if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
-    return;
-  }
 });
 
 self.addEventListener('push', e => {
@@ -180,12 +182,24 @@ self.addEventListener('push', e => {
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = e.notification.data?.url || BASE + '/';
+  const requestedUrl = e.notification.data?.url || BASE + '/';
+  let targetUrl = new URL(BASE + '/', self.location.href).href;
+  try {
+    const candidate = new URL(requestedUrl, targetUrl);
+    // Push payloads are app-controlled. Still constrain navigation to this
+    // origin and registration scope so a malformed/stale payload cannot turn
+    // a notification click into an external redirect.
+    if (candidate.origin === self.location.origin && candidate.href.startsWith(BASE + '/')) {
+      targetUrl = candidate.href;
+    }
+  } catch (_) {}
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
       const match = cs.find(c => c.url.startsWith(BASE));
-      if (match) return match.focus();
-      return clients.openWindow(url);
+      if (match) {
+        return match.navigate(targetUrl).catch(() => null).then(() => match.focus());
+      }
+      return clients.openWindow(targetUrl);
     })
   );
 });
@@ -219,14 +233,75 @@ self.addEventListener('fetch', e => {
     // answered from it: a marketing page frozen at whatever it said the day the
     // user first opened it, which is the exact failure the busters exist to
     // prevent. Network-first, cache only as an offline fallback.
+    // Compared as paths (see PUBLIC_PAGES). endsWith as well as equality so the
+    // match survives a deploy under a different base path; the query string is
+    // deliberately not part of it, welcome.html takes ?share=<token> deep links.
     if (PUBLIC_PAGES.some(p => url.pathname === p || url.pathname.endsWith(p))) {
       e.respondWith(
-        fetch(e.request, { cache: 'no-store' })
-          .catch(() => caches.match(e.request).then(c => c || offlineResponse()))
+        fetch(e.request, { cache: 'no-store' }).then(res => {
+          // These pages are NAVIGATIONS, and the browser refuses to serve a
+          // redirected response for one ("response has redirections"). The
+          // shell branch below has defended against that since the Cloudflare
+          // clean-URL incident (see precacheAll); this branch serves the same
+          // kind of request and needs the same rebuild, or a host-side
+          // redirect would stop these pages loading at all, online included.
+          if (res.redirected) res = new Response(res.body, res);
+          // Write-through, read only as an offline fallback. The first
+          // network-first version skipped the cache entirely, which fixed the
+          // staleness and silently emptied the offline path with it:
+          // activate() wipes the previous cache generation on every bump and
+          // nothing refilled these pages, so an offline open after any bump
+          // got a blank 504 instead of the page from the last online visit.
+          // Freshness is unchanged: the cache is only read when the network
+          // is unreachable.
+          if (res.ok) {
+            const clone = res.clone();
+            e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
+          }
+          return res;
+        }).catch(() =>
+          // Exact URL first, then the query-less page: welcome.html carries
+          // ?share=<token> deep links and the cache keys on the full URL, so
+          // the plain page from a previous visit beats a blank 504.
+          caches.match(e.request)
+            .then(c => c || caches.match(url.origin + url.pathname))
+            .then(c => c || offlineResponse())
+        )
       );
       return;
     }
-    // App shell: stale-while-revalidate, serve cache instantly, refresh in background.
+    // The active worker's app-shell cache is immutable for its generation.
+    // install() populated it with no-store requests, and a newly activated
+    // worker owns a newly populated generation. Serving these exact assets
+    // cache-first avoids a network request and cache write for every JSX file
+    // the boot loader reads on every warm start. The explicit _v probe above
+    // remains network-only and is what discovers a newer worker.
+    const appAssetUrl = url.origin + url.pathname;
+    const isAppAsset = !url.search && ASSETS.includes(appAssetUrl);
+    const isBackgroundPhoto = url.pathname.includes('/Background/');
+    if (isAppAsset || isBackgroundPhoto) {
+      e.respondWith(
+        caches.match(e.request).then(cached => {
+          if (cached) return cached;
+          return fetch(e.request, { cache: 'no-store' }).then(res => {
+            if (res.redirected) res = new Response(res.body, res);
+            if (res.ok) {
+              const clone = res.clone();
+              const target = isBackgroundPhoto ? PHOTOS_CACHE : CACHE;
+              e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
+            }
+            return res;
+          }).catch(() => {
+            if (e.request.mode === 'navigate') return caches.match(BASE + '/').then(c => c || offlineResponse());
+            return offlineResponse();
+          });
+        })
+      );
+      return;
+    }
+
+    // Unlisted same-origin resources stay stale-while-revalidate. This covers
+    // runtime-created files without making them part of the immutable shell.
     // { cache: 'no-store' } on the network fetch matters a lot more than it looks:
     // after a deliberate cache wipe (LB.clearCachesAndReload / "Clear cache &
     // reload"), every request here is a CacheStorage miss and falls through to
@@ -252,10 +327,31 @@ self.addEventListener('fetch', e => {
             // PHOTOS_CACHE, not the short-lived versioned CACHE: otherwise
             // it'd get wiped again on the next deploy.
             const target = url.pathname.includes('/Background/') ? PHOTOS_CACHE : CACHE;
-            caches.open(target).then(c => c.put(e.request, clone));
+            e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
           }
           return res;
-        }).catch(() => cached || offlineResponse());
+        }).catch(() => {
+          if (cached) return cached;
+          // A navigation can miss the cache on its query string alone: the
+          // recipe-share deep link opens the app root as "/?share=<token>",
+          // CacheStorage keys on the full URL, and the shell is stored
+          // without one. The app reads the token from location.search after
+          // boot either way, so the cached shell is the right answer, and a
+          // blank 504 for a user carrying the entire app in their cache is
+          // not. Public pages never reach this branch (matched above), so
+          // this cannot make welcome.html impersonate the app.
+          if (e.request.mode === 'navigate') return caches.match(BASE + '/').then(c => c || offlineResponse());
+          return offlineResponse();
+        });
+        // The background refresh has to OUTLIVE respondWith. When the cached
+        // copy is served (the normal, warm case) nothing else keeps this
+        // worker alive, and a worker torn down early takes the revalidation
+        // and its cache.put with it, so the stale copy survives until the
+        // NEXT visit and the app stays one deploy behind for longer than the
+        // stale-while-revalidate contract implies. Registered synchronously
+        // inside the respondWith chain, which also keeps the event extendable
+        // for the put's own waitUntil above.
+        e.waitUntil(network.catch(() => {}));
         return cached || network;
       })
     );
@@ -273,7 +369,11 @@ self.addEventListener('fetch', e => {
       return fetch(e.request.url, { mode: 'cors', cache: 'no-store' }).then(res => {
         if (res.ok) {
           const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
+          // waitUntil for the same reason as the shell branch: the response
+          // is served immediately, and without an extension the worker can be
+          // torn down before the put lands, leaving the library uncached for
+          // the next offline boot.
+          e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
         }
         return res;
       }).catch(() => offlineResponse());

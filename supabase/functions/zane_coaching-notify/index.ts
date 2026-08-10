@@ -1,3 +1,5 @@
+import { sendNotification } from '../_shared/notifications.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -126,25 +128,16 @@ Deno.serve(async (req) => {
   // Pushover INSTEAD of Web Push when the recipient chose that channel, the
   // same rule the reminder functions follow. This used to send both whenever a
   // key existed, so a Pushover user got every coaching message twice.
-  const viaPushover = !!settings[0].use_pushover && !!settings[0].pushover_user_key;
-  if (viaPushover) {
-    const token = Deno.env.get('PUSHOVER_TOKEN') ?? '';
-    const r = await fetch('https://api.pushover.net/1/messages.json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, user: settings[0].pushover_user_key, title, message }),
-    });
-    console.log(`[coaching-notify] pushover ${r.status}: ${await r.text()}`);
-  } else {
-    const base = Deno.env.get('SUPABASE_URL') ?? '';
-    await fetch(`${base}/functions/v1/web-push`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: recipientId, title, message }),
-    }).catch(e => console.error('[coaching-notify] web-push error:', e));
-  }
+  const delivered = await sendNotification({
+    userId: recipientId,
+    title,
+    message,
+    usePushover: settings[0].use_pushover,
+    pushoverUserKey: settings[0].pushover_user_key,
+    logPrefix: 'coaching-notify',
+  });
 
-  return new Response(JSON.stringify({ sent: true }), {
+  return new Response(JSON.stringify({ sent: delivered }), {
     status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });

@@ -203,16 +203,10 @@
     html, body { background: var(--bg); }
   }
   * { box-sizing: border-box; }
-  /* Form controls don't inherit text-shadow from ancestors by default (a
-     browser UA-stylesheet quirk, confirmed via computed-style inspection:
-     a plain div inherits --text-lift fine, a <button> wrapping the exact
-     same text computes text-shadow: none regardless of nesting depth).
-     Every plain-text nav row in the app (NavRow and its many lookalikes)
-     is a <button>, so paper's grid-lift silently never reached them. Force
-     it back to a normal inherited property; any component with its own
-     explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
-     since inline styles always beat an element-selector rule. */
-  button, input, select, textarea { text-shadow: inherit; }
+  /* Interactive controls are surfaces, so they must not inherit the paper
+     grid lift from Screen. Plain background text keeps the inherited lift;
+     a control that truly needs it must opt in explicitly. */
+  button, input, select, textarea { text-shadow: none; }
   /* No theme ever styled ::placeholder, so every input/textarea's hint
      text (an autofilled example, a computed "from macros" value shown as
      a placeholder, ...) fell back to each browser's own default fade of
@@ -1188,8 +1182,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
      file once, cache the resulting JS in IndexedDB keyed by a content hash,
      and on later starts execute the cached JS directly. Babel is fetched
      lazily and only when a file is new or changed (cache miss). On any
-     failure we fall back to transpiling everything through Babel, so boot can
-     never end up worse than before.
+     failure is isolated to that source, so files already fetched, compiled,
+     and executed are never repeated.
 
      The `env` preset targets `{ esmodules: true }` (modern evergreen
      browsers) instead of the unset default (which downlevels all the way to
@@ -1226,6 +1220,35 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     'src/screens-autoreg-guide.jsx',
     'src/app.jsx',
   ];
+  // Only the shell, login, and home screen block the first React mount. Every
+  // other screen is represented by a small React placeholder and loaded when
+  // its route or overlay is first rendered. Idle time then warms the remaining
+  // modules one at a time, in the original source order.
+  var CRITICAL_SOURCES = [
+    'src/ui.jsx',
+    'src/screens-home.jsx',
+    'src/app.jsx',
+  ];
+  var MODULES = {
+    schedule:   { sources: ['src/screens-schedule.jsx'] },
+    train:      { sources: ['src/screens-train.jsx'] },
+    lib:        { sources: ['src/screens-lib.jsx'] },
+    // Settings reuses Water and Medications settings bodies. Load those
+    // modules before Settings can render any of its nested Health sheets.
+    settings:   { dependencies: ['water', 'medications'], sources: ['src/screens-settings.jsx'] },
+    coaching:   { sources: ['src/screens-coaching-core.jsx', 'src/screens-coaching-client.jsx', 'src/screens-coaching-detail.jsx', 'src/screens-coaching-tabs.jsx'] },
+    // Health can render coach-configured fields, so load the FieldWidget provider first.
+    health:     { dependencies: ['coaching'], sources: ['src/screens-health.jsx'] },
+    // These screens reuse chart components provided by Health.
+    water:      { dependencies: ['health'], sources: ['src/screens-water.jsx'] },
+    food:       { dependencies: ['health'], sources: ['src/screens-food.jsx'] },
+    medications:{ sources: ['src/screens-medications.jsx'] },
+    onboarding: { sources: ['src/screens-onboarding.jsx'] },
+    cardio:     { sources: ['src/screens-cardio.jsx'] },
+    featuremap: { sources: ['src/screens-featuremap.jsx'] },
+    autoreg:    { sources: ['src/screens-autoreg-guide.jsx'] },
+  };
+  var IDLE_MODULES = ['schedule', 'train', 'lib', 'settings', 'coaching', 'health', 'water', 'food', 'medications', 'onboarding', 'cardio', 'featuremap', 'autoreg'];
   var BABEL_URL = 'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js';
   // Same classic-script scope as the legacy <script type="text/babel"> setup,
   // but env targets modern evergreen browsers instead of the (much slower)
@@ -1254,7 +1277,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = function () { req.result.createObjectStore(STORE); };
-      req.onsuccess = function () { resolve(req.result); };
+      req.onsuccess = function () {
+        var db = req.result;
+        // A same-page cache clear calls deleteDatabase(). Closing on the
+        // resulting versionchange keeps that operation from racing the next
+        // boot even while lazy modules are still warming.
+        db.onversionchange = function () { try { db.close(); } catch (e) {} };
+        resolve(db);
+      };
       req.onerror = function () { reject(req.error); };
     });
   }
@@ -1268,13 +1298,20 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     });
   }
   function idbPut(db, key, val) {
-    try {
-      var r = db.transaction(STORE, 'readwrite').objectStore(STORE).put(val, key);
-      r.onerror = function (e) {
-        console.warn('idbPut: failed to write cache entry for key', key, r.error);
-        e.preventDefault();
-      };
-    } catch (e) { console.warn('idbPut: failed to write cache entry for key', key, e); }
+    return new Promise(function (resolve) {
+      try {
+        var r = db.transaction(STORE, 'readwrite').objectStore(STORE).put(val, key);
+        r.onsuccess = function () { resolve(); };
+        r.onerror = function (e) {
+          console.warn('idbPut: failed to write cache entry for key', key, r.error);
+          e.preventDefault();
+          resolve();
+        };
+      } catch (e) {
+        console.warn('idbPut: failed to write cache entry for key', key, e);
+        resolve();
+      }
+    });
   }
   function idbCount(db) {
     return new Promise(function (resolve) {
@@ -1350,79 +1387,260 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     }
   }
 
-  // Last resort: transpile + run everything through Babel (no caching).
-  // Behaviourally identical to the app before this optimisation.
-  function fallback() {
-    var chain = Promise.resolve();
-    SOURCES.forEach(function (src) {
-      chain = chain.then(function () {
-        return fetchTextRetry(src)
-          .then(function (code) { return transpile(code, src); })
-          .then(function (out) { execute(out, src); });
+  var openedDb = null;
+  var preparedSources = Object.create(null);
+  var executedSources = Object.create(null);
+  var modulePromises = Object.create(null);
+
+  // Guard against rare environments where IndexedDB.open() hangs. The loader
+  // remains fully functional without it, only the compiled-code reuse is lost.
+  var dbPromise = Promise.race([
+    idbOpen().catch(function () { return null; }),
+    new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); }),
+  ]).then(function (db) { openedDb = db; return db; });
+
+  // Speculatively fetch Babel only for a truly cold precompile cache. Warm
+  // starts never download it, and lazy modules reuse the same promise.
+  dbPromise.then(function (db) {
+    if (!db) { ensureBabel(); return; }
+    idbCount(db).then(function (n) { if (n <= 0) ensureBabel(); });
+  });
+
+  function prepareSource(src) {
+    if (preparedSources[src]) return preparedSources[src];
+    preparedSources[src] = Promise.all([dbPromise, fetchTextRetry(src)]).then(function (res) {
+      var db = res[0], code = res[1];
+      var key = src + '|' + PRESET_TAG;
+      var h = hash(code);
+      var lookup = db ? idbGet(db, key) : Promise.resolve(null);
+      return lookup.then(function (rec) {
+        if (rec && rec.h === h && typeof rec.code === 'string') return rec.code;
+        return transpile(code, src).then(function (out) {
+          if (!db) return out;
+          return idbPut(db, key, { h: h, code: out }).then(function () { return out; });
+        });
       });
+    }).catch(function (e) {
+      // A route retry should retry only the failed source. Successful sources
+      // remain prepared or executed and are never fetched or compiled again.
+      delete preparedSources[src];
+      throw e;
     });
-    return chain.catch(showError);
+    return preparedSources[src];
   }
 
-  function boot() {
-    // Guard against rare environments where IndexedDB.open() hangs (some iOS
-    // PWA states), after the timeout we just proceed cache-less via Babel.
-    // openedDb is tracked separately from dbPromise's resolved value so it's
-    // still reachable in the close() call below even down the fallback() path.
-    var openedDb = null;
-    var dbPromise = Promise.race([
-      idbOpen().catch(function () { return null; }),
-      new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); }),
-    ]).then(function (db) { openedDb = db; return db; });
-    var fetchAll = Promise.all(SOURCES.map(fetchTextRetry));
-
-    // Speculative warmup: an empty (or unavailable) precompile cache means
-    // this is effectively a first boot, every file below will miss and need
-    // Babel anyway, so start downloading it now, in parallel with the JSX
-    // fetch, instead of only after fetchAll resolves and the per-file cache
-    // lookups confirm the miss (saves a full network round-trip on the
-    // slowest path). No-op cost on a warm cache: ensureBabel() is never
-    // called again once it's already resolved.
-    dbPromise.then(function (db) {
-      if (!db) { ensureBabel(); return; }
-      idbCount(db).then(function (n) { if (n <= 0) ensureBabel(); });
+  function runSource(src) {
+    if (executedSources[src]) return Promise.resolve();
+    return prepareSource(src).then(function (code) {
+      if (executedSources[src]) return;
+      execute(code, src);
+      executedSources[src] = true;
     });
+  }
 
-    Promise.all([dbPromise, fetchAll]).then(function (res) {
-      var db = res[0], sources = res[1];
-      // Resolve each file to runnable JS: from cache when the content hash
-      // matches, otherwise transpile (lazy-loading Babel) and write it back.
-      return Promise.all(sources.map(function (code, i) {
-        var key = SOURCES[i] + '|' + PRESET_TAG;
-        var h = hash(code);
-        var lookup = db ? idbGet(db, key) : Promise.resolve(null);
-        return lookup.then(function (rec) {
-          if (rec && rec.h === h && typeof rec.code === 'string') return rec.code;
-          return transpile(code, SOURCES[i]).then(function (out) {
-            if (db) idbPut(db, key, { h: h, code: out });
-            return out;
-          });
+  function runSourcesInOrder(sources) {
+    var chain = Promise.resolve();
+    sources.forEach(function (src) {
+      chain = chain.then(function () { return runSource(src); });
+    });
+    return chain;
+  }
+
+  function loadModule(name) {
+    if (modulePromises[name]) return modulePromises[name];
+    var spec = MODULES[name];
+    if (!spec) return Promise.reject(new Error('Unknown screen module: ' + name));
+    modulePromises[name] = Promise.resolve()
+      .then(function () {
+        var chain = Promise.resolve();
+        (spec.dependencies || []).forEach(function (dependency) {
+          chain = chain.then(function () { return loadModule(dependency); });
         });
-      }));
-    }).then(function (compiled) {
-      // Promise.all preserves order, so compiled[i] === SOURCES[i].
-      compiled.forEach(function (code, i) { execute(code, SOURCES[i]); });
-    }).catch(function (e) {
-      showError(e);
-      return fallback();
-    }).then(function () {
-      // Done reading/writing the precompile cache for this page's lifetime:
-      // close the connection explicitly. Left open (as it was before), it
-      // stays alive until the tab itself unloads, and a same-page "Clear
-      // cache & reload" later on calls indexedDB.deleteDatabase on this exact
-      // database: per spec that blocks until every open connection closes,
-      // but the onblocked handler (see makeClearCacheButton above and
-      // clearPrecompileCaches in store.js) treats "blocked" as "done" and
-      // navigates away immediately regardless, leaving the actual delete to
-      // race the next page load's own idbOpen(), sometimes past the "React
-      // did not mount" watchdog. Closing here removes that race entirely.
-      if (openedDb) { try { openedDb.close(); } catch (e) {} }
+        return chain;
+      })
+      .then(function () { return runSourcesInOrder(spec.sources); })
+      .catch(function (e) {
+        delete modulePromises[name];
+        throw e;
+      });
+    return modulePromises[name];
+  }
+  window.__loadScreenModule = loadModule;
+  // Start a route module before React needs to render it. The module promise
+  // is shared with the lazy placeholder, so a pointer prefetch can never load
+  // or execute the same source twice.
+  window.__prefetchScreen = function (name) {
+    return loadModule(name).catch(function () { return null; });
+  };
+
+  function loadingStyle(kind) {
+    var base = {
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexDirection: 'column', gap: 10, color: 'var(--ink-faint)',
+      fontFamily: 'Inter, sans-serif', fontSize: 12,
+    };
+    if (kind === 'overlay') {
+      base.position = 'fixed'; base.inset = 0; base.zIndex = 9998;
+      base.background = 'var(--bg)'; base.padding = 24;
+    } else {
+      // A screen placeholder is the main flex child above the persistent
+      // TabBar. Let it consume that slot instead of using a viewport minimum,
+      // which briefly pushed the dock upward while a lazy screen loaded.
+      base.width = '100%'; base.flex = '1 1 auto'; base.minHeight = 0; base.padding = 24;
+    }
+    return base;
+  }
+
+  function makeLazyScreen(screenName, moduleName, options) {
+    options = options || {};
+    function LazyScreen(props) {
+      var shouldLoad = !options.closedProp || !!props[options.closedProp];
+      var statePair = React.useState(0);
+      var retry = statePair[0], setRetry = statePair[1];
+      var errorPair = React.useState(null);
+      var error = errorPair[0], setError = errorPair[1];
+      React.useEffect(function () {
+        if (!shouldLoad) return;
+        if (LazyScreen.actual) return;
+        if (window.Screens[screenName] && window.Screens[screenName] !== LazyScreen) {
+          LazyScreen.actual = window.Screens[screenName];
+          window.Screens[screenName] = LazyScreen;
+          setRetry(function (n) { return n + 1; });
+          return;
+        }
+        var live = true;
+        setError(null);
+        loadModule(moduleName).then(function () {
+          if (!live) return;
+          var loaded = window.Screens[screenName];
+          if (loaded && loaded !== LazyScreen) {
+            LazyScreen.actual = loaded;
+            window.Screens[screenName] = LazyScreen;
+          }
+          setRetry(function (n) { return n + 1; });
+        }).catch(function (e) {
+          if (live) setError(e);
+        });
+        return function () { live = false; };
+      }, [shouldLoad, retry]);
+
+      if (!shouldLoad) return null;
+      var actual = LazyScreen.actual || window.Screens[screenName];
+      if (actual && actual !== LazyScreen) return React.createElement(actual, props);
+      if (options.silent) return null;
+      var children = [React.createElement('div', { key: 'label' }, error ? 'Could not load this screen.' : 'Loading screen...')];
+      if (error) {
+        children.push(React.createElement('button', {
+          key: 'retry', onClick: function () { setRetry(function (n) { return n + 1; }); },
+          style: { border: '1px solid var(--hair-strong)', borderRadius: 4, padding: '8px 14px', background: 'var(--bg-raised)', color: 'var(--ink)', font: 'inherit', cursor: 'pointer' },
+        }, 'Retry'));
+      }
+      return React.createElement('div', { style: loadingStyle(options.kind) }, children);
+    }
+    window.Screens[screenName] = LazyScreen;
+  }
+
+  window.Screens = window.Screens || {};
+  var lazyScreens = {
+    PlanScreen: 'schedule', PlanViewerScreen: 'schedule', ScheduleEditScreen: 'schedule', ScheduleNewScreen: 'schedule',
+    StructuredProgramsScreen: 'schedule', ProgramTemplatesScreen: 'schedule', ProgramPreviewScreen: 'schedule', FiveThreeOneSetupScreen: 'schedule',
+    ExercisePicker: 'schedule', DayTypePicker: 'schedule', ExerciseItemEditor: 'schedule',
+    TrainingScreen: 'train',
+    LibraryScreen: 'lib', ExerciseCreator: 'lib', ExerciseDetailScreen: 'lib', HistoryScreen: 'lib', SessionDetailScreen: 'lib',
+    SessionCompareScreen: 'lib', SpectatorScreen: 'lib', ExerciseHistoryScreen: 'lib',
+    SettingsScreen: 'settings',
+    CoachClientScreen: 'coaching', CoachPlanEditorScreen: 'coaching', CoachNewPlanScreen: 'coaching', CoachingTabScreen: 'coaching',
+    CoachingUnreadBanner: 'coaching', CoachingNotesSheet: 'coaching',
+    HealthScreen: 'health', HealthClientLogs: 'health', WaterScreen: 'water', FoodScreen: 'food', MedicationsScreen: 'medications',
+    CardioPlanScreen: 'cardio', FeatureMapScreen: 'featuremap', AutoregGuideScreen: 'autoreg',
+  };
+  Object.keys(lazyScreens).forEach(function (screenName) {
+    makeLazyScreen(screenName, lazyScreens[screenName]);
+  });
+  makeLazyScreen('CoachingPendingBanner', 'coaching', { silent: true });
+  makeLazyScreen('CoachingBannerGroup', 'coaching', { silent: true });
+  makeLazyScreen('TodayCardioWidget', 'cardio', { silent: true });
+  makeLazyScreen('RecipeShareSheet', 'food', { kind: 'overlay' });
+  makeLazyScreen('OnboardingPrompt', 'onboarding', { kind: 'overlay' });
+  makeLazyScreen('OnboardingTour', 'onboarding', { kind: 'overlay' });
+
+  // DailyLogScreen is referenced as a classic global by HomeScreen rather
+  // than through window.Screens. Keep a closed instance completely free, then
+  // load Health when the user actually opens the daily log.
+  function LazyDailyLogScreen(props) {
+    var statePair = React.useState(0);
+    var retry = statePair[0], setRetry = statePair[1];
+    var errorPair = React.useState(null);
+    var error = errorPair[0], setError = errorPair[1];
+    React.useEffect(function () {
+      if (!props.open) return;
+      if (LazyDailyLogScreen.actual) return;
+      if (window.DailyLogScreen && window.DailyLogScreen !== LazyDailyLogScreen) {
+        LazyDailyLogScreen.actual = window.DailyLogScreen;
+        window.DailyLogScreen = LazyDailyLogScreen;
+        setRetry(function (n) { return n + 1; });
+        return;
+      }
+      var live = true;
+      setError(null);
+      loadModule('health').then(function () {
+        if (!live) return;
+        var loaded = window.DailyLogScreen;
+        if (loaded && loaded !== LazyDailyLogScreen) {
+          LazyDailyLogScreen.actual = loaded;
+          window.DailyLogScreen = LazyDailyLogScreen;
+        }
+        setRetry(function (n) { return n + 1; });
+      }).catch(function (e) {
+        if (live) setError(e);
+      });
+      return function () { live = false; };
+    }, [props.open, retry]);
+    if (!props.open) return null;
+    var actual = LazyDailyLogScreen.actual || window.DailyLogScreen;
+    if (actual && actual !== LazyDailyLogScreen) return React.createElement(actual, props);
+    return React.createElement('div', { style: loadingStyle('overlay') }, [
+      React.createElement('div', { key: 'label' }, error ? 'Could not load the daily log.' : 'Loading daily log...'),
+      error ? React.createElement('button', {
+        key: 'retry', onClick: function () { setRetry(function (n) { return n + 1; }); },
+        style: { border: '1px solid var(--hair-strong)', borderRadius: 4, padding: '8px 14px', background: 'var(--bg-raised)', color: 'var(--ink)', font: 'inherit', cursor: 'pointer' },
+      }, 'Retry') : null,
+    ]);
+  }
+  window.DailyLogScreen = LazyDailyLogScreen;
+
+  function warmModulesWhenIdle(index) {
+    if (index >= IDLE_MODULES.length) {
+      if (openedDb) { try { openedDb.close(); } catch (e) {} openedDb = null; }
+      return;
+    }
+    var schedule = window.requestIdleCallback || function (cb) { return setTimeout(cb, 250); };
+    schedule(function () {
+      loadModule(IDLE_MODULES[index])
+        .catch(function (e) { console.warn('Lazy module warmup failed:', IDLE_MODULES[index], e); })
+        .then(function () { warmModulesWhenIdle(index + 1); });
     });
+  }
+
+  var warmupStarted = false;
+  window.__startScreenWarmup = function () {
+    if (warmupStarted) return;
+    warmupStarted = true;
+    // Login and the first authenticated paint must stay free of optional
+    // compilation. Route-level lazy loading remains available immediately;
+    // this pass only prepares screens the user has not opened yet.
+    setTimeout(function () { warmModulesWhenIdle(0); }, 1200);
+  };
+
+  function boot() {
+    // Prepare the three critical files in parallel, then execute them in their
+    // original order. No noncritical source is fetched or hashed on this path.
+    Promise.all(CRITICAL_SOURCES.map(prepareSource)).then(function (compiled) {
+      compiled.forEach(function (code, i) {
+        execute(code, CRITICAL_SOURCES[i]);
+        executedSources[CRITICAL_SOURCES[i]] = true;
+      });
+    }).catch(showError);
   }
 
   // Lazily load html2canvas the first time a screenshot is actually taken.

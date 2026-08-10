@@ -913,7 +913,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
       {renderHelpBtn(helpKey)}
     </div>
   );
-  const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `var(--hair-width) solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, textShadow: active ? 'var(--text-lift)' : 'none', color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
+  const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `var(--hair-width) solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, textShadow: 'none', color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
   const renderToggle = (on, onToggle, label) => <Toggle on={on} onToggle={onToggle} label={label} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' };

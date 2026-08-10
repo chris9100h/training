@@ -44,6 +44,7 @@ function loadStore() {
     new Function('window', src)(sandbox.window);
   }
   storeWindow = sandbox.window;
+  storeWindow.__testLocalStorage = sandbox.localStorage;
   return sandbox.window.LB;
 }
 
@@ -65,6 +66,49 @@ async function testAsync(name, fn) {
     const d = new Date();
     const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     assert.strictEqual(LB.todayISO(), expected);
+  });
+
+  test('saveSyncedState stores one snapshot and loadLocalState reuses it as the base', () => {
+    const state = { user: { name: 'A' }, sessions: [] };
+    assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-cache-user'));
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-cache-user'), null);
+    const loaded = LB.loadLocalState('cache-user');
+    assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(state));
+    assert.strictEqual(loaded.base, loaded.store);
+  });
+
+  test('saveLocalState keeps a separate base only while local edits are pending', () => {
+    const base = { settings: { unit: 'kg' }, sessions: [] };
+    const edited = { settings: { unit: 'lbs' }, sessions: [] };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'pending-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'));
+    const pending = LB.loadLocalState('pending-user');
+    assert.strictEqual(pending.store.settings.unit, 'lbs');
+    assert.strictEqual(pending.base.settings.unit, 'kg');
+    assert.strictEqual(LB.saveSyncedState(edited, 'pending-user'), true);
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'), null);
+  });
+
+  await testAsync('refreshHealthLogs does not issue medication reads while the feature is disabled', async () => {
+    const queried = [];
+    testFrom = (table) => {
+      queried.push(table);
+      const result = { data: [], error: null };
+      const query = {
+        select() { return query; }, eq() { return query; }, gte() { return query; }, order() { return query; },
+        then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); },
+      };
+      return query;
+    };
+    const disabled = await LB.refreshHealthLogs('u1', { medsEnabled: false });
+    assert.strictEqual(disabled.medicationsLoaded, false);
+    assert.strictEqual(queried.some(table => table.startsWith('zane_medication')), false);
+
+    queried.length = 0;
+    const enabled = await LB.refreshHealthLogs('u1', { medsEnabled: true });
+    assert.strictEqual(enabled.medicationsLoaded, true);
+    assert.strictEqual(queried.filter(table => table.startsWith('zane_medication')).length, 6);
   });
 
   // ── validateBackup ───────────────────────────────────────────────────────
@@ -508,18 +552,43 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.statusModeSince, null);
   });
   test('mergeBootScalars clears a statusMode the cache kept after the period went', () => {
-    // Same contradiction from the other side: the clear synced from another
-    // device (fresh agrees there is no status), this device's cache still holds
-    // the mode. The group rule alone would call that an unsynced local edit.
-    const cur = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
-    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    // Same contradiction from the other side: another device closed the period
+    // but its own statusMode write never landed, so the server row still says
+    // vacation with nothing open behind it. base carries the mode too, which is
+    // what makes this a STALE value rather than an unsynced edit.
+    const synced = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...synced }, { ...synced }, { ...synced }, []);
     assert.strictEqual(out.statusMode, null);
     assert.strictEqual(out.statusModeSince, null);
   });
+  test('mergeBootScalars never clears a status this device just set', () => {
+    // The failure that shipped. app.jsx sets phase 'ready' off the cache while
+    // loadFromSupabase is still in flight, so a user can tap Sick after the
+    // snapshot was taken. The optimistic period carries id '_pending' and
+    // mergeCollectionById drops it (server rows only), so the merged list is
+    // empty and the clear branch used to blank a status set seconds earlier.
+    // The server still holds the period, so it reappeared on the next launch.
+    const base = { ...bs };                                  // last synced: normal
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, base, []);   // fresh = pre-tap snapshot
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars keeps an offline status clear against a stale server mode', () => {
+    // The mirror of the case above, and the reason the group rule has to stay
+    // in charge: this device cleared the status, the period write landed, the
+    // scalar write did not. cur must win even though the server still says sick.
+    const base = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-01T00:00:00Z' };
+    const cur = { ...bs, statusMode: null, statusModeSince: null };
+    const out = LB.mergeBootScalars({ ...base }, cur, base, []);
+    assert.strictEqual(out.statusMode, null);
+  });
   test('mergeBootScalars leaves statusMode alone when it has no period data at all', () => {
     // null periods means "the caller did not supply any", not "there are none".
-    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
-    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, null);
+    // Defensive only: app.jsx always hands over an array, so this guard is not
+    // reachable in production and must not be mistaken for the real one above.
+    const synced = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...synced }, { ...synced }, { ...synced }, null);
     assert.strictEqual(out.statusMode, 'sick');
     assert.strictEqual(out.statusModeSince, '2026-05-01T00:00:00Z');
   });
@@ -1192,6 +1261,122 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.weightChangeKg, -1);
   });
 
+  test('adaptiveTdeeHistoryRow: preserves the estimate and weight signal for a dated point', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const row = LB.adaptiveTdeeHistoryRow({ dailyLogs: days }, 'user-1', '2025-01-14', {
+      decision: 'applied',
+      source: 'live',
+      targetsSnapshot: { caloriesTraining: 2200 },
+    });
+    assert.ok(row);
+    assert.strictEqual(row.id, 'tdee_user-1_2025-01-14');
+    assert.strictEqual(row.tdee, 2592);
+    assert.strictEqual(row.avgCalories, 2000);
+    assert.strictEqual(row.weightStartKg, 80);
+    assert.strictEqual(row.weightEndKg, 79);
+    assert.strictEqual(row.weightChangeKg, -1);
+    assert.strictEqual(row.daySpan, 13);
+    assert.strictEqual(row.calorieDays, 13);
+    assert.strictEqual(row.weighIns, 2);
+    assert.strictEqual(row.decision, 'applied');
+    assert.strictEqual(row.source, 'live');
+    assert.strictEqual(row.targetsSnapshot.caloriesTraining, 2200);
+  });
+
+  test('reconstructAdaptiveTdeeHistory: uses only reliable macroCalc anchors', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const store = {
+      dailyLogs: days,
+      settings: { macroCalc: {
+        lastCheckinAt: '2025-01-14',
+        lastAppliedAt: '2025-01-14',
+        trainingDays: 5,
+        lastAppliedTargets: { caloriesTraining: 2200, caloriesRest: 1800 },
+      } },
+    };
+    const rows = LB.reconstructAdaptiveTdeeHistory(store, 'user-1', [
+      '2025-01-14',
+      '2025-01-14',
+      null,
+    ]);
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].decision, 'applied');
+    assert.strictEqual(rows[0].source, 'reconstructed');
+    assert.strictEqual(rows[0].targetsSnapshot.caloriesTraining, 2200);
+    assert.strictEqual(rows[0].targetsSnapshot.weeklyAverageCalories, 2086);
+    assert.strictEqual(rows[0].targetsSnapshot.deltaKcal, -506);
+  });
+
+  test('enrichAdaptiveTdeeHistoryTarget: repairs legacy snapshots without changing the decision', () => {
+    const row = {
+      asOfDate: '2025-01-14',
+      tdee: 2592,
+      source: 'live',
+      decision: 'applied',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const enriched = LB.enrichAdaptiveTdeeHistoryTarget(row, { trainingDays: 5, goal: 'gain' });
+    assert.strictEqual(enriched.source, 'live');
+    assert.strictEqual(enriched.decision, 'applied');
+    assert.strictEqual(enriched.targetsSnapshot.weeklyAverageCalories, 2086);
+    assert.strictEqual(enriched.targetsSnapshot.deltaKcal, -506);
+    assert.strictEqual(enriched.targetsSnapshot.trainingDays, 5);
+    assert.strictEqual(enriched.targetsSnapshot.goal, 'gain');
+  });
+
+  test('mergeAdaptiveTdeeHistory: live decisions replace reconstructed rows for the same date', () => {
+    const reconstructed = { asOfDate: '2025-01-14', source: 'reconstructed', decision: 'reconstructed', updatedAt: '2025-01-14T08:00:00.000Z' };
+    const live = { asOfDate: '2025-01-14', source: 'live', decision: 'skipped', updatedAt: '2025-01-14T09:00:00.000Z' };
+    const merged = LB.mergeAdaptiveTdeeHistory([reconstructed], [live]);
+    assert.strictEqual(merged.length, 1);
+    assert.strictEqual(merged[0], live);
+    assert.strictEqual(merged[0].decision, 'skipped');
+  });
+
+  test('mergeAdaptiveTdeeHistory: keeps richer target data on the live row', () => {
+    const live = {
+      asOfDate: '2025-01-14',
+      source: 'live',
+      decision: 'applied',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const repaired = {
+      asOfDate: '2025-01-14',
+      source: 'reconstructed',
+      decision: 'applied',
+      targetsSnapshot: { weeklyAverageCalories: 2086, deltaKcal: -506 },
+    };
+    const merged = LB.mergeAdaptiveTdeeHistory([live], [repaired]);
+    assert.strictEqual(merged[0].source, 'live');
+    assert.strictEqual(merged[0].decision, 'applied');
+    assert.strictEqual(merged[0].targetsSnapshot.weeklyAverageCalories, 2086);
+  });
+
+  test('mergeAdaptiveTdeeHistory: keeps rich data when a newer live status is legacy-shaped', () => {
+    const repaired = {
+      asOfDate: '2025-01-14',
+      source: 'reconstructed',
+      decision: 'reconstructed',
+      targetsSnapshot: { weeklyAverageCalories: 2086, deltaKcal: -506 },
+    };
+    const live = {
+      asOfDate: '2025-01-14',
+      source: 'live',
+      decision: 'skipped',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const merged = LB.mergeAdaptiveTdeeHistory([repaired], [live]);
+    assert.strictEqual(merged[0].source, 'live');
+    assert.strictEqual(merged[0].decision, 'skipped');
+    assert.strictEqual(merged[0].targetsSnapshot.weeklyAverageCalories, 2086);
+  });
+
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
     // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
     assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);
@@ -1515,6 +1700,48 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.statusModeForDate({ statusPeriods: [state.statusPeriods[1]] }, '2026-05-20'), 'deload');
     assert.strictEqual(LB.statusModeForDate({ statusPeriods: [] }, '2026-05-20'), null);
     assert.strictEqual(LB.statusModeForDate(state, null), null);
+  });
+
+  test('isNutritionUnscoredMode: only sick and vacation blank a day', () => {
+    // Being ill or away is an exceptional state for eating, so the day carries
+    // no meaningful score. A deload or cleanup week only modulates TRAINING
+    // load: the macro targets are unchanged and the day is scored like any
+    // other. Treating all four alike blanked adherence for whole deload and
+    // cleanup weeks, in the card, the coach view, the check-in prefill and the
+    // adherence trend.
+    assert.strictEqual(LB.isNutritionUnscoredMode('sick'), true);
+    assert.strictEqual(LB.isNutritionUnscoredMode('vacation'), true);
+    assert.strictEqual(LB.isNutritionUnscoredMode('deload'), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode('cleanup'), false);
+    // No status at all is not "unscored", it is an ordinary day.
+    assert.strictEqual(LB.isNutritionUnscoredMode(null), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode(undefined), false);
+    assert.strictEqual(LB.isNutritionUnscoredMode(''), false);
+    // A mode nobody has taught it about must NOT inherit the blanking.
+    assert.strictEqual(LB.isNutritionUnscoredMode('taper'), false);
+  });
+
+  test('isRoutineDisruptedMode: only sick and vacation leave the trend', () => {
+    // Gates the adaptive-TDEE window and the daily summary's weight trend.
+    // Illness and travel distort intake and scale weight at once. A deload or
+    // cleanup week does not: the training calories at stake are smaller than a
+    // fortnight of weigh-in noise, the eating is unchanged, and excluding them
+    // cut the 14-day window to 7, one step above the 5-day minimum.
+    assert.strictEqual(LB.isRoutineDisruptedMode('sick'), true);
+    assert.strictEqual(LB.isRoutineDisruptedMode('vacation'), true);
+    assert.strictEqual(LB.isRoutineDisruptedMode('deload'), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode('cleanup'), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode(null), false);
+    assert.strictEqual(LB.isRoutineDisruptedMode('taper'), false);
+  });
+
+  test('the two status predicates stay separate functions', () => {
+    // They read the same today and answer different questions: one asks
+    // whether a macro score means anything, the other whether a weigh-in can
+    // be trusted. A later mode can land differently on the two (a peak week
+    // scores fine and weighs terribly), so this pins that they are two
+    // decisions, not one shared list behind two names.
+    assert.notStrictEqual(LB.isNutritionUnscoredMode, LB.isRoutineDisruptedMode);
   });
 
   test('dailyLogsWeekPrefill: today weight + week sum/averages', () => {
@@ -5298,6 +5525,65 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
       cleanupStore, 80, null, { percent: 20 });
     assert.strictEqual(seeded[0].kg, 80);
+  });
+  test('buildSeedSets: a reduced plus_load set records the load it was reduced FROM', () => {
+    // The floor in withPlusLoad is lossy: once the belt clamps to 0 the stored
+    // pair is (bodyweight, +0) whatever the real belt was. The cleanup opt-out
+    // has to undo the reduction, and it used to do that by multiplying the
+    // stored total back up, which invents bodyweight * (1/f - 1). At 80 kg and
+    // 20 percent every belt from 0 to 15 came back as +20, so a bare pull-up
+    // was prescribed as a 20 kg weighted one. cleanupFullLoad is the recorded
+    // answer that makes the toggle a lookup instead of a reconstruction.
+    const store = {
+      exercises: [{ id: 'wpu', equipment: 'bodyweight', bodyweight_mode: 'plus_load', log_mode: 'weight' }],
+      dailyLogs: [{ date: LB.todayISO(), weight: 80 }],
+      settings: {}, sessions: [],
+    };
+    const lastWith = (belt) => ({ entry: { sets: [{ warmup: false, kg: 80 + belt, addedKg: belt, reps: 8, done: true }] } });
+    const seed = (belt, cleanupOpts) =>
+      LB.buildSeedSets({ sets: 1, exId: 'wpu', reps: 8 }, lastWith(belt), null, false, store, null, null, cleanupOpts)[0];
+
+    // The invariant the toggle rests on, across the whole floored range and
+    // beyond it: re-applying the factor to the recorded full load has to land
+    // back on exactly what was seeded, and the recorded load has to equal what
+    // the seeder itself produces for the opted-out state.
+    for (const belt of [0, 2.5, 5, 7.5, 10, 15, 20, 25, 30]) {
+      const reduced = seed(belt, { percent: 20 });
+      const full = reduced.cleanupFullLoad;
+      assert.ok(full, `belt +${belt}: no cleanupFullLoad recorded`);
+      const truth = seed(belt, { percent: 20, optOuts: { wpu: true } });
+      assert.strictEqual(full.kg, truth.kg, `belt +${belt}: recorded total`);
+      assert.strictEqual(full.addedKg ?? null, truth.addedKg ?? null, `belt +${belt}: recorded belt`);
+      // And back down again, the arithmetic the toggle runs.
+      const bw = Math.round((full.kg - (full.addedKg ?? 0)) * 100) / 100;
+      const target = Math.round((full.kg * 0.8) / 2.5) * 2.5;
+      const belt2 = Math.max(0, Math.round((target - bw) * 100) / 100);
+      assert.strictEqual(Math.round((bw + belt2) * 100) / 100, reduced.kg, `belt +${belt}: round trip total`);
+      assert.strictEqual(belt2, reduced.addedKg, `belt +${belt}: round trip belt`);
+    }
+    // No reduction, nothing to record: the field must not appear, or the toggle
+    // would restore a "full load" onto a set that was never reduced.
+    assert.strictEqual(seed(10, null).cleanupFullLoad, undefined);
+  });
+
+  test('buildSeedSets: a bodyweight lift is exempt however the caller was called', () => {
+    // This is the hole the test above could not see. It hands over
+    // bodyweightKg = 80, and the old gate inferred "nothing to reduce" from
+    // that argument alone, so the assertion passed for the wrong reason and
+    // kept passing after the session-start callers stopped supplying a weight
+    // for this exact exercise (bodyweight_mode null, the default every catalog
+    // import stamps). Reducing a Pull-Up to 64 kg is not a lighter week, it is
+    // a number the lifter cannot act on.
+    const noBw = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(noBw[0].kg, 80, 'cleanup must not touch it with no bodyweight passed');
+    const deloaded = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, null, true, null);
+    assert.strictEqual(deloaded[0].kg, 80, 'and neither must a deload');
+    // The invariant the pair above exists to protect: buildSeedSets and the
+    // predicate that decides whether the opt-out row renders have to agree, or
+    // a reduced set has no control that can restore it.
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bw', null), false);
   });
   test('buildSeedSets: deload still wins over a cleanup config', () => {
     const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,

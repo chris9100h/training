@@ -167,7 +167,7 @@ function mdSegBtn(active) {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent)' : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   };
@@ -422,7 +422,7 @@ function MdCheckbox({ checked, onToggle, label }) {
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
-        textShadow: checked ? 'none' : 'var(--text-lift)',
+        textShadow: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -1286,7 +1286,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       });
     return () => { cancelled = true; };
   }, [screenTab, activeMedications, userId]);
-  const logsForStock = stockBackfill || medicationLogs;
+  // Tombstones filtered HERE too, not only where medicationLogs is built.
+  // stockBackfill comes straight from LB.fetchMedicationLogsSince and takes
+  // precedence, so a deliberately removed dose reached mdConsumedSince, which
+  // counts every row with planned false, and was billed as taken.
+  const logsForStock = (stockBackfill || medicationLogs).filter(l => !l.skipped);
   // Computed once per medication per render and reused everywhere below
   // (lowStockList, mainInventoryList, renderMedRow, the stock sheet),
   // instead of every one of those independently re-running
@@ -2330,7 +2334,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                       border: `1px solid ${slotDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
                       background: slotDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
                       color: slotDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
-                      textShadow: slotDraft.weekdays.includes(wd) ? 'none' : 'var(--text-lift)',
+                      textShadow: 'none',
                       WebkitTapHighlightColor: 'transparent',
                     }}>{label}</button>
                   ))}

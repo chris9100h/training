@@ -58,6 +58,19 @@ if (!publicMatch) {
   console.error('FAIL could not find the PUBLIC_PAGES list in sw.js');
   process.exit(1);
 }
+// PUBLIC_PAGES is compared against url.pathname at runtime, so its entries have
+// to be PATHS. The first version built them from BASE, which is
+// registration.scope, a serialized absolute URL: every comparison was
+// false-by-construction and the whole branch was dead, while this tool happily
+// reported it fine because it only ever looked at the string literals. Checking
+// the prefix is the one part of the runtime behaviour a static gate can see.
+// Tested against the ARRAY BODY, not the whole file: a lazy match from
+// `PUBLIC_PAGES = [` happily runs past the closing bracket to the next
+// `BASE +` anywhere below (PHOTO_ASSETS uses it), which fires on correct code.
+if (/\bBASE\b\s*\+/.test(publicMatch[1])) {
+  fail('PUBLIC_PAGES entries are built from BASE (an absolute URL from registration.scope).\n' +
+       '     The fetch handler compares them to url.pathname, so they can never match. Use BASE_PATH.');
+}
 const publicPages = [...publicMatch[1].matchAll(/'([^']+)'/g)].map(x => x[1].replace(/^\//, ''));
 
 // ── 1. everything the app loads is precached ─────────────────────────────

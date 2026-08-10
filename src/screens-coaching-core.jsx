@@ -144,8 +144,21 @@ function CoachingPendingBanner({ store, setStore, userId }) {
 
   const respond = async (accept) => {
     setLoading(true);
+    // Split in two on purpose. Only the FIRST call decides whether the invite
+    // was answered; the second is a refresh, and a refresh must never be able
+    // to keep this overlay up. It is fixed at inset 0 / zIndex 9000 with no
+    // close button, and the only thing that dismisses it is asClient.status
+    // ceasing to be 'pending', so once reloadCoachingState started throwing
+    // (it used to resolve to empty relationships) a dropped request on a flaky
+    // connection left the whole app behind a blocking modal until a force-quit.
     try {
       await LB.respondToCoachingInvite(pending.id, accept);
+    } catch (e) {
+      UI.alert('Error: ' + e.message);
+      setLoading(false);
+      return;
+    }
+    try {
       // Only the coaching slice, via reloadCoachingState. This used to splat a
       // raw loadFromSupabase snapshot over the whole store, bypassing the
       // entire merge pipeline in app.jsx: anything created offline and not yet
@@ -153,8 +166,15 @@ function CoachingPendingBanner({ store, setStore, userId }) {
       // state and gone.
       const coaching = await LB.reloadCoachingState(userId);
       setStore(s => ({ ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } }));
-    } catch (e) {
-      UI.alert('Error: ' + e.message);
+    } catch (_) {
+      // The invite IS answered server-side by now, so reflect that locally
+      // rather than leaving the user staring at a modal for a decision they
+      // already made. Accepting leaves an active relationship, declining
+      // leaves none; the next boot reloads whatever the server really holds.
+      setStore(s => ({
+        ...s,
+        coaching: { ...(s.coaching || {}), asClient: accept ? { ...pending, status: 'active' } : null },
+      }));
     } finally {
       setLoading(false);
     }
@@ -368,7 +388,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           const isMe = n.authorId === userId;
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}` }}>
+              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}`, textShadow: 'none' }}>
                 {(n.attachments || []).map((a, ai) => (
                   <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
                     style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />

@@ -3,7 +3,7 @@
    Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
    btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
    Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
-   NumInput, Field, TextInput. */
+   NumInput, Field, TextInput, isLightCanvasActive. */
 
 const UI = {
   bg:       'var(--bg)',
@@ -34,6 +34,16 @@ const UI = {
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
   fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',
 };
+
+// Generic light-canvas detector (works for 'light', 'paper', or any future
+// light theme): perceived luminance of the live --bg-rgb, no theme-name
+// checks to keep in sync. This lives in the critical UI module because lazy
+// screens use it before the library module has necessarily loaded.
+function isLightCanvasActive() {
+  const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return false;
+  return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
 
 // ─── Screen ─────────────────────────────────────────────────────────
 function Screen({ children, scroll = true, style = {} }) {
@@ -92,14 +102,14 @@ function TopBar({ title, sub, onBack, right }) {
       flexShrink: 0,
       padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0',
       position: 'sticky', top: 0,
-      background: 'rgba(var(--bg-rgb),0.92)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
+      background: 'rgba(var(--bg-rgb),0.97)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
       zIndex: 5,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12 }}>
         {onBack && (
-          <button onClick={onBack} style={{
+          <button type="button" onClick={onBack} aria-label="Back" style={{
             width: 32, height: 32, borderRadius: 4,
             border: `1px solid ${UI.hairStrong}`, background: 'transparent',
             color: UI.gold, cursor: 'pointer',
@@ -135,7 +145,7 @@ function SubTabBar({ tabs, active, onChange, style = {} }) {
       {tabs.map(t => {
         const on = t.id === active;
         return (
-          <button key={t.id} onClick={() => !on && onChange(t.id)} style={{
+          <button key={t.id} onClick={() => !on && onChange(t.id)} aria-current={on ? 'page' : undefined} style={{
             flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
             background: on ? UI.goldFaint : 'transparent',
             border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
@@ -226,7 +236,29 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot] || t.label;
     return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
   });
-  const idx = tabs.findIndex(t => t.id === active);
+  const [visualActive, setVisualActive] = React.useState(active);
+  React.useEffect(() => setVisualActive(active), [active]);
+  const routeForTab = id => {
+    if (id === 'health' && enabledSlots.length) {
+      const curIdx = enabledSlots.indexOf(routeName);
+      return enabledSlots[(curIdx + 1) % enabledSlots.length];
+    }
+    return id;
+  };
+  const moduleForRoute = { plan: 'schedule', hist: 'lib', health: 'health', water: 'water', food: 'food', medications: 'medications', coaching: 'coaching' };
+  const prefetchTab = id => {
+    const moduleName = moduleForRoute[routeForTab(id)];
+    if (moduleName) window.__prefetchScreen?.(moduleName);
+  };
+  const navigateTab = id => {
+    const nextRoute = routeForTab(id);
+    setVisualActive(id);
+    const result = onChange(nextRoute);
+    if (result?.then) result.then(ok => {
+      if (ok === false) setVisualActive(current => current === id ? active : current);
+    });
+  };
+  const idx = tabs.findIndex(t => t.id === visualActive);
   // Health, its water tracker, food tracker and medications tracker share one
   // tab slot (routeName being any of the four still lights up 'health', see
   // tabActive in app.jsx), each independently shown or hidden in Settings.
@@ -236,14 +268,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   // one of them at all (e.g. arriving from Home, or the current one having
   // just been disabled). All four enabled reproduces the original fixed
   // Health → Water → Food → Medications cycle unchanged.
-  const handleTabClick = (id) => {
-    if (id === 'health' && enabledSlots.length) {
-      const curIdx = enabledSlots.indexOf(routeName);
-      onChange(enabledSlots[(curIdx + 1) % enabledSlots.length]);
-      return;
-    }
-    onChange(id);
-  };
+  const handleTabClick = (id) => navigateTab(id);
   // Three-dot "there's more here" indicator, shown under the Health slot's
   // label at all times (not just once you've found water/food): a lit dot
   // for the side you're currently viewing, a faint ring for the other two,
@@ -316,7 +341,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         setReveal(null);
         const pick = resolveHealthOption(ev.clientX, ev.clientY);
         if (pick) {
-          onChange(pick);
+          navigateTab(pick);
           // Release landed on a popup chip, a sibling of this button, so no
           // native click will ever follow to consume suppressClickRef itself
           // (a click only fires when press and release resolve to the same
@@ -367,11 +392,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           <div className="knurl" style={{ margin: '0 14px 8px' }} />
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
-              const on = t.id === active;
+              const on = t.id === visualActive;
               const badge = t.id === 'coaching' ? coachingBadge : null;
               const { healthSlot, iconKey, label } = t;
               return (
-                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} onPointerDown={() => prefetchTab(t.id)} onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }} aria-current={on ? 'page' : undefined} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -443,13 +468,13 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     }}>
       <div ref={barRef} style={{
         position: 'relative',
-        background: 'rgba(var(--bg-rgb),0.92)',
-        backdropFilter: 'blur(24px) saturate(130%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        background: 'rgba(var(--bg-rgb),0.97)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
         padding: '7px 6px 4px',
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
       }}>
         {/* knurled top edge, grip texture, signature of the kit */}
         <div className="knurl" style={{ position: 'absolute', top: 7, left: 14, right: 14 }} />
@@ -457,45 +482,50 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           {/* Sliding gold key plate behind the active icon */}
           {idx >= 0 && (
             <div style={{
-              position: 'absolute',
-              left: `${(idx + 0.5) * 100 / n}%`,
+              position: 'absolute', left: 0,
               top: KEY_TOP,
-              transform: 'translateX(-50%)',
-              width: KEY, height: KEY, borderRadius: 6,
-              background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
-              border: '1px solid var(--accent-deep)',
-              // Neutral white highlight, not tinted warm-cream: that read as a
-              // yellow smudge once paper mutes --accent to grey. White reads
-              // as a plausible glossy sheen on every accent color, muted or not.
-              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
-              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              pointerEvents: 'none',
+              width: `${100 / n}%`, height: KEY,
+              transform: `translate3d(${idx * 100}%, 0, 0)`,
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform', pointerEvents: 'none',
               zIndex: 0,
-            }} />
+            }}>
+              <div style={{
+                width: KEY, height: KEY, margin: '0 auto', borderRadius: 6,
+                background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+                border: '1px solid var(--accent-deep)',
+                // Neutral white highlight, not tinted warm-cream: that read as a
+                // yellow smudge once paper mutes --accent to grey. White reads
+                // as a plausible glossy sheen on every accent color, muted or not.
+                boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+              }} />
+            </div>
           )}
           {/* Top rail above the active plate, mechanical selector cue */}
           {idx >= 0 && (
             <div style={{
-              position: 'absolute',
-              left: `${(idx + 0.5) * 100 / n}%`,
+              position: 'absolute', left: 0,
               top: KEY_TOP - 5,
-              transform: 'translateX(-50%)',
-              width: 28, height: 2, borderRadius: 4,
-              background: UI.gold,
-              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              pointerEvents: 'none',
+              width: `${100 / n}%`, height: 2,
+              transform: `translate3d(${idx * 100}%, 0, 0)`,
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform', pointerEvents: 'none',
               zIndex: 2,
-            }} />
+            }}>
+              <div style={{ width: 28, height: 2, margin: '0 auto', borderRadius: 4, background: UI.gold }} />
+            </div>
           )}
           {tabs.map(t => {
-            const on = t.id === active;
+            const on = t.id === visualActive;
             const badge = t.id === 'coaching' ? coachingBadge : null;
             const { healthSlot, iconKey, label } = t;
             const isHealthTab = t.id === 'health';
             return (
               <button key={t.id} data-tour={`tab-${t.id}`}
                 onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
-                onPointerDown={isHealthTab ? healthOnPointerDown : undefined}
+                aria-current={on ? 'page' : undefined}
+                onPointerDown={e => { prefetchTab(t.id); if (isHealthTab) healthOnPointerDown(e); }}
+                onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }}
                 onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
                 onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
                 onPointerCancel={isHealthTab ? healthOnPointerUp : undefined}
@@ -553,12 +583,12 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
         transformOrigin: 'bottom center',
         display: 'flex', gap: 8, padding: 8,
-        background: 'rgba(var(--bg-rgb),0.92)',
-        backdropFilter: 'blur(24px) saturate(130%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(130%)',
+        background: 'rgba(var(--bg-rgb),0.97)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
         animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
         zIndex: 30,
       }}>
@@ -671,7 +701,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
   const round = (v) => Math.round(v * 1000) / 1000;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-      <button onClick={() => onChange(Math.max(min, round((+value || 0) - step)))} style={{
+      <button type="button" aria-label="Decrease" onClick={() => onChange(Math.max(min, round((+value || 0) - step)))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
         borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
@@ -683,7 +713,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, max = null, suffix, big
         fontSize: big ? 36 : 22, color: UI.ink, minWidth: big ? 100 : 64,
         fontVariantNumeric: 'tabular-nums',
       }}>{value ?? '—'}{suffix && <span style={{ fontSize: big ? 14 : 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}</div>
-      <button onClick={() => onChange(max != null ? Math.min(max, round((+value || 0) + step)) : round((+value || 0) + step))} style={{
+      <button type="button" aria-label="Increase" onClick={() => onChange(max != null ? Math.min(max, round((+value || 0) + step)) : round((+value || 0) + step))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
         borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
@@ -829,9 +859,17 @@ function Toggle({ on, onToggle, disabled = false, label }) {
 // whichever of its Log it/Plan it sheets is currently open as the flight's
 // source rect when it stages an entry, so it needs a real handle on the
 // panel node itself.
-function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
+function Sheet({ open, onClose, title, titleColor, titleRight, children, renderContent, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  const panelNodeRef = React.useRef(null);
+  const previousFocusRef = React.useRef(null);
+  const titleIdRef = React.useRef(`sheet-title-${Math.random().toString(36).slice(2)}`);
+  const setPanelRef = (node) => {
+    panelNodeRef.current = node;
+    if (typeof panelRef === 'function') panelRef(node);
+    else if (panelRef) panelRef.current = node;
+  };
   // Every sheet opens with the keyboard down, full stop: a field left
   // focused from wherever the user was before (a background screen, or a
   // sheet this one replaces/covers) would otherwise keep the OS keyboard
@@ -847,8 +885,31 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   React.useLayoutEffect(() => {
     if (!open) return;
     const active = document.activeElement;
+    previousFocusRef.current = active;
     if (active && active !== document.body && active.blur) active.blur();
+    // Focus the dialog container, never a child input. This gives screen
+    // readers a stable entry point while preserving the deliberate
+    // "keyboard stays down until the user taps a field" behaviour.
+    panelNodeRef.current?.focus?.({ preventScroll: true });
+    return () => {
+      const previous = previousFocusRef.current;
+      const current = document.activeElement;
+      const isTextEntry = previous && (previous.tagName === 'INPUT' || previous.tagName === 'TEXTAREA' || previous.isContentEditable);
+      if (previous && !isTextEntry && document.contains(previous) && (current === document.body || panelNodeRef.current?.contains?.(current))) {
+        try { previous.focus({ preventScroll: true }); } catch (_) { previous.focus(); }
+      }
+    };
   }, [open]);
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape' || !onClose) return;
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -888,6 +949,10 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   }, [open]);
 
   if (!open) return null;
+  // renderContent is the lazy equivalent of children for sheets whose body
+  // contains large lists or expensive derived JSX. Existing children remain
+  // fully supported, so callers opt in without changing Sheet semantics.
+  const content = typeof renderContent === 'function' ? renderContent() : children;
   const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
   // Above a real keyboard (native or this app's custom one), the panel no
   // longer sits flush against the physical bottom edge, it floats above
@@ -902,7 +967,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
   // sheet changes.
   const cardLike = floating || center;
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
-  const shadowLayers = [cardLike ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
+  const shadowLayers = [cardLike ? '0 4px 18px rgba(0,0,0,0.4)' : '0 -10px 28px rgba(0,0,0,0.5)'];
   if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
@@ -914,7 +979,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
     // all (a separate OS/browser compositing layer), so there's nothing
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
-    <div onClick={onClose} style={{
+    <div onClick={onClose} aria-hidden={false} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
@@ -937,7 +1002,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
         {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
-        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
+        <div ref={setPanelRef} role="dialog" aria-modal="true" aria-labelledby={title ? titleIdRef.current : undefined} aria-label={title ? undefined : 'Dialog'} tabIndex={-1} onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
@@ -994,17 +1059,17 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (titleRight ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div id={titleIdRef.current} style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {title}
               </div>
               <div style={{ flexShrink: 0 }}>{titleRight}</div>
             </div>
           ) : (
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
+            <div id={titleIdRef.current} style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
               {title}
             </div>
           ))}
-          {children}
+          {content}
         </div>
       </div>
     </div>
@@ -1016,15 +1081,21 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboar
 // the close button) to dismiss. src is nullable, render unconditionally
 // and pass the tapped image's URL, or null to keep it closed.
 function ImageLightbox({ src, onClose }) {
+  React.useEffect(() => {
+    if (!src) return;
+    const onKeyDown = (event) => { if (event.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [src, onClose]);
   if (!src) return null;
   return (
-    <div onClick={onClose} style={{
+    <div role="dialog" aria-modal="true" aria-label="Image preview" onClick={onClose} style={{
       position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
     }}>
       <img src={src} alt="" style={{ maxWidth: '92%', maxHeight: '88vh', objectFit: 'contain', borderRadius: 4 }} />
-      <button onClick={onClose} style={{
+      <button type="button" onClick={onClose} aria-label="Close image preview" style={{
         position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 16,
         width: 36, height: 36, borderRadius: '50%', border: 'none',
         background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 20, lineHeight: 1,
@@ -1244,7 +1315,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         {onBack && (
-          <button onClick={onBack} style={{
+          <button type="button" onClick={onBack} aria-label="Back" style={{
             width: 32, height: 32, borderRadius: 4,
             border: `1px solid ${UI.hairStrong}`, background: 'transparent',
             color: UI.gold, cursor: 'pointer',
@@ -1365,7 +1436,6 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
         <button
           type="button"
           onClick={onToggleReveal}
-          tabIndex={-1}
           aria-label={reveal ? 'Hide password' : 'Show password'}
           style={{
             flexShrink: 0, background: 'none', border: 'none', padding: '0 2px', cursor: 'pointer',
@@ -1989,10 +2059,158 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
   return <div ref={ref} data-reorder-list="true" style={style} className={className}>{children}</div>;
 }
 
+// Shared drill-in row used by Settings and the Water tracker. Keeping it in
+// the common UI layer avoids a lazy-module cycle between those screens.
+function Row({ label, children, first = false }) {
+  // The row's text is the switch's name, but nothing associates the two: a
+  // screen reader on a bare Toggle reads "switch, on" with no idea of what.
+  // Hand the label down rather than repeating it at every call site. Only
+  // for a Toggle that has none of its own, so an explicit label always wins.
+  const named = React.Children.map(children, c => (
+    (React.isValidElement(c) && c.type === Toggle && !c.props.label && typeof label === 'string')
+      ? React.cloneElement(c, { label })
+      : c
+  ));
+  return (
+    <>
+      {!first && <div className="knurl" />}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }}>
+        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+        {named}
+      </div>
+    </>
+  );
+}
+
+function NavRow({ label, hint, onTap, first = false, accent = false }) {
+  return (
+    <>
+      {!first && <div className="knurl" />}
+      <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
+        <span style={{ fontSize: 16, color: accent ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: accent ? 600 : 400 }}>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {hint != null && <span style={{ fontSize: 13, color: accent ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={accent ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+        </div>
+      </button>
+    </>
+  );
+}
+
+// Plate inventory data is shared by the lazy Train calculator and the lazy
+// Settings inventory sheet. Keep it in the critical UI layer so either screen
+// can open without depending on the other module.
+const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
+const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
+const PLATE_COLORS_KG = { 25:'#c0392b', 20:'#2471a3', 15:'#d4ac0d', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
+const PLATE_SIZE_KG = { 25: 70, 20: 64, 15: 60, 10: 56, 5: 48, 2.5: 42, 1.25: 36, 0.75: 30, 0.5: 30, 0.25: 30 };
+const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
+const PLATE_SIZE_LBS = { 55: 70, 45: 64, 35: 56, 25: 48, 10: 42, 5: 36, 2.5: 30, 1.25: 28 };
+
+// Shared block recap used by Home, Training and Library confirmation sheets.
+function BlockRecap({ recap, evidence = null, escalation = 0 }) {
+  const u = UI.unit();
+  const tile = (k, v) => (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
+      <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
+    </div>
+  );
+  return (
+    <div style={{ textAlign: 'left' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
+        {tile('Weight PRs', recap.prCount)}
+        {tile('Sessions', recap.sessionCount)}
+      </div>
+      {recap.loadPRs.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {recap.loadPRs.map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {recap.setGains.some(g => g.setDelta > 0) && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {recap.setGains.filter(g => g.setDelta > 0).map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {evidence && evidence.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div>{evidence.map((e, i) => <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>)}</div>
+      </>)}
+    </div>
+  );
+}
+
+// Screenshot-only grid and divider primitives shared by every module that
+// can export a poster. They must be available before any lazy screen runs.
+function SvgGrid({ style }) {
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+  const gridAlpha = getComputedStyle(document.documentElement).getPropertyValue('--grid-alpha').trim() || '0.16';
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', ...style }}>
+      <defs><pattern id="paperGridPattern" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M 22 0 L 0 0 0 22" fill="none" stroke={`rgba(${knurlRgb},${gridAlpha})`} strokeWidth="1" /></pattern></defs>
+      <rect width="100%" height="100%" fill="url(#paperGridPattern)" />
+    </svg>
+  );
+}
+
+function KnurlCanvas({ style }) {
+  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+}
+
+const FEEL_LEVELS = [
+  { key: 'easy', label: 'EASY', color: '#38bdf8', colorLight: '#0369a1' },
+  { key: 'good', label: 'GOOD', color: '#4ade80', colorLight: '#15803d' },
+  { key: 'hard', label: 'HARD', color: '#facc15', colorLight: '#a16207' },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316', colorLight: '#c2410c' },
+  { key: 'max', label: 'MAX', color: '#ef4444', colorLight: '#b91c1c' },
+];
+function feelColorOf(f) { return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint; }
+function feelColor(key) { return feelColorOf(FEEL_LEVELS.find(f => f.key === key)); }
+function feelLabel(key) { return FEEL_LEVELS.find(f => f.key === key)?.label ?? null; }
+const FEEL_ICONS = { easy: 'fa-face-smile', good: 'fa-bolt', hard: 'fa-fire', very_hard: 'fa-skull', max: 'fa-trophy' };
+function FeelSelector({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {FEEL_LEVELS.map(f => {
+        const active = value === f.key;
+        const fc = feelColorOf(f);
+        return <button key={f.key} onClick={() => onChange(active ? null : f.key)} style={{
+          flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+          border: `1px solid ${active ? fc : UI.hairStrong}`, background: active ? `${fc}22` : 'transparent', color: active ? fc : UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400, letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
+        }}><i className={`fa-solid ${FEEL_ICONS[f.key]}`} style={{ fontSize: 15 }} />{f.label}</button>;
+      })}
+    </div>
+  );
+}
+
+// Shared comparison aliases. Keeping them in the critical UI layer avoids a
+// coaching screen depending on the Library module for two pure store helpers.
+const isImprovement = LB.isImprovement;
+const isDecline = LB.isDecline;
+
 Object.assign(window, {
   UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
-  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
+  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList, Row, NavRow,
+  PLATES_KG, PLATES_LBS, PLATE_COLORS_KG, PLATE_SIZE_KG, PLATE_COLORS_LBS, PLATE_SIZE_LBS,
+  BlockRecap, SvgGrid, KnurlCanvas, FeelSelector, feelColor, feelLabel,
+  FEEL_LEVELS, FEEL_ICONS, feelColorOf, isImprovement, isDecline,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // primitives
   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,

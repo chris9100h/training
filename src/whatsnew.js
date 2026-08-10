@@ -22,6 +22,31 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.743',
+    date: '2026-08-10',
+    title: 'Faster from the first tap ⚡',
+    items: [
+      '⚡ The app now starts noticeably faster, with your first screen appearing sooner.',
+      '🧭 Switching tabs feels much smoother. The next screen starts preparing as soon as you touch its tab, so navigation stays responsive.',
+      '💤 Heavy areas such as Health, Food and Coaching load when you need them instead of slowing down the initial launch.',
+      '🔄 Coming back from the background is lighter too: the app keeps what is already loaded and refreshes only the data that may have changed.',
+      '✨ Training input, charts and longer lists should feel more responsive throughout the app.'
+    ],
+  },
+  {
+    id: 'v2.742',
+    date: '2026-08-10',
+    title: 'A clearer calorie picture and a shorter setup 📈',
+    items: [
+      '📈 TDEE history: Previous automatic estimates now remain available after a new check-in. In Health, drag across the chart to inspect each point, switch between calories and weight, and see the target that was suggested at the time.',
+      '🧮 Estimate Targets is now a guided wizard with steps for About You, Goals, Macros, and Review. After saving, you will see a compact summary. When you want to make changes, simply walk through the wizard again.',
+      '🎯 Coach Targets and Algorithm Estimate are now visually separated and structured more consistently. Suggested weekly targets are easier to compare with your current targets.',
+      '✨ Cleaner interface: distracting inner shadows have been removed from cards and buttons across the app, making text and controls look much sharper, especially in Coaching.',
+      '🔔 Reminders are now more reliable and accessible, with improved timezone handling, fewer duplicate notifications, and better handling of edge cases.',
+      '🛠️ We also completed a broader reliability and data-correction pass covering logging, sync, cleanup weeks, medication status, and restoring saved data.'
+    ],
+  },
+  {
     id: 'v2.732',
     date: '2026-08-09',
     title: 'Machines with many horns, and a lot of housekeeping',

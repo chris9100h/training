@@ -10,6 +10,7 @@
    so CI can never drift from what the app actually loads. */
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const Babel = require('@babel/standalone');
 
 const root = path.join(__dirname, '..');
@@ -21,6 +22,46 @@ if (!m) {
   process.exit(1);
 }
 const jsxSources = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]);
+
+// The boot loader itself is plain inline JavaScript, so Babel never sees it.
+// Parse every inline script with Node's JS parser to keep a typo in the lazy
+// module registry from shipping as a blank page.
+const htmlWithoutComments = html.replace(/<!--[\s\S]*?-->/g, '');
+for (const match of htmlWithoutComments.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) {
+  if (/\bsrc\s*=/.test(match[1])) continue;
+  try {
+    new vm.Script(match[2], { filename: 'index.html:inline-script' });
+  } catch (e) {
+    console.error(`FAIL index.html inline script: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+// Every authored JSX source must belong to exactly one boot bucket. Critical
+// sources mount React, module sources are route-loaded or warmed during idle.
+// This prevents a future screen from being precached but never executable.
+const criticalMatch = html.match(/var CRITICAL_SOURCES = \[([\s\S]*?)\];/);
+const modulesMatch = html.match(/var MODULES = \{([\s\S]*?)\r?\n  \};\r?\n  var IDLE_MODULES/);
+if (!criticalMatch || !modulesMatch) {
+  console.error('FAIL could not parse CRITICAL_SOURCES / MODULES in index.html');
+  process.exit(1);
+}
+const criticalSources = [...criticalMatch[1].matchAll(/'(src\/[^']+\.jsx)'/g)].map(x => x[1]);
+const moduleSources = [...modulesMatch[1].matchAll(/'(src\/[^']+\.jsx)'/g)].map(x => x[1]);
+const bucketCounts = new Map();
+for (const rel of [...criticalSources, ...moduleSources]) bucketCounts.set(rel, (bucketCounts.get(rel) || 0) + 1);
+for (const rel of jsxSources) {
+  if (bucketCounts.get(rel) !== 1) {
+    console.error(`FAIL ${rel}: expected exactly one critical/lazy loader bucket, found ${bucketCounts.get(rel) || 0}`);
+    process.exit(1);
+  }
+}
+for (const rel of bucketCounts.keys()) {
+  if (!jsxSources.includes(rel)) {
+    console.error(`FAIL ${rel}: loader bucket source is missing from SOURCES`);
+    process.exit(1);
+  }
+}
 
 // Plain scripts loaded via <script src> (vendored supabase.js excluded:
 // minified third-party bundle, not authored here).

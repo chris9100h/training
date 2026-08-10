@@ -91,42 +91,6 @@ function UserArchivedSection({ tickets, renderTicket }) {
   );
 }
 
-function Row({ label, children, first = false }) {
-  // The row's text is the switch's name, but nothing associates the two: a
-  // screen reader on a bare Toggle reads "switch, on" with no idea of what.
-  // Hand the label down rather than repeating it at eighty call sites. Only
-  // for a Toggle that has none of its own, so an explicit label always wins.
-  const named = React.Children.map(children, c => (
-    (React.isValidElement(c) && c.type === Toggle && !c.props.label && typeof label === 'string')
-      ? React.cloneElement(c, { label })
-      : c
-  ));
-  return (
-    <>
-      {!first && <div className="knurl" />}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }}>
-        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-        {named}
-      </div>
-    </>
-  );
-}
-
-function NavRow({ label, hint, onTap, first = false, accent = false }) {
-  return (
-    <>
-      {!first && <div className="knurl" />}
-      <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
-        <span style={{ fontSize: 16, color: accent ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: accent ? 600 : 400 }}>{label}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {hint != null && <span style={{ fontSize: 13, color: accent ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
-          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={accent ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
-        </div>
-      </button>
-    </>
-  );
-}
-
 // Alpha bumped from the original 0.10/0.22, plenty visible against a vivid
 // accent color, but on paper's muted grey accent those read as barely-there
 // against bg-raised. Higher alpha keeps a normal accent legible too.
@@ -652,7 +616,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent)' : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   });
@@ -2540,7 +2504,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
                     color: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'none' : 'var(--text-lift)' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
               ))}
@@ -2565,7 +2529,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
                     color: LB.defaultTempUnit(store.settings) === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: LB.defaultTempUnit(store.settings) === u ? 'none' : 'var(--text-lift)' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'c' ? '°C' : '°F'}
                 </button>
               ))}
@@ -3528,7 +3492,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                           background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: supportCategoryDraft === c.key ? 'var(--text-lift)' : 'none',
+                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: 'none',
                         }}>
                           <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
                           {c.label}
@@ -3732,7 +3696,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       background: currentStatus === s.key ? sBg[s.key] : 'transparent',
                       color: currentStatus === s.key ? sColor[s.key] : UI.inkFaint,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                      textShadow: (currentStatus === s.key && s.key === 'in_progress') ? 'none' : 'var(--text-lift)',
+                      textShadow: 'none',
                     }}>{s.label}</button>
                   ))}
                 </div>

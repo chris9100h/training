@@ -19,6 +19,12 @@ jobs:
       # Same Babel build and version the app itself loads from unpkg.
       - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
       - run: node tools/check-syntax.cjs
+      # Edge Functions are TypeScript modules outside the browser loader. Keep
+      # their syntax covered by the same CI job so a deploy cannot hide a
+      # broken cron/helper file from the green app check.
+      - run: node tools/check-edge-functions.cjs
+      - run: node tools/test/reminder-time.test.cjs
+      - run: node tools/test/notification-delivery.test.cjs
       - run: node tools/test/store.test.cjs
       # Replays all migrations and verifies schema.sql + docs/database.md
       # were updated alongside them (offline half of the DB drift checks;
@@ -38,3 +44,8 @@ jobs:
       # missing there boots fine on a warm cache and blanks the app offline
       # or mid-deploy, when it is the only fetch that has to hit the network.
       - run: node tools/check-asset-parity.cjs
+      # sw.js had no runtime coverage anywhere, which is how a branch comparing
+      # an absolute URL to a pathname shipped as dead code through six green
+      # gates. This loads the real sw.js in a node vm and drives real requests
+      # through the fetch handler: routing, offline fallbacks, waitUntil.
+      - run: node tools/check-sw.cjs

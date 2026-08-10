@@ -256,6 +256,44 @@ CREATE TABLE public.zane_daily_logs (
   CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)
 );
 
+-- Adaptive TDEE history (migration 0260): one reproducible estimate per
+-- calculation endpoint. The source logs remain the calculation source; this
+-- row preserves whether the user applied or skipped the result and the target
+-- snapshot that was accepted at that point.
+CREATE TABLE public.zane_adaptive_tdee_history (
+  id                  text NOT NULL,
+  user_id             uuid NOT NULL,
+  as_of_date          date NOT NULL,
+  window_start        date NOT NULL,
+  window_end          date NOT NULL,
+  tdee_kcal           integer NOT NULL,
+  avg_calories_kcal   integer NOT NULL,
+  weight_start_kg     numeric NOT NULL,
+  weight_end_kg       numeric NOT NULL,
+  weight_change_kg    numeric NOT NULL,
+  weight_rate_kg_week numeric NOT NULL,
+  day_span            integer NOT NULL,
+  calorie_days        integer NOT NULL,
+  weigh_ins           integer NOT NULL,
+  decision            text NOT NULL DEFAULT 'reconstructed'::text,
+  source              text NOT NULL DEFAULT 'reconstructed'::text,
+  targets_snapshot    jsonb,
+  calculated_at       timestamp with time zone NOT NULL DEFAULT now(),
+  decided_at          timestamp with time zone,
+  created_at          timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at          timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT zane_adaptive_tdee_history_pkey PRIMARY KEY (id),
+  CONSTRAINT zane_adaptive_tdee_history_user_date_key UNIQUE (user_id, as_of_date),
+  CONSTRAINT zane_adaptive_tdee_history_day_span_check CHECK ((day_span > 0)),
+  CONSTRAINT zane_adaptive_tdee_history_calorie_days_check CHECK ((calorie_days > 0)),
+  CONSTRAINT zane_adaptive_tdee_history_weigh_ins_check CHECK ((weigh_ins > 1)),
+  CONSTRAINT zane_adaptive_tdee_history_decision_check CHECK ((decision = ANY (ARRAY['applied'::text, 'skipped'::text, 'reconstructed'::text]))),
+  CONSTRAINT zane_adaptive_tdee_history_source_check CHECK ((source = ANY (ARRAY['live'::text, 'reconstructed'::text])))
+);
+
+REVOKE ALL ON public.zane_adaptive_tdee_history FROM PUBLIC, anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.zane_adaptive_tdee_history TO authenticated;
+
 CREATE TABLE public.zane_skips (
   id text NOT NULL,
   user_id uuid,
@@ -339,6 +377,7 @@ CREATE TABLE public.zane_user_settings (
   water_reminder_enabled boolean NOT NULL DEFAULT false,
   water_last_push_at timestamp with time zone,
   tz_offset_minutes integer,
+  time_zone text,
   meal_reminder_enabled boolean NOT NULL DEFAULT false,
   meds_enabled boolean NOT NULL DEFAULT false,
   medication_reminder_enabled boolean NOT NULL DEFAULT false,
@@ -481,6 +520,7 @@ ALTER TABLE public.zane_sets ADD CONSTRAINT zane_sets_user_id_fkey FOREIGN KEY (
 
 ALTER TABLE public.zane_cardio_logs ADD CONSTRAINT zane_cardio_logs_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_cardio_logs ADD CONSTRAINT zane_cardio_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.zane_adaptive_tdee_history ADD CONSTRAINT zane_adaptive_tdee_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
 ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -550,6 +590,7 @@ CREATE INDEX IF NOT EXISTS idx_zane_session_entries_user_id    ON public.zane_se
 CREATE INDEX IF NOT EXISTS idx_zane_sessions_user_id           ON public.zane_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_zane_sets_user_id               ON public.zane_sets(user_id);
 CREATE INDEX IF NOT EXISTS idx_zane_skips_user_id              ON public.zane_skips(user_id);
+CREATE INDEX zane_adaptive_tdee_history_user_idx ON public.zane_adaptive_tdee_history USING btree (user_id, as_of_date DESC);
 
 -- ── Row Level Security ─────────────────────────────────────────────────────────
 
@@ -564,6 +605,7 @@ ALTER TABLE public.zane_session_entries  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sets             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_cardio_logs      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_daily_logs       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_adaptive_tdee_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_skips            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_user_settings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_feature_grants   ENABLE ROW LEVEL SECURITY;  -- no policies: service-role / SECURITY DEFINER only
@@ -624,6 +666,7 @@ CREATE POLICY "coaches read client cardio logs" ON public.zane_cardio_logs FOR S
 -- daily logs
 CREATE POLICY "Users manage own daily logs" ON public.zane_daily_logs FOR ALL TO authenticated USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
 CREATE POLICY "coach can read client daily logs" ON public.zane_daily_logs FOR SELECT TO authenticated USING (zane_is_coach_of(user_id));
+CREATE POLICY "zane_adaptive_tdee_history_own" ON public.zane_adaptive_tdee_history FOR ALL TO authenticated USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
 
 -- push subscriptions
 CREATE POLICY "users manage own push subscriptions" ON public.zane_push_subscriptions FOR ALL TO public USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
@@ -1768,6 +1811,9 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_adaptive_tdee_history;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_adaptive_tdee_history
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- ── Session completion stamp (Migration 0242) ─────────────────────────────────
 CREATE OR REPLACE FUNCTION public.zane_sessions_stamp_completion()
@@ -2539,6 +2585,24 @@ CREATE POLICY "coaches read client food logs"
 -- ── Food Tracker quick-add (migration 0187) ─────────────────────────────────────
 -- Both simple owned collections (mirrors zane_workout_templates), no coach
 -- visibility, not part of the Health tab's live-refresh polling.
+
+-- Server-only ledger for meal reminder delivery attempts. It is derived
+-- provider state, not personal content, and is intentionally excluded from
+-- user backups (migration 0259).
+CREATE TABLE zane_meal_reminder_deliveries (
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_log_id     text NOT NULL,
+  last_attempt_at timestamptz,
+  delivered_at    timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, food_log_id)
+);
+
+CREATE INDEX zane_meal_reminder_deliveries_user_idx
+  ON public.zane_meal_reminder_deliveries USING btree (user_id, delivered_at);
+
+ALTER TABLE zane_meal_reminder_deliveries ENABLE ROW LEVEL SECURITY;
+-- No policies: only the service role may read or write delivery state.
 
 CREATE TABLE zane_food_favorites (
   id          text        PRIMARY KEY,

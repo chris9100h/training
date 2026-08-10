@@ -302,6 +302,70 @@ function ErrorScreen({ onRetry }) {
   );
 }
 
+const STAGED_BOOT_COLLECTIONS = [
+  'exercises', 'schedules', 'skips', 'cardioLogs', 'cardioPlans', 'dailyLogs',
+  'statusPeriods', 'waterLogs', 'foodLogs', 'foodFavorites', 'foodRecipes',
+  'foodTemplateSlots', 'foodTemplateDays', 'foodMealPlans', 'foodShoppingPrefs',
+  'medicationPlans', 'medications', 'medicationScheduleSlots', 'medicationLogs',
+  'medicationPlanItems', 'medicationPillboxChecks', 'glucoseLogs',
+  'bloodPressureLogs', 'bodyTempLogs', 'workoutTemplates',
+  'checkinSchemaTemplates', 'mesoStates',
+];
+
+function mergeStagedCollection(key, freshRows, curRows, baseRows) {
+  const serverIds = new Set((freshRows || []).map(row => row.id));
+  const baseIds = new Set((baseRows || []).map(row => row.id));
+  const currentIds = new Set((curRows || []).map(row => row.id));
+  const deletedIds = new Set([...baseIds].filter(id => !currentIds.has(id)));
+  const serverDates = key === 'dailyLogs' ? new Set((freshRows || []).map(row => row.date)) : null;
+  const localOnly = (curRows || []).filter(row =>
+    !serverIds.has(row.id) && !baseIds.has(row.id) && (!serverDates || !serverDates.has(row.date))
+  );
+  return [...localOnly, ...LB.mergeCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds)];
+}
+
+// A first-install boot renders its essential payload while secondary tables
+// hydrate. Any edit made during that short window must survive the full server
+// response exactly like an edit made against the normal persisted cache.
+function mergeStagedBootStore(fresh, cur, base) {
+  if (!cur || !base) return fresh;
+  const merged = { ...fresh };
+  const inProgressId = LB.resolveInProgressId(cur, fresh, base);
+  const sessionMerge = LB.mergeSessions(fresh.sessions || [], cur.sessions || [], inProgressId, base.sessions || []);
+  merged.sessions = sessionMerge.sessions;
+  merged.inProgress = sessionMerge.activeExists ? inProgressId : null;
+
+  for (const key of STAGED_BOOT_COLLECTIONS) {
+    merged[key] = mergeStagedCollection(key, fresh[key], cur[key], base[key]);
+  }
+
+  const stagedStatusPeriods = merged.statusPeriods;
+  Object.assign(merged, LB.mergeBootScalars(fresh, cur, base, stagedStatusPeriods));
+  const deviceOnlySettings = new Set(['darkMode', 'accentColor', 'swVersion', 'cycleWeekView', 'pushEnabled']);
+  const settings = { ...(fresh.settings || {}) };
+  const settingKeys = new Set([...Object.keys(fresh.settings || {}), ...Object.keys(cur.settings || {})]);
+  for (const key of settingKeys) {
+    const changedLocally = JSON.stringify(cur.settings?.[key]) !== JSON.stringify(base.settings?.[key]);
+    if (deviceOnlySettings.has(key) || changedLocally) settings[key] = cur.settings?.[key];
+  }
+  merged.settings = settings;
+
+  if (JSON.stringify(cur.nextReminderAt) !== JSON.stringify(base.nextReminderAt)) {
+    merged.nextReminderAt = cur.nextReminderAt;
+  }
+  if (JSON.stringify(cur.user?.name) !== JSON.stringify(base.user?.name)) {
+    merged.user = { ...fresh.user, name: cur.user?.name || fresh.user?.name || '' };
+  }
+  merged.planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base.planDrafts);
+  merged.adaptiveTdeeHistory = LB.mergeAdaptiveTdeeHistory(
+    fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []
+  );
+  for (const key of Object.keys(cur)) {
+    if (!(key in fresh) && JSON.stringify(cur[key]) !== JSON.stringify(base[key])) merged[key] = cur[key];
+  }
+  return merged;
+}
+
 function App() {
   const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
@@ -352,10 +416,21 @@ function App() {
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
   const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
+  const foregroundRefresh         = useRefA(null); // one in-flight health refresh across all foreground events
+  const lastForegroundRefreshAt   = useRefA(0);    // start time of the last accepted soft refresh
+  const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
+  const stagedBootHydrating       = useRefA(false); // prevents feature-on effects duplicating stage two queries
+  const previousMedsEnabled       = useRefA(null);
 
-  useEffectA(() => { userIdRef.current = userId; }, [userId]);
+  useEffectA(() => {
+    userIdRef.current = userId;
+    previousMedsEnabled.current = null;
+  }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
+  useEffectA(() => {
+    if (phase === 'ready') window.__startScreenWarmup?.();
+  }, [phase]);
 
   // Boot-time admin support unread count
   useEffectA(() => {
@@ -444,7 +519,7 @@ function App() {
     }
   }, [store?.settings?.darkMode]);
 
-  // Keeps settings.tzOffsetMinutes fresh for every reminder cron (medication,
+  // Keeps the reminder clock fresh for every reminder cron (medication,
   // water, meal, daily-log) that places "now" on the user's local clock. Used
   // to be three separate per-screen writers (Water: only while that tab is
   // open, Food: only in Plan Mode, Meds: only while that tab is open), so a
@@ -467,7 +542,13 @@ function App() {
     // store, not the one captured here, and only write when it changed.
     const sync = () => {
       const off = -new Date().getTimezoneOffset();
-      setStore(s => (s && s.settings?.tzOffsetMinutes !== off ? { ...s, settings: { ...s.settings, tzOffsetMinutes: off } } : s));
+      let zone = null;
+      try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) {}
+      setStore(s => {
+        if (!s) return s;
+        if (s.settings?.tzOffsetMinutes === off && s.settings?.timeZone === zone) return s;
+        return { ...s, settings: { ...s.settings, tzOffsetMinutes: off, timeZone: zone } };
+      });
     };
     sync();
     // 5-minute poll: the crons fire on fixed UTC schedules, so a longer
@@ -513,7 +594,15 @@ function App() {
     const softRefresh = () => {
       const uid = userIdRef.current;
       if (phaseRef.current !== 'ready' || !uid) return;
-      LB.refreshHealthLogs(uid).then(fresh => {
+      if (foregroundRefresh.current) return foregroundRefresh.current;
+      const now = Date.now();
+      if (now - lastForegroundRefreshAt.current < SOFT_THRESHOLD) return null;
+      lastForegroundRefreshAt.current = now;
+      const request = LB.refreshHealthLogs(uid, {
+        medsEnabled: !!pendingStore.current?.settings?.medsEnabled,
+      });
+      foregroundRefresh.current = request;
+      request.then(fresh => {
         if (!fresh) return;
         // Re-check after the await, not just before it started: a sign-out
         // (or a different user signing in) while this fetch was in flight
@@ -607,12 +696,12 @@ function App() {
           const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
           const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
           const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
-          const nextMedPlans = [...localOnlyMedPlans, ...LB.mergeCollectionById(fresh.medicationPlans || [], s.medicationPlans, base?.medicationPlans, delMedPlans)];
-          const nextMeds = [...localOnlyMeds, ...LB.mergeCollectionById(fresh.medications || [], s.medications, base?.medications, delMeds)];
-          const nextMedSlots = [...localOnlyMedSlots, ...LB.mergeCollectionById(fresh.medicationScheduleSlots || [], s.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlots)];
-          const nextMedLogs = [...localOnlyMedLogs, ...LB.mergeCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs)];
-          const nextMedPlanItems = [...localOnlyMedPlanItems, ...LB.mergeCollectionById(fresh.medicationPlanItems || [], s.medicationPlanItems, base?.medicationPlanItems, delMedPlanItems)];
-          const nextMedPillboxChecks = [...localOnlyMedPillboxChecks, ...LB.mergeCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks)];
+          const nextMedPlans = fresh.medicationsLoaded ? [...localOnlyMedPlans, ...LB.mergeCollectionById(fresh.medicationPlans || [], s.medicationPlans, base?.medicationPlans, delMedPlans)] : (s.medicationPlans || []);
+          const nextMeds = fresh.medicationsLoaded ? [...localOnlyMeds, ...LB.mergeCollectionById(fresh.medications || [], s.medications, base?.medications, delMeds)] : (s.medications || []);
+          const nextMedSlots = fresh.medicationsLoaded ? [...localOnlyMedSlots, ...LB.mergeCollectionById(fresh.medicationScheduleSlots || [], s.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlots)] : (s.medicationScheduleSlots || []);
+          const nextMedLogs = fresh.medicationsLoaded ? [...localOnlyMedLogs, ...LB.mergeCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs)] : (s.medicationLogs || []);
+          const nextMedPlanItems = fresh.medicationsLoaded ? [...localOnlyMedPlanItems, ...LB.mergeCollectionById(fresh.medicationPlanItems || [], s.medicationPlanItems, base?.medicationPlanItems, delMedPlanItems)] : (s.medicationPlanItems || []);
+          const nextMedPillboxChecks = fresh.medicationsLoaded ? [...localOnlyMedPillboxChecks, ...LB.mergeCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks)] : (s.medicationPillboxChecks || []);
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed,
           // which forced a full re-render of the active screen on EVERY
@@ -652,44 +741,87 @@ function App() {
             medicationPillboxChecks: medPillboxChecksSame ? s.medicationPillboxChecks : nextMedPillboxChecks,
           };
         });
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => {
+        if (foregroundRefresh.current === request) foregroundRefresh.current = null;
+      });
+      return request;
     };
 
-    const onHide = () => localStorage.setItem(KEY, Date.now());
-    const onShow = (e) => {
-      if (!e.persisted) return;
+    const onHide = () => { try { localStorage.setItem(KEY, Date.now()); } catch (_) {} };
+    const handleForeground = () => {
+      if (document.hidden) return;
       if (routeRef.current?.name === 'train') return;
-      const ts = localStorage.getItem(KEY);
+      const now = Date.now();
+      if (now - lastForegroundEventAt.current < 500) return;
+      lastForegroundEventAt.current = now;
+      let ts = null;
+      try { ts = localStorage.getItem(KEY); } catch (_) {}
       const elapsed = ts ? Date.now() - Number(ts) : 0;
       if (elapsed > THRESHOLD) { window.location.reload(); return; }
       if (elapsed > SOFT_THRESHOLD) softRefresh();
       swReg.current?.update().catch(() => {});
       reportSwVersion();
     };
-    // visibilitychange as additional fallback
+    const onShow = (e) => { if (e.persisted) handleForeground(); };
     const onVisibility = () => {
       if (document.hidden) {
-        localStorage.setItem(KEY, Date.now());
+        onHide();
       } else {
-        if (routeRef.current?.name === 'train') return;
-        const ts = localStorage.getItem(KEY);
-        const elapsed = ts ? Date.now() - Number(ts) : 0;
-        if (elapsed > THRESHOLD) { window.location.reload(); return; }
-        if (elapsed > SOFT_THRESHOLD) softRefresh();
-        swReg.current?.update().catch(() => {});
-        reportSwVersion();
+        handleForeground();
       }
     };
 
     window.addEventListener('pagehide', onHide);
     window.addEventListener('pageshow', onShow);
+    window.addEventListener('focus', handleForeground);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onHide);
       window.removeEventListener('pageshow', onShow);
+      window.removeEventListener('focus', handleForeground);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  // A user can turn Medications back on without reloading. Since disabled
+  // accounts no longer fetch those six tables at boot, hydrate them once on
+  // the false-to-true transition while sharing the foreground request lock.
+  useEffectA(() => {
+    const enabled = !!store?.settings?.medsEnabled;
+    const wasEnabled = previousMedsEnabled.current;
+    previousMedsEnabled.current = enabled;
+    if (phase !== 'ready' || !userId || wasEnabled !== false || !enabled || stagedBootHydrating.current) return;
+    let cancelled = false;
+    const hydrate = () => {
+      if (cancelled || !userIdRef.current || foregroundRefresh.current) return;
+      const uid = userIdRef.current;
+      const request = LB.refreshHealthLogs(uid, { medsEnabled: true });
+      foregroundRefresh.current = request;
+      lastForegroundRefreshAt.current = Date.now();
+      request.then(fresh => {
+        if (cancelled || !fresh?.medicationsLoaded || userIdRef.current !== uid) return;
+        setStore(current => {
+          if (!current) return current;
+          const base = syncBase.current;
+          return {
+            ...current,
+            medicationPlans: mergeStagedCollection('medicationPlans', fresh.medicationPlans, current.medicationPlans, base?.medicationPlans),
+            medications: mergeStagedCollection('medications', fresh.medications, current.medications, base?.medications),
+            medicationScheduleSlots: mergeStagedCollection('medicationScheduleSlots', fresh.medicationScheduleSlots, current.medicationScheduleSlots, base?.medicationScheduleSlots),
+            medicationLogs: mergeStagedCollection('medicationLogs', fresh.medicationLogs, current.medicationLogs, base?.medicationLogs),
+            medicationPlanItems: mergeStagedCollection('medicationPlanItems', fresh.medicationPlanItems, current.medicationPlanItems, base?.medicationPlanItems),
+            medicationPillboxChecks: mergeStagedCollection('medicationPillboxChecks', fresh.medicationPillboxChecks, current.medicationPillboxChecks, base?.medicationPillboxChecks),
+          };
+        });
+      }).catch(() => {}).finally(() => {
+        if (foregroundRefresh.current === request) foregroundRefresh.current = null;
+      });
+    };
+    const pending = foregroundRefresh.current;
+    if (pending) pending.then(hydrate, hydrate);
+    else hydrate();
+    return () => { cancelled = true; };
+  }, [phase, userId, store?.settings?.medsEnabled]);
 
   // Dismiss already-shown notifications whenever the app is in the foreground.
   // TTL on the push only governs *undelivered* messages; notifications that
@@ -811,6 +943,49 @@ function App() {
     }
   }, []);
 
+  const cancelScheduledLocalSave = useCallbackA(() => {
+    const task = localSaveTimer.current;
+    if (!task) return;
+    if (task.debounceId != null) clearTimeout(task.debounceId);
+    if (task.idleId != null) {
+      if (task.idleIsTimeout) clearTimeout(task.idleId);
+      else if (typeof cancelIdleCallback === 'function') cancelIdleCallback(task.idleId);
+    }
+    localSaveTimer.current = null;
+  }, []);
+
+  const persistLocalNow = useCallbackA(() => {
+    cancelScheduledLocalSave();
+    const uid = userIdRef.current;
+    const target = pendingStore.current;
+    if (!uid || !target) return true;
+    const ok = LB.saveLocalState(target, syncBase.current, uid);
+    if (!ok) setStorageFull(true);
+    return ok;
+  }, [cancelScheduledLocalSave]);
+
+  const scheduleLocalSave = useCallbackA((delay = 300) => {
+    cancelScheduledLocalSave();
+    const task = { debounceId: null, idleId: null, idleIsTimeout: false };
+    task.debounceId = setTimeout(() => {
+      task.debounceId = null;
+      const run = () => {
+        if (localSaveTimer.current !== task) return;
+        localSaveTimer.current = null;
+        const uid = userIdRef.current;
+        const target = pendingStore.current;
+        if (uid && target && !LB.saveLocalState(target, syncBase.current, uid)) setStorageFull(true);
+      };
+      if (typeof requestIdleCallback === 'function') {
+        task.idleId = requestIdleCallback(run, { timeout: 1200 });
+      } else {
+        task.idleIsTimeout = true;
+        task.idleId = setTimeout(run, 0);
+      }
+    }, delay);
+    localSaveTimer.current = task;
+  }, [cancelScheduledLocalSave]);
+
   // Push pending local changes to Supabase. Serialized; on failure syncBase is
   // left untouched so the next change (or an 'online' event) retries the diff.
   const flushSync = useCallbackA((uid) => {
@@ -824,7 +999,7 @@ function App() {
     syncing.current = true;
     let ok = false;
     LB.syncStore(syncBase.current, target, uid)
-      .then(() => { syncBase.current = target; if (!LB.saveBase(target, uid)) setStorageFull(true); ok = true; })
+      .then(() => { syncBase.current = target; scheduleLocalSave(0); ok = true; })
       .catch(err => console.error('Supabase sync failed, will retry', err))
       .finally(() => {
         syncing.current = false;
@@ -840,7 +1015,7 @@ function App() {
           retryTimer.current = setTimeout(() => flushSync(uid), 15000);
         }
       });
-  }, []);
+  }, [scheduleLocalSave]);
 
   // One-shot, awaitable flush for the sign-out flow. Unlike flushSync (fire-
   // and-forget, auto-retried on a 15s timer), SIGNED_OUT wipes the local
@@ -872,7 +1047,11 @@ function App() {
     const timeout = new Promise(resolve => setTimeout(resolve, 5000));
     try {
       await Promise.race([
-        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); landed = true; }),
+        LB.syncStore(syncBase.current, target, uid).then(() => {
+          syncBase.current = target;
+          if (!LB.saveSyncedState(target, uid)) setStorageFull(true);
+          landed = true;
+        }),
         timeout,
       ]);
     } catch (err) {
@@ -896,17 +1075,21 @@ function App() {
     // persisted the mix into B's local cache.
     const seq = ++loadSeq.current;
     const isStale = () => seq !== loadSeq.current || uid !== userIdRef.current;
-    const cached = LB.loadFromLocal(uid);
+    const localState = LB.loadLocalState(uid);
+    const cached = localState.store;
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
       // base = last state confirmed written to Supabase. Lets the merge below
       // tell apart locally-changed-but-unsynced settings from server state.
-      const base = LB.loadBase(uid);
+      const base = localState.base;
       syncBase.current = base || cached;
       setStore(cached);
       setPhase('ready');
-      LB.loadFromSupabase(uid)
+      const bootRefresh = LB.loadFromSupabase(uid);
+      foregroundRefresh.current = bootRefresh;
+      lastForegroundRefreshAt.current = Date.now();
+      bootRefresh
         .then(fresh => {
           if (isStale()) return;
           const cur = prevStore.current;
@@ -924,7 +1107,6 @@ function App() {
           // then self-heals once the post-boot flush saves the merged base).
           const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
           syncBase.current = diffBase;
-          LB.saveBase(diffBase, uid);
           let merged = fresh;
           if (cur) {
             // Same unsynced-edit test LB.mergeBootScalars applies below: an explicit
@@ -1216,29 +1398,62 @@ function App() {
               medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...mergeById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds)],
               mesoStates,
               planDrafts,
+              // TDEE history is loaded by HealthScreen separately because it
+              // can be reconstructed from the health logs. The regular boot
+              // payload does not carry it, so never let this background merge
+              // erase rows that arrived through that dedicated loader.
+              adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []),
             };
           }
           prevStore.current = merged;
           setStore(merged);
         })
-        .catch(err => { if (!isStale()) console.error(err); });
+        .catch(err => { if (!isStale()) console.error(err); })
+        .finally(() => {
+          if (foregroundRefresh.current === bootRefresh) foregroundRefresh.current = null;
+        });
     } else {
       setPhase('loading');
+      let essentialBase = null;
+      stagedBootHydrating.current = true;
       try {
-        const loaded = await LB.loadFromSupabase(uid);
+        const bootRefresh = LB.loadFromSupabase(uid, 0, {
+          onEssential: essential => {
+            if (isStale() || recoveryInProgress.current) return;
+            essentialBase = essential;
+            prevStore.current = essential;
+            syncBase.current = essential;
+            pendingStore.current = essential;
+            setStore(essential);
+            setPhase('ready');
+          },
+        });
+        foregroundRefresh.current = bootRefresh;
+        lastForegroundRefreshAt.current = Date.now();
+        const loaded = await bootRefresh.finally(() => {
+          if (foregroundRefresh.current === bootRefresh) foregroundRefresh.current = null;
+        });
         // Same guard as the cached path: this await can outlive the account.
-        if (isStale()) return;
+        if (isStale()) { stagedBootHydrating.current = false; return; }
         // PASSWORD_RECOVERY event may have fired while we were fetching, don't override the reset screen
-        if (recoveryInProgress.current) return;
-        prevStore.current = loaded;
+        if (recoveryInProgress.current) { stagedBootHydrating.current = false; return; }
+        const hydrated = essentialBase
+          ? mergeStagedBootStore(loaded, pendingStore.current || prevStore.current || essentialBase, essentialBase)
+          : loaded;
+        stagedBootHydrating.current = false;
+        prevStore.current = hydrated;
         syncBase.current = loaded;
-        LB.saveBase(loaded, uid);
-        setStore(loaded);
+        pendingStore.current = hydrated;
+        setStore(hydrated);
         setPhase('ready');
       } catch (e) {
-        if (isStale()) return;
+        if (isStale()) { stagedBootHydrating.current = false; return; }
+        stagedBootHydrating.current = false;
         console.error('loadFromSupabase failed', e);
-        setPhase('error');
+        // Essential data is already usable. A secondary table can retry on
+        // the next foreground without replacing a working first screen with
+        // the global error view.
+        if (!essentialBase) setPhase('error');
       }
     }
   };
@@ -1530,39 +1745,16 @@ function App() {
     pendingStore.current = store;
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
-    // Debounced, not synchronous: LB.saveToLocal stringifies the ENTIRE
-    // store, and this effect runs on every store change (every set toggle,
-    // water log, note keystroke), which used to pay that cost synchronously
-    // every single time. pendingStore.current/userIdRef.current, not the
-    // captured store/userId, so whichever debounced call actually fires
-    // saves the latest value even if several store changes landed within
-    // the same window. Flushed immediately on pagehide/visibilitychange
-    // below, so the crash-safety guarantee is unchanged, just no longer
-    // synchronous on every keystroke.
-    if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
-    localSaveTimer.current = setTimeout(() => {
-      localSaveTimer.current = null;
-      // Re-checked at fire time, not just captured above: a sign-out within
-      // the debounce window clears userIdRef, and writing to a stale/absent
-      // id here would be a wasted write under the wrong key, not a real save.
-      if (pendingStore.current && userIdRef.current) {
-        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
-      }
-    }, 400);
-  }, [store]);
+    // Full-store serialization is debounced and moved into idle time. The
+    // snapshot helper also avoids a second base serialization once the cache
+    // and confirmed server state are identical.
+    scheduleLocalSave();
+  }, [store, scheduleLocalSave]);
 
-  // Flushes a pending debounced localStorage save (see the [store] effect
-  // above) immediately instead of losing up to 400ms of local edits to a
-  // background kill or tab close.
+  // Flushes a pending idle localStorage save immediately so a background kill
+  // or tab close cannot drop the latest local edit.
   useEffectA(() => {
-    const flushLocalSave = () => {
-      if (!localSaveTimer.current) return;
-      clearTimeout(localSaveTimer.current);
-      localSaveTimer.current = null;
-      if (pendingStore.current && userIdRef.current) {
-        if (!LB.saveToLocal(pendingStore.current, userIdRef.current)) setStorageFull(true);
-      }
-    };
+    const flushLocalSave = () => { persistLocalNow(); };
     const onVisibilityHidden = () => { if (document.hidden) flushLocalSave(); };
     window.addEventListener('pagehide', flushLocalSave);
     document.addEventListener('visibilitychange', onVisibilityHidden);
@@ -1570,7 +1762,7 @@ function App() {
       window.removeEventListener('pagehide', flushLocalSave);
       document.removeEventListener('visibilitychange', onVisibilityHidden);
     };
-  }, []);
+  }, [persistLocalNow]);
 
   // Check for SW updates on every screen navigation and whenever the app
   // comes back to the foreground (visibilitychange). Fetches sw.js directly
@@ -1759,9 +1951,15 @@ function App() {
     // a fully synchronous setRoute, unchanged for every other screen.
     if (window.__foodLeaveGuard && r.name !== cur.name) {
       const ok = await window.__foodLeaveGuard();
-      if (!ok) return;
+      if (!ok) return false;
     }
-    setRoute(r);
+    const updateRoute = () => setRoute(r);
+    // Keep the current frame responsive while React mounts the next screen.
+    // The TabBar has its own immediate visual state, so its indicator does not
+    // wait for this lower-priority render to commit.
+    if (typeof React.startTransition === 'function') React.startTransition(updateRoute);
+    else updateRoute();
+    return true;
   };
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.

@@ -378,15 +378,6 @@ function scrollChainRowIntoView(rowAttr, idx) {
 }
 
 // ─── Plate Calculator ────────────────────────────────────────────────
-const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
-const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
-
-const PLATE_COLORS_KG  = { 25:'#c0392b', 20:'#2471a3', 15:'#d4ac0d', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
-const PLATE_SIZE_KG    = { 25: 70,       20: 64,       15: 60,       10: 56,       5: 48,       2.5: 42,       1.25: 36,      0.75: 30,      0.5: 30,      0.25: 30      };
-
-const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
-const PLATE_SIZE_LBS   = { 55: 70,       45: 64,       35: 56,       25: 48,       10: 42,       5: 36,        2.5: 30,       1.25: 28      };
-
 const PULLEY_RATIOS = [1, 2, 3, 4];
 
 function calcPlates(weight, plateSet) {
@@ -1310,44 +1301,103 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Cleanup week, per-exercise opt-out: flip one lift between the reduced load
-  // and its full one without ending the cleanup for everything else. Rescales
-  // the pending sets (warm-ups included) rather than re-seeding, so the rest of
-  // the exercise stays consistent. Keyed by exId, matching the map
-  // buildSeedSets reads, so an exercise programmed twice in one day flips both
-  // of its slots together instead of leaving the second contradicting the chip.
+  // and its full one without ending the cleanup for everything else. Keyed by
+  // exId, matching the map buildSeedSets reads, so an exercise programmed twice
+  // in one day flips both of its slots together instead of leaving the second
+  // contradicting the chip.
   //
-  // Already-completed sets are deliberately left alone. Rescaling them would
-  // rewrite what the user actually lifted: tick three sets at 80, tap Full, and
+  // Already-completed sets are deliberately left alone. Rewriting them would
+  // change what the user actually lifted: tick three sets at 80, tap Full, and
   // the history would claim 100. That number then feeds volume, e1RM and (once
   // the cleanup ends) the next week's seed base. The toggle changes what is
   // still to come, never what was logged.
   //
-  // Intensity-technique rounds carry their own per-round loads in st.drops, and
-  // st.kg is only a mirror of the first round (see finishDropSet), so they have
-  // to move together or the row would render 80/70/60 while volume counts 100.
+  // Three kinds of load, and only two of them can be rescaled:
   //
-  // The 2.5 rounding is not perfectly reversible (102.5 -> 82 -> 82.5), which is
-  // the same granularity every other seeded load carries; the user can adjust.
+  //   plain      kg is a real load and the reduction was a pure multiply, so
+  //              dividing it back out is right. The 2.5 rounding is not
+  //              perfectly reversible (102.5 -> 82 -> 82.5), the same
+  //              granularity every seeded load carries.
+  //   multi-horn the same multiply, but PER HORN, with kg rebuilt from the sum.
+  //              Rescaling kg alone (what this used to do) broke the
+  //              kg === hornLoadTotal(hornLoads) invariant that buildSeedSets
+  //              and the horn sheet both rely on.
+  //   plus_load  NOT rescalable. withPlusLoad floors the belt at 0, so a set
+  //              whose reduced target fell below bodyweight is stored as
+  //              (bodyweight, +0) whatever the real belt was, and multiplying
+  //              that back up invents bodyweight * (1/f - 1): at 80 kg and 20
+  //              percent, every belt from 0 to 15 kg came back as +20, and a
+  //              bare pull-up was prescribed as a 20 kg weighted one. So the
+  //              seeder records the un-reduced pair (cleanupFullLoad) while it
+  //              still knows it, and this reads it back. No recorded pair means
+  //              the load is left exactly as it is: refusing to answer beats
+  //              fabricating a number the lifter would put on a belt.
+  //
+  // Intensity-technique rounds carry their own per-round loads in st.drops, and
+  // st.kg is only a mirror of the first round (see finishDropSet), so they move
+  // with the set. They follow the RATIO the set actually moved by, not the raw
+  // factor, so they stay proportional even where the set itself did not scale.
   const toggleCleanupOptOut = (exId) => {
     const f = (100 - cleanupPct) / 100;
     const wasOptedOut = !!session.cleanupOptOuts?.[exId];
     // Opting out divides the reduction back out, opting back in re-applies it.
     const scale = wasOptedOut ? f : 1 / f;
     const rescale = (kg) => kg == null ? kg : Math.round((kg * scale) / 2.5) * 2.5;
-    updateSession(sess => ({
-      ...sess,
-      cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
-      entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
+    const ex = (store.exercises || []).find(e => e.id === exId);
+    const isPlusLoadEx = LB.isBodyweightPlusLoad(ex);
+    const isHornEx = LB.isMultiHorn(ex);
+
+    const reshape = (st) => {
+      if (isPlusLoadEx) {
+        const full = st.cleanupFullLoad;
+        if (!full || full.kg == null) return st;
+        if (!wasOptedOut) return { ...st, kg: full.kg, addedKg: full.addedKg ?? null };
+        // Back to reduced: re-apply the factor to the FULL load, the same math
+        // withPlusLoad runs at seed time, so both paths land on one number.
+        const bw = Math.round((full.kg - (full.addedKg ?? 0)) * 100) / 100;
+        const target = Math.round((full.kg * f) / 2.5) * 2.5;
+        const belt = Math.max(0, Math.round((target - bw) * 100) / 100);
+        return { ...st, kg: Math.round((bw + belt) * 100) / 100, addedKg: belt };
+      }
+      if (isHornEx && Array.isArray(st.hornLoads) && st.hornLoads.length) {
+        const horns = st.hornLoads.map(h => ({ ...h, kg: rescale(h.kg ?? null) }));
+        return { ...st, hornLoads: horns, kg: LB.hornLoadTotal(horns) };
+      }
+      return { ...st, kg: rescale(st.kg) };
+    };
+
+    updateSession(sess => {
+      // Whether anything actually moved. On a device that never cached this
+      // session (a second device, or sign-out and back in on this one) the
+      // local entries are gone and with them every cleanupFullLoad, so the
+      // plus_load branch correctly declines to touch any set. Flipping the flag
+      // anyway was the worst of both: the loads stayed reduced while the lift
+      // counted as full, which switches off the PR and regression suppression
+      // and turns the low-weight outlier warning back on. Half-acting is worse
+      // than not acting, so if nothing could move, nothing changes at all and
+      // the row keeps saying what is true.
+      let moved = false;
+      const entries = sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
         ...e,
-        sets: e.sets.map(st => (st.done || st.kg == null) ? st : {
-          ...st,
-          kg: rescale(st.kg),
-          ...(Array.isArray(st.drops) && st.drops.length
-            ? { drops: st.drops.map(d => ({ ...d, kg: rescale(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: rescale(d.stretch.kg) } } : {}) })) }
-            : {}),
+        sets: e.sets.map(st => {
+          if (st.done || st.kg == null) return st;
+          const next = reshape(st);
+          if (next !== st) moved = true;
+          if (!Array.isArray(st.drops) || !st.drops.length) return next;
+          // Ratio the SET moved by, so the chain follows even when reshape used
+          // a recorded full load rather than the raw factor, and stays put when
+          // reshape declined to move the set at all.
+          const ratio = (st.kg && next.kg != null) ? next.kg / st.kg : 1;
+          const r = (kg) => kg == null ? kg : Math.round((kg * ratio) / 2.5) * 2.5;
+          return {
+            ...next,
+            drops: st.drops.map(d => ({ ...d, kg: r(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: r(d.stretch.kg) } } : {}) })),
+          };
         }),
-      }),
-    }));
+      });
+      if (!moved) return sess;
+      return { ...sess, cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut }, entries };
+    });
   };
 
   const updateSet = (setIdx, patch) => {
@@ -1605,6 +1655,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       : (drops.stretch ? { ...drops, stretch: normalizeStretchHold(drops.stretch) } : drops);
   };
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
+    // A regular keypad field is buffered locally while typing. Commit it before
+    // any validation or done-state update so both operations compose through
+    // React's functional updater queue and the completed set always carries the
+    // final visible value.
+    flushPendingKbCommit();
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count, every other
     // entry point (checkbox is hidden for this row, "Check set", keyboard
@@ -2227,6 +2282,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // with the rest of the (unmounted) training screen.
   const requestGoHome = async () => {
     if (!await confirmDiscardChain()) return;
+    flushPendingKbCommit();
     closeChainSheet();
     go({ name: 'home' });
   };
@@ -2254,7 +2310,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // addedKg, while its total still fed volume, e1RM and the PR checks.
           const plusLoad = LB.isBodyweightPlusLoad(ex);
           const carryKg = plusLoad && last?.addedKg == null ? null : (last?.kg ?? bwKg ?? null);
-          const carryAdded = plusLoad ? { addedKg: last?.addedKg ?? null } : null;
+          // cleanupFullLoad rides along with the pair for the same reason the
+          // pair rides together: during a cleanup week the clone inherits the
+          // REDUCED load, and the opt-out row restores a set from what the
+          // seeder recorded, not by arithmetic. Without the marker the added set
+          // was the one set the toggle silently declined to move, so tapping
+          // "full load" left it 20 kg light while its siblings jumped, and the
+          // whole lift was then scored as not reduced. Nothing was floored here:
+          // the un-reduced pair is sitting on the very set being cloned.
+          const carryAdded = plusLoad
+            ? { addedKg: last?.addedKg ?? null, ...(last?.cleanupFullLoad ? { cleanupFullLoad: last.cleanupFullLoad } : {}) }
+            : null;
           const newSet = uni
             ? { kg: carryKg, ...carryAdded, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
             : { kg: carryKg, ...carryAdded, reps: last?.reps ?? null, done: false };
@@ -4037,7 +4103,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
-    textShadow: sel ? 'var(--text-lift)' : 'none',
+    textShadow: 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -4588,6 +4654,108 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbFieldRef = useRefT(null);
   const kbRawRef = useRefT('');
   const kbFreshRef = useRefT(false);
+  // Regular set fields are the expensive path: writing one digit used to clone
+  // the sessions, entries and sets arrays, then wake the app-wide persistence
+  // effects. Keep the visible string local and coalesce the store write. Chain,
+  // horn and stretch editors already use isolated local state and do not enter
+  // this buffer.
+  const pendingKbCommitRef = useRefT(null);
+  const kbCommitAwaitingRenderRef = useRefT(null);
+  const kbCommitTimerRef = useRefT(null);
+  const latestStoreRef = useRefT(store);
+  latestStoreRef.current = store;
+  const pendingEntryIndex = (liveSession, pending) => {
+    const entries = liveSession?.entries || [];
+    const byIdentity = entries.indexOf(pending.entryRef);
+    if (byIdentity >= 0) return byIdentity;
+    return entries[pending.exIdx]?.exId === pending.exId ? pending.exIdx : -1;
+  };
+  const applyPendingKbCommit = (s, pending, parsed) => {
+    const sessions = s.sessions || [];
+    const sessIdx = sessions.findIndex(x => x.id === pending.sessionId);
+    if (sessIdx < 0) return s;
+    const liveSession = sessions[sessIdx];
+    const entryIdx = pendingEntryIndex(liveSession, pending);
+    const liveEntry = liveSession.entries?.[entryIdx];
+    // Exercise transitions flush before changing currentExIdx. If another
+    // update reordered or replaced the entry first, abstain instead of
+    // applying the draft to a different exercise at the same index.
+    if (entryIdx < 0 || !liveEntry || !liveEntry.sets?.[pending.setIdx]) return s;
+
+    const fieldPatch = pending.field === 'kg'
+      ? (pending.plusLoad
+          ? (parsed == null
+              ? { kg: null, addedKg: null }
+              : { kg: Math.round((pending.plusLoadBase + parsed) * 100) / 100, addedKg: parsed })
+          : { kg: parsed })
+      : { [pending.field]: parsed };
+
+    const nextSets = liveEntry.sets.slice();
+    const target = nextSets[pending.setIdx];
+    nextSets[pending.setIdx] = {
+      ...target,
+      ...fieldPatch,
+      done: false,
+      ...(target.technique ? { technique: null, drops: null } : {}),
+    };
+
+    if (pending.field === 'kg' && s.settings?.weightFillDown !== false) {
+      for (let i = pending.setIdx + 1; i < nextSets.length; i++) {
+        const st = nextSets[i];
+        if (!st.done && !st.warmup) nextSets[i] = { ...st, ...fieldPatch };
+      }
+    }
+
+    const nextEntries = liveSession.entries.slice();
+    nextEntries[entryIdx] = { ...liveEntry, sets: nextSets };
+    const nextSessions = sessions.slice();
+    nextSessions[sessIdx] = { ...liveSession, entries: nextEntries };
+    return { ...s, sessions: nextSessions };
+  };
+  const flushPendingKbCommit = (persistImmediately = false) => {
+    clearTimeout(kbCommitTimerRef.current);
+    kbCommitTimerRef.current = null;
+    const pending = pendingKbCommitRef.current;
+    if (!pending) return;
+    pendingKbCommitRef.current = null;
+
+    const parsed = pending.field === 'kg'
+      ? (pending.raw === '' ? null : parseFloat(pending.raw.replace(',', '.')))
+      : (pending.raw === '' ? null : parseInt(pending.raw, 10));
+    if (pending.raw !== '' && isNaN(parsed)) return;
+
+    kbCommitAwaitingRenderRef.current = { pending, parsed };
+    if (persistImmediately && userId) {
+      const cached = applyPendingKbCommit(latestStoreRef.current, pending, parsed);
+      if (cached !== latestStoreRef.current) LB.saveToLocal(cached, userId);
+    }
+    setStore(s => applyPendingKbCommit(s, pending, parsed));
+  };
+  const queuePendingKbCommit = (raw, field, setIdx) => {
+    if (typeof setIdx !== 'number' || !entry) return;
+    const previous = pendingKbCommitRef.current;
+    if (previous && (
+      previous.sessionId !== sessionId || previous.exIdx !== exIdx ||
+      previous.setIdx !== setIdx || previous.field !== field
+    )) flushPendingKbCommit();
+    pendingKbCommitRef.current = {
+      sessionId, exIdx, exId: entry.exId, entryRef: entry, setIdx, field, raw,
+      plusLoad: isPlusLoad,
+      plusLoadBase: plusLoadBw ?? 0,
+    };
+    clearTimeout(kbCommitTimerRef.current);
+    kbCommitTimerRef.current = setTimeout(flushPendingKbCommit, 220);
+  };
+  const persistLatestKbCommit = () => {
+    if (pendingKbCommitRef.current) {
+      flushPendingKbCommit(true);
+      return;
+    }
+    const awaiting = kbCommitAwaitingRenderRef.current;
+    if (!awaiting || !userId) return;
+    const cached = applyPendingKbCommit(latestStoreRef.current, awaiting.pending, awaiting.parsed);
+    if (cached !== latestStoreRef.current) LB.saveToLocal(cached, userId);
+  };
   const [kbShield, setKbShield] = useStateT(false);
   const kbShieldTimerRef = useRefT(null);
   // After keyboard dismissal (completeSet or ⌄), briefly keep a touch-blocking
@@ -4611,7 +4779,37 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
   const lastCompleteRef = useRefT(0);
 
-  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); }, [exIdx, sessionId]);
+  useEffectT(() => {
+    flushPendingKbCommit();
+    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setKbField(null); setKbRaw('');
+  }, [exIdx, sessionId]);
+  useEffectT(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') persistLatestKbCommit(); };
+    const onPageHide = () => persistLatestKbCommit();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onPageHide);
+      flushPendingKbCommit();
+      clearTimeout(kbCommitTimerRef.current);
+    };
+  }, []);
+  useEffectT(() => {
+    const awaiting = kbCommitAwaitingRenderRef.current;
+    if (!awaiting) return;
+    const { pending, parsed } = awaiting;
+    const liveSession = store.sessions?.find(x => x.id === pending.sessionId);
+    const liveSet = liveSession?.entries?.[pendingEntryIndex(liveSession, pending)]?.sets?.[pending.setIdx];
+    if (!liveSet) return;
+    const valueMatches = pending.field === 'kg'
+      ? (liveSet.kg === (pending.plusLoad && parsed != null
+          ? Math.round((pending.plusLoadBase + parsed) * 100) / 100
+          : parsed) && (!pending.plusLoad || liveSet.addedKg === parsed))
+      : liveSet[pending.field] === parsed;
+    if (valueMatches) kbCommitAwaitingRenderRef.current = null;
+  }, [store]);
   useEffectT(() => {
     const pf = pendingFocusRef.current;
     if (!pf) return;
@@ -4733,6 +4931,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // now stays open until the user taps ⌄ explicitly or navigates away.
 
   const activateKb = (setIdx, field) => {
+    flushPendingKbCommit();
     // A multi-horn exercise has no single weight field to type into: kg is the
     // computed sum of the horns. Routing here rather than at the call sites,
     // because the weight gets focused from several places that are easy to miss
@@ -4802,6 +5001,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setTimeout(() => activateHornKb(0), 80);
   };
   const activateHornKb = (hornIdx) => {
+    flushPendingKbCommit();
     const d = hornRowsRef.current[hornIdx];
     const val = d?.kg != null ? String(d.kg).replace('.', ',') : '';
     kbFieldRef.current = { setIdx: 'horn', hornIdx, field: 'kg' };
@@ -4840,6 +5040,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const activateDropKb = (dropIdx, field) => {
+    flushPendingKbCommit();
     const d = dropDropsRef.current[dropIdx];
     const val = field === 'kg'
       ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
@@ -4853,6 +5054,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const activateMyo = (dropIdx, field) => {
+    flushPendingKbCommit();
     const d = myoDropsRef.current[dropIdx];
     const val = field === 'kg'
       ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
@@ -4866,6 +5068,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const activateAvKb = (dropIdx, field) => {
+    flushPendingKbCommit();
     const d = avDropsRef.current[dropIdx];
     const val = field === 'kg'
       ? (dispChainKg(d?.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '')
@@ -4899,6 +5102,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setter(prev => prev.map((d, i) => i === dropIdx ? { ...d, stretch: { kg: null, timeSec: null, ...(d.stretch || {}), ...patch } } : d));
   };
   const activateStretchKb = (target, dropIdx, field) => {
+    flushPendingKbCommit();
     const src = readStretch(target, dropIdx);
     const val = field === 'kg'
       ? (src.kg != null ? String(src.kg).replace('.', ',') : '')
@@ -4977,26 +5181,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     _log(`kbApply(set${setIdx} ${field} '${newRaw}')`);
     if (field === 'kg') {
       const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
-      if (newRaw === '' || !isNaN(num)) {
-        updateSession(sess => ({
-          ...sess,
-          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-            ...en,
-            // Editing the weight of an already-committed intensity-technique
-            // set (drop-set/myo-rep/lengthened partials) reopens it for
-            // editing, clear the stale technique/drops so it doesn't carry
-            // forward data that no longer matches what's being typed.
-            sets: en.sets.map((st, si) =>
-              si === setIdx ? { ...st, ...weightPatch(num ?? null), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(num ?? null) }
-              : st
-            ),
-          }),
-        }));
-      }
+      if (newRaw === '' || !isNaN(num)) queuePendingKbCommit(newRaw, field, setIdx);
     } else {
       const num = newRaw === '' ? null : parseInt(newRaw, 10);
-      if (newRaw === '' || !isNaN(num)) updateSet(setIdx, { [field]: num ?? null, done: false });
+      if (newRaw === '' || !isNaN(num)) queuePendingKbCommit(newRaw, field, setIdx);
     }
   };
 
@@ -5141,27 +5329,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
-      // Same patch kbApply writes: the ± keys step the typed number, so on a
-      // plus_load exercise `next` is an added load and only weightPatch can turn
-      // it into the stored total. Writing kg directly here left addedKg stale and
-      // put the belt figure into the total's slot.
-      updateSession(sess => ({
-        ...sess,
-        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-          ...en,
-          sets: en.sets.map((st, si) =>
-            si === setIdx ? { ...st, ...weightPatch(next), done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-            : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, ...weightPatch(next) }
-            : st
-          ),
-        }),
-      }));
+      kbApply(newRaw, field, setIdx);
     } else {
       const cur = parseInt(kbRawRef.current, 10) || 0;
       const next = Math.max(0, cur + dir);
       kbRawRef.current = String(next);
       setKbRaw(String(next));
-      updateSet(setIdx, { [field]: next, done: false });
+      kbApply(String(next), field, setIdx);
     }
   };
 
@@ -5247,6 +5421,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
     kbApply(kbRawRef.current, field, setIdx);
+    flushPendingKbCommit();
     if (field === 'kg') {
       _log(`kbConfirm: kg→${isUnilateral ? 'repsL' : 'reps'}`);
       activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
@@ -5274,6 +5449,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFreshRef.current = false;
     setKbRaw(newRaw);
     kbApply(newRaw, field, setIdx);
+    flushPendingKbCommit();
     setPlateCalcOpen(false);
   };
 
@@ -6158,7 +6334,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            textShadow: sel ? 'var(--text-lift)' : 'none',
+            textShadow: 'none',
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -7453,7 +7629,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
-                          textShadow: (s.done || s.skipped) ? 'var(--text-lift)' : 'none',
+                          textShadow: 'none',
                         }}>GO</button>}
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
@@ -8223,7 +8399,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
-            textShadow: active ? 'var(--text-lift)' : 'none',
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', gap: 14,
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',
@@ -8733,7 +8909,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         />
                       ) : (
                         <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span className="num" style={{ fontSize: 15, color: UI.inkFaint }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          {/* dispChainKg, same as the editable sibling above. This
+                              branch is not a rare fallback: it renders for EVERY mini
+                              round of both myo variants and for the activation row of
+                              Myo-Rep Match, and every one of those gets its kg in
+                              TOTAL space (appendMyoRound / anchor.drops[0]). Left raw,
+                              a plus_load lift printed "100" directly under the "20"
+                              the lifter had just typed, in the same column: two
+                              meanings of kg in one sheet, which is the mis-read the
+                              belt-space change existed to remove. */}
+                          <span className="num" style={{ fontSize: 15, color: UI.inkFaint }}>{dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '—'}</span>
                         </div>
                       )}
                       <KbCell
@@ -9316,7 +9501,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR')) ||
           (kbField?.setIdx === 'stretch' && kbField?.field === 'sec')
         }
-        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); armKbShield(); }}
+        onDismiss={() => { flushPendingKbCommit(); kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
         onSign={kbSignToggle}
         assisted={LB.isAssisted(exercise)}

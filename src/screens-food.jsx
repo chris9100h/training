@@ -1235,13 +1235,22 @@ function FdCheckbox({ checked, onToggle, disabled, label }) {
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
-        textShadow: checked ? 'none' : 'var(--text-lift)',
+        textShadow: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}
     >
       <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
     </button>
+  );
+}
+
+function FdShowMore({ remaining, onClick }) {
+  const count = Math.min(24, remaining);
+  return (
+    <Btn kind="ghost" onClick={onClick} style={{ width: '100%', marginTop: 4 }}>
+      Show {count} more
+    </Btn>
   );
 }
 
@@ -1484,7 +1493,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // cleared on switching sub-tabs so a filter typed in one never silently
   // hides everything in the next.
   const [quickQuery, setQuickQuery] = useStateFd('');
-  function onQuickTabChange(id) { setQuickTab(id); setQuickQuery(''); }
+  const [quickVisibleCount, setQuickVisibleCount] = useStateFd(24);
+  function onQuickTabChange(id) { setQuickTab(id); setQuickQuery(''); setQuickVisibleCount(24); }
+  function onQuickQueryChange(value) { setQuickQuery(value); setQuickVisibleCount(24); }
   // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
   // at that hour instead of now. Cleared once the staged batch that used it
   // actually commits (see commitEntries), or when the user leaves the
@@ -1952,16 +1963,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const splitUndoTimer = useRefFd(null);
   useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
   // "Create recipe from block": the mirror of Split, folding a stacked
-  // hour's 2+ items into ONE recipe-shaped entry instead of fanning one
-  // entry out. recipeBlockHour is the hour being combined (null = sheet
-  // closed). recipeBlockSave defaults OFF: off replaces the block with a
-  // single log entry only ("temporary", no zane_food_recipes row, nothing
-  // to reuse later); on ALSO saves it as a real recipe under Quick Add,
+  // hour's 2+ items into one or more recipe-shaped entries instead of fanning
+  // the original items out. recipeBlockHour is the hour being combined (null = sheet
+  // closed). recipeBlockSave defaults OFF: off replaces the block with portion
+  // entries only ("temporary", no zane_food_recipes row, nothing to reuse
+  // later); on ALSO saves it as a real recipe under Quick Add,
   // Recipes, same as building one in the recipe editor. Undo reuses the
   // exact same split_batch/restoreSplitBatch machinery as Split (see there),
   // tagged kind:'merge' instead of 'split'.
   const [recipeBlockHour, setRecipeBlockHour] = useStateFd(null);
   const [recipeBlockName, setRecipeBlockName] = useStateFd('');
+  const [recipeBlockPortions, setRecipeBlockPortions] = useStateFd(1);
   const [recipeBlockSave, setRecipeBlockSave] = useStateFd(false);
   const recipeBlockInitialSnap = useRefFd(null);
   function splitEntryUnit(e) {
@@ -2175,32 +2187,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (entries.length < 2) return;
     setRecipeBlockHour(h);
     setRecipeBlockName('');
+    setRecipeBlockPortions(1);
     setRecipeBlockSave(false);
-    recipeBlockInitialSnap.current = JSON.stringify({ name: '', save: false });
+    recipeBlockInitialSnap.current = JSON.stringify({ name: '', portions: 1, save: false });
   }
-  // Backdrop tap used to drop the whole block-recipe draft (name, save
-  // toggle) silently, same pattern as requestCloseSplit.
+  // Backdrop tap used to drop the whole block-recipe draft (name, portions,
+  // save toggle) silently, same pattern as requestCloseSplit.
   async function requestCloseBlockRecipe() {
     if (recipeBlockHour != null) {
-      const cur = JSON.stringify({ name: recipeBlockName, save: recipeBlockSave });
+      const cur = JSON.stringify({ name: recipeBlockName, portions: recipeBlockPortions, save: recipeBlockSave });
       if (cur !== recipeBlockInitialSnap.current && !await confirm("Your recipe won't be created.", { title: 'Discard?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     }
     setRecipeBlockHour(null);
   }
-  // Folds the block's items into one recipe-shaped log entry (source:
-  // 'recipe', recipeItems built straight from them at their current
-  // amounts, no rescaling since this IS the batch, not a portion of one).
+  // Folds the block's items into one recipe batch, then creates one
+  // recipe-shaped log entry per requested portion. The stored recipe keeps
+  // the whole batch as its ingredients and the log entries carry the scaled
+  // snapshots, so each portion can be moved to another time independently.
   // recipeBlockSave additionally saves the same items as a real
   // zane_food_recipes row (with foodId/brand/source, unlike recipeItems'
   // own leaner shape) so it can be reused later like any other recipe;
-  // off, it's just this one entry. Tags the new entry with a split_batch
-  // (kind:'merge') the same way applySplit does, so the shared Undo
-  // machinery works for this direction too.
+  // off, there is no library row. Every new entry shares one split_batch
+  // (kind:'merge') the same way applySplit does, so the shared Undo machinery
+  // restores the original block in one go.
   function applyBlockRecipe() {
     if (recipeBlockHour == null) return;
     const entries = byHour[recipeBlockHour] || [];
     const name = recipeBlockName.trim();
     if (entries.length < 2 || !name) return;
+    const portions = Math.max(1, Math.round(Number(recipeBlockPortions) || 1));
     const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
     const hasFiber = entries.some(e => e.fiber != null);
     const now = new Date().toISOString();
@@ -2215,7 +2230,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const merged = {
       id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
       foodId: null, foodName: name, brand: null, source: 'recipe', recipeId,
-      loggedTotalPortions: 1,
+      // The combined entries are the whole batch, so keep today's logged
+      // calories intact while remembering how many portions the batch makes.
+      loggedTotalPortions: portions,
       quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
       protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
       fiber: hasFiber ? fdRound1(sum('fiber')) : null,
@@ -2230,9 +2247,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       createdAt: now,
       splitBatch: { id: LB.uid(), kind: 'merge', removedEntries: entries },
     };
+    // Partition every integer field exactly, and every macro field to one
+    // decimal place exactly, so rounding never changes the day's totals when
+    // a batch such as 1057 kcal becomes 529 + 528 kcal. Recipe-item
+    // snapshots use the same partitioning as their parent log entries.
+    const partitionFields = source => {
+      const parts = Array.from({ length: portions }, () => ({}));
+      const assign = (key, values) => values.forEach((value, i) => { parts[i][key] = value; });
+      ['quantityG', 'calories', 'sodiumMg'].forEach(key => {
+        assign(key, source[key] == null ? Array(portions).fill(null) : fdEvenSplit(Math.round(source[key]), portions));
+      });
+      ['protein', 'carbs', 'fat', 'fiber', 'sugar', 'satFat'].forEach(key => {
+        if (source[key] == null) { assign(key, Array(portions).fill(null)); return; }
+        const totalTenths = Math.round(source[key] * 10);
+        const base = Math.floor(totalTenths / portions);
+        const remainder = totalTenths - base * portions;
+        assign(key, Array.from({ length: portions }, (_, i) => (base + (i < remainder ? 1 : 0)) / 10));
+      });
+      return parts;
+    };
+    const mergedParts = partitionFields(merged);
+    const itemParts = (merged.recipeItems || []).map(partitionFields);
+    const portionEntries = mergedParts.map((fields, i) => ({
+      ...merged,
+      ...fields,
+      id: LB.uid(),
+      foodName: portions > 1 ? `${name} (${i + 1}/${portions})` : name,
+      recipeItems: (merged.recipeItems || []).map((item, itemIndex) => ({ ...item, ...itemParts[itemIndex][i] })),
+    }));
     const removeIds = new Set(entries.map(e => e.id));
     setStore(s => {
-      const nextLogs = [merged, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const nextLogs = [...portionEntries, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
       const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
       const nextRecipes = recipeBlockSave
         ? [{
@@ -2244,7 +2289,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
               loggedUnit: e.loggedUnit != null ? { label: e.loggedUnit.label, grams: Number(e.loggedUnit.grams) } : null,
             })),
-            portions: 1, createdAt: now, updatedAt: now,
+            portions, createdAt: now, updatedAt: now,
           }, ...(s.foodRecipes || [])]
         : s.foodRecipes;
       return { ...s, foodLogs: nextLogs, dailyLogs, foodRecipes: nextRecipes };
@@ -2501,12 +2546,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // are walked low to high, unlike dayEntries itself (newest-first, for the
   // live timeline further down).
   const copyMoveCategories = useMemoFd(() => {
+    if (!copyMoveOpen) return [];
     return mealCats.map(cat => {
       const entries = [];
       for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
       return { ...cat, entries };
     }).filter(cat => cat.entries.length > 0);
-  }, [byHour, mealCats]);
+  }, [copyMoveOpen, byHour, mealCats]);
 
   // Flat drag-reorder slot list for the whole timeline, in EXACT render order
   // (category by category, hour by hour): one slot per logged entry, or one
@@ -2533,6 +2579,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // way, never re-sorted, matching Favorites/Recipes' own alphabetical sort
   // being deliberately NOT applied to Recent.
   const recentFoodsAll = useMemoFd(() => {
+    if (tab !== 'quickadd' || quickTab !== 'recent') return [];
     // Backdated entries can be prepended to store.foodLogs out of date order
     // (see commitEntries), so sort a copy by (date, time) descending before
     // the first-seen-wins dedupe walk instead of trusting array order.
@@ -2549,26 +2596,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       out.push(l);
     }
     return out;
-  }, [store.foodLogs]);
+  }, [tab, quickTab, store.foodLogs]);
   const recentFoods = useMemoFd(() => {
     const q = quickQuery.trim().toLowerCase();
     if (!q) return recentFoodsAll.slice(0, 20);
     return recentFoodsAll.filter(l => l.foodName.toLowerCase().includes(q) || (l.brand || '').toLowerCase().includes(q));
   }, [recentFoodsAll, quickQuery]);
-  // Favorites/Recipes: alphabetical by name (unlike Recent, which stays
-  // recency-ordered), filtered by the same shared quickQuery.
+  // Favorites/Recipes are sorted only when their tab is visible. Search then
+  // filters those stable sorted arrays without repeating the alphabetical
+  // sort on every keystroke.
+  const favoritesSorted = useMemoFd(() => {
+    if (tab !== 'quickadd' || quickTab !== 'favorites') return [];
+    return [...(store.foodFavorites || [])].sort((a, b) => a.foodName.localeCompare(b.foodName));
+  }, [tab, quickTab, store.foodFavorites]);
   const favoritesFiltered = useMemoFd(() => {
     const q = quickQuery.trim().toLowerCase();
-    const list = q
-      ? (store.foodFavorites || []).filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q))
-      : (store.foodFavorites || []);
-    return [...list].sort((a, b) => a.foodName.localeCompare(b.foodName));
-  }, [store.foodFavorites, quickQuery]);
+    return q
+      ? favoritesSorted.filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q))
+      : favoritesSorted;
+  }, [favoritesSorted, quickQuery]);
+  const recipesSorted = useMemoFd(() => {
+    if (tab !== 'quickadd' || quickTab !== 'recipes') return [];
+    return [...(store.foodRecipes || [])].sort((a, b) => a.name.localeCompare(b.name));
+  }, [tab, quickTab, store.foodRecipes]);
   const recipesFiltered = useMemoFd(() => {
     const q = quickQuery.trim().toLowerCase();
-    const list = q ? (store.foodRecipes || []).filter(r => r.name.toLowerCase().includes(q)) : (store.foodRecipes || []);
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [store.foodRecipes, quickQuery]);
+    return q ? recipesSorted.filter(r => r.name.toLowerCase().includes(q)) : recipesSorted;
+  }, [recipesSorted, quickQuery]);
+  const recipeSummaries = useMemoFd(() => {
+    const out = new Map();
+    if (tab !== 'quickadd' || quickTab !== 'recipes') return out;
+    const netCarbs = !!store.settings?.netCarbs;
+    recipesSorted.forEach(recipe => out.set(recipe.id, fdRecipeSummary(recipe, netCarbs)));
+    return out;
+  }, [tab, quickTab, recipesSorted, store.settings?.netCarbs]);
 
   // Unbounded both ways: backward lazy-fetches outside the boot window, forward
   // is needed for Plan Mode (plan tomorrow's meals), matching the calendar input
@@ -2708,7 +2769,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+      // Same guard commitEntries uses when it adds a PLANNED entry: a planned
+      // row never reached the daily log, so removing it changes nothing there,
+      // and calling patchDaily anyway rewrites the day from its logged entries.
+      // On a day with none, that means writing nulls over macros the user typed
+      // into the Health tab by hand.
+      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
 
@@ -2761,6 +2828,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // write it). Status is not on the row, so undeclaring still has to ask
   // statusModeForDate itself, or un-marking on a sick/vacation day would hand
   // it a real score, the same hole those two call sites had before Phase 2.4.
+  // Via isNutritionUnscoredMode, so a deload/cleanup day un-marks back to a
+  // real score rather than staying blank.
   // Marking on needs no such check: mealOfChoice alone already forces
   // dailyLogAdherence's result to null.
   async function setMealOfChoice(on, name, hour) {
@@ -2781,7 +2850,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
       const offPlanNote = LB.withMealOfChoiceNote(existing?.offPlanNote ?? null, on ? (name || '') : null);
       const isTraining = LB.isTrainingDayForDate(s, curDate);
-      const unscored = !on && !!LB.statusModeForDate(s, curDate);
+      const unscored = !on && LB.isNutritionUnscoredMode(LB.statusModeForDate(s, curDate));
       // A past day already scored keeps the target it was scored against
       // (same dayTargetOverride contract dayTarget above and the
       // HealthScreen food reconciler use): without this, toggling Meal of
@@ -2971,8 +3040,38 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // sit outside dayTotals, the daily log and the adherence score forever.
     // Copying onto a future date therefore lands logged, exactly like the add
     // sheets do on a future day once Plan Mode is off.
-    const targetLandsPlanned = planMode && (targetIsFuture || targetDate === today);
-    if (!targetLandsPlanned) {
+    // Per CLONE, not per target date. The previous version forced planned from
+    // a "must land planned" predicate (planMode && (future || today)), which
+    // correctly stopped a planned row landing where nothing can check it off,
+    // and then also silently converted planned entries moved onto a PAST date
+    // while Plan Mode is on. That is a supported state, not an impossible one:
+    // the check-off box is gated on planMode alone with no date test, and
+    // "Repeat yesterday" creates planned copies on whatever day is open. So it
+    // took an entry the user had deliberately planned, marked it eaten, and
+    // folded it into that day's totals.
+    //
+    // The three cases the UI actually offers:
+    //   Plan Mode off   -> logged. Nothing renders a check-off box or the
+    //                      logged/planned switch, so a planned row would sit
+    //                      outside the day's totals forever.
+    //   future target   -> planned. A day that has not happened cannot hold
+    //                      something eaten, and the switch is hidden there
+    //                      (planMode && editingEntry && !curDateIsFuture).
+    //   today or past   -> whatever the source was. Both states are reachable
+    //                      by hand on those days, so the target has no business
+    //                      overriding the user's choice.
+    const clonePlanned = (l) => planMode && (targetIsFuture || !!l.planned);
+    // The macro warning and patchDaily below key off whether anything actually
+    // lands LOGGED, which is now a per-clone question. Computed from the store
+    // before the setStore below, since that is where the clones are built.
+    const anyLandsLogged = (store.foodLogs || []).some(l => ids.includes(l.id) && !clonePlanned(l));
+    // And whether anything LOGGED actually leaves the source day on a move.
+    // Planned entries never counted toward that day's totals, so recomputing it
+    // for them changes nothing it should change, and on a day whose macros were
+    // typed by hand with no logged entries it rewrites them from an empty
+    // rollup, i.e. wipes them. Same shape as the target guard above.
+    const anyLeavesLogged = mode === 'move' && (store.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
+    if (anyLandsLogged) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
     }
@@ -2981,15 +3080,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!selected.length) return s;
       const now = new Date().toISOString();
       const clones = selected.map(l => ({
-        // The target decides, the source never does. Inheriting planned from
-        // the source left a planned row planned on a target that cannot hold
-        // one (a past date, or any date with Plan Mode off), where nothing
-        // renders a check-off box, so it sat outside the day's totals for
-        // good. Forcing it also makes the two lines below honest again: with
-        // no clone able to land planned, "not targetLandsPlanned" really does
-        // mean "everything here counts", which is what the macro warning and
-        // patchDaily already assumed.
-        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: !!targetLandsPlanned,
+        // The target decides only where it genuinely constrains the answer,
+        // see clonePlanned above; otherwise the source's own flag carries.
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: clonePlanned(l),
         // Same rule "Repeat yesterday" follows: a copy is its own entry and
         // must not inherit the split/merge batch (its "undo split" would act
         // on another day) or the template-slot marker (auto-fill would treat
@@ -2999,8 +3092,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
-      if (!targetLandsPlanned) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
-      if (mode === 'move') {
+      if (anyLandsLogged) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      if (anyLeavesLogged) {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
       return { ...s, foodLogs: nextLogs, dailyLogs };
@@ -3019,7 +3112,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.foodLogs || []).filter(l => !ids.includes(l.id));
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+      // Only if something LOGGED actually left the day, see deleteEntry. A
+      // selection of nothing but planned entries leaves the day's totals exactly
+      // as they were, so recomputing them can only do damage.
+      const anyLoggedDeleted = (s.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
+      const dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
   }
@@ -3570,7 +3668,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+        // Only when the day's LOGGED set actually changes, i.e. the entry was
+        // logged before or is logged now. Editing a planned entry that stays
+        // planned leaves the daily log untouched by design, and recomputing it
+        // anyway rewrites the row from the logged entries: on a day with none,
+        // that nulls macros the user typed into the Health tab.
+        const touchesDaily = !editingEntry.planned || !savePlanned;
+        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       closeQtySheet();
       return;
@@ -4123,7 +4228,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
     setStore(s => {
       const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? updated : l);
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+      // planned is carried through unchanged here, so a planned entry stays out
+      // of the daily log and recomputing it would only risk overwriting manual
+      // Health-tab macros, see deleteEntry.
+      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     closeIngredientEditor();
   }
@@ -4257,7 +4366,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+        // Only when the day's LOGGED set actually changes, i.e. the entry was
+        // logged before or is logged now. Editing a planned entry that stays
+        // planned leaves the daily log untouched by design, and recomputing it
+        // anyway rewrites the row from the logged entries: on a day with none,
+        // that nulls macros the user typed into the Health tab.
+        const touchesDaily = !editingEntry.planned || !savePlanned;
+        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       setEditingEntry(null);
     } else {
@@ -4462,7 +4578,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           backdrop glow uses), since this bar sits on the normal
           theme-reactive Screen background and should mute along with
           everything else on Paper. */}
-      <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.98)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
         {pickedExpanded && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
             {staged.map(e => (
@@ -4729,11 +4845,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       use var(--surface-tint-lg) instead of a solid
                       background: an opaque card blocks the watermark
                       entirely wherever it sits, leaving it visible only in
-                      the thin gaps between cards. textShadow explicitly
-                      restored to the inherited lift (fdCategoryCard resets
-                      it to 'none' for its own opaque-background reason,
-                      which no longer applies once the fill is translucent). */}
-                  <div style={{ ...fdCategoryCard, background: 'var(--surface-tint-lg)', textShadow: 'var(--text-lift)' }}>
+                      the thin gaps between cards. The card and entry
+                      surfaces still reset textShadow so their text stays
+                      clean over the translucent fill. */}
+                  <div style={{ ...fdCategoryCard, background: 'var(--surface-tint-lg)', textShadow: 'none' }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                       <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
@@ -4753,7 +4868,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {entries.map(e => (
-                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)',
+                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'none',
                               ...(e.moc ? { border: `var(--hair-width) dashed var(--hair-accent)` } : null) }}>
                               {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
@@ -5242,11 +5357,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </div>
 
             <div style={{ position: 'relative', width: '100%' }}>
-              <input value={quickQuery} onChange={e => setQuickQuery(e.target.value)} type="text"
+              <input value={quickQuery} onChange={e => onQuickQueryChange(e.target.value)} type="text"
                 placeholder={`Search ${FD_QUICK_TABS.find(t => t.id === quickTab)?.label.toLowerCase() || ''}`}
                 style={{ ...fdInputStyle, paddingRight: 32 }} />
               {quickQuery && (
-                <button onClick={() => setQuickQuery('')} aria-label="Clear search" style={fdClearBtn}>
+                <button onClick={() => onQuickQueryChange('')} aria-label="Clear search" style={fdClearBtn}>
                   <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
                 </button>
               )}
@@ -5259,7 +5374,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={fdEmptyHint}>No matches for "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {recentFoods.map(l => (
+                  {recentFoods.slice(0, quickVisibleCount).map(l => (
                     <button key={l.id} onClick={() => reAddFromRecent(l)} style={fdResultRow}>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -5274,6 +5389,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </div>
                     </button>
                   ))}
+                  {recentFoods.length > quickVisibleCount && (
+                    <FdShowMore remaining={recentFoods.length - quickVisibleCount} onClick={() => setQuickVisibleCount(n => n + 24)} />
+                  )}
                 </div>
               )
             )}
@@ -5285,7 +5403,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={fdEmptyHint}>No favorites match "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {favoritesFiltered.map(f => (
+                  {favoritesFiltered.slice(0, quickVisibleCount).map(f => (
                     <div key={f.id} style={fdQuickRowWrap}>
                       <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
@@ -5308,6 +5426,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </button>
                     </div>
                   ))}
+                  {favoritesFiltered.length > quickVisibleCount && (
+                    <FdShowMore remaining={favoritesFiltered.length - quickVisibleCount} onClick={() => setQuickVisibleCount(n => n + 24)} />
+                  )}
                 </div>
               )
             )}
@@ -5324,9 +5445,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div style={fdEmptyHint}>No recipes match "{quickQuery}".</div>
               ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {recipesFiltered.map(r => {
-                      const items = r.items || [];
-                      const kcal = fdRecipeItemsCalories(items, !!store.settings?.netCarbs);
+                    {recipesFiltered.slice(0, quickVisibleCount).map(r => {
+                      const summary = recipeSummaries.get(r.id) || fdRecipeSummary(r, !!store.settings?.netCarbs);
+                      const items = summary.items;
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
                           <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
@@ -5335,13 +5456,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               <div style={fdEntryMeta}>
                                 {items.length} ingredient{items.length === 1 ? '' : 's'}
                                 <span style={fdMetaDivider} />
-                                <FdMacroBits
-                                  protein={items.reduce((a, i) => a + (i.protein || 0), 0)}
-                                  carbs={items.reduce((a, i) => a + (i.carbs || 0), 0)}
-                                  fat={items.reduce((a, i) => a + (i.fat || 0), 0)} />
+                                <FdMacroBits protein={summary.protein} carbs={summary.carbs} fat={summary.fat} />
                               </div>
                             </div>
-                            <div className="num" style={{ fontSize: 12, color: UI.warn, flexShrink: 0 }}>{kcal} kcal</div>
+                            <div className="num" style={{ fontSize: 12, color: UI.warn, flexShrink: 0 }}>{summary.calories} kcal</div>
                           </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
@@ -5352,6 +5470,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         </div>
                       );
                     })}
+                    {recipesFiltered.length > quickVisibleCount && (
+                      <FdShowMore remaining={recipesFiltered.length - quickVisibleCount} onClick={() => setQuickVisibleCount(n => n + 24)} />
+                    )}
                   </div>
               )
             )}
@@ -5480,7 +5601,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
+      <Sheet open={customOpen} onClose={requestCloseCustomSheet} title="Custom item" titleColor="var(--accent)" panelRef={flyingSheetPanelRef} renderContent={() => (<>
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -5541,11 +5662,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Btn onClick={() => submitCustomItem(false)} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
           </div>
         )}
-      </Sheet>
+      </>)} />
 
       {/* ── Describe a meal: free text, a photo, or both -> parsed into
           mealItems, reviewed in the Sheet right below ── */}
-      <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)">
+      <Sheet open={mealDescribeOpen} onClose={closeMealDescribeSheet} title="Describe a meal" titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           Describe what you ate, attach a photo, or both. We'll estimate each item's macros (generously where cooking fat isn't specified), then you'll get a chance to review and adjust before anything's added.
         </div>
@@ -5577,7 +5698,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Btn kind="ghost" onClick={closeMealDescribeSheet} disabled={mealParsing} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={handleDescribeMeal} disabled={mealParsing || mealPhotoReading || (!mealDescription.trim() && !mealPhoto)} style={{ flex: 2 }}>{mealParsing ? 'Estimating…' : 'Estimate'}</Btn>
         </div>
-      </Sheet>
+      </>)} />
       {/* Hidden picker for the meal photo above: no `capture` attribute
           (unlike labelInputRef), a meal is often logged after the fact from
           an already-taken photo, and `capture` steers mobile browsers toward
@@ -5589,7 +5710,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           adjust it (opens the quantity sheet above at zIndex 200), trash to
           drop it outright, Plan it/Log it stages every remaining row at
           once. Nothing from here reaches store.foodLogs until that tap. ── */}
-      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)" panelRef={flyingSheetPanelRef}>
+      <Sheet open={mealItems != null} onClose={requestCloseMealReview} title="Review meal" titleColor="var(--accent)" panelRef={flyingSheetPanelRef} renderContent={() => (<>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           Tap an item to adjust its amount or numbers, remove anything that doesn't belong, or refine the whole estimate with a note.
         </div>
@@ -5640,7 +5761,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </Btn>
           </div>
         )}
-      </Sheet>
+      </>)} />
 
       {/* ── Refine sub-sheet, opened from the Review meal Sheet above at
           zIndex 200 (same nested-sheet pattern the quantity edit uses over
@@ -5706,7 +5827,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           at YESTERDAY's entries and pre-ticked: the reason to open this is
           that today's meal is nearly the same, so the work is unticking the
           one item that isn't. ── */}
-      <Sheet open={!!repeat} onClose={() => setRepeat(null)} title={repeat ? `Repeat ${repeat.label.toLowerCase()}` : 'Repeat yesterday'} titleColor="var(--accent)">
+      <Sheet open={!!repeat} onClose={() => setRepeat(null)} title={repeat ? `Repeat ${repeat.label.toLowerCase()}` : 'Repeat yesterday'} titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           {planMode
             ? "From yesterday, landing on today at the same times as planned meals you check off as you eat them."
@@ -5744,10 +5865,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               : 'Nothing picked'}
           </Btn>
         </div>
-      </Sheet>
+      </>)} />
 
       {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
-      <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)">
+      <Sheet open={copyMoveOpen} onClose={requestCloseCopyMove} title="Manage entries" titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: '16px' }}>
           {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
@@ -5794,7 +5915,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
           </Btn>
         )}
-      </Sheet>
+      </>)} />
 
       {/* ── Split a stacked hour (a meal-prep batch) across multiple meal
           times: how many meals, at what hours, and how much of each item
@@ -5890,6 +6011,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Field label="Recipe name" style={{ marginBottom: 16 }}>
               <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" />
             </Field>
+            <div style={{ marginBottom: 16 }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Portions</div>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <Stepper value={recipeBlockPortions} step={1} min={1}
+                  suffix={recipeBlockPortions === 1 ? ' portion' : ' portions'}
+                  onChange={v => setRecipeBlockPortions(Math.max(1, Math.round(v)))} />
+              </div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'center', marginTop: 6 }}>
+                Creates one log entry per portion, so you can move them to different times afterwards.
+              </div>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
               <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} label="Save as reusable recipe" />
@@ -5913,7 +6045,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
-      <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)">
+      <Sheet open={!!editFavId} onClose={requestCloseEditFavorite} title="Units" titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: '16px' }}>
           Add one or more units and relogging this favorite offers a picker (grams or a count of one of them) instead of always typing grams.
         </div>
@@ -5944,7 +6076,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Btn kind="ghost" onClick={closeEditFavorite} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={saveEditFavorite} style={{ flex: 2 }}>Save</Btn>
         </div>
-      </Sheet>
+      </>)} />
 
       {/* ── Barcode vs. label picker (opened by the search box's scan button) ── */}
       <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
@@ -6131,7 +6263,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Duplicate-recipe picker (header copy icon, see duplicateRecipe) ── */}
-      <Sheet open={duplicatePickerOpen} onClose={() => setDuplicatePickerOpen(false)} title="Duplicate recipe" titleColor="var(--accent)">
+      <Sheet open={duplicatePickerOpen} onClose={() => setDuplicatePickerOpen(false)} title="Duplicate recipe" titleColor="var(--accent)" renderContent={() => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '60vh', overflowY: 'auto' }}>
           {(store.foodRecipes || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
             const n = (r.items || []).length;
@@ -6146,7 +6278,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             );
           })}
         </div>
-      </Sheet>
+      )} />
 
       {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
       <Sheet open={!!shareSheet} onClose={() => setShareSheet(null)} title={shareSheet ? `Share ${shareSheet.recipe.name}` : 'Share recipe'} titleColor="var(--accent)" zIndex={200}>
@@ -6245,7 +6377,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           body) always clears the z-100 editor sheet; row removal only ever
           fires from the list, never from the z-200 grams sheet, so the
           confirm can never be covered. */}
-      <Sheet open={!!ingredientEditorEntry} onClose={closeIngredientEditor} title="Edit ingredients" titleColor="var(--accent)">
+      <Sheet open={!!ingredientEditorEntry} onClose={closeIngredientEditor} title="Edit ingredients" titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ marginBottom: 12 }}>
           <FdMacroHero label="Totals" calories={ingredientTotals.calories} protein={ingredientTotals.protein} carbs={ingredientTotals.carbs} fat={ingredientTotals.fat} compact />
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, textAlign: 'center' }}>
@@ -6283,7 +6415,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Btn kind="ghost" onClick={closeIngredientEditor} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={saveIngredientEditor} disabled={!ingredientItems.length} style={{ flex: 2 }}>Save</Btn>
         </div>
-      </Sheet>
+      </>)} />
 
       {/* Row grams sheet: mirrors RecipeEditorScreen's edit sheet minus the
           rename field and trash button (removal lives on the list rows
@@ -6319,7 +6451,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         Sits above stagedPanel: it's the momentary one of the two, stagedPanel
         is the one meant to persist until dealt with. */}
     {splitUndo && (
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.98)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
         <i className={`fa-solid ${splitUndo.kind === 'merge' ? 'fa-bowl-food' : 'fa-arrows-split-up-and-left'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
         <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, flex: 1, minWidth: 0 }}>
           {splitUndo.kind === 'merge' ? `Combined ${splitUndo.count} items into a recipe` : `Split into ${splitUndo.count} meals`}
@@ -6361,6 +6493,27 @@ function fdSumExtras(entries) {
 }
 function fdRecipeItemsCalories(items, netCarbs) {
   return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0), 0));
+}
+
+// Recipe objects are replaced immutably when an ingredient changes. A
+// WeakMap therefore gives every unchanged recipe one reusable macro summary
+// without retaining deleted recipes or adding cache fields to persisted data.
+const fdRecipeSummaryCache = new WeakMap();
+function fdRecipeSummary(recipe, netCarbs) {
+  if (!recipe || typeof recipe !== 'object') return { items: [], calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const items = Array.isArray(recipe.items) ? recipe.items : [];
+  const cached = fdRecipeSummaryCache.get(recipe);
+  if (cached && cached.items === items && cached.netCarbs === !!netCarbs) return cached.summary;
+  const sum = key => items.reduce((total, item) => total + (Number(item[key]) || 0), 0);
+  const summary = {
+    items,
+    calories: fdRecipeItemsCalories(items, !!netCarbs),
+    protein: fdRound1(sum('protein')),
+    carbs: fdRound1(sum('carbs')),
+    fat: fdRound1(sum('fat')),
+  };
+  fdRecipeSummaryCache.set(recipe, { items, netCarbs: !!netCarbs, summary });
+  return summary;
 }
 
 // ── Recipe share (receiver side) ────────────────────────────────────────────
@@ -6597,11 +6750,17 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
 // (grams for a food, portions for a recipe); editing an existing slot adjusts
 // its hour and day-type (and a food slot's grams), recipe portions are set at
 // add time (re-add to change them).
-function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
+function FoodTemplateScreen(props) {
+  const [pickerTab, setPickerTab] = useStateFd('favorites');
+  const [planSubTab, setPlanSubTab] = useStateFd('mine');
+  if (!props.open) return null;
+  return React.createElement(FoodTemplateScreenOpen, { ...props, pickerTab, setPickerTab, planSubTab, setPlanSubTab });
+}
+function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, pickerTab, setPickerTab, planSubTab, setPlanSubTab }) {
   const [confirmEl, confirm] = useConfirm();
   const [pickerOpen, setPickerOpen] = useStateFd(false);
-  const [pickerTab, setPickerTab] = useStateFd('favorites');
   const [pickerQuery, setPickerQuery] = useStateFd('');
+  const [pickerVisibleCount, setPickerVisibleCount] = useStateFd(24);
   // Database search (Search tab): separate from pickerQuery, which only
   // live-filters the already-loaded favorites/recipes lists. This one is an
   // explicit, network-backed lookup (same LB.searchFoods used everywhere
@@ -6645,7 +6804,6 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   // split (by isTemplate), and a plan can be pushed to a client.
   const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
   const coachClients = useMemoFd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
-  const [planSubTab, setPlanSubTab] = useStateFd('mine'); // 'mine' | 'templates'
   const [pushPlan, setPushPlan] = useStateFd(null);   // plan being pushed
   const [pushTarget, setPushTarget] = useStateFd(null); // client picked for the activate-choice step
   const [pushBusy, setPushBusy] = useStateFd(false);
@@ -7141,18 +7299,23 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setDraft(null);
   }
 
+  const pickerFavoritesSorted = useMemoFd(() => {
+    if (!pickerOpen || pickerTab !== 'favorites') return [];
+    return [...(store.foodFavorites || [])].sort((a, b) => a.foodName.localeCompare(b.foodName));
+  }, [pickerOpen, pickerTab, store.foodFavorites]);
   const favs = useMemoFd(() => {
     const q = pickerQuery.trim().toLowerCase();
-    const list = q ? (store.foodFavorites || []).filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q)) : (store.foodFavorites || []);
-    return [...list].sort((a, b) => a.foodName.localeCompare(b.foodName));
-  }, [store.foodFavorites, pickerQuery]);
+    return q ? pickerFavoritesSorted.filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q)) : pickerFavoritesSorted;
+  }, [pickerFavoritesSorted, pickerQuery]);
+  const pickerRecipesSorted = useMemoFd(() => {
+    if (!pickerOpen || pickerTab !== 'recipes') return [];
+    return [...(store.foodRecipes || [])].sort((a, b) => a.name.localeCompare(b.name));
+  }, [pickerOpen, pickerTab, store.foodRecipes]);
   const recipes = useMemoFd(() => {
     const q = pickerQuery.trim().toLowerCase();
-    const list = q ? (store.foodRecipes || []).filter(r => r.name.toLowerCase().includes(q)) : (store.foodRecipes || []);
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [store.foodRecipes, pickerQuery]);
+    return q ? pickerRecipesSorted.filter(r => r.name.toLowerCase().includes(q)) : pickerRecipesSorted;
+  }, [pickerRecipesSorted, pickerQuery]);
 
-  if (!open) return null;
   // Meal count badge, the closest food analog to a training plan's day pills.
   const slotCountFor = pid => (store.foodTemplateSlots || []).filter(s => s.mealPlanId === pid).length;
 
@@ -7162,7 +7325,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
         right={viewedPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} aria-label="Add a meal" style={fdTopAddBtn}>
+            <button onClick={() => { setPickerQuery(''); setPickerVisibleCount(24); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} aria-label="Add a meal" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
             <button className="label" onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
@@ -7290,10 +7453,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       </div>
 
       {/* Food source picker: the user's Favorites and Recipes, or a fresh database search */}
-      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add a meal" titleColor="var(--accent)">
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add a meal" titleColor="var(--accent)" renderContent={() => (<>
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
           {[['search', 'Search'], ['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
-            <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
+            <button key={id} onClick={() => { setPickerTab(id); setPickerVisibleCount(24); }} style={fdSegBtn(pickerTab === id)}>{label}</button>
           ))}
         </div>
         {pickerTab === 'search' ? (
@@ -7356,11 +7519,12 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           </>
         ) : (
           <>
-            <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
+            <input value={pickerQuery} onChange={e => { setPickerQuery(e.target.value); setPickerVisibleCount(24); }} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
               {pickerTab === 'favorites' ? (
                 favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food while adding it to save it here.</div>
-                : favs.map(f => (
+                : <>
+                  {favs.slice(0, pickerVisibleCount).map(f => (
                   <button key={f.id} onClick={() => openAddFood(f)} style={fdResultRow}>
                     <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <div style={fdEntryName}>{f.foodName}</div>
@@ -7368,10 +7532,15 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                     </div>
                     <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
                   </button>
-                ))
+                  ))}
+                  {favs.length > pickerVisibleCount && (
+                    <FdShowMore remaining={favs.length - pickerVisibleCount} onClick={() => setPickerVisibleCount(n => n + 24)} />
+                  )}
+                </>
               ) : (
                 recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet. Build one from a few ingredients you log together often.</div>
-                : recipes.map(r => (
+                : <>
+                  {recipes.slice(0, pickerVisibleCount).map(r => (
                   <button key={r.id} onClick={() => openAddRecipe(r)} style={fdResultRow}>
                     <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <div style={fdEntryName}>{r.name}</div>
@@ -7379,12 +7548,16 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                     </div>
                     <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
                   </button>
-                ))
+                  ))}
+                  {recipes.length > pickerVisibleCount && (
+                    <FdShowMore remaining={recipes.length - pickerVisibleCount} onClick={() => setPickerVisibleCount(n => n + 24)} />
+                  )}
+                </>
               )}
             </div>
           </>
         )}
-      </Sheet>
+      </>)} />
 
       {/* ── Barcode vs. label picker (opened by the Search tab's scan button) ── */}
       <Sheet open={pickerScanPickerOpen} onClose={() => setPickerScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
@@ -7607,12 +7780,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 // for the full merge logic), setStore is only for the per-food prefs
 // (fdSetShoppingPref); still no userId/useConfirm like its siblings, it
 // never touches Supabase directly or needs a destructive-action confirm.
-function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
+function ShoppingListScreen(props) {
+  const [screenTab, setScreenTab] = useStateFd('list');
+  const [excludedOpen, setExcludedOpen] = useStateFd(false);
+  if (!props.open) return null;
+  return React.createElement(ShoppingListScreenOpen, { ...props, screenTab, setScreenTab, excludedOpen, setExcludedOpen });
+}
+function ShoppingListScreenOpen({ open, onClose, store, setStore, today, userId, screenTab, setScreenTab, excludedOpen, setExcludedOpen }) {
   // 'list' is the default/most-opened path (see fdBuildInventoryList's own
   // comment): the Running Low section and its banner stay there rather than
   // moving to 'inventory', so the warning still surfaces on the path a user
   // actually opens often, not just the one dedicated to browsing stock.
-  const [screenTab, setScreenTab] = useStateFd('list'); // 'list' | 'inventory'
   // store.foodLogs is boot-windowed (FOOD_HISTORY_WINDOW_DAYS), which
   // understates consumption, and so overstates stock, for a baseline set
   // further back than that (a bulk item bought a few times a year). Lazily
@@ -7721,7 +7899,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
   // Collapsed by default: the Excluded section is set-aside stuff the user
   // already decided not to buy, not something that needs to compete for
   // attention with the actual shopping list every time this screen opens.
-  const [excludedOpen, setExcludedOpen] = useStateFd(false);
 
   // One-time "Running Low" banner: shows only for a dip the user hasn't
   // already seen (see fdReadLowStockAcks), dismissing marks every currently-
@@ -8133,7 +8310,6 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
     }
   };
 
-  if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title="Shopping list" onBack={onClose} right={
@@ -8206,7 +8382,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 // sits, leaving it visible only in the gaps between rows.
                 // Excluded and well-stocked items never make it into
                 // includedList, neither belongs in a "what to buy" poster.
-                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
+                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'none', cursor: 'default' }}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{item.displayName}</div>
                     {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
@@ -8693,7 +8869,11 @@ function fdAutoGrow(el) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
-function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
+function RecipeEditorScreen(props) {
+  if (!props.open) return null;
+  return React.createElement(RecipeEditorScreenOpen, props);
+}
+function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
   const [items, setItems] = useStateFd([]);
@@ -8996,7 +9176,6 @@ function RecipeEditorScreen({ open, onClose, onSave, onShare, recipe, store }) {
     setCapturing,
   });
 
-  if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={recipe ? 'Edit recipe' : 'New recipe'} onBack={requestClose}
@@ -9419,7 +9598,11 @@ function fdComputeCookingDiff(originalItems, finalItems, swapEvents) {
 // LATER sibling than recipeLogPrompt's own Sheet in FoodScreen's return, so
 // the tie against THAT is won by DOM order instead, the exact same mechanism
 // RecipeEditorScreen already relies on for nesting this same picker.
-function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe, onNoteChange }) {
+function CookingModeScreen(props) {
+  if (!props.open) return null;
+  return React.createElement(CookingModeScreenOpen, props);
+}
+function CookingModeScreenOpen({ open, recipe, draft, store, onClose, onFinish, onUpdateRecipe, onNoteChange }) {
   const [confirmEl, confirm] = useConfirm();
   const [items, setItems] = useStateFd([]);
   const originalItemsRef = useRefFd([]);
@@ -9817,7 +10000,6 @@ function CookingModeScreen({ open, recipe, draft, store, onClose, onFinish, onUp
     proceedToLog();
   }
 
-  if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       {confirmEl}
@@ -10178,7 +10360,7 @@ function FdStatsBody({ store }) {
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
       color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
-      textShadow: period === id ? 'none' : 'var(--text-lift)',
+      textShadow: 'none',
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );
@@ -10245,9 +10427,14 @@ function FdStatsBody({ store }) {
 // into its scaled rows by fdExplodeRecipeItems (never as a single opaque
 // row). excludeRecipeId keeps the recipe currently being edited out of that
 // list, a recipe cannot include itself.
-function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeRecipeId }) {
+function FdIngredientPicker(props) {
+  if (!props.open) return null;
+  return React.createElement(FdIngredientPickerOpen, props);
+}
+function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excludeRecipeId }) {
   const [confirmEl, confirm] = useConfirm();
   const [pickTab, setPickTab] = useStateFd('search');
+  const [listVisibleCount, setListVisibleCount] = useStateFd(24);
   const [query, setQuery] = useStateFd('');
   const [searching, setSearching] = useStateFd(false);
   const [searchError, setSearchError] = useStateFd(null);
@@ -10518,9 +10705,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   // Alphabetical like favoritesSorted; the recipe currently being edited
   // (excludeRecipeId) and empty recipes are filtered out, there is nothing
   // to explode in either.
-  const recipesSorted = useMemoFd(() => (store.foodRecipes || [])
+  const recipesSorted = useMemoFd(() => pickTab === 'recipes' ? (store.foodRecipes || [])
     .filter(r => r.id !== excludeRecipeId && (r.items || []).length > 0)
-    .sort((a, b) => a.name.localeCompare(b.name)), [store.foodRecipes, excludeRecipeId]);
+    .sort((a, b) => a.name.localeCompare(b.name)) : [], [pickTab, store.foodRecipes, excludeRecipeId]);
   function openExplodeRecipe(r) {
     setExplodeRecipe(r);
     setExplodeMode('portions');
@@ -10617,6 +10804,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
   }
 
   const recentPicks = useMemoFd(() => {
+    if (pickTab !== 'recent') return [];
     // Sort by (date, time) first, exactly like recentFoodsAll: store.foodLogs
     // is not in date order (a backdated entry gets prepended), so the
     // first-seen-wins walk below picked essentially arbitrary "recent" foods.
@@ -10632,12 +10820,12 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
       if (out.length >= 20) break;
     }
     return out;
-  }, [store.foodLogs]);
+  }, [pickTab, store.foodLogs]);
   // Alphabetical, same as FoodScreen's own favoritesFiltered: store.foodFavorites
   // is otherwise recency/insertion-ordered, which read as random here.
   const favoritesSorted = useMemoFd(
-    () => [...(store.foodFavorites || [])].sort((a, b) => a.foodName.localeCompare(b.foodName)),
-    [store.foodFavorites],
+    () => pickTab === 'favorites' ? [...(store.foodFavorites || [])].sort((a, b) => a.foodName.localeCompare(b.foodName)) : [],
+    [pickTab, store.foodFavorites],
   );
 
   const manualValid = mName.trim() && fdNum(mP) != null && fdNum(mC) != null && fdNum(mF) != null && fdNum(mCal) != null;
@@ -10687,7 +10875,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
         {confirmEl}
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 12 }}>
           {(showRecipes ? [...FD_PICKER_TABS, { id: 'recipes', label: 'Recipes' }] : FD_PICKER_TABS).map(t => (
-            <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
+            <button key={t.id} onClick={() => { setPickTab(t.id); setListVisibleCount(24); }} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
           ))}
         </div>
 
@@ -10794,7 +10982,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
             <div style={fdEmptyHint}>No favorites yet. Star a food while adding it to save it here.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
-              {favoritesSorted.map(f => (
+              {favoritesSorted.slice(0, listVisibleCount).map(f => (
                 <button key={f.id} onClick={() => openQtyForLog(f)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -10809,6 +10997,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
                   </div>
                 </button>
               ))}
+              {favoritesSorted.length > listVisibleCount && (
+                <FdShowMore remaining={favoritesSorted.length - listVisibleCount} onClick={() => setListVisibleCount(n => n + 24)} />
+              )}
             </div>
           )
         )}
@@ -10842,18 +11033,21 @@ function FdIngredientPicker({ open, onClose, onAdd, store, showRecipes, excludeR
             <div style={fdEmptyHint}>No other recipes yet. Build one in the editor and it will show up here.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
-              {recipesSorted.map(r => (
+              {recipesSorted.slice(0, listVisibleCount).map(r => (
                 <button key={r.id} onClick={() => openExplodeRecipe(r)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{r.name}</div>
                     <div style={fdEntryMeta}>{(r.items || []).length} ingredients · {r.portions || 1} {r.portions === 1 ? 'portion' : 'portions'}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div className="num" style={{ fontSize: 12, color: UI.warn }}>{fdRecipeItemsCalories(r.items, !!store.settings?.netCarbs)} kcal</div>
+                    <div className="num" style={{ fontSize: 12, color: UI.warn }}>{fdRecipeSummary(r, !!store.settings?.netCarbs).calories} kcal</div>
                     <div style={fdEntryMeta}>whole batch</div>
                   </div>
                 </button>
               ))}
+              {recipesSorted.length > listVisibleCount && (
+                <FdShowMore remaining={recipesSorted.length - listVisibleCount} onClick={() => setListVisibleCount(n => n + 24)} />
+              )}
             </div>
           )
         )}
@@ -11429,7 +11623,7 @@ function fdSegBtn(active, danger) {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? (danger ? UI.danger : 'var(--accent)') : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   };

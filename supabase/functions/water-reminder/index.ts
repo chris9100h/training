@@ -1,3 +1,6 @@
+import { sendNotification } from '../_shared/notifications.ts';
+import { localClock } from '../_shared/time.ts';
+
 // Water reminder cron function. Mirrors the training `reminder` function but
 // computes a hydration ramp: for each opted-in user it places "now" on the
 // linear expected curve between their daily start and end time (using the
@@ -15,8 +18,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const THRESHOLD_ML = 250;              // only nudge when this far behind the ramp
 const COOLDOWN_MS = 60 * 60 * 1000;    // at most one nudge per hour per user
 
@@ -34,15 +35,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
-async function sendWebPush(userId: string, title: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, title, message }),
-  }).catch(e => console.error(`[water-reminder] web-push error for ${userId}:`, e));
-}
-
 function hhmmToDecimal(t: string): number {
   const [h, m] = (t || '0:0').split(':').map(Number);
   return (h || 0) + (m || 0) / 60;
@@ -56,12 +48,13 @@ interface Row {
   water_start_time: string | null;
   water_end_time: string | null;
   water_last_push_at: string | null;
+  time_zone: string | null;
   tz_offset_minutes: number | null;
 }
 
 async function sendReminders() {
   const r = await dbFetch(
-    'zane_user_settings?water_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,water_goal_ml,water_start_time,water_end_time,water_last_push_at,tz_offset_minutes'
+    'zane_user_settings?water_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,water_goal_ml,water_start_time,water_end_time,water_last_push_at,time_zone,tz_offset_minutes'
   );
   // A non-2xx PostgREST response is still valid JSON (an error object, not an
   // array), so `.json().catch(...)` alone never catches it: `rows` would be
@@ -80,13 +73,10 @@ async function sendReminders() {
     const end = hhmmToDecimal(row.water_end_time ?? '22:00');
     if (end <= start) continue;
 
-    // Shift "now" into the user's local wall clock via their UTC offset. The
-    // shifted Date's UTC fields then read as local time / local date.
-    const tz = row.tz_offset_minutes ?? 0;
-    const shifted = new Date(now + tz * 60000);
-    const localH = shifted.getUTCHours() + shifted.getUTCMinutes() / 60;
+    const local = localClock(now, row.time_zone, row.tz_offset_minutes);
+    const localH = local.msSinceMidnight / 3600000;
     if (localH < start || localH > end) continue; // outside the daily window
-    const localDate = shifted.toISOString().slice(0, 10);
+    const localDate = local.date;
 
     const expected = Math.round(goal * (localH - start) / (end - start));
 
@@ -109,23 +99,18 @@ async function sendReminders() {
     // and a key set) send only Pushover, otherwise send native Web Push. This
     // matches the use_pushover "instead of Web Push" semantics used elsewhere,
     // so the user never gets the same nudge on both channels.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
-        });
-        console.log(`[water-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        console.error(`[water-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      await sendWebPush(row.user_id, title, message);
-    }
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'water-reminder',
+      ttl: 10800,
+    });
+    if (!delivered) continue;
 
-    // Stamp the throttle. fetch only rejects on transport failure, so a
+    // Stamp the throttle only after a successful handoff. fetch only rejects on transport failure, so a
     // PATCH that comes back 4xx/5xx resolves like a success and the write
     // silently never happened. Check the status explicitly, the same way
     // medication-reminder checks its state patch, otherwise a broken throttle

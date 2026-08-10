@@ -350,9 +350,12 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
       if (isTrainingDay) {
         if (planStartDateStr && dateStr < planStartDateStr) continue;
-        // Sick/vacation days don't count against adherence.
+        // Sick and vacation days don't count against adherence. Deload and
+        // cleanup still follow the active plan, just with reduced loads, so
+        // those training days remain part of the planned/done count.
         const ts = date.getTime();
         const inStatusPeriod = (clientStore.statusPeriods || []).some(p => {
+          if (!['sick', 'vacation'].includes(p.mode)) return false;
           const start = new Date(p.startedAt).getTime();
           const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
           return ts >= start && ts <= end;
@@ -620,13 +623,17 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                     const tr = LB.techniqueRounds(s);
                     const strList = tr.rounds.length ? tr.rounds.filter(r => r.stretch).map(r => r.stretch) : (tr.stretch ? [tr.stretch] : []);
                     const strTag = strList.length ? ` +stretch ${strList.map(x => x.timeSec + 's').join('/')}` : '';
-                    const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                    // setLoadLabel, not raw kg: on a plus_load set that is the belt
+                    // figure, which is what the chain line below already prints and what
+                    // every athlete-side view prints. Left raw, a straight set and a drop
+                    // set of the SAME lift stood side by side in two different spaces.
+                    const main = `${LB.setLoadLabel(s) ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
                     if (tr.kind === 'weighted_stretch') return `${main}${strTag}`;
                     if (tr.kind === 'lengthened_partial') {
                       return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
                     }
                     if (tr.kind) {
-                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(s, d.kg) ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                       const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
                       return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
                     }
@@ -754,7 +761,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-                            {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg != null ? `${s.kg}${unit}` : '—'} × {s.reps ?? s.repsL ?? '—'}</>}
+                            {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{LB.setLoadLabel(s) != null ? `${LB.setLoadLabel(s)}${unit}` : '—'} × {s.reps ?? s.repsL ?? '—'}</>}
                           </span>
                         )) : (
                           <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>First time, no weight data yet</span>
@@ -1617,7 +1624,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
                   {sess.sets.map((st, si) => (
                     <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
                       {st.timeSec != null ? LB.fmtDuration(st.timeSec) : (<>
-                        {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
+                        {LB.setLoadLabel(st) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
                         <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
                         {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                       </>)}
@@ -1759,13 +1766,13 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               const tr = LB.techniqueRounds(s);
               const strList = tr.rounds.length ? tr.rounds.filter(r => r.stretch).map(r => r.stretch) : (tr.stretch ? [tr.stretch] : []);
               const strTag = strList.length ? ` +stretch ${strList.map(x => x.timeSec + 's').join('/')}` : '';
-              const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+              const main = `${LB.setLoadLabel(s) ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
               if (tr.kind === 'weighted_stretch') return `${main}${strTag}`;
               if (tr.kind === 'lengthened_partial') {
                 return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
               }
               if (tr.kind) {
-                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(s, d.kg) ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                 const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
                 return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
               }

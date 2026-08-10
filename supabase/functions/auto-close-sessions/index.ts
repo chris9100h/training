@@ -4,6 +4,38 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+async function sendPushover(userKey: string, userId: string, message: string): Promise<boolean> {
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  try {
+    const response = await fetch(`${base}/functions/v1/pushover`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, title: 'Zane', userKey, userId }),
+    });
+    if (!response.ok) console.error(`[auto-close] pushover handoff failed for ${userId}: ${response.status}`);
+    return response.ok;
+  } catch (e) {
+    console.error('[auto-close] pushover error:', e);
+    return false;
+  }
+}
+
+async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  try {
+    const response = await fetch(`${base}/functions/v1/web-push`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, title, message }),
+    });
+    if (!response.ok) console.error(`[auto-close] web-push handoff failed for ${userId}: ${response.status}`);
+    return response.ok;
+  } catch (e) {
+    console.error('[auto-close] web-push error:', e);
+    return false;
+  }
+}
+
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -16,24 +48,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
       ...(options.headers ?? {}),
     },
   });
-}
-
-async function sendPushover(userKey: string, userId: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/pushover`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, title: 'Zane', userKey, userId }),
-  }).catch(e => console.error('[auto-close] pushover error:', e));
-}
-
-async function sendWebPush(userId: string, title: string, message: string) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  return fetch(`${base}/functions/v1/web-push`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, title, message }),
-  }).catch(e => console.error('[auto-close] web-push error:', e));
 }
 
 Deno.serve(async (req) => {

@@ -43,6 +43,7 @@ const BACKUP_ENUM = [
   'zane_workout_templates', 'zane_glucose_logs', 'zane_cardio_plans',
   'zane_status_periods', 'zane_meso_states', 'zane_checkin_schema_templates',
   'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_water_logs',
+  'zane_adaptive_tdee_history',
   'zane_food_logs', 'zane_food_favorites', 'zane_food_recipes',
   'zane_food_template_slots', 'zane_food_meal_plans', 'zane_food_shopping_prefs',
   'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items',
@@ -71,6 +72,7 @@ const EXCLUDED = {
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',
   zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
+  zane_meal_reminder_deliveries: 'server-side reminder delivery ledger, derived provider state rather than user content',
 };
 
 // Columns that legitimately never round-trip.
@@ -83,11 +85,11 @@ const PER_TABLE_ALLOW = {
   // sw_version: internal client marker. auto_close_notify / manual_calories: not
   // part of the store model (never loaded/synced), so nothing to round-trip; add
   // them to loadFromSupabase + the store if they ever become real settings.
-  // tz_offset_minutes: environment-derived, auto-set by the client on load.
+  // tz_offset_minutes/time_zone: environment-derived, auto-set by the client on load.
   // water_last_push_at: server-written throttle for the water reminder cron.
   // daily_log_reminder_last_date: server-written per-day throttle for the
   // daily-log-reminder cron, same status as water_last_push_at.
-  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at', 'daily_log_reminder_last_date']),
+  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'time_zone', 'water_last_push_at', 'daily_log_reminder_last_date']),
   // tier / tier_granted_at: server-authored, granted by grant_lifetime_if_qualified()
   // and reverted on any client write by zane_profiles_protect_tier. Deliberately
   // NOT restorable: a backup file is user-editable, so importing it would be a
@@ -155,7 +157,7 @@ function captureImportedColumns() {
     skips: [{}], cardioLogs: [{}], dailyLogs: [{}], workoutTemplates: [{}],
     glucoseLogs: [{}], cardioPlans: [{}], statusPeriods: [{}], mesoStates: [{}],
     checkinSchemaTemplates: [{}], bloodPressureLogs: [{}], bodyTempLogs: [{}],
-    waterLogs: [{}], foodLogs: [{}], foodFavorites: [{}], foodRecipes: [{}],
+    waterLogs: [{}], adaptiveTdeeHistory: [{ asOfDate: '2026-01-01', windowStart: '2025-12-19', windowEnd: '2026-01-01', tdee: 2000, avgCalories: 1900, weightStartKg: 80, weightEndKg: 79.5, weightChangeKg: -0.5, weightRateKgWeek: -0.25, daySpan: 10, calorieDays: 5, weighIns: 6 }], foodLogs: [{}], foodFavorites: [{}], foodRecipes: [{}],
     foodTemplateSlots: [{}], foodMealPlans: [{}], foodShoppingPrefs: [{}],
     medicationPlans: [{}], medications: [{}], medicationPlanItems: [{}], medicationScheduleSlots: [{}], medicationLogs: [{}],
     activeScheduleId: null, activeMealTemplateId: null, cycleIndex: 0, customDayTypes: [],

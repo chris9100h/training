@@ -463,15 +463,20 @@ const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every
 // and stays at the default (false) below, no explicit "expanded" wrap needed.
 const ChartCompactContext = React.createContext(false);
 
-function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false }) {
+function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false, plotTop = CHART_PLOT_TOP, plotH = CHART_PLOT_H }) {
   const wrapRef = useRefH(null);
+  const rectRef = useRefH(null);
+  const pointerRef = useRefH(null);
+  const frameRef = useRefH(null);
   const [active, setActive] = useStateH(null);
   const compact = React.useContext(ChartCompactContext);
 
-  const pick = (clientX, clientY) => {
-    const el = wrapRef.current;
-    if (!el || !points.length) return;
-    const rect = el.getBoundingClientRect();
+  const measure = () => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    rectRef.current = rect?.width && rect?.height ? rect : null;
+  };
+  const pick = (clientX, clientY, rect) => {
+    if (!rect || !points.length) return;
     if (!rect.width || !rect.height) return;
     const vbX = ((clientX - rect.left) / rect.width) * W;
     const vbY = ((clientY - rect.top) / rect.height) * H;
@@ -481,15 +486,38 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       const d = mode === 'xy' ? dx * dx + dy * dy : Math.abs(dx);
       if (d < bestD) { bestD = d; best = i; }
     }
-    setActive(best);
+    setActive(current => current === best ? current : best);
+  };
+  const flushPointer = () => {
+    frameRef.current = null;
+    const pointer = pointerRef.current;
+    if (!pointer) return;
+    pick(pointer.clientX, pointer.clientY, rectRef.current);
+  };
+  const queuePoint = e => {
+    if (!rectRef.current) measure();
+    pointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+    if (frameRef.current == null) frameRef.current = requestAnimationFrame(flushPointer);
   };
   // Activate on pointer MOVE only: mouse hover fires move continuously, a touch
   // scrub fires move while the finger drags. Deliberately not on pointerdown, so
   // a tap never flashes the box and starting a vertical scroll on a chart never
-  // flickers one. No pointer capture: touchAction 'pan-y' lets the browser keep
-  // vertical list-scrolling while we get horizontal drags.
-  const onPoint = e => pick(e.clientX, e.clientY);
-  const clear = () => setActive(null);
+  // flickers one. Geometry is measured once per hover or drag gesture, and
+  // pointer moves are coalesced to one lookup per animation frame.
+  const begin = () => measure();
+  const clear = () => {
+    if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pointerRef.current = null;
+    rectRef.current = null;
+    setActive(current => current == null ? current : null);
+  };
+  useEffectH(() => () => {
+    if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pointerRef.current = null;
+    rectRef.current = null;
+  }, []);
 
   // Guard the index: a time-frame switch can shrink `points` while a stale
   // `active` still points past the new end.
@@ -505,7 +533,8 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
   return (
     <div ref={wrapRef} data-reorder-ignore="true"
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
-      onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
+      onPointerEnter={begin} onPointerDown={begin} onPointerMove={queuePoint}
+      onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear} onLostPointerCapture={clear}>
       {children}
       {!p && !compact && !hideHint && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
@@ -514,7 +543,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       )}
       {p && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
+          <div style={{ position: 'absolute', left: leftPct + '%', top: (plotTop / H) * 100 + '%', height: (plotH / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
@@ -578,7 +607,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
               color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: tf === t.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -1420,12 +1449,20 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     // This hands dailyLogAdherence a synthetic literal rather than the row,
     // so the meal-of-choice flag has to be passed in explicitly: it does not
     // ride along the way it does for the callers that pass the real log.
-    let { adherence, targetsSnap } = dayMode
+    // The SEVENTH writer of this pair, and the one the predicate change missed.
+    // Only sick and vacation blank a day (LB.isNutritionUnscoredMode); a deload
+    // or cleanup day eats to the same targets as any other. Left on raw dayMode
+    // this wrote adherence null AND targetsSnap null for every hand-saved
+    // deload day, which then also dropped the flex day-type the user had just
+    // chosen on the slider, so the day was re-scored against the rest-day
+    // target on the next Health mount.
+    const dayUnscored = LB.isNutritionUnscoredMode(dayMode);
+    let { adherence, targetsSnap } = dayUnscored
       ? { adherence: null, targetsSnap: null }
       : LB.dailyLogAdherence({ protein, carbs, fat, mealOfChoice: existing?.mealOfChoice }, targets, isTraining);
     // Don't let a macro-less save (incomplete macros / no macro targets) wipe an
     // existing flex day-type override off the log.
-    if (!dayMode && flexActive && !targetsSnap) {
+    if (!dayUnscored && flexActive && !targetsSnap) {
       const dt = existing?.targetsSnap?.dayType;
       if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
     }
@@ -1573,7 +1610,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                   flex: 1, padding: '14px 4px', cursor: disabled ? 'default' : 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  textShadow: active ? 'none' : 'var(--text-lift)',
+                  textShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   opacity: disabled ? 0.35 : 1,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
@@ -1642,7 +1679,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
               color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: netCarbs === o.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -2031,15 +2068,17 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           and is not portaled, so nesting it inside a scroll container invites
           clipping. zIndex above this screen's own 100, the same bump the other
           sheets stacked on top of a full-page screen use. */}
-      <Sheet open={cleanupSheet} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
-        <CleanupStartBody
-          percent={cleanupDraftPct}
-          onPercent={setCleanupDraftPct}
-          startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
-          onCancel={() => setCleanupSheet(false)}
-          onStart={startCleanupWithPct}
-        />
-      </Sheet>
+      {cleanupSheet && (
+        <Sheet open={true} onClose={() => setCleanupSheet(false)} title="Cleanup week" titleColor="var(--accent)" zIndex={200}>
+          <CleanupStartBody
+            percent={cleanupDraftPct}
+            onPercent={setCleanupDraftPct}
+            startLabel={cleanupStartISO ? new Date(cleanupStartISO).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' }) : null}
+            onCancel={() => setCleanupSheet(false)}
+            onStart={startCleanupWithPct}
+          />
+        </Sheet>
+      )}
     </Screen>
   );
 }
@@ -2121,6 +2160,13 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // It stays editable regardless, because someone can want targets before they
   // have ever logged a weight, and that used to block the whole sheet.
   const loggedWeight = LB.latestBodyweight(store);
+  const estimatorConfigured = healthInt(calc.heightCm) > 0
+    && healthInt(calc.birthYear) > 0
+    && !!calc.sex
+    && !!calc.activity
+    && !!calc.goal
+    && calc.trainingDays != null
+    && (healthNum(calc.weightKg) > 0 || loggedWeight != null);
 
   // How often they actually train, from the last four weeks of real sessions
   // rather than from what a plan says: plans come in weekday, cycle and flex
@@ -2139,13 +2185,18 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // another one is edited, which is the only way to keep a number you typed
   // from being rebalanced away by the next edit.
   const [locks, setLocks] = useStateH({ training: {}, rest: {} });
+  const [sheetMode, setSheetMode] = useStateH(estimatorConfigured ? 'summary' : 'wizard');
+  const [wizardStep, setWizardStep] = useStateH(estimatorConfigured ? 3 : 0);
+  const [wizardError, setWizardError] = useStateH('');
+  const [confirmEl, confirm] = useConfirm(300);
+  const initialSnap = useRefH(null);
 
   useEffectH(() => {
     if (!open) return;
     const storedWeight = calc.weightKg != null
       ? String(Math.round((isLbs ? calc.weightKg / LBS_TO_KG : calc.weightKg) * 10) / 10)
       : '';
-    setForm({
+    const next = {
       weight: loggedWeight != null ? String(loggedWeight) : storedWeight,
       heightCm: calc.heightCm != null ? String(calc.heightCm) : '',
       birthYear: calc.birthYear != null ? String(calc.birthYear) : '',
@@ -2164,10 +2215,25 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       // the training day count instead of freezing at whatever it was when the
       // sheet was last saved.
       restRatioPct: calc.restRatioPct != null ? calc.restRatioPct : null,
-    });
+    };
+    setForm(next);
+    initialSnap.current = next;
     setManual(null);
     setLocks({ training: {}, rest: {} });
+    setSheetMode(estimatorConfigured ? 'summary' : 'wizard');
+    setWizardStep(estimatorConfigured ? 3 : 0);
+    setWizardError('');
   }, [open]); // eslint-disable-line
+
+  const isDirty = initialSnap.current != null && JSON.stringify(form) !== JSON.stringify(initialSnap.current);
+  const requestClose = async () => {
+    const hasProgress = sheetMode === 'wizard' && (wizardStep > 0 || isDirty);
+    if (hasProgress && !(await confirm(
+      'Your estimate settings will not be saved.',
+      { title: 'Discard settings?', ok: 'Discard', cancel: 'Keep editing', danger: true }
+    ))) return;
+    onClose();
+  };
 
   const weightInput = healthNum(form.weight);
   const weightKg = weightInput > 0 ? (isLbs ? weightInput * LBS_TO_KG : weightInput) : null;
@@ -2377,7 +2443,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent)' : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   });
@@ -2487,6 +2553,127 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
     </div>
   );
 
+  const wizardSteps = [
+    { id: 0, label: 'About you' },
+    { id: 1, label: 'Goal' },
+    { id: 2, label: 'Macro split' },
+    { id: 3, label: 'Review' },
+  ];
+  const optionLabel = (options, value, fallback = 'Not set') => options.find(o => o.id === value)?.label || fallback;
+  const summaryItem = (label, value) => (
+    <div style={{ minWidth: 0 }}>
+      <div className="micro" style={{ marginBottom: 3 }}>{label}</div>
+      <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, lineHeight: '18px', overflowWrap: 'anywhere' }}>{value}</div>
+    </div>
+  );
+  const summaryDaySection = (dayType, label) => (
+    <div style={{ marginBottom: dayType === 'training' ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 7 }}>
+        <span className="micro">
+          {label}
+          <span className="num" style={{ color: UI.inkFaint, marginLeft: 6, letterSpacing: 0 }}>
+            &times;{dayType === 'training' ? trainingDays : 7 - trainingDays}
+          </span>
+        </span>
+        <span className="num" style={{ fontSize: 13, color: UI.warn }}>{dayCalories(dayType)} kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {[['protein', 'Protein'], ['carbs', 'Carbs'], ['fat', 'Fat']].map(([key, macroLabel]) => (
+          <div key={key} style={{ flex: 1, minWidth: 0 }}>
+            <div className="micro" style={{ marginBottom: 2 }}>{macroLabel}</div>
+            <div className="num" style={{ fontSize: 17, color: UI.ink }}>
+              {shown?.[dayType]?.[key] ?? '–'}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>g</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  const startEditing = () => {
+    setSheetMode('wizard');
+    setWizardStep(0);
+    setWizardError('');
+  };
+  const wizardNext = () => {
+    if (wizardStep === 0 && (!weightKg || healthInt(form.heightCm) <= 0 || healthInt(form.birthYear) <= 0 || !form.sex)) {
+      setWizardError('Fill in weight, height, year of birth and sex to continue.');
+      return;
+    }
+    if (wizardStep === 1 && (form.goal !== 'maintain' && !(Number(form.rateKgPerWeek) > 0))) {
+      setWizardError('Choose how quickly you want your weight to change.');
+      return;
+    }
+    if (wizardStep === 2 && ((form.proteinFixed && !(proteinGVal > 0))
+      || (fatModeUI === 'perKg' && !(fatPerKg > 0))
+      || (fatModeUI === 'fixed' && !(fatGVal > 0)))) {
+      setWizardError('Add the fixed protein or fat value before continuing.');
+      return;
+    }
+    setWizardError('');
+    setWizardStep(s => Math.min(3, s + 1));
+  };
+  const wizardBack = () => {
+    setWizardError('');
+    setWizardStep(s => Math.max(0, s - 1));
+  };
+  const wizardGo = (step) => {
+    if (step <= wizardStep) {
+      setWizardError('');
+      setWizardStep(step);
+    }
+  };
+
+  const summaryView = (
+    <>
+      {hint('Your settings are ready. This compact view shows what the estimate is using. Edit settings to walk through the steps again.',
+        { fontSize: 12, lineHeight: '18px', marginBottom: 16 })}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Current setup</Bezel>
+      <Card style={{ padding: 12, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '11px 12px' }}>
+          {summaryItem(`Weight ${UI.unit()}`, form.weight ? `${form.weight} ${UI.unit()}` : 'Not set')}
+          {summaryItem('Height', form.heightCm ? `${form.heightCm} cm` : 'Not set')}
+          {summaryItem('Born', form.birthYear || 'Not set')}
+          {summaryItem('Sex', optionLabel([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex))}
+          {summaryItem('Daily activity', optionLabel(MACRO_ACTIVITY_OPTIONS, form.activity))}
+          {summaryItem('Goal', optionLabel(MACRO_GOAL_OPTIONS, form.goal))}
+          {form.goal !== 'maintain' && summaryItem('Rate', `${isLbs ? form.rateKgPerWeek / LBS_TO_KG : form.rateKgPerWeek} ${UI.unit()}/week`)}
+          {summaryItem('Training days', `${trainingDays} / week`)}
+        </div>
+      </Card>
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
+      {shown ? (
+        <Card style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
+            {headlineStat('Maintenance', est ? est.tdee : null, 'what you burn')}
+            <Hairline vertical style={{ alignSelf: 'stretch' }} />
+            {headlineStat('Your week', weekAvgCalories, deltaLabel,
+              deltaContradictsGoal ? UI.warn : UI.inkSoft)}
+          </div>
+          <Hairline style={{ marginBottom: 12 }} />
+          {summaryDaySection('training', 'Training day')}
+          {summaryDaySection('rest', 'Rest day')}
+          {hint(
+            <>
+              {form.proteinFixed ? `Protein is fixed at ${proteinGVal || 'the entered value'} g per day. ` : ''}
+              {fatModeUI === 'perKg' ? `Fat follows ${form.fatPerStr} g per ${UI.unit()}.` : form.fatFixed ? `Fat is fixed at ${fatGVal || 'the entered value'} g per day.` : 'Fat follows the automatic split.'}
+            </>, { marginTop: 12 })}
+        </Card>
+      ) : (
+        <Card style={{ padding: 14, marginBottom: 16, textAlign: 'center' }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 16, color: UI.inkGhost }} />
+          {hint('Fill in the missing details to see an estimate.', { marginTop: 8 })}
+        </Card>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={startEditing} style={{ flex: 1 }}>Edit settings</Btn>
+        <Btn onClick={standalone ? onClose : apply} disabled={!shown} style={{ flex: 1 }}>{standalone ? 'Done' : 'Use these numbers'}</Btn>
+      </div>
+    </>
+  );
+
   // zIndex above the default 100: this opens on top of MacroTargetSheet, the
   // same nesting idiom the food module's own quantity sheet uses.
   //
@@ -2502,13 +2689,31 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // and a rewrap shifts by exactly one line. Keep it that way: 12px copy may
   // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
-    <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
-      {hint(standalone
-        ? 'Rate, protein, fat and training split all live here, whatever you set feeds both this estimate and your weekly automatic check-ins.'
-        : 'A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
-        { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
+    <Sheet open={open} onClose={requestClose} title="Estimate targets" zIndex={200}>
+      {sheetMode === 'summary' ? summaryView : (
+        <>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+            {wizardSteps.map(step => (
+              <button key={step.id} onClick={() => wizardGo(step.id)} style={{
+                flex: 1, minWidth: 0, padding: '7px 3px', borderRadius: 4,
+                border: `var(--hair-width) solid ${wizardStep === step.id ? 'var(--accent)' : UI.hairStrong}`,
+                background: wizardStep === step.id ? 'var(--accent)' : step.id < wizardStep ? UI.bgInset : 'transparent',
+                color: wizardStep === step.id ? 'var(--accent-ink)' : step.id < wizardStep ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                textTransform: 'uppercase', cursor: step.id <= wizardStep ? 'pointer' : 'default',
+                WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+              }}>{step.label}</button>
+            ))}
+          </div>
 
-      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
+          {hint(standalone
+            ? 'Set the numbers once, then your automatic check-ins use them as the starting point.'
+            : 'A starting point, not a prescription. We will walk through the details one short step at a time.',
+            { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
+
+          {wizardStep === 0 && (
+            <>
+              <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
         <div style={{ flex: 1 }}>
@@ -2538,8 +2743,12 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Daily activity outside training',
         seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v }))),
         activityHint)}
+            </>
+          )}
 
-      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
+          {wizardStep === 1 && (
+            <>
+              <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
 
       {group('Goal', (
         <>
@@ -2560,32 +2769,13 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Training days per week',
         seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v }))),
         cyclesDays
-          ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
+          ? 'Training days get more carbs, rest days fewer. Fine-tune the split on the review step.'
           : 'Every day gets the same target, since there is no second day type to cycle against.')}
+            </>
+          )}
 
-      {/* How far the two day types are pulled apart. The week's total is fixed
-          at every setting, so this only decides where the calories sit inside
-          it. The automatic split is the sharpest one on offer and therefore the
-          slider's floor, which also makes it the default without pinning a
-          value that would then stop following the training day count. */}
-      {cyclesDays && group('Rest day calories', (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
-            onChange={e => {
-              const v = +e.target.value;
-              // Back at the floor it goes to null, so it follows the training
-              // day count again instead of pinning the rounded percentage.
-              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
-            }}
-            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
-          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
-        </div>
-      ),
-      restPct >= 100
-        ? 'Both day types eat the same. No carb cycling at all.'
-        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
-      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
-
+          {wizardStep === 2 && (
+            <>
       {/* Protein has no per-kg option, only the app's own 2g/kg default or a
           fixed number: for anyone with a settled protein target, holding it
           exact matters more than tracking a ratio that drifts with the
@@ -2656,6 +2846,31 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
         </>
       ))}
 
+            </>
+          )}
+
+          {wizardStep === 3 && (
+            <>
+      {/* The slider lives beside the live numbers it changes, so the user can
+          see the rest-day target and the weekly average while adjusting it. */}
+      {cyclesDays && group('Rest day calories', (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
+            onChange={e => {
+              const v = +e.target.value;
+              // Back at the floor it goes to null, so it follows the training
+              // day count again instead of pinning the rounded percentage.
+              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
+            }}
+            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
+          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
+        </div>
+      ),
+      restPct >= 100
+        ? 'Both day types eat the same. No carb cycling at all.'
+        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
+      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
+
       <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
 
       {shown ? (
@@ -2693,7 +2908,21 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
         </Card>
       )}
 
-      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>{standalone ? 'Save automation settings' : 'Use these numbers'}</Btn>
+            </>
+          )}
+
+          {wizardError && hint(wizardError, { color: UI.warn, marginBottom: 10 })}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {wizardStep > 0 && <Btn kind="ghost" onClick={wizardBack} style={{ flex: 1 }}>Back</Btn>}
+            {wizardStep < 3 ? (
+              <Btn onClick={wizardNext} style={{ flex: 1 }}>Next</Btn>
+            ) : (
+              <Btn onClick={apply} disabled={!shown} style={{ flex: 1 }}>{standalone ? 'Save automation settings' : 'Use these numbers'}</Btn>
+            )}
+          </div>
+        </>
+      )}
+      {confirmEl}
     </Sheet>
   );
 }
@@ -2792,11 +3021,13 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
       {section('Training', 'Training day', calsTraining)}
       {section('Rest', 'Rest day', calsRest)}
       <Btn onClick={save} style={{ width: '100%' }}>Save targets</Btn>
-      <MacroEstimatorSheet open={estimatorOpen} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
-        onApply={t => setForm({
-          proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
-          proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
-        })} />
+      {estimatorOpen && (
+        <MacroEstimatorSheet open={true} onClose={() => setEstimatorOpen(false)} store={store} setStore={setStore}
+          onApply={t => setForm({
+            proteinTraining: String(t.proteinTraining), carbsTraining: String(t.carbsTraining), fatTraining: String(t.fatTraining),
+            proteinRest: String(t.proteinRest), carbsRest: String(t.carbsRest), fatRest: String(t.fatRest),
+          })} />
+      )}
       {confirmEl}
     </Sheet>
   );
@@ -2812,7 +3043,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 // one thing. Deliberately kept visually quiet in every automation state
 // except "due": that row is the one thing in the lower box that must never
 // lose a fight for attention against the coach-info / SET-EDIT clutter.
-function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenSettings, children }) {
+function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
   const calc = store.settings?.macroCalc || {};
   const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
   // Offered while coached too now: a coach's numbers still always win (see
@@ -2889,12 +3120,22 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
     <>
     <HealthChartCard title="Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={dragHandle}
       headerExtra={
-        <button data-reorder-ignore="true" onClick={onSetTarget} style={{
-          background: 'transparent', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.4)`,
-          borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
-          fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
-          WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-        }}>{hasTargets ? 'EDIT' : 'SET'}</button>
+        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+          {(store.adaptiveTdeeHistory?.length || checkinEnabled) && (
+            <button data-reorder-ignore="true" onClick={onOpenHistory} style={{
+              background: 'transparent', border: 'var(--hair-width) solid ' + UI.hairStrong,
+              borderRadius: 4, padding: '3px 8px', color: UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}>HISTORY</button>
+          )}
+          <button data-reorder-ignore="true" onClick={onSetTarget} style={{
+            background: 'transparent', border: 'var(--hair-width) solid rgba(var(--accent-rgb),0.4)',
+            borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
+            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+          }}>{hasTargets ? 'EDIT' : 'SET'}</button>
+        </div>
       }>
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, marginBottom: 10 }}>{sourceLabel}</div>
       <div style={{ marginBottom: 10 }}>
@@ -2924,7 +3165,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
               flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
               background: calc.goal === o.id ? 'var(--accent)' : 'transparent',
               color: calc.goal === o.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: calc.goal === o.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.03em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -2948,7 +3189,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
           )}
         </div>
         {calc.lastAppliedTargets && ['Training', 'Rest'].map(suffix => (
-          <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+          <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', borderBottom: suffix === 'Training' ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
             <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
             <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
               {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
@@ -2973,7 +3214,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             calc.trainingDays,
           );
           return (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}`, borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
               <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
               <span className="num" style={{ fontSize: 16, color: UI.inkSoft, fontWeight: 400 }}>
                 {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
@@ -3058,21 +3299,218 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
     {/* Only reached when gain/cut is picked with no rate on file yet, see
         setGoal above: asks once, up front, rather than silently defaulting
         a number the user never chose. */}
-    <Sheet open={!!rateModalGoal} onClose={() => setRateModalGoal(null)} title="How fast?" titleColor="var(--accent)">
-      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
-        Pick a weekly rate for {rateModalGoal === 'gain' ? 'gaining' : 'losing'}. You can fine-tune this any time from the full estimator.
-      </div>
-      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-        {(isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => (
-          <button key={r} onClick={() => confirmGoalRate(isLbs ? r * LBS_TO_KG : r)} style={{
-            flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
-            WebkitTapHighlightColor: 'transparent',
-          }}>{r} {UI.unit()}</button>
-        ))}
-      </div>
-    </Sheet>
+    {rateModalGoal && (
+      <Sheet open={true} onClose={() => setRateModalGoal(null)} title="How fast?" titleColor="var(--accent)">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: '17px' }}>
+          Pick a weekly rate for {rateModalGoal === 'gain' ? 'gaining' : 'losing'}. You can fine-tune this any time from the full estimator.
+        </div>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
+          {(isLbs ? MACRO_RATE_OPTIONS_LBS : MACRO_RATE_OPTIONS_KG).map(r => (
+            <button key={r} onClick={() => confirmGoalRate(isLbs ? r * LBS_TO_KG : r)} style={{
+              flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
+              color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{r} {UI.unit()}</button>
+          ))}
+        </div>
+      </Sheet>
+    )}
     </>
+  );
+}
+
+function AdaptiveTdeeChart({ history }) {
+  const isLbs = UI.unit() === 'lbs';
+  const model = useMemoH(() => {
+    const points = (history || []).slice().sort((a, b) => a.asOfDate.localeCompare(b.asOfDate)).map(row => ({
+      ...row,
+      targetCalories: Number(row.targetsSnapshot?.weeklyAverageCalories),
+    }));
+    if (!points.length) return null;
+    const W = 320, padL = 38, padR = 10, padTop = 10, plotH = 112, padBottom = 20;
+    const H = padTop + plotH + padBottom;
+    const plotW = W - padL - padR;
+    const values = points.flatMap(p => [Number(p.tdee), Number(p.avgCalories), Number(p.targetCalories)]).filter(Number.isFinite);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const range = Math.max(100, max - min);
+    const domainMin = Math.floor((min - range * 0.12) / 50) * 50;
+    const domainMax = Math.ceil((max + range * 0.12) / 50) * 50;
+    const domainRange = Math.max(100, domainMax - domainMin);
+    const from = points[0].asOfDate;
+    const to = points[points.length - 1].asOfDate;
+    const totalDays = Math.max(1, healthDayDiff(from, to));
+    const xOf = date => padL + healthDayDiff(from, date) / totalDays * plotW;
+    const yOf = value => padTop + (1 - (value - domainMin) / domainRange) * plotH;
+    const line = key => points.filter(p => Number.isFinite(Number(p[key])))
+      .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
+    const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
+    const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
+    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+    const displayWeight = kg => {
+      const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
+      return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+    };
+    const signed = value => value == null ? null : (value > 0 ? '+' : '') + String(value);
+    const hoverPoints = points.map(p => {
+      const weightStart = displayWeight(p.weightStartKg);
+      const weightEnd = displayWeight(p.weightEndKg);
+      const rate = displayWeight(p.weightRateKgWeek);
+      const weightUnit = isLbs ? 'lbs' : 'kg';
+      const rows = [
+        { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
+        { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
+      ];
+      if (Number.isFinite(p.targetCalories)) {
+        const delta = Number(p.targetsSnapshot?.deltaKcal);
+        rows.push({
+          label: 'Target',
+          value: String(p.targetCalories) + ' kcal' + (Number.isFinite(delta) ? ' (' + (delta > 0 ? '+' : '') + String(delta) + ')' : ''),
+          color: UI.gold,
+        });
+      }
+      if (weightStart != null || weightEnd != null) {
+        const weightValue = weightStart != null && weightEnd != null
+          ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit
+          : String(weightEnd ?? weightStart) + ' ' + weightUnit;
+        rows.push({ label: 'Weight', value: weightValue, color: UI.inkSoft });
+      }
+      const sub = [
+        statusLabel(p),
+        rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
+      ].filter(Boolean).join(' · ');
+      return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
+    });
+    return { points, W, H, padL, padR, padTop, plotH, domainMin, domainMax, from, to, xOf, yOf, line, grid, hasTarget, hoverPoints };
+  }, [history, isLbs]);
+  if (!model) return null;
+  const { points, W, H, padL, padR, padTop, plotH, domainMin, domainMax, from, to, xOf, yOf, line, grid, hasTarget, hoverPoints } = model;
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
+        <span><i className="fa-solid fa-minus" style={{ color: 'var(--accent)', marginRight: 5 }} />Auto TDEE</span>
+        <span><i className="fa-solid fa-minus" style={{ color: UI.inkSoft, marginRight: 5 }} />Avg intake</span>
+        {hasTarget && <span><i className="fa-solid fa-minus" style={{ color: UI.gold, marginRight: 5 }} />Suggested target</span>}
+      </div>
+      <ChartHover W={W} H={H} points={hoverPoints} markerColor="var(--accent)" plotTop={padTop} plotH={plotH}>
+      <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display: 'block', overflow: 'hidden' }} role="img" aria-label="Adaptive TDEE, calorie target and average calorie intake history">
+        {grid.map((value, i) => (
+          <g key={i}>
+            {i > 0 && <line x1={padL} y1={yOf(value)} x2={W - padR} y2={yOf(value)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+            <text x={padL - 5} y={yOf(value) + 3} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(value)}</text>
+          </g>
+        ))}
+        <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+        {points.length >= 2 && (
+          <>
+            <polyline points={line('avgCalories')} fill="none" stroke={UI.inkSoft} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.9" />
+            <polyline points={line('tdee')} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {hasTarget && <polyline points={line('targetCalories')} fill="none" stroke={UI.gold} strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.95" />}
+          </>
+        )}
+        {points.map((p, i) => (
+          <g key={p.asOfDate}>
+            <circle cx={xOf(p.asOfDate)} cy={yOf(p.tdee)} r={i === points.length - 1 ? 3 : 2} fill="var(--accent)" />
+            <circle cx={xOf(p.asOfDate)} cy={yOf(p.avgCalories)} r="2" fill={UI.inkSoft} />
+            {Number.isFinite(p.targetCalories) && <circle cx={xOf(p.asOfDate)} cy={yOf(p.targetCalories)} r="2" fill={UI.gold} />}
+          </g>
+        ))}
+        <text x={padL} y={H - 3} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{LB.fmtDayLabel(from, { day: 'numeric', month: 'short' })}</text>
+        {points.length > 1 && <text x={W - padR} y={H - 3} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{LB.fmtDayLabel(to, { day: 'numeric', month: 'short' })}</text>}
+      </svg>
+      </ChartHover>
+    </div>
+  );
+}
+
+function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', onRetry, chartMode, onChartMode }) {
+  const history = useMemoH(
+    () => LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || []),
+    [store.adaptiveTdeeHistory]
+  );
+  const isLbs = UI.unit() === 'lbs';
+  const displayWeight = kg => {
+    const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
+    return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+  };
+  const weightSeries = useMemoH(
+    () => history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null),
+    [history, isLbs]
+  );
+  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+  const loading = loadStatus === 'loading' && !history.length;
+  const loadError = loadStatus === 'error' && !history.length;
+  return (
+    <Sheet open={open} onClose={onClose} title="TDEE history">
+      {loading ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
+          Loading your TDEE history…
+        </div>
+      ) : loadError ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
+          TDEE history could not be loaded right now.
+          {onRetry && <button onClick={onRetry} style={{ display: 'block', marginTop: 12, padding: '8px 12px', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, background: 'transparent', color: UI.ink, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Retry</button>}
+        </div>
+      ) : !history.length ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
+          Your first estimate will appear here after the next check-in. Older points are rebuilt from your logged calories and bodyweight when there is enough data.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 10 }}>
+            Drag across the chart to inspect each estimate. TDEE is the accent line, the gold line is the suggested intake, and the dashed line is what you actually averaged. Weight uses the full two-week window, while the trend is shown as a one-week rate. Both are included in the inspected point.
+          </div>
+          <div style={{ display: 'flex', width: '100%', marginBottom: 10, border: 'var(--hair-width) solid ' + UI.hairStrong, borderRadius: 4, overflow: 'hidden' }}>
+            {['calories', 'weight'].map(mode => (
+              <button key={mode} onClick={() => onChartMode(mode)} style={{ flex: 1, padding: '5px 8px', border: 'none', cursor: 'pointer', background: chartMode === mode ? 'var(--accent)' : 'transparent', color: chartMode === mode ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>
+                {mode}
+              </button>
+            ))}
+          </div>
+          {chartMode === 'calories'
+            ? <AdaptiveTdeeChart history={history} />
+            : weightSeries.length > 0
+              ? <HealthLineChart series={weightSeries} from={weightSeries[0].date} to={weightSeries[weightSeries.length - 1].date}
+                format={v => String(v) + (isLbs ? 'lbs' : 'kg')} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
+              : <HealthChartEmpty label="No weight signal in this history yet" />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+            {history.map(row => {
+              const weightStart = displayWeight(row.weightStartKg);
+              const weightEnd = displayWeight(row.weightEndKg);
+              const rate = displayWeight(row.weightRateKgWeek);
+              const weightUnit = isLbs ? 'lbs' : 'kg';
+              const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
+              const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
+              return (
+                <div key={row.asOfDate} style={{ background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderRadius: 6, padding: '9px 11px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 5 }}>
+                    <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.ink }}>{LB.fmtDayLabel(row.asOfDate, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: row.decision === 'applied' ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{statusLabel(row)}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
+                    <span className="num" style={{ fontSize: 20, color: 'var(--accent)' }}>{row.tdee}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span></span>
+                    <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>avg intake {row.avgCalories} kcal</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
+                    <span>weight window {weightStart != null && weightEnd != null ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit : weightEnd != null ? String(weightEnd) + ' ' + weightUnit : 'n/a'}</span>
+                    <span>trend {rate == null ? 'n/a' : (rate > 0.05 ? '+' : '') + String(rate) + ' ' + weightUnit + '/wk'}</span>
+                  </div>
+                  {Number.isFinite(target) && (
+                    <div style={{ marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.gold }}>
+                      suggested {String(target)} kcal/day{Number.isFinite(targetDelta) ? ' · ' + (targetDelta > 0 ? '+' : '') + String(targetDelta) + ' vs TDEE' : ''}
+                    </div>
+                  )}
+                  {row.source === 'reconstructed' && (
+                    <div style={{ marginTop: 5, fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>Recalculated from the logs available for that date.</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }
 
@@ -3083,7 +3521,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
 // today either way, that is what stops the nag, not whether the numbers
 // actually changed. Never applies anything on its own; see MacroEstimatorSheet
 // for the same "estimate is a prefill, not a save" philosophy this mirrors.
-function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, coachingMacros, onOpenSettings }) {
+function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMacros, coachingMacros, onOpenSettings }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
   const toKg = w => (isLbs ? Number(w) * LBS_TO_KG : Number(w));
@@ -3093,6 +3531,12 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
     () => open ? LB.estimateAdaptiveTdee(store, LB.todayISO()) : null,
     [open, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit]
   );
+  const checkinHistory = useMemoH(() => {
+    const calcDates = [calc.lastCheckinAt, calc.lastAppliedAt];
+    const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, calcDates);
+    return LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || [], rebuilt);
+  }, [store.adaptiveTdeeHistory, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit, calc.lastCheckinAt, calc.lastAppliedAt, userId]);
+  const previousEstimate = checkinHistory.find(row => row.asOfDate < LB.todayISO()) || null;
 
   // What the ORIGINAL one-time estimate said, for a sense of higher/lower than
   // before. Not itself persisted (only its inputs are, in macroCalc), so
@@ -3135,6 +3579,15 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
   // actually has (calc.trainingDays), same reasoning weeklyAverageCalories
   // exists for everywhere else in the app.
   const algoAvg = newTargets ? LB.weeklyAverageCalories(newTargets.caloriesTraining, newTargets.caloriesRest, calc.trainingDays) : null;
+  const targetDeltaKcal = newTargets && algoAvg != null && adaptive?.ok ? algoAvg - adaptive.tdee : null;
+  const targetSnapshot = newTargets && algoAvg != null ? {
+    ...newTargets,
+    weeklyAverageCalories: algoAvg,
+    deltaKcal: targetDeltaKcal,
+    trainingDays: calc.trainingDays,
+    goal: calc.goal ?? null,
+    rateKgPerWeek: calc.rateKgPerWeek ?? null,
+  } : null;
   const coachAvg = (coachHasMacros && LB.hasMacroTargets(coachingMacros))
     ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
     : null;
@@ -3146,8 +3599,22 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
   // MacroSourceCard to surface, not something a later Skip should touch or
   // clear.
   const finish = (applyTargets) => {
+    const asOfDate = LB.todayISO();
+    const previousRows = LB.reconstructAdaptiveTdeeHistory(store, userId, [
+      calc.lastCheckinAt,
+      calc.lastAppliedAt,
+    ]);
+    const currentRow = adaptive?.ok
+      ? LB.adaptiveTdeeHistoryRow(store, userId, asOfDate, {
+        decision: applyTargets && newTargets ? 'applied' : 'skipped',
+        source: 'live',
+        targetsSnapshot: targetSnapshot,
+      })
+      : null;
+    const historyRows = [...previousRows, currentRow].filter(Boolean);
     setStore(s => ({
       ...s,
+      adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(s.adaptiveTdeeHistory || [], historyRows),
       settings: {
         ...s.settings,
         ...(applyTargets && newTargets ? { macroTargets: newTargets } : {}),
@@ -3162,6 +3629,9 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
         },
       },
     }));
+    if (historyRows.length) {
+      LB.saveAdaptiveTdeeHistory(userId, historyRows).catch(error => console.error('adaptive TDEE history save failed:', error));
+    }
     onClose();
   };
 
@@ -3188,12 +3658,17 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
     </div>
   );
   const showCoachCompare = coachAvg != null;
-  const avgLine = (value) => (
+  const avgLine = (value, label = 'Average', delta = null) => (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-      <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Average</span>
+      <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
       <span className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 400 }}>
         {value}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
       </span>
+      {delta != null && (
+        <span style={{ fontSize: 10, color: delta >= 0 ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, marginLeft: 2 }}>
+          {delta === 0 ? 'at TDEE' : (delta > 0 ? '+' : '') + String(delta) + (delta > 0 ? ' above TDEE' : ' below TDEE')}
+        </span>
+      )}
     </div>
   );
   // What this whole report is being judged against: without it, "Weekly
@@ -3237,6 +3712,28 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
               </div>
             </div>
           </div>
+          {previousEstimate && (() => {
+            const previousWeight = previousEstimate.weightEndKg != null ? Math.round(fromKg(previousEstimate.weightEndKg) * 10) / 10 : null;
+            const currentWeight = adaptive.weightEndKg != null ? Math.round(fromKg(adaptive.weightEndKg) * 10) / 10 : null;
+            const delta = adaptive.tdee - previousEstimate.tdee;
+            return (
+              <div style={{ marginBottom: 18, padding: '10px 12px', background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderRadius: 6 }}>
+                <div className="micro" style={{ marginBottom: 4 }}>Previous estimate</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                  <span className="num" style={{ fontSize: 21, color: UI.inkSoft }}>{previousEstimate.tdee}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span></span>
+                  <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{LB.fmtDayLabel(previousEstimate.asOfDate, { day: 'numeric', month: 'short' })}</span>
+                  <span style={{ fontSize: 11, color: delta >= 0 ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi }}>
+                    {delta === 0 ? 'same as before' : (delta > 0 ? '+' : '') + String(delta) + ' kcal'}
+                  </span>
+                </div>
+                <div style={{ marginTop: 5, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                  {previousWeight != null && currentWeight != null
+                    ? 'Weight signal: ' + String(previousWeight) + ' → ' + String(currentWeight) + ' ' + (isLbs ? 'lbs' : 'kg')
+                    : 'Weight signal from the previous estimate is available in history.'}
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ marginBottom: 18, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
             <div className="micro" style={{ marginBottom: 4 }}>New maintenance estimate</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -3253,19 +3750,27 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
           {newTargets ? (
             <>
               {showCoachCompare && (
-                <>
-                  <div className="micro" style={{ color: 'var(--accent)', marginBottom: 4 }}>Your coach</div>
-                  {avgLine(coachAvg)}
+                <div style={{ marginBottom: 12, padding: '10px 12px', background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderLeft: '3px solid ' + UI.inkFaint, borderRadius: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
+                    <span className="micro" style={{ color: UI.inkSoft, flex: 1 }}>Your coach</span>
+                    <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Current targets</span>
+                  </div>
+                  {avgLine(coachAvg, 'Weekly average')}
                   {dayRow('Training', 'Training', coachingMacros, 'coach')}
                   <div style={{ height: 0.5, background: UI.hair }} />
                   {dayRow('Rest', 'Rest', coachingMacros, 'coach')}
-                  <div className="micro" style={{ color: UI.inkFaint, margin: '14px 0 4px' }}>The algorithm suggests</div>
-                </>
+                </div>
               )}
-              {avgLine(algoAvg)}
-              {dayRow('Training', 'Training', newTargets, 'algo')}
-              <div style={{ height: 0.5, background: UI.hair }} />
-              {dayRow('Rest', 'Rest', newTargets, 'algo')}
+              <div style={{ marginBottom: 12, padding: '10px 12px', background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hairStrong, borderLeft: '3px solid var(--accent)', borderRadius: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
+                  <span className="micro" style={{ color: 'var(--accent)', flex: 1 }}>Algorithm suggests</span>
+                  <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em', textTransform: 'uppercase' }}>This check-in</span>
+                </div>
+                {avgLine(algoAvg, 'Suggested target', targetDeltaKcal)}
+                {dayRow('Training', 'Training', newTargets, 'algo')}
+                <div style={{ height: 0.5, background: UI.hair }} />
+                {dayRow('Rest', 'Rest', newTargets, 'algo')}
+              </div>
               {coachHasMacros && (
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 12 }}>
                   Applying only updates your personal targets. Your coach's numbers stay active either way.
@@ -3305,7 +3810,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, coachHasMacros, co
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, isStatusDay, mealOfChoiceOrdinal, weightUnit }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -3322,9 +3827,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   // This also has to suppress the FALLBACK below, not just the stored value,
   // or the card would helpfully re-derive the score the save path discarded.
   const isMealOfChoice = !!log?.mealOfChoice;
-  const unscoredDay = isStatusDay || isMealOfChoice;
+  const unscoredDay = nutritionUnscored || isMealOfChoice;
   // On a sick/vacation day adherence is intentionally nulled at save (no target
-  // to hit), so don't recompute it from the raw macros here.
+  // to hit), so don't recompute it from the raw macros here. A deload or
+  // cleanup day is NOT one of those (LB.isNutritionUnscoredMode): it eats to
+  // the same targets as any other day, so it scores and the fallback below
+  // still runs for it.
   const adh = (storedAdh != null && !isMealOfChoice)
     ? storedAdh
     : (!unscoredDay && log && dayTarget ? LB.macroAdherence({ protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget) : null);
@@ -3509,7 +4017,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
   }
 
   return (
-    <Card style={{ padding: 16 }}>
+    <Card style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{label}'s Summary</span>
@@ -3712,10 +4220,17 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
   // Flex Training|Rest override for the selected day (header slider). Only in the
   // user's own tab (setStore present, not the read-only coach view), only for a
-  // flex plan, and hidden when the day is under a status mode or already has a
-  // logged session (training is then settled).
+  // flex plan, and hidden when the day is unscored for nutrition or already has
+  // a logged session (training is then settled).
+  //
+  // Unscored, not "under any status mode": the slider picks which macro target
+  // the day is measured against, so it only becomes pointless where the day
+  // carries no score at all, which is sick and vacation only
+  // (LB.isNutritionUnscoredMode). A deload or cleanup day IS scored, and hiding
+  // the control there left a flex user unable to correct a day the plan derived
+  // as the wrong type, with a visibly wrong percentage and no way to fix it.
   const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
-  const selDayStatus = flexActive ? (selectedDate === today
+  const selDayUnscored = flexActive ? LB.isNutritionUnscoredMode(selectedDate === today
     ? (store.statusMode ?? null)
     : ((store.statusPeriods || []).find(p => {
         const ts = new Date(selectedDate + 'T12:00:00').getTime();
@@ -3723,7 +4238,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
         const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
         return ts >= start && ts <= end;
       })?.mode || null)) : null;
-  const showDayType = !!setStore && flexActive && !selDayStatus && !LB.isLoggedTrainingDay(store.sessions, selectedDate);
+  const showDayType = !!setStore && flexActive && !selDayUnscored && !LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const selDayType = LB.isTrainingDayForDate(store, selectedDate) ? 'training' : 'rest';
   const setFlexDayType = (type) => {
     const existing = (store.dailyLogs || []).find(l => l.date === selectedDate);
@@ -3743,7 +4258,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     // below on purpose: unlike dailyLogAdherence this site persists a
     // snapshot even for a day with no macros yet, because the dayType has
     // to survive regardless. That asymmetry is this call site's whole job.
-    const unscored = !!LB.statusModeForDate(store, selectedDate);
+    const unscored = LB.isNutritionUnscoredMode(LB.statusModeForDate(store, selectedDate));
     const adherence = (dayTarget && hasMacros && !unscored)
       ? LB.dailyLogAdherence(existing, targets, isTraining).adherence : null;
     const targetsSnap = dayTarget ? { ...dayTarget, dayType: type } : { dayType: type };
@@ -3780,11 +4295,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
-              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
+              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'none' }}>
                 {WEEKDAYS[i]}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
-                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
+                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'none' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
               {/* Day-type indicator, ALWAYS shown: dumbbell = training, dot = rest.
@@ -3832,7 +4347,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
-                  textShadow: active ? 'none' : 'var(--text-lift)',
+                  textShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -4232,6 +4747,11 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [checkinOpen, setCheckinOpen] = useStateH(false);
+  const [tdeeHistoryOpen, setTdeeHistoryOpen] = useStateH(false);
+  const [tdeeHistoryChartMode, setTdeeHistoryChartMode] = useStateH('calories');
+  const [tdeeHistoryStatus, setTdeeHistoryStatus] = useStateH('loading');
+  const [tdeeHistoryRetry, setTdeeHistoryRetry] = useStateH(0);
+  const tdeeHistoryRetrySeen = useRefH(0);
   // Reached directly from MacroSourceCard's "Adjust automation settings",
   // skipping the manual-numbers MacroTargetSheet layer: apply() below commits
   // straight to macroTargets the same way that sheet's own Save does, so this
@@ -4242,6 +4762,92 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // straight away is the whole point of that trip, arriving on the Health tab
   // with nothing open would just make them hunt for the card.
   useEffectH(() => { if (openMacroTargets) setTargetOpen(true); }, [openMacroTargets]);
+  // Build the history fingerprint only while the sheet is open. The selected
+  // fields are exactly the inputs used by the adaptive estimate and target
+  // enrichment, so unrelated store updates do not reconstruct the history.
+  const tdeeHistoryInputKey = useMemoH(() => {
+    if (!tdeeHistoryOpen) return null;
+    const calc = store.settings?.macroCalc || {};
+    return JSON.stringify({
+      logs: (store.dailyLogs || []).map(log => [log.date, log.calories ?? null, log.weight ?? null]),
+      statusMode: store.statusMode ?? null,
+      statusPeriods: (store.statusPeriods || []).map(period => [period.mode, period.startedAt, period.endedAt ?? null]),
+      unit: store.settings?.unit ?? null,
+      calc: [
+        calc.lastCheckinAt ?? null,
+        calc.lastAppliedAt ?? null,
+        calc.lastAppliedTargets ?? null,
+        calc.trainingDays ?? null,
+        calc.goal ?? null,
+        calc.rateKgPerWeek ?? null,
+      ],
+    });
+  }, [tdeeHistoryOpen, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit, store.settings?.macroCalc]);
+  useEffectH(() => {
+    if (!tdeeHistoryOpen || !tdeeHistoryInputKey || !userId) return;
+    let cancelled = false;
+    const forceServerReload = tdeeHistoryRetrySeen.current !== tdeeHistoryRetry;
+    tdeeHistoryRetrySeen.current = tdeeHistoryRetry;
+    const calc = store.settings?.macroCalc || {};
+    const cache = window.__lbAdaptiveTdeeHistorySessionCache
+      || (window.__lbAdaptiveTdeeHistorySessionCache = new Map());
+    const cached = cache.get(userId);
+
+    if (!forceServerReload && cached?.inputKey === tdeeHistoryInputKey) {
+      setTdeeHistoryStatus('ready');
+      if (cached.history?.length && !(store.adaptiveTdeeHistory || []).length) {
+        setStore(s => s ? { ...s, adaptiveTdeeHistory: cached.history } : s);
+      }
+      return;
+    }
+
+    const processRows = serverRows => {
+      if (cancelled) return;
+      if (serverRows == null) {
+        setTdeeHistoryStatus('error');
+        return;
+      }
+      const rawServerHistory = serverRows || [];
+      const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
+      const refreshedServerHistory = rawServerHistory.map(row => LB.refreshAdaptiveTdeeHistoryEstimate(store, row));
+      const serverHistory = refreshedServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
+      const mergedHistory = LB.mergeAdaptiveTdeeHistory(serverHistory, rebuilt, store.adaptiveTdeeHistory || []);
+      setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(mergedHistory, s.adaptiveTdeeHistory || []) } : s);
+      const serverDates = new Set(rawServerHistory.map(row => row.asOfDate));
+      const missing = rebuilt.filter(row => !serverDates.has(row.asOfDate));
+      const repaired = serverHistory.filter((row, index) => {
+        const raw = rawServerHistory[index];
+        return row.tdee !== raw?.tdee
+          || row.daySpan !== raw?.daySpan
+          || row.weightRateKgWeek !== raw?.weightRateKgWeek
+          || row.targetsSnapshot?.weeklyAverageCalories != null
+          && raw?.targetsSnapshot?.weeklyAverageCalories == null;
+      });
+      const toSave = LB.mergeAdaptiveTdeeHistory(missing, repaired);
+      cache.set(userId, {
+        inputKey: tdeeHistoryInputKey,
+        serverRows: LB.mergeAdaptiveTdeeHistory(rawServerHistory, toSave),
+        history: mergedHistory,
+      });
+      if (toSave.length) {
+        LB.saveAdaptiveTdeeHistory(userId, toSave).catch(error => console.error('adaptive TDEE backfill failed:', error));
+      }
+      setTdeeHistoryStatus('ready');
+    };
+
+    if (!forceServerReload && cached?.serverRows) {
+      processRows(cached.serverRows);
+      return () => { cancelled = true; };
+    }
+
+    setTdeeHistoryStatus('loading');
+    LB.loadAdaptiveTdeeHistory(userId).then(processRows).catch(error => {
+      if (cancelled) return;
+      console.error('adaptive TDEE history refresh failed:', error);
+      setTdeeHistoryStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [tdeeHistoryOpen, tdeeHistoryInputKey, tdeeHistoryRetry, userId]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-
@@ -4535,19 +5141,18 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // own dayTarget memo makes the exact same assumption for today.
         const snap = log.date !== today ? log.targetsSnap : null;
         const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
-        let { adherence, targetsSnap } = dayMode
+        // Only sick and vacation blank the day, not every status: see
+        // LB.isNutritionUnscoredMode. A deload or cleanup week eats to the
+        // same targets as any other week and gets scored like one.
+        const dayUnscored = LB.isNutritionUnscoredMode(dayMode);
+        let { adherence, targetsSnap } = dayUnscored
           ? { adherence: null, targetsSnap: null }
           : LB.dailyLogAdherence(log, effectiveTargets, isTraining, storedTarget);
-        if (!dayMode && flexActive && !targetsSnap) {
+        if (!dayUnscored && flexActive && !targetsSnap) {
           const dt = log.targetsSnap?.dayType;
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
         }
         if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
-        // Bump updatedAt so sync_daily_logs_batch's `updated_at < EXCLUDED`
-        // staleness guard accepts this write. The Food-Tracker rollup already
-        // persisted this row with its own timestamp; re-sending the reconciled
-        // adherence with that SAME timestamp would be silently dropped server-
-        // side, leaving the coach/check-in with null/stale adherence forever.
         // No updatedAt bump: a recompute is not an edit of the day. It used
         // to need one to get past sync_daily_logs_batch's staleness guard,
         // which is exactly what let it carry this device's stale weight,
@@ -4608,7 +5213,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // Same hole as setFlexDayType: this rewrote a score onto days that
         // must not carry one. The flag is on the row so dailyLogAdherence
         // sees it; status has to be asked for.
-        const unscored = l.mealOfChoice || !!LB.statusModeForDate(s, l.date);
+        const unscored = l.mealOfChoice || LB.isNutritionUnscoredMode(LB.statusModeForDate(s, l.date));
         // Unlike the food reconciler this genuinely needs the CURRENT targets:
         // the day type itself changed, and the old snapshot only holds the
         // target for the type that turned out to be wrong.
@@ -4829,7 +5434,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // can be today (see dayLabel above), and today has to answer from the live
   // statusMode cache rather than scanning statusPeriods, since a just-started
   // period may not have landed there yet.
-  const selectedIsStatusDay = !!LB.statusModeForDate(store, selectedDate);
+  const selectedNutritionUnscored = LB.isNutritionUnscoredMode(LB.statusModeForDate(store, selectedDate));
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see the onExpand wiring per card and
   // expandableCards further down, which the sheet renders from by this id).
@@ -4844,6 +5449,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     <MacroSourceCard store={store} setStore={setStore} dragHandle={handle} tf={tf} setTf={setTf}
       coachHasMacros={coachHasMacros} fromCoach={fromCoach} selfCoachedMacros={selfCoachedMacros}
       hasTargets={!!effectiveTargets} onSetTarget={() => setTargetOpen(true)} onOpenCheckin={() => setCheckinOpen(true)}
+      onOpenHistory={() => setTdeeHistoryOpen(true)}
       onOpenSettings={() => setAutomationSettingsOpen(true)}>
       {targetRow}
     </MacroSourceCard>
@@ -4863,7 +5469,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay}
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
     aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
@@ -4963,7 +5569,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       } />
       {store.statusMode && !capturing && (
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
-          margin: '0 16px 12px',
+          margin: '4px 16px 12px',
           padding: '10px 14px',
           background: 'rgba(var(--accent-rgb), 0.16)',
           border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`,
@@ -5030,12 +5636,25 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
           React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
-      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
-      <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
-        onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
-      <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
-        onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
+      {logOpen && (
+        <DailyLogScreen open={true} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
+      )}
+      {targetOpen && (
+        <MacroTargetSheet open={true} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
+      )}
+      {tdeeHistoryOpen && (
+        <AdaptiveTdeeHistorySheet open={true} onClose={() => setTdeeHistoryOpen(false)} store={store}
+          loadStatus={tdeeHistoryStatus} onRetry={() => setTdeeHistoryRetry(value => value + 1)}
+          chartMode={tdeeHistoryChartMode} onChartMode={setTdeeHistoryChartMode} />
+      )}
+      {checkinOpen && (
+        <WeeklyCheckinSheet open={true} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} userId={userId} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
+          onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
+      )}
+      {automationSettingsOpen && (
+        <MacroEstimatorSheet open={true} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
+          onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
+      )}
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
     </Screen>
   );
@@ -5322,6 +5941,7 @@ function ExportSheet({ open, onClose, store, userId }) {
   const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
   const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | 'food' | null
+  if (!open) return null;
 
   const applyPreset = (days) => {
     setFrom(LB.shiftDate(today, -(days - 1)));
