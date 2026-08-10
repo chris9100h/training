@@ -1479,7 +1479,10 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       base.position = 'fixed'; base.inset = 0; base.zIndex = 9998;
       base.background = 'var(--bg)'; base.padding = 24;
     } else {
-      base.width = '100%'; base.minHeight = '45vh'; base.padding = 24;
+      // A screen placeholder is the main flex child above the persistent
+      // TabBar. Let it consume that slot instead of using a viewport minimum,
+      // which briefly pushed the dock upward while a lazy screen loaded.
+      base.width = '100%'; base.flex = '1 1 auto'; base.minHeight = 0; base.padding = 24;
     }
     return base;
   }

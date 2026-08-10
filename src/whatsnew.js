@@ -22,6 +22,16 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.743',
+    date: '2026-08-10',
+    title: 'A faster app, from first tap to tab switch 🚀',
+    items: [
+      '🚀 The app now opens faster and switches between tabs more smoothly, so getting to your workout, plan, history, health, or coaching takes less time.',
+      'Screens appear as soon as they are ready, while your bottom navigation stays in place during loading, so the app no longer seems to jump around.',
+      'Your existing data and offline behavior stay the same. These improvements simply get you to the right screen sooner and keep the interface responsive.'
+    ],
+  },
+  {
     id: 'v2.742',
     date: '2026-08-10',
     title: 'A clearer calorie picture and a shorter setup 📈',
