@@ -317,6 +317,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_adaptive_tdee_history').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
@@ -568,6 +569,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.waterLogs?.length ? 1 : 0)
+    + (backup.adaptiveTdeeHistory?.length ? 1 : 0)
     + (backup.foodLogs?.length ? 1 : 0)
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
@@ -742,6 +744,35 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, date: l.date, time: l.time,
         amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
         breakdown: l.breakdown ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.adaptiveTdeeHistory?.length) {
+    prog('Uploading adaptive TDEE history…');
+    await unwrap(_supabase.from('zane_adaptive_tdee_history').upsert(
+      backup.adaptiveTdeeHistory.filter(h => h?.asOfDate).map(h => ({
+        id: 'tdee_' + userId + '_' + h.asOfDate,
+        user_id: userId,
+        as_of_date: h.asOfDate,
+        window_start: h.windowStart,
+        window_end: h.windowEnd,
+        tdee_kcal: h.tdee,
+        avg_calories_kcal: h.avgCalories,
+        weight_start_kg: h.weightStartKg,
+        weight_end_kg: h.weightEndKg,
+        weight_change_kg: h.weightChangeKg,
+        weight_rate_kg_week: h.weightRateKgWeek,
+        day_span: h.daySpan,
+        calorie_days: h.calorieDays,
+        weigh_ins: h.weighIns,
+        decision: h.decision || 'reconstructed',
+        source: h.source || 'reconstructed',
+        targets_snapshot: h.targetsSnapshot ?? null,
+        calculated_at: h.calculatedAt ?? new Date().toISOString(),
+        decided_at: h.decidedAt ?? null,
+        created_at: h.createdAt ?? new Date().toISOString(),
+        updated_at: h.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -1022,6 +1053,8 @@ async function exportBackup(store, userId) {
     // windowed copy would silently drop every dose logged before the window.
     _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_adaptive_tdee_history').select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
+      .eq('user_id', userId).order('as_of_date', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -1032,13 +1065,14 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, foodLogsRes, medicationLogsRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
   // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
   if (entriesRes.error) throw entriesRes.error;
   if (foodLogsRes.error) throw foodLogsRes.error;
   if (medicationLogsRes.error) throw medicationLogsRes.error;
+  if (adaptiveTdeeHistoryRes.error) throw adaptiveTdeeHistoryRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -1070,6 +1104,7 @@ async function exportBackup(store, userId) {
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
+    adaptiveTdeeHistory: (adaptiveTdeeHistoryRes.data || []).map(mapAdaptiveTdeeHistoryRow),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
       notes: notesRes?.data || [],
@@ -6636,7 +6671,7 @@ function isRoutineDisruptedMode(mode) {
   return !!mode && ROUTINE_DISRUPTED_MODES.includes(mode);
 }
 
-// ── Adaptive TDEE recalibration (weekly check-in, migration-free) ──────────
+// ── Adaptive TDEE recalibration (weekly check-in + history) ────────────────
 // estimateTdee above is a formula run once from static inputs (height/weight/
 // age/activity) and never revisited. This is the opposite approach and the
 // weekly companion to it: no body formula at all, just what actually
@@ -6654,7 +6689,7 @@ function isRoutineDisruptedMode(mode) {
 // a new target set via macroTargetsFromGoal, same as the one-time estimator.
 //
 // Returns one of:
-//   { ok: true, tdee, avgCalories, weightChangeKg, daySpan }
+//   { ok: true, tdee, avgCalories, weightChangeKg, daySpan, ...historyFields }
 //   { ok: false, reason: 'insufficient_data' }
 // weightChangeKg is always true kilograms regardless of settings.unit (like
 // every other *Kg field in this file, e.g. macroCalc.weightKg), positive
@@ -6728,6 +6763,8 @@ function estimateAdaptiveTdee(store, todayStr) {
   const weightChangeNative = avgOf(secondHalf) - avgOf(firstHalf);
   const weightChangeKg = isLbs ? weightChangeNative * KG_PER_LB : weightChangeNative;
   const daySpan = Math.max(1, dayDiff(firstHalf[0].date, secondHalf[secondHalf.length - 1].date));
+  const weightStartKg = isLbs ? avgOf(firstHalf) * KG_PER_LB : avgOf(firstHalf);
+  const weightEndKg = isLbs ? avgOf(secondHalf) * KG_PER_LB : avgOf(secondHalf);
 
   // Sign check: eating avgCalories/day while LOSING weight (weightChangeKg <
   // 0) means more was burned than eaten, so real maintenance sits ABOVE
@@ -6742,7 +6779,160 @@ function estimateAdaptiveTdee(store, todayStr) {
     avgCalories: Math.round(avgCalories),
     weightChangeKg: Math.round(weightChangeKg * 100) / 100,
     daySpan,
+    weightStartKg: Math.round(weightStartKg * 100) / 100,
+    weightEndKg: Math.round(weightEndKg * 100) / 100,
+    calorieDays: calorieDays.length,
+    weighIns: n,
+    windowStart: winStart,
+    windowEnd: today,
   };
+}
+
+// Convert a successful adaptive estimate into the durable history shape. The
+// calculation endpoint is a local calendar date, not a UTC timestamp, because
+// daily logs use the user's local date everywhere else in the app.
+function adaptiveTdeeHistoryRow(store, userId, asOfDate, {
+  decision = 'reconstructed',
+  source = 'reconstructed',
+  targetsSnapshot = null,
+  decidedAt = null,
+} = {}) {
+  if (!userId || !asOfDate) return null;
+  const estimate = estimateAdaptiveTdee(store, asOfDate);
+  if (!estimate?.ok) return null;
+  const now = new Date().toISOString();
+  return {
+    id: 'tdee_' + userId + '_' + asOfDate,
+    userId,
+    asOfDate,
+    windowStart: estimate.windowStart,
+    windowEnd: estimate.windowEnd,
+    tdee: estimate.tdee,
+    avgCalories: estimate.avgCalories,
+    weightStartKg: estimate.weightStartKg,
+    weightEndKg: estimate.weightEndKg,
+    weightChangeKg: estimate.weightChangeKg,
+    weightRateKgWeek: Math.round(estimate.weightChangeKg * 7 / estimate.daySpan * 100) / 100,
+    daySpan: estimate.daySpan,
+    calorieDays: estimate.calorieDays,
+    weighIns: estimate.weighIns,
+    decision,
+    source,
+    targetsSnapshot: targetsSnapshot ?? null,
+    calculatedAt: now,
+    decidedAt: decidedAt ?? (source === 'live' ? now : null),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// Reconstruct only dates that have a reliable anchor in macroCalc. This is
+// intentionally conservative: daily logs can reproduce the number, but they
+// cannot prove that a user actually opened a check-in on an arbitrary date.
+function reconstructAdaptiveTdeeHistory(store, userId, dates) {
+  const calc = store?.settings?.macroCalc || {};
+  const uniqueDates = [...new Set((dates || []).filter(Boolean))].sort();
+  return uniqueDates.map(asOfDate => {
+    const wasApplied = calc.lastAppliedAt === asOfDate;
+    const wasHandled = calc.lastCheckinAt === asOfDate;
+    return adaptiveTdeeHistoryRow(store, userId, asOfDate, {
+      decision: wasApplied ? 'applied' : wasHandled ? 'skipped' : 'reconstructed',
+      targetsSnapshot: wasApplied ? (calc.lastAppliedTargets ?? null) : null,
+    });
+  }).filter(Boolean);
+}
+
+function mergeAdaptiveTdeeHistory(...collections) {
+  const byDate = new Map();
+  for (const collection of collections) {
+    for (const row of (collection || [])) {
+      if (!row?.asOfDate) continue;
+      const current = byDate.get(row.asOfDate);
+      if (!current) {
+        byDate.set(row.asOfDate, row);
+        continue;
+      }
+      // A live decision contains information that a reconstructed row does
+      // not. Otherwise let the newest local/remote write win.
+      if (current.source !== 'live' && row.source === 'live') {
+        byDate.set(row.asOfDate, row);
+      } else if (current.source === row.source
+        && new Date(row.updatedAt || 0).getTime() > new Date(current.updatedAt || 0).getTime()) {
+        byDate.set(row.asOfDate, row);
+      }
+    }
+  }
+  return [...byDate.values()].sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+}
+
+function mapAdaptiveTdeeHistoryRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    asOfDate: row.as_of_date,
+    windowStart: row.window_start,
+    windowEnd: row.window_end,
+    tdee: row.tdee_kcal,
+    avgCalories: row.avg_calories_kcal,
+    weightStartKg: Number(row.weight_start_kg),
+    weightEndKg: Number(row.weight_end_kg),
+    weightChangeKg: Number(row.weight_change_kg),
+    weightRateKgWeek: Number(row.weight_rate_kg_week),
+    daySpan: row.day_span,
+    calorieDays: row.calorie_days,
+    weighIns: row.weigh_ins,
+    decision: row.decision,
+    source: row.source,
+    targetsSnapshot: row.targets_snapshot ?? null,
+    calculatedAt: row.calculated_at ?? null,
+    decidedAt: row.decided_at ?? null,
+    createdAt: row.created_at ?? null,
+    updatedAt: row.updated_at ?? null,
+  };
+}
+
+async function loadAdaptiveTdeeHistory(userId) {
+  const { data, error } = await _supabase.from('zane_adaptive_tdee_history')
+    .select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
+    .eq('user_id', userId)
+    .order('as_of_date', { ascending: false });
+  if (error) {
+    console.warn('adaptive TDEE history load failed:', error);
+    return null;
+  }
+  return (data || []).map(mapAdaptiveTdeeHistoryRow);
+}
+
+async function saveAdaptiveTdeeHistory(userId, rows) {
+  const entries = (rows || []).filter(row => row?.asOfDate && row?.tdee != null);
+  if (!userId || !entries.length) return;
+  const now = new Date().toISOString();
+  await unwrap(_supabase.from('zane_adaptive_tdee_history').upsert(
+    entries.map(row => ({
+      id: 'tdee_' + userId + '_' + row.asOfDate,
+      user_id: userId,
+      as_of_date: row.asOfDate,
+      window_start: row.windowStart,
+      window_end: row.windowEnd,
+      tdee_kcal: row.tdee,
+      avg_calories_kcal: row.avgCalories,
+      weight_start_kg: row.weightStartKg,
+      weight_end_kg: row.weightEndKg,
+      weight_change_kg: row.weightChangeKg,
+      weight_rate_kg_week: row.weightRateKgWeek,
+      day_span: row.daySpan,
+      calorie_days: row.calorieDays,
+      weigh_ins: row.weighIns,
+      decision: row.decision || 'reconstructed',
+      source: row.source || 'reconstructed',
+      targets_snapshot: row.targetsSnapshot ?? null,
+      calculated_at: row.calculatedAt || now,
+      decided_at: row.decidedAt ?? null,
+      created_at: row.createdAt || now,
+      updated_at: row.updatedAt || now,
+    })),
+    { onConflict: 'user_id,as_of_date' }
+  ));
 }
 
 // The budget a meal of choice inherits: the day's target minus everything else
@@ -9932,7 +10122,8 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
-  estimateAdaptiveTdee,
+  estimateAdaptiveTdee, adaptiveTdeeHistoryRow, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
+  loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,

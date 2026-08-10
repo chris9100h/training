@@ -1217,6 +1217,64 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.weightChangeKg, -1);
   });
 
+  test('adaptiveTdeeHistoryRow: preserves the estimate and weight signal for a dated point', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const row = LB.adaptiveTdeeHistoryRow({ dailyLogs: days }, 'user-1', '2025-01-14', {
+      decision: 'applied',
+      source: 'live',
+      targetsSnapshot: { caloriesTraining: 2200 },
+    });
+    assert.ok(row);
+    assert.strictEqual(row.id, 'tdee_user-1_2025-01-14');
+    assert.strictEqual(row.tdee, 2592);
+    assert.strictEqual(row.avgCalories, 2000);
+    assert.strictEqual(row.weightStartKg, 80);
+    assert.strictEqual(row.weightEndKg, 79);
+    assert.strictEqual(row.weightChangeKg, -1);
+    assert.strictEqual(row.daySpan, 13);
+    assert.strictEqual(row.calorieDays, 13);
+    assert.strictEqual(row.weighIns, 2);
+    assert.strictEqual(row.decision, 'applied');
+    assert.strictEqual(row.source, 'live');
+    assert.strictEqual(row.targetsSnapshot.caloriesTraining, 2200);
+  });
+
+  test('reconstructAdaptiveTdeeHistory: uses only reliable macroCalc anchors', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const store = {
+      dailyLogs: days,
+      settings: { macroCalc: {
+        lastCheckinAt: '2025-01-14',
+        lastAppliedAt: '2025-01-14',
+        lastAppliedTargets: { caloriesTraining: 2200 },
+      } },
+    };
+    const rows = LB.reconstructAdaptiveTdeeHistory(store, 'user-1', [
+      '2025-01-14',
+      '2025-01-14',
+      null,
+    ]);
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].decision, 'applied');
+    assert.strictEqual(rows[0].source, 'reconstructed');
+    assert.strictEqual(rows[0].targetsSnapshot.caloriesTraining, 2200);
+  });
+
+  test('mergeAdaptiveTdeeHistory: live decisions replace reconstructed rows for the same date', () => {
+    const reconstructed = { asOfDate: '2025-01-14', source: 'reconstructed', decision: 'reconstructed', updatedAt: '2025-01-14T08:00:00.000Z' };
+    const live = { asOfDate: '2025-01-14', source: 'live', decision: 'skipped', updatedAt: '2025-01-14T09:00:00.000Z' };
+    const merged = LB.mergeAdaptiveTdeeHistory([reconstructed], [live]);
+    assert.strictEqual(merged.length, 1);
+    assert.strictEqual(merged[0], live);
+    assert.strictEqual(merged[0].decision, 'skipped');
+  });
+
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {
     // 2 training at 4023 + 5 rest at 2743 = 21761 over the week, 3109 a day.
     assert.strictEqual(LB.weeklyAverageCalories(4023, 2743, 2), 3109);

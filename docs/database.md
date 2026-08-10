@@ -551,6 +551,33 @@ Sync-Verhalten:
 - Der Cache-first-Merge in `app.jsx` dedupliziert Daily Logs zusätzlich **per Datum** (Server gewinnt), damit eine vor der RPC entstandene divergente id nicht als doppelter Tag erscheint.
 - RLS: eigene Zeilen + Coach-of-Client-Reads (so füllt `loadClientStore` das `clientStore.dailyLogs` für den Coach-„Daily"-Tab, keine extra RPC).
 
+### `zane_adaptive_tdee_history`
+
+Historie der automatisch berechneten TDEE-Werte (Migration 0260). Die Werte
+werden nicht aus einem TDEE-Textfeld in den Settings gelesen, sondern bleiben
+aus zane_daily_logs nachrechenbar. Die Tabelle hält zusätzlich fest, was der
+Nutzer mit dem Ergebnis gemacht hat, damit ein späterer Check-in den vorherigen
+Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
+
+- id (text, deterministisch aus User und as_of_date), user_id (uuid)
+- as_of_date (date), window_start/window_end (date): lokaler Berechnungstag und das verwendete 14-Tage-Fenster
+- tdee_kcal/avg_calories_kcal (integer): gelöster Erhaltungsbedarf und durchschnittliche Kalorienaufnahme
+- weight_start_kg/weight_end_kg/weight_change_kg (numeric): Mittelwerte der ersten und zweiten Hälfte der Wiegedaten sowie deren Veränderung
+- weight_rate_kg_week (numeric), day_span (integer), calorie_days/weigh_ins (integer): Wochenrate und Transparenzwerte zur Datenbasis
+- decision (applied | skipped | reconstructed): Apply, Skip oder aus den vorhandenen Logs nachgebaut
+- source (live | reconstructed): beim Check-in live berechnet oder nachträglich rekonstruiert
+- targets_snapshot (jsonb, nullable): eingefrorene Makroziele des Apply-Schritts; bei Skip und reinen Rekonstruktionen leer
+- calculated_at, decided_at, created_at, updated_at (timestamptz)
+- Store field: store.adaptiveTdeeHistory. Die bestehende zane_user_settings.macro_calc-Shape bleibt der aktuelle Formular-/Check-in-Zustand; die Historie wird nicht in dieses JSONB hineingeschrieben.
+- RLS: ausschließlich eigene Zeilen, kein Coach-Zugriff. Data-API-Rechte sind ausdrücklich auf authenticated beschränkt.
+- Backup: Teil des persönlichen User-Backups. Beim Restore wird die deterministische ID für den Ziel-User neu gebildet.
+
+Die erste historische Zeile kann beim Laden aus lastCheckinAt/lastAppliedAt
+und den Daily Logs rekonstruiert werden. Bei jedem weiteren Apply oder Skip
+wird der bisherige Check-in vor dem Überschreiben der Settings gesichert. Die
+Rekonstruktion kennt den Berechnungstag, aber keinen exakten alten Zeitstempel;
+solche Zeilen tragen deshalb source = reconstructed.
+
 ### `zane_skips`
 
 - `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
