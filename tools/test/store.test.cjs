@@ -508,18 +508,43 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.statusModeSince, null);
   });
   test('mergeBootScalars clears a statusMode the cache kept after the period went', () => {
-    // Same contradiction from the other side: the clear synced from another
-    // device (fresh agrees there is no status), this device's cache still holds
-    // the mode. The group rule alone would call that an unsynced local edit.
-    const cur = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
-    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, []);
+    // Same contradiction from the other side: another device closed the period
+    // but its own statusMode write never landed, so the server row still says
+    // vacation with nothing open behind it. base carries the mode too, which is
+    // what makes this a STALE value rather than an unsynced edit.
+    const synced = { ...bs, statusMode: 'vacation', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...synced }, { ...synced }, { ...synced }, []);
     assert.strictEqual(out.statusMode, null);
     assert.strictEqual(out.statusModeSince, null);
   });
+  test('mergeBootScalars never clears a status this device just set', () => {
+    // The failure that shipped. app.jsx sets phase 'ready' off the cache while
+    // loadFromSupabase is still in flight, so a user can tap Sick after the
+    // snapshot was taken. The optimistic period carries id '_pending' and
+    // mergeCollectionById drops it (server rows only), so the merged list is
+    // empty and the clear branch used to blank a status set seconds earlier.
+    // The server still holds the period, so it reappeared on the next launch.
+    const base = { ...bs };                                  // last synced: normal
+    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-09T08:00:00Z' };
+    const out = LB.mergeBootScalars({ ...bs }, cur, base, []);   // fresh = pre-tap snapshot
+    assert.strictEqual(out.statusMode, 'sick');
+    assert.strictEqual(out.statusModeSince, '2026-06-09T08:00:00Z');
+  });
+  test('mergeBootScalars keeps an offline status clear against a stale server mode', () => {
+    // The mirror of the case above, and the reason the group rule has to stay
+    // in charge: this device cleared the status, the period write landed, the
+    // scalar write did not. cur must win even though the server still says sick.
+    const base = { ...bs, statusMode: 'sick', statusModeSince: '2026-06-01T00:00:00Z' };
+    const cur = { ...bs, statusMode: null, statusModeSince: null };
+    const out = LB.mergeBootScalars({ ...base }, cur, base, []);
+    assert.strictEqual(out.statusMode, null);
+  });
   test('mergeBootScalars leaves statusMode alone when it has no period data at all', () => {
     // null periods means "the caller did not supply any", not "there are none".
-    const cur = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
-    const out = LB.mergeBootScalars({ ...bs }, cur, { ...bs }, null);
+    // Defensive only: app.jsx always hands over an array, so this guard is not
+    // reachable in production and must not be mistaken for the real one above.
+    const synced = { ...bs, statusMode: 'sick', statusModeSince: '2026-05-01T00:00:00Z' };
+    const out = LB.mergeBootScalars({ ...synced }, { ...synced }, { ...synced }, null);
     assert.strictEqual(out.statusMode, 'sick');
     assert.strictEqual(out.statusModeSince, '2026-05-01T00:00:00Z');
   });

@@ -5732,9 +5732,17 @@ function checkinWeekStart() {
 // the old one, a coaching note's entity_id, the ai_opinion row the edge
 // function is writing back to, the coach's open selection, was pointing at an
 // id that no longer existed. Any other truthy value still means "this is an
-// edit" (the label below) but generates a fresh id, so an older caller that
-// passes a bare boolean keeps its previous behaviour rather than writing
-// `true` into the key.
+// edit" (the label below) but does not name a row, so the id is resolved the
+// same way a first submission resolves it.
+//
+// Passing the id only covers the EDIT path, and that is not enough on its own:
+// a "new" submission can land on a row that already exists for that week, so
+// the same key rotation happened through the sibling path. The client's list is
+// loaded on mount and after a save, so a tab left open while another device
+// submits is all it takes. Whenever the caller cannot name the row, ask the
+// server which row this (coaching_id, week_start) already resolves to and reuse
+// that id. One extra read on the first-submission path, and it makes the
+// invariant hold for both ways in.
 async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, existingRef = false, schema = null) {
   const isEdit = !!existingRef;
   // Free-text fields have no length bound in the UI (a plain textarea) or
@@ -5751,9 +5759,16 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     general_note: clampCheckinText(responses.general_note),
   };
   const weekStart = weekStartArg || checkinWeekStart();
-  const id = (typeof existingRef === 'string' && existingRef)
-    ? existingRef
-    : 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  let id = (typeof existingRef === 'string' && existingRef) ? existingRef : null;
+  if (!id) {
+    // A failed lookup falls through to a fresh id, which is the behaviour this
+    // whole block replaces: no worse than before, and never a reason to refuse
+    // a check-in the user has already filled in.
+    const { data: prior, error: priorErr } = await _supabase.from('zane_checkins')
+      .select('id').eq('coaching_id', coachingId).eq('week_start', weekStart).maybeSingle();
+    if (priorErr && priorErr.code !== 'PGRST116') console.error('submitCheckin: existing-row lookup failed', priorErr);
+    id = prior?.id || ('ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+  }
   const row = {
     id,
     coaching_id: coachingId,
@@ -9557,6 +9572,10 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // legacy cache). statusPeriods = the ALREADY MERGED period rows, see below.
 function mergeBootScalars(fresh, cur, base, statusPeriods) {
   const out = {};
+  // Per group, did the LOCAL side win because it holds an edit this device made
+  // since the last confirmed sync? The status rules below need to know, see
+  // there.
+  const groupLocalWins = {};
   for (const group of BOOT_SCALAR_GROUPS) {
     // A cache written before one of these fields existed carries it as
     // undefined. Keeping that would blank a real server value, so those fields
@@ -9570,6 +9589,7 @@ function mergeBootScalars(fresh, cur, base, statusPeriods) {
     // the same bias as mergeSessions' cachedDiffersFromBase: in doubt, do not
     // discard this device's data.
     const localWins = present.length > 0 && (!base || present.some(f => !sameJson(cur[f], base[f])));
+    groupLocalWins[group[0]] = localWins;
     for (const f of group) {
       out[f] = (localWins && cur[f] !== undefined) ? cur[f] : fresh?.[f];
     }
@@ -9594,15 +9614,30 @@ function mergeBootScalars(fresh, cur, base, statusPeriods) {
   // nothing in the UI to clear because as far as the period history goes it is
   // already cleared. No open period means no status, full stop.
   //
+  // The clear direction must NOT fire over an unsynced local edit, and this is
+  // where it first shipped wrong. app.jsx renders the cache and sets
+  // phase = 'ready' before loadFromSupabase resolves, so the app is fully
+  // interactive while that fetch is in flight, and `fresh` is a snapshot taken
+  // BEFORE anything the user does in that window. Tap Sick right after opening
+  // the app and the optimistic period row carries id '_pending', which
+  // mergeCollectionById drops because it maps over server rows only. The clear
+  // branch then saw "no open period" and threw away a status the user had set
+  // seconds earlier; the server still held the period, so it came back on the
+  // next cold start. Requiring the mode to have come from the SERVER confines
+  // the rule to the case it was written for, another device closed the period
+  // and its own scalar write did not land, and leaves every unsynced local edit
+  // to the group rule above, which is what that rule is for.
+  //
   // statusPeriods == null means "the caller has no period data", not "there
-  // are none", so it must not clear anything.
+  // are none", so it must not clear anything. Defensive only: app.jsx always
+  // passes an array, so nothing in production reaches it.
   const open = statusPeriods ? statusPeriods.find(p => p.endedAt == null) : null;
   if (open) {
     if (out.statusMode !== open.mode) {
       out.statusMode = open.mode;
       out.statusModeSince = open.startedAt ?? out.statusModeSince ?? null;
     }
-  } else if (statusPeriods && out.statusMode) {
+  } else if (statusPeriods && out.statusMode && !groupLocalWins.statusMode) {
     out.statusMode = null;
     out.statusModeSince = null;
   }

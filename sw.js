@@ -50,11 +50,22 @@ const ASSETS = [
 // cache while the network is reachable, see the fetch handler. Matched against
 // the request path, so a new public page has to be listed here as well as kept
 // out of ASSETS.
+// PATHS, not BASE-prefixed URLs. BASE is registration.scope with the trailing
+// slash stripped, and scope is a serialized ABSOLUTE url ("https://host/training"),
+// which is right for ASSETS because CacheStorage is keyed by url. The fetch
+// handler matches these against url.pathname ("/training/welcome.html"), and a
+// path can never equal nor end with a string starting "https:", so the first
+// version of this list was dead on arrival: every public page kept falling
+// through to the stale-while-revalidate branch and kept being frozen in the
+// versioned cache, exactly the behaviour it was added to remove. Keeping them
+// relative to BASE's own path makes the comparison a path-to-path one, and
+// tools/check-asset-parity.cjs now fails the build if they go back to BASE.
+const BASE_PATH = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '');
 const PUBLIC_PAGES = [
-  BASE + '/welcome.html',
-  BASE + '/features.html',
-  BASE + '/autoreg.html',
-  BASE + '/src/autoreg-guide-page.js',
+  BASE_PATH + '/welcome.html',
+  BASE_PATH + '/features.html',
+  BASE_PATH + '/autoreg.html',
+  BASE_PATH + '/src/autoreg-guide-page.js',
 ];
 
 // Decorative background photos + their index. Purely cosmetic, and their file
@@ -219,6 +230,9 @@ self.addEventListener('fetch', e => {
     // answered from it: a marketing page frozen at whatever it said the day the
     // user first opened it, which is the exact failure the busters exist to
     // prevent. Network-first, cache only as an offline fallback.
+    // Compared as paths (see PUBLIC_PAGES). endsWith as well as equality so the
+    // match survives a deploy under a different base path; the query string is
+    // deliberately not part of it, welcome.html takes ?share=<token> deep links.
     if (PUBLIC_PAGES.some(p => url.pathname === p || url.pathname.endsWith(p))) {
       e.respondWith(
         fetch(e.request, { cache: 'no-store' })
