@@ -3520,7 +3520,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
   }
 
   return (
-    <Card style={{ padding: 16 }}>
+    <Card style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{label}'s Summary</span>
@@ -4980,7 +4980,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       } />
       {store.statusMode && !capturing && (
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
-          margin: '0 16px 12px',
+          margin: '4px 16px 12px',
           padding: '10px 14px',
           background: 'rgba(var(--accent-rgb), 0.16)',
           border: `var(--hair-width) solid rgba(var(--accent-rgb), 0.3)`,
