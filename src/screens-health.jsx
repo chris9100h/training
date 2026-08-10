@@ -2157,13 +2157,15 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   const [sheetMode, setSheetMode] = useStateH(estimatorConfigured ? 'summary' : 'wizard');
   const [wizardStep, setWizardStep] = useStateH(estimatorConfigured ? 3 : 0);
   const [wizardError, setWizardError] = useStateH('');
+  const [confirmEl, confirm] = useConfirm(300);
+  const initialSnap = useRefH(null);
 
   useEffectH(() => {
     if (!open) return;
     const storedWeight = calc.weightKg != null
       ? String(Math.round((isLbs ? calc.weightKg / LBS_TO_KG : calc.weightKg) * 10) / 10)
       : '';
-    setForm({
+    const next = {
       weight: loggedWeight != null ? String(loggedWeight) : storedWeight,
       heightCm: calc.heightCm != null ? String(calc.heightCm) : '',
       birthYear: calc.birthYear != null ? String(calc.birthYear) : '',
@@ -2182,13 +2184,25 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       // the training day count instead of freezing at whatever it was when the
       // sheet was last saved.
       restRatioPct: calc.restRatioPct != null ? calc.restRatioPct : null,
-    });
+    };
+    setForm(next);
+    initialSnap.current = next;
     setManual(null);
     setLocks({ training: {}, rest: {} });
     setSheetMode(estimatorConfigured ? 'summary' : 'wizard');
     setWizardStep(estimatorConfigured ? 3 : 0);
     setWizardError('');
   }, [open]); // eslint-disable-line
+
+  const isDirty = initialSnap.current != null && JSON.stringify(form) !== JSON.stringify(initialSnap.current);
+  const requestClose = async () => {
+    const hasProgress = sheetMode === 'wizard' && (wizardStep > 0 || isDirty);
+    if (hasProgress && !(await confirm(
+      'Your estimate settings will not be saved.',
+      { title: 'Discard settings?', ok: 'Discard', cancel: 'Keep editing', danger: true }
+    ))) return;
+    onClose();
+  };
 
   const weightInput = healthNum(form.weight);
   const weightKg = weightInput > 0 ? (isLbs ? weightInput * LBS_TO_KG : weightInput) : null;
@@ -2644,7 +2658,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // and a rewrap shifts by exactly one line. Keep it that way: 12px copy may
   // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
-    <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
+    <Sheet open={open} onClose={requestClose} title="Estimate targets" zIndex={200}>
       {sheetMode === 'summary' ? summaryView : (
         <>
           <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
@@ -2657,7 +2671,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
                 textTransform: 'uppercase', cursor: step.id <= wizardStep ? 'pointer' : 'default',
                 WebkitTapHighlightColor: 'transparent', textShadow: 'none',
-              }}>{step.id + 1} {step.label}</button>
+              }}>{step.label}</button>
             ))}
           </div>
 
@@ -2724,36 +2738,13 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Training days per week',
         seg([0, 1, 2, 3, 4, 5, 6, 7].map(n => ({ id: n, label: String(n) })), form.trainingDays, v => setForm(f => ({ ...f, trainingDays: v }))),
         cyclesDays
-          ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
+          ? 'Training days get more carbs, rest days fewer. Fine-tune the split on the review step.'
           : 'Every day gets the same target, since there is no second day type to cycle against.')}
             </>
           )}
 
           {wizardStep === 2 && (
             <>
-      {/* How far the two day types are pulled apart. The week's total is fixed
-          at every setting, so this only decides where the calories sit inside
-          it. The automatic split is the sharpest one on offer and therefore the
-          slider's floor, which also makes it the default without pinning a
-          value that would then stop following the training day count. */}
-      {cyclesDays && group('Rest day calories', (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
-            onChange={e => {
-              const v = +e.target.value;
-              // Back at the floor it goes to null, so it follows the training
-              // day count again instead of pinning the rounded percentage.
-              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
-            }}
-            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
-          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
-        </div>
-      ),
-      restPct >= 100
-        ? 'Both day types eat the same. No carb cycling at all.'
-        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
-      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
-
       {/* Protein has no per-kg option, only the app's own 2g/kg default or a
           fixed number: for anyone with a settled protein target, holding it
           exact matters more than tracking a ratio that drifts with the
@@ -2829,6 +2820,26 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
 
           {wizardStep === 3 && (
             <>
+      {/* The slider lives beside the live numbers it changes, so the user can
+          see the rest-day target and the weekly average while adjusting it. */}
+      {cyclesDays && group('Rest day calories', (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input type="range" min={minRestPct} max="100" step="1" value={restPct}
+            onChange={e => {
+              const v = +e.target.value;
+              // Back at the floor it goes to null, so it follows the training
+              // day count again instead of pinning the rounded percentage.
+              setForm(f => ({ ...f, restRatioPct: v <= minRestPct ? null : v }));
+            }}
+            style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${restFillPct}%, var(--range-track) ${restFillPct}%)` }} />
+          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 40, textAlign: 'right' }}>{restPct}%</span>
+        </div>
+      ),
+      restPct >= 100
+        ? 'Both day types eat the same. No carb cycling at all.'
+        : `A rest day is ${restPct}% of a training day. All the way left is the sharpest split, all the way right feeds both the same. The weekly total does not move either way.`,
+      form.restRatioPct != null ? resetBtn(() => setForm(f => ({ ...f, restRatioPct: null }))) : null)}
+
       <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
 
       {shown ? (
@@ -2880,6 +2891,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
           </div>
         </>
       )}
+      {confirmEl}
     </Sheet>
   );
 }
