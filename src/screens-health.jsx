@@ -3156,7 +3156,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
           )}
         </div>
         {calc.lastAppliedTargets && ['Training', 'Rest'].map(suffix => (
-          <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+          <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', borderBottom: suffix === 'Training' ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
             <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{suffix}</span>
             <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
               {calc.lastAppliedTargets[`calories${suffix}`]}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
@@ -3181,7 +3181,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             calc.trainingDays,
           );
           return (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', marginTop: 2, borderTop: `var(--hair-width) solid ${UI.hair}`, borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
               <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>Week avg</span>
               <span className="num" style={{ fontSize: 16, color: UI.inkSoft, fontWeight: 400 }}>
                 {weekCal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
