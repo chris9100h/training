@@ -236,7 +236,29 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot] || t.label;
     return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
   });
-  const idx = tabs.findIndex(t => t.id === active);
+  const [visualActive, setVisualActive] = React.useState(active);
+  React.useEffect(() => setVisualActive(active), [active]);
+  const routeForTab = id => {
+    if (id === 'health' && enabledSlots.length) {
+      const curIdx = enabledSlots.indexOf(routeName);
+      return enabledSlots[(curIdx + 1) % enabledSlots.length];
+    }
+    return id;
+  };
+  const moduleForRoute = { plan: 'schedule', hist: 'lib', health: 'health', water: 'water', food: 'food', medications: 'medications', coaching: 'coaching' };
+  const prefetchTab = id => {
+    const moduleName = moduleForRoute[routeForTab(id)];
+    if (moduleName) window.__prefetchScreen?.(moduleName);
+  };
+  const navigateTab = id => {
+    const nextRoute = routeForTab(id);
+    setVisualActive(id);
+    const result = onChange(nextRoute);
+    if (result?.then) result.then(ok => {
+      if (ok === false) setVisualActive(current => current === id ? active : current);
+    });
+  };
+  const idx = tabs.findIndex(t => t.id === visualActive);
   // Health, its water tracker, food tracker and medications tracker share one
   // tab slot (routeName being any of the four still lights up 'health', see
   // tabActive in app.jsx), each independently shown or hidden in Settings.
@@ -246,14 +268,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   // one of them at all (e.g. arriving from Home, or the current one having
   // just been disabled). All four enabled reproduces the original fixed
   // Health → Water → Food → Medications cycle unchanged.
-  const handleTabClick = (id) => {
-    if (id === 'health' && enabledSlots.length) {
-      const curIdx = enabledSlots.indexOf(routeName);
-      onChange(enabledSlots[(curIdx + 1) % enabledSlots.length]);
-      return;
-    }
-    onChange(id);
-  };
+  const handleTabClick = (id) => navigateTab(id);
   // Three-dot "there's more here" indicator, shown under the Health slot's
   // label at all times (not just once you've found water/food): a lit dot
   // for the side you're currently viewing, a faint ring for the other two,
@@ -326,7 +341,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         setReveal(null);
         const pick = resolveHealthOption(ev.clientX, ev.clientY);
         if (pick) {
-          onChange(pick);
+          navigateTab(pick);
           // Release landed on a popup chip, a sibling of this button, so no
           // native click will ever follow to consume suppressClickRef itself
           // (a click only fires when press and release resolve to the same
@@ -377,11 +392,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           <div className="knurl" style={{ margin: '0 14px 8px' }} />
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
-              const on = t.id === active;
+              const on = t.id === visualActive;
               const badge = t.id === 'coaching' ? coachingBadge : null;
               const { healthSlot, iconKey, label } = t;
               return (
-                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} aria-current={on ? 'page' : undefined} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} onPointerDown={() => prefetchTab(t.id)} onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }} aria-current={on ? 'page' : undefined} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -467,38 +482,41 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           {/* Sliding gold key plate behind the active icon */}
           {idx >= 0 && (
             <div style={{
-              position: 'absolute',
-              left: `${(idx + 0.5) * 100 / n}%`,
+              position: 'absolute', left: 0,
               top: KEY_TOP,
-              transform: 'translateX(-50%)',
-              width: KEY, height: KEY, borderRadius: 6,
-              background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
-              border: '1px solid var(--accent-deep)',
-              // Neutral white highlight, not tinted warm-cream: that read as a
-              // yellow smudge once paper mutes --accent to grey. White reads
-              // as a plausible glossy sheen on every accent color, muted or not.
-              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
-              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              pointerEvents: 'none',
+              width: `${100 / n}%`, height: KEY,
+              transform: `translate3d(${idx * 100}%, 0, 0)`,
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform', pointerEvents: 'none',
               zIndex: 0,
-            }} />
+            }}>
+              <div style={{
+                width: KEY, height: KEY, margin: '0 auto', borderRadius: 6,
+                background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+                border: '1px solid var(--accent-deep)',
+                // Neutral white highlight, not tinted warm-cream: that read as a
+                // yellow smudge once paper mutes --accent to grey. White reads
+                // as a plausible glossy sheen on every accent color, muted or not.
+                boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+              }} />
+            </div>
           )}
           {/* Top rail above the active plate, mechanical selector cue */}
           {idx >= 0 && (
             <div style={{
-              position: 'absolute',
-              left: `${(idx + 0.5) * 100 / n}%`,
+              position: 'absolute', left: 0,
               top: KEY_TOP - 5,
-              transform: 'translateX(-50%)',
-              width: 28, height: 2, borderRadius: 4,
-              background: UI.gold,
-              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              pointerEvents: 'none',
+              width: `${100 / n}%`, height: 2,
+              transform: `translate3d(${idx * 100}%, 0, 0)`,
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform', pointerEvents: 'none',
               zIndex: 2,
-            }} />
+            }}>
+              <div style={{ width: 28, height: 2, margin: '0 auto', borderRadius: 4, background: UI.gold }} />
+            </div>
           )}
           {tabs.map(t => {
-            const on = t.id === active;
+            const on = t.id === visualActive;
             const badge = t.id === 'coaching' ? coachingBadge : null;
             const { healthSlot, iconKey, label } = t;
             const isHealthTab = t.id === 'health';
@@ -506,7 +524,8 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
               <button key={t.id} data-tour={`tab-${t.id}`}
                 onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
                 aria-current={on ? 'page' : undefined}
-                onPointerDown={isHealthTab ? healthOnPointerDown : undefined}
+                onPointerDown={e => { prefetchTab(t.id); if (isHealthTab) healthOnPointerDown(e); }}
+                onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }}
                 onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
                 onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
                 onPointerCancel={isHealthTab ? healthOnPointerUp : undefined}

@@ -1462,6 +1462,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return modulePromises[name];
   }
   window.__loadScreenModule = loadModule;
+  // Start a route module before React needs to render it. The module promise
+  // is shared with the lazy placeholder, so a pointer prefetch can never load
+  // or execute the same source twice.
+  window.__prefetchScreen = function (name) {
+    return loadModule(name).catch(function () { return null; });
+  };
 
   function loadingStyle(kind) {
     var base = {

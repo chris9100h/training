@@ -1951,9 +1951,15 @@ function App() {
     // a fully synchronous setRoute, unchanged for every other screen.
     if (window.__foodLeaveGuard && r.name !== cur.name) {
       const ok = await window.__foodLeaveGuard();
-      if (!ok) return;
+      if (!ok) return false;
     }
-    setRoute(r);
+    const updateRoute = () => setRoute(r);
+    // Keep the current frame responsive while React mounts the next screen.
+    // The TabBar has its own immediate visual state, so its indicator does not
+    // wait for this lower-priority render to commit.
+    if (typeof React.startTransition === 'function') React.startTransition(updateRoute);
+    else updateRoute();
+    return true;
   };
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.
