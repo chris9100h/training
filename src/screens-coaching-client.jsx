@@ -350,9 +350,12 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
       if (isTrainingDay) {
         if (planStartDateStr && dateStr < planStartDateStr) continue;
-        // Sick/vacation days don't count against adherence.
+        // Sick and vacation days don't count against adherence. Deload and
+        // cleanup still follow the active plan, just with reduced loads, so
+        // those training days remain part of the planned/done count.
         const ts = date.getTime();
         const inStatusPeriod = (clientStore.statusPeriods || []).some(p => {
+          if (!['sick', 'vacation'].includes(p.mode)) return false;
           const start = new Date(p.startedAt).getTime();
           const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
           return ts >= start && ts <= end;
