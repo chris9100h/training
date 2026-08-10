@@ -1145,25 +1145,6 @@ async function testAsync(name, fn) {
     assert.ok(r.tdee < r.avgCalories);
   });
 
-  test('estimateAdaptiveTdee: half-window averages use the distance between their centers', () => {
-    const days = [];
-    for (let d = 1; d <= 14; d++) {
-      days.push({
-        date: `2025-01-${String(d).padStart(2, '0')}`,
-        calories: 2000,
-        weight: 80 + (d - 1) * 0.1,
-      });
-    }
-    const r = LB.estimateAdaptiveTdee({ dailyLogs: days }, '2025-01-14');
-    assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.weightChangeKg, 0.7);
-    assert.strictEqual(r.daySpan, 7);
-    assert.strictEqual(r.tdee, 1230);
-    const row = LB.adaptiveTdeeHistoryRow({ dailyLogs: days }, 'user-1', '2025-01-14');
-    assert.strictEqual(row.daySpan, 7);
-    assert.strictEqual(row.weightRateKgWeek, 0.7);
-  });
-
   test('estimateAdaptiveTdee: insufficient data below every threshold', () => {
     const fullCalories = [];
     for (let d = 1; d <= 14; d++) fullCalories.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });

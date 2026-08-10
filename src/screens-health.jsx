@@ -3130,9 +3130,7 @@ function AdaptiveTdeeChart({ history }) {
   const hoverPoints = points.map(p => {
     const weightStart = displayWeight(p.weightStartKg);
     const weightEnd = displayWeight(p.weightEndKg);
-    const weightChange = displayWeight(p.weightChangeKg);
     const rate = displayWeight(p.weightRateKgWeek);
-    const periodDays = Number(p.daySpan);
     const weightUnit = isLbs ? 'lbs' : 'kg';
     const rows = [
       { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
@@ -3154,7 +3152,6 @@ function AdaptiveTdeeChart({ history }) {
     }
     const sub = [
       statusLabel(p),
-      weightChange != null && Number.isFinite(periodDays) ? 'change ' + signed(weightChange) + ' ' + weightUnit + ' / ' + String(periodDays) + 'd' : null,
       rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
     ].filter(Boolean).join(' · ');
     return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
@@ -3197,7 +3194,7 @@ function AdaptiveTdeeChart({ history }) {
   );
 }
 
-function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
+function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', onRetry }) {
   const history = LB.mergeAdaptiveTdeeHistory(store.adaptiveTdeeHistory || []);
   const [chartMode, setChartMode] = useStateH('calories');
   const isLbs = UI.unit() === 'lbs';
@@ -3207,9 +3204,20 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
   };
   const weightSeries = history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null);
   const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+  const loading = loadStatus === 'loading' && !history.length;
+  const loadError = loadStatus === 'error' && !history.length;
   return (
     <Sheet open={open} onClose={onClose} title="TDEE history">
-      {!history.length ? (
+      {loading ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
+          Loading your TDEE history…
+        </div>
+      ) : loadError ? (
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
+          TDEE history could not be loaded right now.
+          {onRetry && <button onClick={onRetry} style={{ display: 'block', marginTop: 12, padding: '8px 12px', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, background: 'transparent', color: UI.ink, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Retry</button>}
+        </div>
+      ) : !history.length ? (
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '17px' }}>
           Your first estimate will appear here after the next check-in. Older points are rebuilt from your logged calories and bodyweight when there is enough data.
         </div>
@@ -3235,9 +3243,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
             {history.map(row => {
               const weightStart = displayWeight(row.weightStartKg);
               const weightEnd = displayWeight(row.weightEndKg);
-              const weightChange = displayWeight(row.weightChangeKg);
               const rate = displayWeight(row.weightRateKgWeek);
-              const periodDays = Number(row.daySpan);
               const weightUnit = isLbs ? 'lbs' : 'kg';
               const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
               const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
@@ -3252,8 +3258,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
                     <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>avg intake {row.avgCalories} kcal</span>
                   </div>
                   <div style={{ display: 'flex', gap: 12, marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
-                    <span>weight {weightStart != null && weightEnd != null ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit : weightEnd != null ? String(weightEnd) + ' ' + weightUnit : 'n/a'}</span>
-                    {weightChange != null && Number.isFinite(periodDays) && <span>change {weightChange > 0 ? '+' : ''}{String(weightChange)} {weightUnit} / {String(periodDays)}d</span>}
+                    <span>weight window {weightStart != null && weightEnd != null ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit : weightEnd != null ? String(weightEnd) + ' ' + weightUnit : 'n/a'}</span>
                     <span>trend {rate == null ? 'n/a' : (rate > 0.05 ? '+' : '') + String(rate) + ' ' + weightUnit + '/wk'}</span>
                   </div>
                   {Number.isFinite(target) && (
@@ -4508,6 +4513,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [checkinOpen, setCheckinOpen] = useStateH(false);
   const [tdeeHistoryOpen, setTdeeHistoryOpen] = useStateH(false);
+  const [tdeeHistoryStatus, setTdeeHistoryStatus] = useStateH('loading');
+  const [tdeeHistoryRetry, setTdeeHistoryRetry] = useStateH(0);
   // Reached directly from MacroSourceCard's "Adjust automation settings",
   // skipping the manual-numbers MacroTargetSheet layer: apply() below commits
   // straight to macroTargets the same way that sheet's own Save does, so this
@@ -4521,10 +4528,15 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   useEffectH(() => {
     let cancelled = false;
     if (!userId) return;
+    setTdeeHistoryStatus('loading');
     const calc = store.settings?.macroCalc || {};
     const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
     LB.loadAdaptiveTdeeHistory(userId).then(serverRows => {
       if (cancelled) return;
+      if (serverRows == null) {
+        setTdeeHistoryStatus('error');
+        return;
+      }
       const rawServerHistory = serverRows || [];
       const refreshedServerHistory = rawServerHistory.map(row => LB.refreshAdaptiveTdeeHistoryEstimate(store, row));
       const serverHistory = refreshedServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
@@ -4543,9 +4555,14 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       if (toSave.length) {
         LB.saveAdaptiveTdeeHistory(userId, toSave).catch(error => console.error('adaptive TDEE backfill failed:', error));
       }
-    }).catch(error => console.error('adaptive TDEE history refresh failed:', error));
+      setTdeeHistoryStatus('ready');
+    }).catch(error => {
+      if (cancelled) return;
+      console.error('adaptive TDEE history refresh failed:', error);
+      setTdeeHistoryStatus('error');
+    });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, tdeeHistoryRetry]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-
@@ -5336,7 +5353,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
       <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
-      <AdaptiveTdeeHistorySheet open={tdeeHistoryOpen} onClose={() => setTdeeHistoryOpen(false)} store={store} />
+      <AdaptiveTdeeHistorySheet open={tdeeHistoryOpen} onClose={() => setTdeeHistoryOpen(false)} store={store}
+        loadStatus={tdeeHistoryStatus} onRetry={() => setTdeeHistoryRetry(value => value + 1)} />
       <WeeklyCheckinSheet open={checkinOpen} onClose={() => setCheckinOpen(false)} store={store} setStore={setStore} userId={userId} coachHasMacros={coachHasMacros} coachingMacros={coachingMacros}
         onOpenSettings={() => { setCheckinOpen(false); setAutomationSettingsOpen(true); }} />
       <MacroEstimatorSheet open={automationSettingsOpen} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone

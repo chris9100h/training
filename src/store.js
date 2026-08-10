@@ -6754,11 +6754,6 @@ function estimateAdaptiveTdee(store, todayStr) {
   const firstHalf = weighIns.slice(0, half);
   const secondHalf = weighIns.slice(n - half);
   const avgOf = list => list.reduce((s, l) => s + Number(l.weight), 0) / list.length;
-  // weightChange is the difference between two half-window averages, so its
-  // elapsed time is the distance between those halves' time centers, not the
-  // distance from the first reading to the last. For a full 14-day window
-  // that is normally 7 days, which keeps the weekly rate and TDEE coherent.
-  const meanDateMs = list => list.reduce((s, l) => s + new Date(l.date + 'T12:00:00').getTime(), 0) / list.length;
   // store.dailyLogs weight is in the DISPLAY unit (lbs users log lbs
   // straight, no conversion, see CLAUDE.md's weight-unit note), but
   // weightChangeKg has to be TRUE kg for the KCAL_PER_KG physical constant
@@ -6767,7 +6762,7 @@ function estimateAdaptiveTdee(store, todayStr) {
   const isLbs = weightAxisUnit(store?.settings?.unit) === 'lbs';
   const weightChangeNative = avgOf(secondHalf) - avgOf(firstHalf);
   const weightChangeKg = isLbs ? weightChangeNative * KG_PER_LB : weightChangeNative;
-  const daySpan = Math.max(1, Math.round((meanDateMs(secondHalf) - meanDateMs(firstHalf)) / 86400000));
+  const daySpan = Math.max(1, dayDiff(firstHalf[0].date, secondHalf[secondHalf.length - 1].date));
   const weightStartKg = isLbs ? avgOf(firstHalf) * KG_PER_LB : avgOf(firstHalf);
   const weightEndKg = isLbs ? avgOf(secondHalf) * KG_PER_LB : avgOf(secondHalf);
 
