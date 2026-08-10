@@ -1269,6 +1269,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(rows[0].targetsSnapshot.deltaKcal, -506);
   });
 
+  test('enrichAdaptiveTdeeHistoryTarget: repairs legacy snapshots without changing the decision', () => {
+    const row = {
+      asOfDate: '2025-01-14',
+      tdee: 2592,
+      source: 'live',
+      decision: 'applied',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const enriched = LB.enrichAdaptiveTdeeHistoryTarget(row, { trainingDays: 5, goal: 'gain' });
+    assert.strictEqual(enriched.source, 'live');
+    assert.strictEqual(enriched.decision, 'applied');
+    assert.strictEqual(enriched.targetsSnapshot.weeklyAverageCalories, 2086);
+    assert.strictEqual(enriched.targetsSnapshot.deltaKcal, -506);
+    assert.strictEqual(enriched.targetsSnapshot.trainingDays, 5);
+    assert.strictEqual(enriched.targetsSnapshot.goal, 'gain');
+  });
+
   test('mergeAdaptiveTdeeHistory: live decisions replace reconstructed rows for the same date', () => {
     const reconstructed = { asOfDate: '2025-01-14', source: 'reconstructed', decision: 'reconstructed', updatedAt: '2025-01-14T08:00:00.000Z' };
     const live = { asOfDate: '2025-01-14', source: 'live', decision: 'skipped', updatedAt: '2025-01-14T09:00:00.000Z' };
@@ -1276,6 +1293,44 @@ async function testAsync(name, fn) {
     assert.strictEqual(merged.length, 1);
     assert.strictEqual(merged[0], live);
     assert.strictEqual(merged[0].decision, 'skipped');
+  });
+
+  test('mergeAdaptiveTdeeHistory: keeps richer target data on the live row', () => {
+    const live = {
+      asOfDate: '2025-01-14',
+      source: 'live',
+      decision: 'applied',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const repaired = {
+      asOfDate: '2025-01-14',
+      source: 'reconstructed',
+      decision: 'applied',
+      targetsSnapshot: { weeklyAverageCalories: 2086, deltaKcal: -506 },
+    };
+    const merged = LB.mergeAdaptiveTdeeHistory([live], [repaired]);
+    assert.strictEqual(merged[0].source, 'live');
+    assert.strictEqual(merged[0].decision, 'applied');
+    assert.strictEqual(merged[0].targetsSnapshot.weeklyAverageCalories, 2086);
+  });
+
+  test('mergeAdaptiveTdeeHistory: keeps rich data when a newer live status is legacy-shaped', () => {
+    const repaired = {
+      asOfDate: '2025-01-14',
+      source: 'reconstructed',
+      decision: 'reconstructed',
+      targetsSnapshot: { weeklyAverageCalories: 2086, deltaKcal: -506 },
+    };
+    const live = {
+      asOfDate: '2025-01-14',
+      source: 'live',
+      decision: 'skipped',
+      targetsSnapshot: { caloriesTraining: 2200, caloriesRest: 1800 },
+    };
+    const merged = LB.mergeAdaptiveTdeeHistory([repaired], [live]);
+    assert.strictEqual(merged[0].source, 'live');
+    assert.strictEqual(merged[0].decision, 'skipped');
+    assert.strictEqual(merged[0].targetsSnapshot.weeklyAverageCalories, 2086);
   });
 
   test('weeklyAverageCalories: weights the two day types by how often they occur', () => {

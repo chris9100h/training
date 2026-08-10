@@ -6839,26 +6839,41 @@ function reconstructAdaptiveTdeeHistory(store, userId, dates) {
       decision: wasApplied ? 'applied' : wasHandled ? 'skipped' : 'reconstructed',
       targetsSnapshot: wasApplied ? (calc.lastAppliedTargets ?? null) : null,
     });
-    // Older applied points predate the richer target snapshot. The exact
-    // training/rest values are still available in macroCalc, so add the
-    // comparable weekly average when the training split is known.
-    if (row && wasApplied && calc.lastAppliedTargets && calc.trainingDays != null) {
-      const targetCalories = weeklyAverageCalories(
-        calc.lastAppliedTargets.caloriesTraining,
-        calc.lastAppliedTargets.caloriesRest,
-        calc.trainingDays,
-      );
-      row.targetsSnapshot = {
-        ...calc.lastAppliedTargets,
-        weeklyAverageCalories: targetCalories,
-        deltaKcal: targetCalories - row.tdee,
-        trainingDays: calc.trainingDays,
-        goal: calc.goal ?? null,
-        rateKgPerWeek: calc.rateKgPerWeek ?? null,
-      };
-    }
-    return row;
+    return enrichAdaptiveTdeeHistoryTarget(row, calc);
   }).filter(Boolean);
+}
+
+// Older clients stored only the Training/Rest macro values in the history
+// snapshot. Fill in the values needed by the history chart when they are
+// missing, while preserving the original row metadata and decision.
+function enrichAdaptiveTdeeHistoryTarget(row, calc = {}) {
+  const snapshot = row?.targetsSnapshot;
+  if (!row || !snapshot) return row;
+
+  const trainingDays = snapshot.trainingDays ?? calc.trainingDays;
+  const hasWeeklyAverage = snapshot.weeklyAverageCalories != null;
+  const hasTrainingRest = snapshot.caloriesTraining != null && snapshot.caloriesRest != null;
+  const targetCalories = hasWeeklyAverage
+    ? Number(snapshot.weeklyAverageCalories)
+    : trainingDays != null && hasTrainingRest
+      ? weeklyAverageCalories(snapshot.caloriesTraining, snapshot.caloriesRest, trainingDays)
+      : null;
+  const tdee = Number(row.tdee);
+  const hasDelta = snapshot.deltaKcal != null;
+
+  if (!Number.isFinite(targetCalories) || (hasWeeklyAverage && hasDelta)) return row;
+
+  return {
+    ...row,
+    targetsSnapshot: {
+      ...snapshot,
+      weeklyAverageCalories: targetCalories,
+      ...(hasDelta || !Number.isFinite(tdee) ? {} : { deltaKcal: targetCalories - tdee }),
+      ...(snapshot.trainingDays != null || trainingDays == null ? {} : { trainingDays }),
+      ...(snapshot.goal != null || calc.goal == null ? {} : { goal: calc.goal }),
+      ...(snapshot.rateKgPerWeek != null || calc.rateKgPerWeek == null ? {} : { rateKgPerWeek: calc.rateKgPerWeek }),
+    },
+  };
 }
 
 function mergeAdaptiveTdeeHistory(...collections) {
@@ -6869,6 +6884,21 @@ function mergeAdaptiveTdeeHistory(...collections) {
       const current = byDate.get(row.asOfDate);
       if (!current) {
         byDate.set(row.asOfDate, row);
+        continue;
+      }
+      const currentHasTarget = Number.isFinite(Number(current.targetsSnapshot?.weeklyAverageCalories));
+      const rowHasTarget = Number.isFinite(Number(row.targetsSnapshot?.weeklyAverageCalories));
+      // Keep a richer snapshot when an older local/server row is merged with
+      // a reconstructed or repaired copy. Preserve the existing row metadata
+      // so a live Apply/Skip decision cannot be downgraded to reconstructed.
+      if (!currentHasTarget && rowHasTarget) {
+        byDate.set(row.asOfDate, { ...current, targetsSnapshot: row.targetsSnapshot });
+        continue;
+      }
+      if (currentHasTarget && !rowHasTarget) {
+        if (current.source !== 'live' && row.source === 'live') {
+          byDate.set(row.asOfDate, { ...row, targetsSnapshot: current.targetsSnapshot });
+        }
         continue;
       }
       // A live decision contains information that a reconstructed row does
@@ -10141,7 +10171,7 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
-  estimateAdaptiveTdee, adaptiveTdeeHistoryRow, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
+  estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,

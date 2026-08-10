@@ -567,6 +567,7 @@ Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
 - decision (applied | skipped | reconstructed): Apply, Skip oder aus den vorhandenen Logs nachgebaut
 - source (live | reconstructed): beim Check-in live berechnet oder nachträglich rekonstruiert
 - targets_snapshot (jsonb, nullable): eingefrorener Check-in-Vorschlag mit Training/Rest-Zielen, Wochenmittel, deltaKcal, Ziel und Rate; decision zeigt, ob er angewendet oder übersprungen wurde
+- Ältere Snapshots ohne Wochenmittel werden beim Laden kompatibel ergänzt und einmalig zurückgeschrieben; die ursprüngliche Entscheidung und der Live-/Rebuilt-Status bleiben dabei erhalten.
 - calculated_at, decided_at, created_at, updated_at (timestamptz)
 - Store field: store.adaptiveTdeeHistory. Die bestehende zane_user_settings.macro_calc-Shape bleibt der aktuelle Formular-/Check-in-Zustand; die Historie wird nicht in dieses JSONB hineingeschrieben.
 - RLS: ausschließlich eigene Zeilen, kein Coach-Zugriff. Data-API-Rechte sind ausdrücklich auf authenticated beschränkt.

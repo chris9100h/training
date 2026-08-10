@@ -4510,12 +4510,19 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
     LB.loadAdaptiveTdeeHistory(userId).then(serverRows => {
       if (cancelled) return;
-      const serverHistory = serverRows || [];
+      const rawServerHistory = serverRows || [];
+      const serverHistory = rawServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
       setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(serverHistory, rebuilt, s.adaptiveTdeeHistory || []) } : s);
-      const serverDates = new Set(serverHistory.map(row => row.asOfDate));
+      const serverDates = new Set(rawServerHistory.map(row => row.asOfDate));
       const missing = rebuilt.filter(row => !serverDates.has(row.asOfDate));
-      if (missing.length) {
-        LB.saveAdaptiveTdeeHistory(userId, missing).catch(error => console.error('adaptive TDEE backfill failed:', error));
+      const repaired = serverHistory.filter((row, index) => {
+        const raw = rawServerHistory[index];
+        return row.targetsSnapshot?.weeklyAverageCalories != null
+          && raw?.targetsSnapshot?.weeklyAverageCalories == null;
+      });
+      const toSave = LB.mergeAdaptiveTdeeHistory(missing, repaired);
+      if (toSave.length) {
+        LB.saveAdaptiveTdeeHistory(userId, toSave).catch(error => console.error('adaptive TDEE backfill failed:', error));
       }
     }).catch(error => console.error('adaptive TDEE history refresh failed:', error));
     return () => { cancelled = true; };
