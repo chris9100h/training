@@ -1952,11 +1952,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const splitUndoTimer = useRefFd(null);
   useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
   // "Create recipe from block": the mirror of Split, folding a stacked
-  // hour's 2+ items into ONE recipe-shaped entry instead of fanning one
-  // entry out. recipeBlockHour is the hour being combined (null = sheet
-  // closed). recipeBlockSave defaults OFF: off replaces the block with a
-  // single log entry only ("temporary", no zane_food_recipes row, nothing
-  // to reuse later); on ALSO saves it as a real recipe under Quick Add,
+  // hour's 2+ items into one or more recipe-shaped entries instead of fanning
+  // the original items out. recipeBlockHour is the hour being combined (null = sheet
+  // closed). recipeBlockSave defaults OFF: off replaces the block with portion
+  // entries only ("temporary", no zane_food_recipes row, nothing to reuse
+  // later); on ALSO saves it as a real recipe under Quick Add,
   // Recipes, same as building one in the recipe editor. Undo reuses the
   // exact same split_batch/restoreSplitBatch machinery as Split (see there),
   // tagged kind:'merge' instead of 'split'.
@@ -2189,15 +2189,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     setRecipeBlockHour(null);
   }
-  // Folds the block's items into one recipe-shaped log entry (source:
-  // 'recipe', recipeItems built straight from them at their current
-  // amounts, no rescaling since this IS the batch, not a portion of one).
+  // Folds the block's items into one recipe batch, then creates one
+  // recipe-shaped log entry per requested portion. The stored recipe keeps
+  // the whole batch as its ingredients and the log entries carry the scaled
+  // snapshots, so each portion can be moved to another time independently.
   // recipeBlockSave additionally saves the same items as a real
   // zane_food_recipes row (with foodId/brand/source, unlike recipeItems'
   // own leaner shape) so it can be reused later like any other recipe;
-  // off, it's just this one entry. Tags the new entry with a split_batch
-  // (kind:'merge') the same way applySplit does, so the shared Undo
-  // machinery works for this direction too.
+  // off, there is no library row. Every new entry shares one split_batch
+  // (kind:'merge') the same way applySplit does, so the shared Undo machinery
+  // restores the original block in one go.
   function applyBlockRecipe() {
     if (recipeBlockHour == null) return;
     const entries = byHour[recipeBlockHour] || [];
@@ -2235,9 +2236,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       createdAt: now,
       splitBatch: { id: LB.uid(), kind: 'merge', removedEntries: entries },
     };
+    // Partition every integer field exactly, and every macro field to one
+    // decimal place exactly, so rounding never changes the day's totals when
+    // a batch such as 1057 kcal becomes 529 + 528 kcal. Recipe-item
+    // snapshots use the same partitioning as their parent log entries.
+    const partitionFields = source => {
+      const parts = Array.from({ length: portions }, () => ({}));
+      const assign = (key, values) => values.forEach((value, i) => { parts[i][key] = value; });
+      ['quantityG', 'calories', 'sodiumMg'].forEach(key => {
+        assign(key, source[key] == null ? Array(portions).fill(null) : fdEvenSplit(Math.round(source[key]), portions));
+      });
+      ['protein', 'carbs', 'fat', 'fiber', 'sugar', 'satFat'].forEach(key => {
+        if (source[key] == null) { assign(key, Array(portions).fill(null)); return; }
+        const totalTenths = Math.round(source[key] * 10);
+        const base = Math.floor(totalTenths / portions);
+        const remainder = totalTenths - base * portions;
+        assign(key, Array.from({ length: portions }, (_, i) => (base + (i < remainder ? 1 : 0)) / 10));
+      });
+      return parts;
+    };
+    const mergedParts = partitionFields(merged);
+    const itemParts = (merged.recipeItems || []).map(partitionFields);
+    const portionEntries = mergedParts.map((fields, i) => ({
+      ...merged,
+      ...fields,
+      id: LB.uid(),
+      foodName: portions > 1 ? `${name} (${i + 1}/${portions})` : name,
+      recipeItems: (merged.recipeItems || []).map((item, itemIndex) => ({ ...item, ...itemParts[itemIndex][i] })),
+    }));
     const removeIds = new Set(entries.map(e => e.id));
     setStore(s => {
-      const nextLogs = [merged, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const nextLogs = [...portionEntries, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
       const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
       const nextRecipes = recipeBlockSave
         ? [{
@@ -5955,6 +5984,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <Stepper value={recipeBlockPortions} step={1} min={1}
                   suffix={recipeBlockPortions === 1 ? ' portion' : ' portions'}
                   onChange={v => setRecipeBlockPortions(Math.max(1, Math.round(v)))} />
+              </div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', textAlign: 'center', marginTop: 6 }}>
+                Creates one log entry per portion, so you can move them to different times afterwards.
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
