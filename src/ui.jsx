@@ -2097,6 +2097,16 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
   );
 }
 
+// Plate inventory data is shared by the lazy Train calculator and the lazy
+// Settings inventory sheet. Keep it in the critical UI layer so either screen
+// can open without depending on the other module.
+const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
+const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
+const PLATE_COLORS_KG = { 25:'#c0392b', 20:'#2471a3', 15:'#d4ac0d', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
+const PLATE_SIZE_KG = { 25: 70, 20: 64, 15: 60, 10: 56, 5: 48, 2.5: 42, 1.25: 36, 0.75: 30, 0.5: 30, 0.25: 30 };
+const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
+const PLATE_SIZE_LBS = { 55: 70, 45: 64, 35: 56, 25: 48, 10: 42, 5: 36, 2.5: 30, 1.25: 28 };
+
 // Shared block recap used by Home, Training and Library confirmation sheets.
 function BlockRecap({ recap, evidence = null, escalation = 0 }) {
   const u = UI.unit();
@@ -2198,6 +2208,7 @@ Object.assign(window, {
   UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
   btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList, Row, NavRow,
+  PLATES_KG, PLATES_LBS, PLATE_COLORS_KG, PLATE_SIZE_KG, PLATE_COLORS_LBS, PLATE_SIZE_LBS,
   BlockRecap, SvgGrid, KnurlCanvas, FeelSelector, feelColor, feelLabel,
   FEEL_LEVELS, FEEL_ICONS, feelColorOf, isImprovement, isDecline,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
