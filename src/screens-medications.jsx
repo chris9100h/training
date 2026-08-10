@@ -1286,7 +1286,11 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       });
     return () => { cancelled = true; };
   }, [screenTab, activeMedications, userId]);
-  const logsForStock = stockBackfill || medicationLogs;
+  // Tombstones filtered HERE too, not only where medicationLogs is built.
+  // stockBackfill comes straight from LB.fetchMedicationLogsSince and takes
+  // precedence, so a deliberately removed dose reached mdConsumedSince, which
+  // counts every row with planned false, and was billed as taken.
+  const logsForStock = (stockBackfill || medicationLogs).filter(l => !l.skipped);
   // Computed once per medication per render and reused everywhere below
   // (lowStockList, mainInventoryList, renderMedRow, the stock sheet),
   // instead of every one of those independently re-running

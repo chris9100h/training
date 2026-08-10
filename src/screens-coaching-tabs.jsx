@@ -1716,12 +1716,22 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       { title: 'End coaching?', ok: 'End', danger: true }
     )) return;
     setEnding(true);
+    // Same split as CoachingPendingBanner.respond (screens-coaching-core.jsx):
+    // once endCoaching succeeds the relationship is over server-side, and a
+    // failed refresh must not leave this tab rendering the ended coach as
+    // active with their data still on screen.
     try {
       await LB.endCoaching(coaching.id);
-      const newCoaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching: newCoaching } : s);
     } catch (e) {
       UI.alert(e.message);
+      setEnding(false);
+      return;
+    }
+    try {
+      const newCoaching = await LB.reloadCoachingState(userId);
+      setStore(s => s ? { ...s, coaching: newCoaching } : s);
+    } catch (_) {
+      setStore(s => s ? { ...s, coaching: { ...(s.coaching || {}), asClient: null } } : s);
     } finally {
       setEnding(false);
     }

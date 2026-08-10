@@ -626,7 +626,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
                       return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
                     }
                     if (tr.kind) {
-                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(s, d.kg) ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                       const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
                       return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
                     }
@@ -1765,7 +1765,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
               }
               if (tr.kind) {
-                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(s, d.kg) ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                 const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
                 return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
               }

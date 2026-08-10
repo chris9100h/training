@@ -3873,7 +3873,15 @@ async function fetchMedicationLogsSince(userId, sinceDateISO) {
   return (data || []).map(l => ({
     id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
     date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
-    planned: !!l.planned, scheduleSlotId: l.schedule_slot_id ?? null,
+    // skipped has to be MAPPED, not merely selected. The column was added to
+    // the select above and left out here, so every row came back with
+    // skipped === undefined and nothing downstream could filter a tombstone.
+    // The stock math runs off this list by preference (stockBackfill ||
+    // medicationLogs) and counts any row with planned false as consumed, and a
+    // tombstone is exactly { skipped: true, planned: false }, so a dose the
+    // user deliberately removed from the timeline was billed as taken and the
+    // Running Low banner and the Weekly Prep pack list fired a dose early.
+    planned: !!l.planned, skipped: !!l.skipped, scheduleSlotId: l.schedule_slot_id ?? null,
     reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
     snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
   }));

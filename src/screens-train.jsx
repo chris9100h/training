@@ -8755,7 +8755,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         />
                       ) : (
                         <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span className="num" style={{ fontSize: 15, color: UI.inkFaint }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          {/* dispChainKg, same as the editable sibling above. This
+                              branch is not a rare fallback: it renders for EVERY mini
+                              round of both myo variants and for the activation row of
+                              Myo-Rep Match, and every one of those gets its kg in
+                              TOTAL space (appendMyoRound / anchor.drops[0]). Left raw,
+                              a plus_load lift printed "100" directly under the "20"
+                              the lifter had just typed, in the same column: two
+                              meanings of kg in one sheet, which is the mis-read the
+                              belt-space change existed to remove. */}
+                          <span className="num" style={{ fontSize: 15, color: UI.inkFaint }}>{dispChainKg(d.kg ?? null) != null ? String(dispChainKg(d.kg)).replace('.', ',') : '—'}</span>
                         </div>
                       )}
                       <KbCell

@@ -5839,7 +5839,10 @@ function fmtCompareSet(st) {
     return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
   }
   if (tr.kind) {
-    const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+    // chainRoundKg, like the plain-set line above it: that one already prints
+    // the belt figure through setLoadLabel, so a raw d.kg here put both spaces
+    // in one string ("+20kg" beside "100kg -> 90kg") for the same set.
+    const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(st, d.kg) ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
     const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
     return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`) + strSfx;
   }
@@ -5928,7 +5931,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
                 color: di === 0 || !isMyo ? chipColor : UI.inkSoft,
                 opacity: di === 0 ? 1 : (isMyo ? 0.7 : 0.75),
               }}>
-                {(di === 0 || !isMyo) && <>{d.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span></>}
+                {(di === 0 || !isMyo) && <>{LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span></>}
                 {d.reps ?? '—'}
               </span>
             </React.Fragment>
@@ -6287,7 +6290,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
               return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
             }
             if (tr.kind) {
-              const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+              const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${LB.chainRoundKg(s, d.kg) ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
               const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
               return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`) + strSfx;
             }
@@ -6608,7 +6611,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
                     {drops.map((d, di) => (
                       <React.Fragment key={di}>
                         {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>→</span>}
-                        <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
+                        <span className="num" style={{ fontSize: 13, color: UI.ink }}>{LB.chainRoundKg(s, d.kg) ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                       </React.Fragment>
                     ))}
                   </div>
@@ -6639,7 +6642,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
                         <React.Fragment key={di}>
                           {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>}
                           <span className="num" style={{ fontSize: 13, color: UI.ink }}>
-                            {di === 0 && <>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × </>}{d.reps ?? '—'}
+                            {di === 0 && <>{LB.chainRoundKg(s, d.kg) ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × </>}{d.reps ?? '—'}
                           </span>
                         </React.Fragment>
                       ))}
@@ -6676,7 +6679,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
                           {anyVaried && (
                             <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label || entry.name}</span>
                           )}
-                          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
+                          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{LB.chainRoundKg(s, d.kg) ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                         </div>
                       </React.Fragment>
                     ))}
@@ -7160,7 +7163,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                         tr.rounds.map((d, di) => (
                           <React.Fragment key={di}>
                             {di > 0 && <span style={{ color: UI.inkFaint }}> {tr.connector} </span>}
-                            {(tr.connector === '→' || di === 0) && <>{d.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                            {(tr.connector === '→' || di === 0) && <>{LB.chainRoundKg(st, d.kg) ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span></>}
                             {d.reps ?? '—'}
                           </React.Fragment>
                         ))
