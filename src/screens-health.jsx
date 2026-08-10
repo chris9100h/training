@@ -3130,7 +3130,9 @@ function AdaptiveTdeeChart({ history }) {
   const hoverPoints = points.map(p => {
     const weightStart = displayWeight(p.weightStartKg);
     const weightEnd = displayWeight(p.weightEndKg);
+    const weightChange = displayWeight(p.weightChangeKg);
     const rate = displayWeight(p.weightRateKgWeek);
+    const periodDays = Number(p.daySpan);
     const weightUnit = isLbs ? 'lbs' : 'kg';
     const rows = [
       { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
@@ -3152,6 +3154,7 @@ function AdaptiveTdeeChart({ history }) {
     }
     const sub = [
       statusLabel(p),
+      weightChange != null && Number.isFinite(periodDays) ? 'change ' + signed(weightChange) + ' ' + weightUnit + ' / ' + String(periodDays) + 'd' : null,
       rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
     ].filter(Boolean).join(' · ');
     return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
@@ -3230,8 +3233,12 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
               : <HealthChartEmpty label="No weight signal in this history yet" />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
             {history.map(row => {
-              const weight = displayWeight(row.weightEndKg);
+              const weightStart = displayWeight(row.weightStartKg);
+              const weightEnd = displayWeight(row.weightEndKg);
+              const weightChange = displayWeight(row.weightChangeKg);
               const rate = displayWeight(row.weightRateKgWeek);
+              const periodDays = Number(row.daySpan);
+              const weightUnit = isLbs ? 'lbs' : 'kg';
               const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
               const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
               return (
@@ -3245,8 +3252,9 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store }) {
                     <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>avg intake {row.avgCalories} kcal</span>
                   </div>
                   <div style={{ display: 'flex', gap: 12, marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>
-                    <span>weight {weight != null ? String(weight) + (isLbs ? 'lbs' : 'kg') : 'n/a'}</span>
-                    <span>trend {rate == null ? 'n/a' : (rate > 0.05 ? '+' : '') + String(rate) + (isLbs ? 'lbs' : 'kg') + '/wk'}</span>
+                    <span>weight {weightStart != null && weightEnd != null ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit : weightEnd != null ? String(weightEnd) + ' ' + weightUnit : 'n/a'}</span>
+                    {weightChange != null && Number.isFinite(periodDays) && <span>change {weightChange > 0 ? '+' : ''}{String(weightChange)} {weightUnit} / {String(periodDays)}d</span>}
+                    <span>trend {rate == null ? 'n/a' : (rate > 0.05 ? '+' : '') + String(rate) + ' ' + weightUnit + '/wk'}</span>
                   </div>
                   {Number.isFinite(target) && (
                     <div style={{ marginTop: 5, fontFamily: UI.fontUi, fontSize: 10, color: UI.gold }}>
@@ -4518,13 +4526,17 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     LB.loadAdaptiveTdeeHistory(userId).then(serverRows => {
       if (cancelled) return;
       const rawServerHistory = serverRows || [];
-      const serverHistory = rawServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
+      const refreshedServerHistory = rawServerHistory.map(row => LB.refreshAdaptiveTdeeHistoryEstimate(store, row));
+      const serverHistory = refreshedServerHistory.map(row => LB.enrichAdaptiveTdeeHistoryTarget(row, calc));
       setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(serverHistory, rebuilt, s.adaptiveTdeeHistory || []) } : s);
       const serverDates = new Set(rawServerHistory.map(row => row.asOfDate));
       const missing = rebuilt.filter(row => !serverDates.has(row.asOfDate));
       const repaired = serverHistory.filter((row, index) => {
         const raw = rawServerHistory[index];
-        return row.targetsSnapshot?.weeklyAverageCalories != null
+        return row.tdee !== raw?.tdee
+          || row.daySpan !== raw?.daySpan
+          || row.weightRateKgWeek !== raw?.weightRateKgWeek
+          || row.targetsSnapshot?.weeklyAverageCalories != null
           && raw?.targetsSnapshot?.weeklyAverageCalories == null;
       });
       const toSave = LB.mergeAdaptiveTdeeHistory(missing, repaired);

@@ -563,7 +563,7 @@ Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
 - as_of_date (date), window_start/window_end (date): lokaler Berechnungstag und das verwendete 14-Tage-Fenster
 - tdee_kcal/avg_calories_kcal (integer): gelöster Erhaltungsbedarf und durchschnittliche Kalorienaufnahme
 - weight_start_kg/weight_end_kg/weight_change_kg (numeric): Mittelwerte der ersten und zweiten Hälfte der Wiegedaten sowie deren Veränderung
-- weight_rate_kg_week (numeric), day_span (integer), calorie_days/weigh_ins (integer): Wochenrate und Transparenzwerte zur Datenbasis
+- weight_rate_kg_week (numeric), day_span (integer), calorie_days/weigh_ins (integer): Wochenrate und Transparenzwerte zur Datenbasis; day_span liegt zwischen den zeitlichen Mittelpunkten der beiden Gewichtshälften, damit die Rate zur Differenz der beiden Mittelwerte passt
 - decision (applied | skipped | reconstructed): Apply, Skip oder aus den vorhandenen Logs nachgebaut
 - source (live | reconstructed): beim Check-in live berechnet oder nachträglich rekonstruiert
 - targets_snapshot (jsonb, nullable): eingefrorener Check-in-Vorschlag mit Training/Rest-Zielen, Wochenmittel, deltaKcal, Ziel und Rate; decision zeigt, ob er angewendet oder übersprungen wurde

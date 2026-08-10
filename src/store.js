@@ -6754,6 +6754,11 @@ function estimateAdaptiveTdee(store, todayStr) {
   const firstHalf = weighIns.slice(0, half);
   const secondHalf = weighIns.slice(n - half);
   const avgOf = list => list.reduce((s, l) => s + Number(l.weight), 0) / list.length;
+  // weightChange is the difference between two half-window averages, so its
+  // elapsed time is the distance between those halves' time centers, not the
+  // distance from the first reading to the last. For a full 14-day window
+  // that is normally 7 days, which keeps the weekly rate and TDEE coherent.
+  const meanDateMs = list => list.reduce((s, l) => s + new Date(l.date + 'T12:00:00').getTime(), 0) / list.length;
   // store.dailyLogs weight is in the DISPLAY unit (lbs users log lbs
   // straight, no conversion, see CLAUDE.md's weight-unit note), but
   // weightChangeKg has to be TRUE kg for the KCAL_PER_KG physical constant
@@ -6762,7 +6767,7 @@ function estimateAdaptiveTdee(store, todayStr) {
   const isLbs = weightAxisUnit(store?.settings?.unit) === 'lbs';
   const weightChangeNative = avgOf(secondHalf) - avgOf(firstHalf);
   const weightChangeKg = isLbs ? weightChangeNative * KG_PER_LB : weightChangeNative;
-  const daySpan = Math.max(1, dayDiff(firstHalf[0].date, secondHalf[secondHalf.length - 1].date));
+  const daySpan = Math.max(1, Math.round((meanDateMs(secondHalf) - meanDateMs(firstHalf)) / 86400000));
   const weightStartKg = isLbs ? avgOf(firstHalf) * KG_PER_LB : avgOf(firstHalf);
   const weightEndKg = isLbs ? avgOf(secondHalf) * KG_PER_LB : avgOf(secondHalf);
 
@@ -6860,20 +6865,51 @@ function enrichAdaptiveTdeeHistoryTarget(row, calc = {}) {
       : null;
   const tdee = Number(row.tdee);
   const hasDelta = snapshot.deltaKcal != null;
+  const targetDelta = Number.isFinite(tdee) ? targetCalories - tdee : null;
+  const needsTrainingDays = snapshot.trainingDays == null && trainingDays != null;
+  const needsGoal = snapshot.goal == null && calc.goal != null;
+  const needsRate = snapshot.rateKgPerWeek == null && calc.rateKgPerWeek != null;
 
-  if (!Number.isFinite(targetCalories) || (hasWeeklyAverage && hasDelta)) return row;
+  if (!Number.isFinite(targetCalories)
+    || (hasWeeklyAverage && (!hasDelta || targetDelta == null || Number(snapshot.deltaKcal) === targetDelta)
+      && !needsTrainingDays && !needsGoal && !needsRate)) return row;
 
   return {
     ...row,
     targetsSnapshot: {
       ...snapshot,
       weeklyAverageCalories: targetCalories,
-      ...(hasDelta || !Number.isFinite(tdee) ? {} : { deltaKcal: targetCalories - tdee }),
-      ...(snapshot.trainingDays != null || trainingDays == null ? {} : { trainingDays }),
-      ...(snapshot.goal != null || calc.goal == null ? {} : { goal: calc.goal }),
-      ...(snapshot.rateKgPerWeek != null || calc.rateKgPerWeek == null ? {} : { rateKgPerWeek: calc.rateKgPerWeek }),
+      ...(targetDelta == null ? {} : { deltaKcal: targetDelta }),
+      ...(needsTrainingDays ? { trainingDays } : {}),
+      ...(needsGoal ? { goal: calc.goal } : {}),
+      ...(needsRate ? { rateKgPerWeek: calc.rateKgPerWeek } : {}),
     },
   };
+}
+
+// Recalculate persisted history rows after a formula correction. Keep the
+// original decision, source and accepted target snapshot, only replacing the
+// estimate fields that are derived from the daily logs.
+function refreshAdaptiveTdeeHistoryEstimate(store, row) {
+  if (!row?.asOfDate) return row;
+  const estimate = estimateAdaptiveTdee(store, row.asOfDate);
+  if (!estimate?.ok) return row;
+  const weightRateKgWeek = Math.round(estimate.weightChangeKg * 7 / estimate.daySpan * 100) / 100;
+  const derived = {
+    windowStart: estimate.windowStart,
+    windowEnd: estimate.windowEnd,
+    tdee: estimate.tdee,
+    avgCalories: estimate.avgCalories,
+    weightStartKg: estimate.weightStartKg,
+    weightEndKg: estimate.weightEndKg,
+    weightChangeKg: estimate.weightChangeKg,
+    weightRateKgWeek,
+    daySpan: estimate.daySpan,
+    calorieDays: estimate.calorieDays,
+    weighIns: estimate.weighIns,
+  };
+  const changed = Object.keys(derived).some(key => Number(row[key]) !== Number(derived[key]) && row[key] !== derived[key]);
+  return changed ? { ...row, ...derived, updatedAt: new Date().toISOString() } : row;
 }
 
 function mergeAdaptiveTdeeHistory(...collections) {
@@ -10171,7 +10207,7 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
-  estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
+  estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
