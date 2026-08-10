@@ -1,8 +1,7 @@
 name: Syntax check
 
-# The app has no build step: GitHub Pages serves every push as-is, and one
-# syntax error in any source file blanks the whole app at runtime. This job
-# transpiles all sources exactly like the in-app loader before they go live.
+# The source tree remains a no-build fallback for GitHub Pages. The build check
+# also exercises the precompiled dist/ output used by Cloudflare previews.
 on:
   push:
   pull_request:
@@ -16,9 +15,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Same Babel build and version the app itself loads from unpkg.
-      - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
+      - run: npm install --no-package-lock
       - run: node tools/check-syntax.cjs
+      - run: npm run build
+      - run: node tools/check-build.cjs
       # Edge Functions are TypeScript modules outside the browser loader. Keep
       # their syntax covered by the same CI job so a deploy cannot hide a
       # broken cron/helper file from the green app check.

@@ -1256,6 +1256,9 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // options change so previously cached output is invalidated.
   var PRESETS = ['react', ['env', { targets: { esmodules: true } }]];
   var PRESET_TAG = 'react+env-esm.script.v2';
+  // The raw source tree keeps this false. The build output flips it to true
+  // after every JSX source has been compiled ahead of time.
+  var PRECOMPILED_BUILD = false;
   var DB_NAME = 'zane-precompile';
   var STORE = 'modules';
 
@@ -1341,6 +1344,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   }
 
   function transpile(src, filename) {
+    if (PRECOMPILED_BUILD) return Promise.resolve(src);
     return ensureBabel().then(function (Babel) {
       return Babel.transform(src, {
         presets: PRESETS,
@@ -1402,6 +1406,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // Speculatively fetch Babel only for a truly cold precompile cache. Warm
   // starts never download it, and lazy modules reuse the same promise.
   dbPromise.then(function (db) {
+    if (PRECOMPILED_BUILD) return;
     if (!db) { ensureBabel(); return; }
     idbCount(db).then(function (n) { if (n <= 0) ensureBabel(); });
   });

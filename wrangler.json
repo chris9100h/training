@@ -1,7 +1,8 @@
 {
   "name": "training",
   "compatibility_date": "2026-08-06",
+  "preview_urls": true,
   "assets": {
-    "directory": "./"
+    "directory": "./dist"
   }
 }
