@@ -2708,7 +2708,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+      // Same guard commitEntries uses when it adds a PLANNED entry: a planned
+      // row never reached the daily log, so removing it changes nothing there,
+      // and calling patchDaily anyway rewrites the day from its logged entries.
+      // On a day with none, that means writing nulls over macros the user typed
+      // into the Health tab by hand.
+      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
 
@@ -3045,7 +3051,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!ok) return;
     setStore(s => {
       const nextLogs = (s.foodLogs || []).filter(l => !ids.includes(l.id));
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+      // Only if something LOGGED actually left the day, see deleteEntry. A
+      // selection of nothing but planned entries leaves the day's totals exactly
+      // as they were, so recomputing them can only do damage.
+      const anyLoggedDeleted = (s.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
+      const dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
   }
@@ -3596,7 +3607,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+        // Only when the day's LOGGED set actually changes, i.e. the entry was
+        // logged before or is logged now. Editing a planned entry that stays
+        // planned leaves the daily log untouched by design, and recomputing it
+        // anyway rewrites the row from the logged entries: on a day with none,
+        // that nulls macros the user typed into the Health tab.
+        const touchesDaily = !editingEntry.planned || !savePlanned;
+        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       closeQtySheet();
       return;
@@ -4149,7 +4167,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
     setStore(s => {
       const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? updated : l);
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+      // planned is carried through unchanged here, so a planned entry stays out
+      // of the daily log and recomputing it would only risk overwriting manual
+      // Health-tab macros, see deleteEntry.
+      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     closeIngredientEditor();
   }
@@ -4283,7 +4305,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: savePlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+        // Only when the day's LOGGED set actually changes, i.e. the entry was
+        // logged before or is logged now. Editing a planned entry that stays
+        // planned leaves the daily log untouched by design, and recomputing it
+        // anyway rewrites the row from the logged entries: on a day with none,
+        // that nulls macros the user typed into the Health tab.
+        const touchesDaily = !editingEntry.planned || !savePlanned;
+        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       setEditingEntry(null);
     } else {

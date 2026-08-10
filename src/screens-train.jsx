@@ -1375,14 +1375,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return { ...st, kg: rescale(st.kg) };
     };
 
-    updateSession(sess => ({
-      ...sess,
-      cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
-      entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
+    updateSession(sess => {
+      // Whether anything actually moved. On a device that never cached this
+      // session (a second device, or sign-out and back in on this one) the
+      // local entries are gone and with them every cleanupFullLoad, so the
+      // plus_load branch correctly declines to touch any set. Flipping the flag
+      // anyway was the worst of both: the loads stayed reduced while the lift
+      // counted as full, which switches off the PR and regression suppression
+      // and turns the low-weight outlier warning back on. Half-acting is worse
+      // than not acting, so if nothing could move, nothing changes at all and
+      // the row keeps saying what is true.
+      let moved = false;
+      const entries = sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
         ...e,
         sets: e.sets.map(st => {
           if (st.done || st.kg == null) return st;
           const next = reshape(st);
+          if (next !== st) moved = true;
           if (!Array.isArray(st.drops) || !st.drops.length) return next;
           // Ratio the SET moved by, so the chain follows even when reshape used
           // a recorded full load rather than the raw factor, and stays put when
@@ -1394,8 +1403,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             drops: st.drops.map(d => ({ ...d, kg: r(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: r(d.stretch.kg) } } : {}) })),
           };
         }),
-      }),
-    }));
+      });
+      if (!moved) return sess;
+      return { ...sess, cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut }, entries };
+    });
   };
 
   const updateSet = (setIdx, patch) => {
@@ -2302,7 +2313,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // addedKg, while its total still fed volume, e1RM and the PR checks.
           const plusLoad = LB.isBodyweightPlusLoad(ex);
           const carryKg = plusLoad && last?.addedKg == null ? null : (last?.kg ?? bwKg ?? null);
-          const carryAdded = plusLoad ? { addedKg: last?.addedKg ?? null } : null;
+          // cleanupFullLoad rides along with the pair for the same reason the
+          // pair rides together: during a cleanup week the clone inherits the
+          // REDUCED load, and the opt-out row restores a set from what the
+          // seeder recorded, not by arithmetic. Without the marker the added set
+          // was the one set the toggle silently declined to move, so tapping
+          // "full load" left it 20 kg light while its siblings jumped, and the
+          // whole lift was then scored as not reduced. Nothing was floored here:
+          // the un-reduced pair is sitting on the very set being cloned.
+          const carryAdded = plusLoad
+            ? { addedKg: last?.addedKg ?? null, ...(last?.cleanupFullLoad ? { cleanupFullLoad: last.cleanupFullLoad } : {}) }
+            : null;
           const newSet = uni
             ? { kg: carryKg, ...carryAdded, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
             : { kg: carryKg, ...carryAdded, reps: last?.reps ?? null, done: false };
