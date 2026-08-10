@@ -1962,6 +1962,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // tagged kind:'merge' instead of 'split'.
   const [recipeBlockHour, setRecipeBlockHour] = useStateFd(null);
   const [recipeBlockName, setRecipeBlockName] = useStateFd('');
+  const [recipeBlockPortions, setRecipeBlockPortions] = useStateFd(1);
   const [recipeBlockSave, setRecipeBlockSave] = useStateFd(false);
   const recipeBlockInitialSnap = useRefFd(null);
   function splitEntryUnit(e) {
@@ -2175,14 +2176,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (entries.length < 2) return;
     setRecipeBlockHour(h);
     setRecipeBlockName('');
+    setRecipeBlockPortions(1);
     setRecipeBlockSave(false);
-    recipeBlockInitialSnap.current = JSON.stringify({ name: '', save: false });
+    recipeBlockInitialSnap.current = JSON.stringify({ name: '', portions: 1, save: false });
   }
-  // Backdrop tap used to drop the whole block-recipe draft (name, save
-  // toggle) silently, same pattern as requestCloseSplit.
+  // Backdrop tap used to drop the whole block-recipe draft (name, portions,
+  // save toggle) silently, same pattern as requestCloseSplit.
   async function requestCloseBlockRecipe() {
     if (recipeBlockHour != null) {
-      const cur = JSON.stringify({ name: recipeBlockName, save: recipeBlockSave });
+      const cur = JSON.stringify({ name: recipeBlockName, portions: recipeBlockPortions, save: recipeBlockSave });
       if (cur !== recipeBlockInitialSnap.current && !await confirm("Your recipe won't be created.", { title: 'Discard?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     }
     setRecipeBlockHour(null);
@@ -2201,6 +2203,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const entries = byHour[recipeBlockHour] || [];
     const name = recipeBlockName.trim();
     if (entries.length < 2 || !name) return;
+    const portions = Math.max(1, Math.round(Number(recipeBlockPortions) || 1));
     const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
     const hasFiber = entries.some(e => e.fiber != null);
     const now = new Date().toISOString();
@@ -2215,7 +2218,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const merged = {
       id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
       foodId: null, foodName: name, brand: null, source: 'recipe', recipeId,
-      loggedTotalPortions: 1,
+      // The combined entries are the whole batch, so keep today's logged
+      // calories intact while remembering how many portions the batch makes.
+      loggedTotalPortions: portions,
       quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
       protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
       fiber: hasFiber ? fdRound1(sum('fiber')) : null,
@@ -2244,7 +2249,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               fiber: e.fiber ?? null, sugar: e.sugar ?? null, satFat: e.satFat ?? null, sodiumMg: e.sodiumMg ?? null,
               loggedUnit: e.loggedUnit != null ? { label: e.loggedUnit.label, grams: Number(e.loggedUnit.grams) } : null,
             })),
-            portions: 1, createdAt: now, updatedAt: now,
+            portions, createdAt: now, updatedAt: now,
           }, ...(s.foodRecipes || [])]
         : s.foodRecipes;
       return { ...s, foodLogs: nextLogs, dailyLogs, foodRecipes: nextRecipes };
@@ -5944,6 +5949,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Field label="Recipe name" style={{ marginBottom: 16 }}>
               <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" />
             </Field>
+            <div style={{ marginBottom: 16 }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Portions</div>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <Stepper value={recipeBlockPortions} step={1} min={1}
+                  suffix={recipeBlockPortions === 1 ? ' portion' : ' portions'}
+                  onChange={v => setRecipeBlockPortions(Math.max(1, Math.round(v)))} />
+              </div>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
               <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} label="Save as reusable recipe" />
