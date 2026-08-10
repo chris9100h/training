@@ -5341,6 +5341,25 @@ async function testAsync(name, fn) {
       cleanupStore, 80, null, { percent: 20 });
     assert.strictEqual(seeded[0].kg, 80);
   });
+  test('buildSeedSets: a bodyweight lift is exempt however the caller was called', () => {
+    // This is the hole the test above could not see. It hands over
+    // bodyweightKg = 80, and the old gate inferred "nothing to reduce" from
+    // that argument alone, so the assertion passed for the wrong reason and
+    // kept passing after the session-start callers stopped supplying a weight
+    // for this exact exercise (bodyweight_mode null, the default every catalog
+    // import stamps). Reducing a Pull-Up to 64 kg is not a lighter week, it is
+    // a number the lifter cannot act on.
+    const noBw = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, null, null, { percent: 20 });
+    assert.strictEqual(noBw[0].kg, 80, 'cleanup must not touch it with no bodyweight passed');
+    const deloaded = LB.buildSeedSets({ sets: 1, exId: 'bw', reps: 8 }, cleanupLast(80), null, false,
+      cleanupStore, null, true, null);
+    assert.strictEqual(deloaded[0].kg, 80, 'and neither must a deload');
+    // The invariant the pair above exists to protect: buildSeedSets and the
+    // predicate that decides whether the opt-out row renders have to agree, or
+    // a reduced set has no control that can restore it.
+    assert.strictEqual(LB.cleanupAppliesToExercise(cleanupStore, 'bw', null), false);
+  });
   test('buildSeedSets: deload still wins over a cleanup config', () => {
     const seeded = LB.buildSeedSets({ sets: 1, exId: 'bar', reps: 8 }, cleanupLast(100), null, false,
       cleanupStore, null, true, { percent: 20 });

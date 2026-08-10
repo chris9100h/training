@@ -1176,8 +1176,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id, 3, occ);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null, occ);
-        // Match the real session-start bodyweight rule (screens-home.jsx), not
-        // the stricter shouldPullBodyweight, so preview and session agree.
+        // Same rule as the real session start (screens-home.jsx) so preview and
+        // session agree. Only a PULL-bodyweight lift gets today's weight: for
+        // the other two modes the number is not the body, so prev.kg is the
+        // right seed. Whether a deload or cleanup reduces the load no longer
+        // depends on this argument at all (buildSeedSets keys that off the
+        // exercise), so narrowing it here cannot switch a reduction on.
         const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
         // Load-only autoregulate plans never apply set deltas (mirrors the real
         // seeding in screens-home.jsx so this preview agrees with it).

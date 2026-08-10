@@ -3436,13 +3436,26 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   // Assisted exercises store a negative load, so halving it would REDUCE the
   // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
   const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
-  const plusLoadItemEx = isBodyweightPlusLoad((store?.exercises || []).find(e => e.id === it.exId));
-  // bodyweightKg == null is how the reduction gates recognise "there is a load
-  // to reduce". It is the right test for a pull-bodyweight exercise, whose kg
-  // IS the body, but plus_load callers also pass a bodyweight (to rebuild the
-  // total), which switched both reductions off for exactly the exercises that
-  // do carry a reducible load. withPlusLoad below applies the factor itself.
-  const loadIsReducible = bodyweightKg == null || plusLoadItemEx;
+  const reducibleEx = (store?.exercises || []).find(e => e.id === it.exId);
+  const plusLoadItemEx = isBodyweightPlusLoad(reducibleEx);
+  // Whether there is a load to reduce is a property of the EXERCISE, not of
+  // whether the caller happened to pass a bodyweight. This used to read
+  // `bodyweightKg == null || plusLoadItemEx`, which inferred it from the
+  // argument, and that inference broke twice over:
+  //   - a pull-bodyweight lift on an account with no logged weight got
+  //     bodyweightKg null and was reduced, halving a movement whose load is
+  //     the lifter's own body;
+  //   - once the session-start callers narrowed to shouldPullBodyweight, the
+  //     THIRD bodyweight mode (bodyweight_mode null, "Enter manually") stopped
+  //     receiving a bodyweight too. That mode is the default every catalog
+  //     import stamps, so Pull-Up, Chin-Up and the dips all started seeding at
+  //     half load in a deload and at 80 percent in a cleanup week.
+  // Keyed off the exercise it agrees with cleanupAppliesToExercise by
+  // construction, which matters: that function decides whether the per-lift
+  // opt-out row renders, so any disagreement leaves a reduced set the user
+  // cannot restore. withPlusLoad below applies the factor itself.
+  const bodyweightIsTheLoad = reducibleEx?.equipment === 'bodyweight' && !plusLoadItemEx;
+  const loadIsReducible = !bodyweightIsTheLoad;
   const deload = deloadActive && loadIsReducible && !isAssistedEx;
   // Same exemptions as deload, plus this exercise's own opt-out: the user can
   // flip a single lift back to full load from the exercise header without
@@ -3503,9 +3516,12 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   return withHornLoads(withPlusLoad(Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
-    // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
-    // the stale prev.kg (which reflects a different day's bodyweight). For non-bodyweight
-    // exercises bodyweightKg is null and prev.kg is used as before.
+    // For a PULL-bodyweight exercise bodyweightKg is today's logged weight and
+    // always wins over the stale prev.kg (which reflects a different day's
+    // bodyweight). Everything else gets null from its caller and falls back to
+    // prev.kg, including the "Enter manually" bodyweight mode: there the number
+    // means whatever the lifter decided it means, so repeating last session is
+    // the honest default rather than guessing today's scale reading.
     const seedKg = bodyweightKg ?? prev?.kg ?? null;
     if (suggestion) {
       // During a deload, halve the ACTUAL last-session weight (prev.kg), not the

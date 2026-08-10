@@ -1334,14 +1334,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Opting out divides the reduction back out, opting back in re-applies it.
     const scale = wasOptedOut ? f : 1 / f;
     const rescale = (kg) => kg == null ? kg : Math.round((kg * scale) / 2.5) * 2.5;
+    // On a plus_load set kg and addedKg are not independent: kg is the TOTAL,
+    // addedKg the belt, and the frozen bodyweight is what is left between them
+    // (LB.splitBodyweightLoad). Rescaling kg on its own tore that pair apart,
+    // and this row only became reachable for those lifts when
+    // cleanupAppliesToExercise started returning true for plus_load. The set
+    // then rendered its stale "+15" (dispWeight reads addedKg) while volume,
+    // e1RM and the PR check used the rescaled total, and ticking it wrote that
+    // total to zane_sets as next week's base. Toggling back did not heal it:
+    // the reverse pass rescales kg again and addedKg is still stale.
+    //
+    // So rescale the total and re-derive the belt from it, floored at 0, the
+    // same shape LB.withPlusLoad uses when it seeds these sets in the first
+    // place. A set whose belt floored to 0 keeps the bodyweight it was frozen
+    // against rather than inventing a new one.
+    const isPlusLoadEx = LB.isBodyweightPlusLoad((store.exercises || []).find(e => e.id === exId));
+    const rescaleSet = (st) => {
+      const kg = rescale(st.kg);
+      if (!isPlusLoadEx || st.kg == null) return { ...st, kg };
+      const frozenBw = st.addedKg != null ? st.kg - st.addedKg : null;
+      if (frozenBw == null) return { ...st, kg };
+      const belt = Math.max(0, Math.round((kg - frozenBw) * 100) / 100);
+      return { ...st, kg: Math.round((frozenBw + belt) * 100) / 100, addedKg: belt };
+    };
     updateSession(sess => ({
       ...sess,
       cleanupOptOuts: { ...(sess.cleanupOptOuts || {}), [exId]: !wasOptedOut },
       entries: sess.entries.map(e => (e.exId !== exId || e.isCardio) ? e : {
         ...e,
         sets: e.sets.map(st => (st.done || st.kg == null) ? st : {
-          ...st,
-          kg: rescale(st.kg),
+          ...rescaleSet(st),
           ...(Array.isArray(st.drops) && st.drops.length
             ? { drops: st.drops.map(d => ({ ...d, kg: rescale(d.kg), ...(d.stretch ? { stretch: { ...d.stretch, kg: rescale(d.stretch.kg) } } : {}) })) }
             : {}),

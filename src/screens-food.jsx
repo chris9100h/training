@@ -2973,8 +2973,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // sit outside dayTotals, the daily log and the adherence score forever.
     // Copying onto a future date therefore lands logged, exactly like the add
     // sheets do on a future day once Plan Mode is off.
-    const targetLandsPlanned = planMode && (targetIsFuture || targetDate === today);
-    if (!targetLandsPlanned) {
+    // Per CLONE, not per target date. The previous version forced planned from
+    // a "must land planned" predicate (planMode && (future || today)), which
+    // correctly stopped a planned row landing where nothing can check it off,
+    // and then also silently converted planned entries moved onto a PAST date
+    // while Plan Mode is on. That is a supported state, not an impossible one:
+    // the check-off box is gated on planMode alone with no date test, and
+    // "Repeat yesterday" creates planned copies on whatever day is open. So it
+    // took an entry the user had deliberately planned, marked it eaten, and
+    // folded it into that day's totals.
+    //
+    // The three cases the UI actually offers:
+    //   Plan Mode off   -> logged. Nothing renders a check-off box or the
+    //                      logged/planned switch, so a planned row would sit
+    //                      outside the day's totals forever.
+    //   future target   -> planned. A day that has not happened cannot hold
+    //                      something eaten, and the switch is hidden there
+    //                      (planMode && editingEntry && !curDateIsFuture).
+    //   today or past   -> whatever the source was. Both states are reachable
+    //                      by hand on those days, so the target has no business
+    //                      overriding the user's choice.
+    const clonePlanned = (l) => planMode && (targetIsFuture || !!l.planned);
+    // The macro warning and patchDaily below key off whether anything actually
+    // lands LOGGED, which is now a per-clone question. Computed from the store
+    // before the setStore below, since that is where the clones are built.
+    const anyLandsLogged = (store.foodLogs || []).some(l => ids.includes(l.id) && !clonePlanned(l));
+    if (anyLandsLogged) {
       const ok = await warnIfOverwritingManualMacros(targetDate);
       if (!ok) return;
     }
@@ -2983,15 +3007,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!selected.length) return s;
       const now = new Date().toISOString();
       const clones = selected.map(l => ({
-        // The target decides, the source never does. Inheriting planned from
-        // the source left a planned row planned on a target that cannot hold
-        // one (a past date, or any date with Plan Mode off), where nothing
-        // renders a check-off box, so it sat outside the day's totals for
-        // good. Forcing it also makes the two lines below honest again: with
-        // no clone able to land planned, "not targetLandsPlanned" really does
-        // mean "everything here counts", which is what the macro warning and
-        // patchDaily already assumed.
-        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: !!targetLandsPlanned,
+        // The target decides only where it genuinely constrains the answer,
+        // see clonePlanned above; otherwise the source's own flag carries.
+        ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: clonePlanned(l),
         // Same rule "Repeat yesterday" follows: a copy is its own entry and
         // must not inherit the split/merge batch (its "undo split" would act
         // on another day) or the template-slot marker (auto-fill would treat
@@ -3001,7 +3019,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
-      if (!targetLandsPlanned) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      if (anyLandsLogged) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
       if (mode === 'move') {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
