@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-/* Every file the app loads must also be precached by the Service Worker.
-   There is no build step and no bundler to notice a mismatch, so the two
-   lists are kept in sync by hand across two files:
+/* Every source file the app loads in the root fallback must also be precached
+   by the Service Worker. The root tree stays a no-build fallback, while the
+   generated build rewrites the same asset list to its bundles. This check
+   keeps the source mapping in sync across two files:
 
      index.html  var SOURCES = [...]        the precompile loader's JSX list
      index.html  <script src="src/...">     plain scripts

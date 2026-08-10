@@ -15,7 +15,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 
 ## Architektur
 
-- **Source fallback plus build output.** Der Repo-Root bleibt als No-Build-Fallback nutzbar; `npm run build` erzeugt für Cloudflare Preview eine vorab kompilierte `dist/`-Ausgabe. Die Laufzeit-Abhängigkeiten bleiben über CDN-Scripts in `index.html` (React 18 Production-Build, Babel Standalone-Fallback, Supabase JS).
+- **Source fallback plus build output.** Der Repo-Root bleibt als No-Build-Fallback nutzbar; `npm run build` erzeugt für Cloudflare Preview eine vorab kompilierte `dist/`-Ausgabe mit Core-, Critical- und Lazy-Modul-Chunks. Die Laufzeit-Abhängigkeiten bleiben über CDN-Scripts in `index.html` (React 18 Production-Build, Babel Standalone-Fallback, Supabase JS).
 - **Kein import/export.** Alles läuft über den globalen `window`-Namespace:
   - `window.LB`: Store-Funktionen (aus `store.js`)
   - `window.Screens`: Screen-Komponenten (aus den `screens-*.jsx` Dateien)
