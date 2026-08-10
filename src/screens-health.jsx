@@ -3414,7 +3414,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
       ) : (
         <>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 10 }}>
-            Drag across the chart to inspect each estimate. TDEE is the accent line, the gold line is the suggested intake, and the dashed line is what you actually averaged. Weight is included in the inspected point.
+            Drag across the chart to inspect each estimate. TDEE is the accent line, the gold line is the suggested intake, and the dashed line is what you actually averaged. Weight uses the full two-week window, while the trend is shown as a one-week rate. Both are included in the inspected point.
           </div>
           <div style={{ display: 'flex', width: '100%', marginBottom: 10, border: 'var(--hair-width) solid ' + UI.hairStrong, borderRadius: 4, overflow: 'hidden' }}>
             {['calories', 'weight'].map(mode => (
