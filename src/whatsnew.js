@@ -24,11 +24,13 @@ window.WHATS_NEW = [
   {
     id: 'v2.743',
     date: '2026-08-10',
-    title: 'A faster app, from first tap to tab switch 🚀',
+    title: 'Faster from the first tap ⚡',
     items: [
-      '🚀 The app now opens faster and switches between tabs more smoothly, so getting to your workout, plan, history, health, or coaching takes less time.',
-      '🧭 Screens appear as soon as they are ready, while your bottom navigation stays in place during loading, so the app no longer seems to jump around.',
-      '✨ Your existing data and offline behavior stay the same. These improvements simply get you to the right screen sooner and keep the interface responsive.'
+      '⚡ The app now starts noticeably faster, with your first screen appearing sooner.',
+      '🧭 Switching tabs feels much smoother. The next screen starts preparing as soon as you touch its tab, so navigation stays responsive.',
+      '💤 Heavy areas such as Health, Food and Coaching load when you need them instead of slowing down the initial launch.',
+      '🔄 Coming back from the background is lighter too: the app keeps what is already loaded and refreshes only the data that may have changed.',
+      '✨ Training input, charts and longer lists should feel more responsive throughout the app.'
     ],
   },
   {
