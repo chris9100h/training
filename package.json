@@ -4,7 +4,6 @@
     "build": "node tools/build.cjs"
   },
   "devDependencies": {
-    "@babel/standalone": "7.29.0",
-    "esbuild": "0.25.9"
+    "@babel/standalone": "7.29.0"
   }
 }

@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const esbuild = require('esbuild');
+const Babel = require('@babel/standalone');
 
 const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
@@ -45,14 +45,12 @@ async function build() {
     const inputPath = path.join(root, rel);
     const outputPath = path.join(dist, rel);
     const source = fs.readFileSync(inputPath, 'utf8');
-    const result = await esbuild.transform(source, {
-      loader: 'jsx',
-      target: 'es2020',
-      jsx: 'transform',
-      minifySyntax: true,
-      minifyWhitespace: true,
-      legalComments: 'none',
-      sourcefile: rel,
+    const result = Babel.transform(source, {
+      presets: ['react', ['env', { targets: { esmodules: true } }]],
+      sourceType: 'script',
+      filename: rel,
+      compact: true,
+      comments: false,
     });
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, result.code + '\n');
