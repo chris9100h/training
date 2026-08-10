@@ -1007,6 +1007,10 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
+          // The dialog container receives programmatic focus to keep the
+          // keyboard down when a sheet opens. iOS otherwise paints its
+          // native blue focus ring around the whole panel.
+          outline: 'none',
           // The panel draws the same paper grid as Screen does (bg-texture
           // above), so plain text sitting on it needs the same lift Screen
           // gives its own children (verified directly: without this, the
