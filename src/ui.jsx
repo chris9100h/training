@@ -2059,10 +2059,27 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
   return <div ref={ref} data-reorder-list="true" style={style} className={className}>{children}</div>;
 }
 
+// Shared drill-in row used by Settings and the Water tracker. Keeping it in
+// the common UI layer avoids a lazy-module cycle between those screens.
+function NavRow({ label, hint, onTap, first = false, accent = false }) {
+  return (
+    <>
+      {!first && <div className="knurl" />}
+      <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
+        <span style={{ fontSize: 16, color: accent ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: accent ? 600 : 400 }}>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {hint != null && <span style={{ fontSize: 13, color: accent ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={accent ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+        </div>
+      </button>
+    </>
+  );
+}
+
 Object.assign(window, {
   UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
-  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
+  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList, NavRow,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // primitives
   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,
