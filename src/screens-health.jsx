@@ -3128,8 +3128,10 @@ function AdaptiveTdeeChart({ history }) {
   const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
   const signed = value => value == null ? null : (value > 0 ? '+' : '') + String(value);
   const hoverPoints = points.map(p => {
-    const weight = displayWeight(p.weightEndKg);
+    const weightStart = displayWeight(p.weightStartKg);
+    const weightEnd = displayWeight(p.weightEndKg);
     const rate = displayWeight(p.weightRateKgWeek);
+    const weightUnit = isLbs ? 'lbs' : 'kg';
     const rows = [
       { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
       { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
@@ -3142,9 +3144,14 @@ function AdaptiveTdeeChart({ history }) {
         color: UI.gold,
       });
     }
+    if (weightStart != null || weightEnd != null) {
+      const weightValue = weightStart != null && weightEnd != null
+        ? String(weightStart) + ' → ' + String(weightEnd) + ' ' + weightUnit
+        : String(weightEnd ?? weightStart) + ' ' + weightUnit;
+      rows.push({ label: 'Weight', value: weightValue, color: UI.inkSoft });
+    }
     const sub = [
       statusLabel(p),
-      weight != null ? 'weight ' + String(weight) + (isLbs ? 'lbs' : 'kg') : null,
       rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
     ].filter(Boolean).join(' · ');
     return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
@@ -3157,7 +3164,7 @@ function AdaptiveTdeeChart({ history }) {
         {hasTarget && <span><i className="fa-solid fa-minus" style={{ color: UI.gold, marginRight: 5 }} />Suggested target</span>}
       </div>
       <ChartHover W={W} H={H} points={hoverPoints} markerColor="var(--accent)" plotTop={padTop} plotH={plotH}>
-      <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display: 'block', overflow: 'visible' }} role="img" aria-label="Adaptive TDEE, calorie target and average calorie intake history">
+      <svg width="100%" viewBox={'0 0 ' + W + ' ' + H} style={{ display: 'block', overflow: 'hidden' }} role="img" aria-label="Adaptive TDEE, calorie target and average calorie intake history">
         {grid.map((value, i) => (
           <g key={i}>
             {i > 0 && <line x1={padL} y1={yOf(value)} x2={W - padR} y2={yOf(value)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
