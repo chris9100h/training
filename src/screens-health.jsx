@@ -2129,6 +2129,13 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // It stays editable regardless, because someone can want targets before they
   // have ever logged a weight, and that used to block the whole sheet.
   const loggedWeight = LB.latestBodyweight(store);
+  const estimatorConfigured = healthInt(calc.heightCm) > 0
+    && healthInt(calc.birthYear) > 0
+    && !!calc.sex
+    && !!calc.activity
+    && !!calc.goal
+    && calc.trainingDays != null
+    && (healthNum(calc.weightKg) > 0 || loggedWeight != null);
 
   // How often they actually train, from the last four weeks of real sessions
   // rather than from what a plan says: plans come in weekday, cycle and flex
@@ -2147,6 +2154,9 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // another one is edited, which is the only way to keep a number you typed
   // from being rebalanced away by the next edit.
   const [locks, setLocks] = useStateH({ training: {}, rest: {} });
+  const [sheetMode, setSheetMode] = useStateH(estimatorConfigured ? 'summary' : 'wizard');
+  const [wizardStep, setWizardStep] = useStateH(estimatorConfigured ? 3 : 0);
+  const [wizardError, setWizardError] = useStateH('');
 
   useEffectH(() => {
     if (!open) return;
@@ -2175,6 +2185,9 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
     });
     setManual(null);
     setLocks({ training: {}, rest: {} });
+    setSheetMode(estimatorConfigured ? 'summary' : 'wizard');
+    setWizardStep(estimatorConfigured ? 3 : 0);
+    setWizardError('');
   }, [open]); // eslint-disable-line
 
   const weightInput = healthNum(form.weight);
@@ -2495,6 +2508,127 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
     </div>
   );
 
+  const wizardSteps = [
+    { id: 0, label: 'About you' },
+    { id: 1, label: 'Goal' },
+    { id: 2, label: 'Macro split' },
+    { id: 3, label: 'Review' },
+  ];
+  const optionLabel = (options, value, fallback = 'Not set') => options.find(o => o.id === value)?.label || fallback;
+  const summaryItem = (label, value) => (
+    <div style={{ minWidth: 0 }}>
+      <div className="micro" style={{ marginBottom: 3 }}>{label}</div>
+      <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, lineHeight: '18px', overflowWrap: 'anywhere' }}>{value}</div>
+    </div>
+  );
+  const summaryDaySection = (dayType, label) => (
+    <div style={{ marginBottom: dayType === 'training' ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 7 }}>
+        <span className="micro">
+          {label}
+          <span className="num" style={{ color: UI.inkFaint, marginLeft: 6, letterSpacing: 0 }}>
+            &times;{dayType === 'training' ? trainingDays : 7 - trainingDays}
+          </span>
+        </span>
+        <span className="num" style={{ fontSize: 13, color: UI.warn }}>{dayCalories(dayType)} kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {[['protein', 'Protein'], ['carbs', 'Carbs'], ['fat', 'Fat']].map(([key, macroLabel]) => (
+          <div key={key} style={{ flex: 1, minWidth: 0 }}>
+            <div className="micro" style={{ marginBottom: 2 }}>{macroLabel}</div>
+            <div className="num" style={{ fontSize: 17, color: UI.ink }}>
+              {shown?.[dayType]?.[key] ?? '–'}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>g</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  const startEditing = () => {
+    setSheetMode('wizard');
+    setWizardStep(0);
+    setWizardError('');
+  };
+  const wizardNext = () => {
+    if (wizardStep === 0 && (!weightKg || healthInt(form.heightCm) <= 0 || healthInt(form.birthYear) <= 0 || !form.sex)) {
+      setWizardError('Fill in weight, height, year of birth and sex to continue.');
+      return;
+    }
+    if (wizardStep === 1 && (form.goal !== 'maintain' && !(Number(form.rateKgPerWeek) > 0))) {
+      setWizardError('Choose how quickly you want your weight to change.');
+      return;
+    }
+    if (wizardStep === 2 && ((form.proteinFixed && !(proteinGVal > 0))
+      || (fatModeUI === 'perKg' && !(fatPerKg > 0))
+      || (fatModeUI === 'fixed' && !(fatGVal > 0)))) {
+      setWizardError('Add the fixed protein or fat value before continuing.');
+      return;
+    }
+    setWizardError('');
+    setWizardStep(s => Math.min(3, s + 1));
+  };
+  const wizardBack = () => {
+    setWizardError('');
+    setWizardStep(s => Math.max(0, s - 1));
+  };
+  const wizardGo = (step) => {
+    if (step <= wizardStep) {
+      setWizardError('');
+      setWizardStep(step);
+    }
+  };
+
+  const summaryView = (
+    <>
+      {hint('Your settings are ready. This compact view shows what the estimate is using. Edit settings to walk through the steps again.',
+        { fontSize: 12, lineHeight: '18px', marginBottom: 16 })}
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Current setup</Bezel>
+      <Card style={{ padding: 12, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '11px 12px' }}>
+          {summaryItem(`Weight ${UI.unit()}`, form.weight ? `${form.weight} ${UI.unit()}` : 'Not set')}
+          {summaryItem('Height', form.heightCm ? `${form.heightCm} cm` : 'Not set')}
+          {summaryItem('Born', form.birthYear || 'Not set')}
+          {summaryItem('Sex', optionLabel([{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }], form.sex))}
+          {summaryItem('Daily activity', optionLabel(MACRO_ACTIVITY_OPTIONS, form.activity))}
+          {summaryItem('Goal', optionLabel(MACRO_GOAL_OPTIONS, form.goal))}
+          {form.goal !== 'maintain' && summaryItem('Rate', `${isLbs ? form.rateKgPerWeek / LBS_TO_KG : form.rateKgPerWeek} ${UI.unit()}/week`)}
+          {summaryItem('Training days', `${trainingDays} / week`)}
+        </div>
+      </Card>
+
+      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
+      {shown ? (
+        <Card style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
+            {headlineStat('Maintenance', est ? est.tdee : null, 'what you burn')}
+            <Hairline vertical style={{ alignSelf: 'stretch' }} />
+            {headlineStat('Your week', weekAvgCalories, deltaLabel,
+              deltaContradictsGoal ? UI.warn : UI.inkSoft)}
+          </div>
+          <Hairline style={{ marginBottom: 12 }} />
+          {summaryDaySection('training', 'Training day')}
+          {summaryDaySection('rest', 'Rest day')}
+          {hint(
+            <>
+              {form.proteinFixed ? `Protein is fixed at ${proteinGVal || 'the entered value'} g per day. ` : ''}
+              {fatModeUI === 'perKg' ? `Fat follows ${form.fatPerStr} g per ${UI.unit()}.` : form.fatFixed ? `Fat is fixed at ${fatGVal || 'the entered value'} g per day.` : 'Fat follows the automatic split.'}
+            </>, { marginTop: 12 })}
+        </Card>
+      ) : (
+        <Card style={{ padding: 14, marginBottom: 16, textAlign: 'center' }}>
+          <i className="fa-solid fa-calculator" style={{ fontSize: 16, color: UI.inkGhost }} />
+          {hint('Fill in the missing details to see an estimate.', { marginTop: 8 })}
+        </Card>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={startEditing} style={{ flex: 1 }}>Edit settings</Btn>
+        <Btn onClick={standalone ? onClose : apply} disabled={!shown} style={{ flex: 1 }}>{standalone ? 'Done' : 'Use these numbers'}</Btn>
+      </div>
+    </>
+  );
+
   // zIndex above the default 100: this opens on top of MacroTargetSheet, the
   // same nesting idiom the food module's own quantity sheet uses.
   //
@@ -2511,12 +2645,30 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
   // use 1.5 (18px exactly), 11px copy may not use a ratio at all.
   return (
     <Sheet open={open} onClose={onClose} title="Estimate targets" zIndex={200}>
-      {hint(standalone
-        ? 'Rate, protein, fat and training split all live here, whatever you set feeds both this estimate and your weekly automatic check-ins.'
-        : 'A starting point, not a prescription. Everything below the estimate is editable, and it is worth revisiting when your weight or training changes.',
-        { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
+      {sheetMode === 'summary' ? summaryView : (
+        <>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+            {wizardSteps.map(step => (
+              <button key={step.id} onClick={() => wizardGo(step.id)} style={{
+                flex: 1, minWidth: 0, padding: '7px 3px', borderRadius: 4,
+                border: `var(--hair-width) solid ${wizardStep === step.id ? 'var(--accent)' : UI.hairStrong}`,
+                background: wizardStep === step.id ? 'var(--accent)' : step.id < wizardStep ? UI.bgInset : 'transparent',
+                color: wizardStep === step.id ? 'var(--accent-ink)' : step.id < wizardStep ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                textTransform: 'uppercase', cursor: step.id <= wizardStep ? 'pointer' : 'default',
+                WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+              }}>{step.id + 1} {step.label}</button>
+            ))}
+          </div>
 
-      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
+          {hint(standalone
+            ? 'Set the numbers once, then your automatic check-ins use them as the starting point.'
+            : 'A starting point, not a prescription. We will walk through the details one short step at a time.',
+            { fontSize: 12, lineHeight: '18px', marginBottom: 18 })}
+
+          {wizardStep === 0 && (
+            <>
+              <Bezel style={{ marginTop: 8, marginBottom: 12 }}>About you</Bezel>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
         <div style={{ flex: 1 }}>
@@ -2546,8 +2698,12 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
       {group('Daily activity outside training',
         seg(MACRO_ACTIVITY_OPTIONS, form.activity, v => setForm(f => ({ ...f, activity: v }))),
         activityHint)}
+            </>
+          )}
 
-      <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
+          {wizardStep === 1 && (
+            <>
+              <Bezel style={{ marginTop: 8, marginBottom: 12 }}>Your goal</Bezel>
 
       {group('Goal', (
         <>
@@ -2570,7 +2726,11 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
         cyclesDays
           ? 'Training days get more carbs, rest days fewer. Set how far apart below.'
           : 'Every day gets the same target, since there is no second day type to cycle against.')}
+            </>
+          )}
 
+          {wizardStep === 2 && (
+            <>
       {/* How far the two day types are pulled apart. The week's total is fixed
           at every setting, so this only decides where the calories sit inside
           it. The automatic split is the sharpest one on offer and therefore the
@@ -2664,6 +2824,11 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
         </>
       ))}
 
+            </>
+          )}
+
+          {wizardStep === 3 && (
+            <>
       <Bezel style={{ marginTop: 8, marginBottom: 12 }}>The estimate</Bezel>
 
       {shown ? (
@@ -2701,7 +2866,20 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
         </Card>
       )}
 
-      <Btn onClick={apply} disabled={!shown} style={{ width: '100%' }}>{standalone ? 'Save automation settings' : 'Use these numbers'}</Btn>
+            </>
+          )}
+
+          {wizardError && hint(wizardError, { color: UI.warn, marginBottom: 10 })}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {wizardStep > 0 && <Btn kind="ghost" onClick={wizardBack} style={{ flex: 1 }}>Back</Btn>}
+            {wizardStep < 3 ? (
+              <Btn onClick={wizardNext} style={{ flex: 1 }}>Next</Btn>
+            ) : (
+              <Btn onClick={apply} disabled={!shown} style={{ flex: 1 }}>{standalone ? 'Save automation settings' : 'Use these numbers'}</Btn>
+            )}
+          </div>
+        </>
+      )}
     </Sheet>
   );
 }
