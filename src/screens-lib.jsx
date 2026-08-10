@@ -57,62 +57,8 @@ const mesoVolumeLbl = (loadOnly) => loadOnly
 // 'reentry' is the auto-stamped post-break ramp (discounted, like Rough).
 const MESO_READINESS_LBL = { fresh: 'Fresh', normal: 'Normal', rough: 'Rough day', reentry: 'Easing back in' };
 
-// Autoreg v2 P2: shared Block-Recap content node (spec 5.1), rendered inside a
-// confirm() sheet (its message accepts a node). Pure: depends only on the global UI
-// object and its args, no store/closure state, so both the training screen (via the
-// blockRecapNode wrapper) and the home 8-cycle nudge render the identical recap.
-// evidence null + escalation 0 is the block-end CELEBRATION framing (gains only); a
-// non-null evidence array is the mid-block DECLINE framing (adds the fatigue section).
-function BlockRecap({ recap, evidence = null, escalation = 0 }) {
-  const u = UI.unit();
-  const tile = (k, v) => (
-    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
-      <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
-    </div>
-  );
-  return (
-    <div style={{ textAlign: 'left' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
-        {tile('Weight PRs', recap.prCount)}
-        {tile('Sessions', recap.sessionCount)}
-      </div>
-      {recap.loadPRs.length > 0 && (<>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
-        <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {recap.loadPRs.map((g, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
-              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
-            </div>
-          ))}
-        </div>
-      </>)}
-      {recap.setGains.some(g => g.setDelta > 0) && (<>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
-        <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
-              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
-            </div>
-          ))}
-        </div>
-      </>)}
-      {evidence && evidence.length > 0 && (<>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
-        <div className="knurl" style={{ marginBottom: 10 }} />
-        <div>
-          {evidence.map((e, i) => (
-            <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>
-          ))}
-        </div>
-      </>)}
-    </div>
-  );
-}
+// BlockRecap is defined in src/ui.jsx because Home and Training use it before
+// the Library module is loaded.
 
 // Toggle shown under a non-empty exercise note: pins the note so it pops up and
 // must be acknowledged at the start of that exercise every workout (zane_exercises
@@ -840,38 +786,8 @@ function SvgKnurl({ style }) {
   );
 }
 
-// The app's grid overlay (see index.html's --bg-texture, togglable per theme
-// via Settings -> Appearance -> Grid) doesn't survive html2canvas:
-// repeating-linear-gradient background-images are silently dropped from the
-// export (verified against the exact CDN build the app loads, html2canvas
-// 1.4.1). An SVG <pattern> renders fine there, so screenshot mode gets its
-// own grid via this component instead of CSS, driven by the same
-// --knurl-rgb/--grid-alpha the live CSS grid uses so it matches whichever
-// theme is active, not just paper's colors. Absolutely positioned inset:0:
-// the caller must be position:relative (or :fixed) for that to resolve
-// against the right box.
-function SvgGrid({ style }) {
-  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
-  const gridAlpha = getComputedStyle(document.documentElement).getPropertyValue('--grid-alpha').trim() || '0.16';
-  return (
-    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', ...style }}>
-      <defs>
-        <pattern id="paperGridPattern" width="22" height="22" patternUnits="userSpaceOnUse">
-          <path d="M 22 0 L 0 0 0 22" fill="none" stroke={`rgba(${knurlRgb},${gridAlpha})`} strokeWidth="1" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#paperGridPattern)" />
-    </svg>
-  );
-}
-
-// Canvas placeholder for between-exercise knurl dividers in screenshot mode.
-// takeScreenshot draws into these imperatively right before html2canvas runs,
-// so timing is guaranteed regardless of when React flushes the re-render. Lines
-// that overlap the avatar (bottom-right) are shortened there too, measured live.
-function KnurlCanvas({ style }) {
-  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
-}
+// SvgGrid and KnurlCanvas are defined in src/ui.jsx because several lazy
+// screens use them before the Library module is loaded.
 
 // Gold-bordered micro-label heading off a section throughout the library/
 // stats screens. Border is always UI.gold (the fixed brand color, not the
@@ -3323,57 +3239,8 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 // color: tuned for a dark canvas. colorLight: same hue, deep enough to stay
 // readable on light/paper's near-white surfaces (the bright set drops well
 // under WCAG AA there).
-const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#38bdf8', colorLight: '#0369a1' },
-  { key: 'good',      label: 'GOOD',      color: '#4ade80', colorLight: '#15803d' },
-  { key: 'hard',      label: 'HARD',      color: '#facc15', colorLight: '#a16207' },
-  { key: 'very_hard', label: 'VERY HARD', color: '#f97316', colorLight: '#c2410c' },
-  { key: 'max',       label: 'MAX',       color: '#ef4444', colorLight: '#b91c1c' },
-];
-
-function feelColorOf(f) {
-  return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint;
-}
-function feelColor(key) {
-  return feelColorOf(FEEL_LEVELS.find(f => f.key === key));
-}
-function feelLabel(key) {
-  return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
-}
-
-const FEEL_ICONS = {
-  easy: 'fa-face-smile',
-  good: 'fa-bolt',
-  hard: 'fa-fire',
-  very_hard: 'fa-skull',
-  max: 'fa-trophy',
-};
-
-function FeelSelector({ value, onChange }) {
-  return (
-    <div style={{ display: 'flex', gap: 6 }}>
-      {FEEL_LEVELS.map(f => {
-        const active = value === f.key;
-        const fc = feelColorOf(f);
-        return (
-          <button key={f.key} onClick={() => onChange(active ? null : f.key)}
-            style={{
-              flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-              border: `1px solid ${active ? fc : UI.hairStrong}`,
-              background: active ? `${fc}22` : 'transparent',
-              color: active ? fc : UI.inkSoft,
-              fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
-              letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
-            }}>
-            <i className={`fa-solid ${FEEL_ICONS[f.key]}`} style={{ fontSize: 15 }} />
-            {f.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// Feel levels and FeelSelector are defined in src/ui.jsx because Coaching can
+// render them without loading the Library module first.
 
 // ─── SET COMPARISON HELPERS ──────────────────────────────────────────
 // Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
@@ -3384,9 +3251,6 @@ function FeelSelector({ value, onChange }) {
 // classic scripts sharing one global scope throws and kills the whole file
 // that loads second. Renaming or removing these needs a matching update
 // there too.
-const isImprovement = LB.isImprovement;
-const isDecline = LB.isDecline;
-
 // Sessions eligible for comparison against `s`: same dayId, ended, excluding
 // itself, newest first. Deload and cleanup sessions excluded for the same
 // reason as prevEntryMap below (artificially light, not a fair comparison

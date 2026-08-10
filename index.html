@@ -1233,13 +1233,15 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     schedule:   { sources: ['src/screens-schedule.jsx'] },
     train:      { sources: ['src/screens-train.jsx'] },
     lib:        { sources: ['src/screens-lib.jsx'] },
-    // Settings reuses the Water settings bodies. Load that shared module
-    // before Settings can render any of its nested Health sheets.
-    settings:   { dependencies: ['water'], sources: ['src/screens-settings.jsx'] },
+    // Settings reuses Water and Medications settings bodies. Load those
+    // modules before Settings can render any of its nested Health sheets.
+    settings:   { dependencies: ['water', 'medications'], sources: ['src/screens-settings.jsx'] },
     coaching:   { sources: ['src/screens-coaching-core.jsx', 'src/screens-coaching-client.jsx', 'src/screens-coaching-detail.jsx', 'src/screens-coaching-tabs.jsx'] },
-    health:     { sources: ['src/screens-health.jsx'] },
-    water:      { sources: ['src/screens-water.jsx'] },
-    food:       { sources: ['src/screens-food.jsx'] },
+    // Health can render coach-configured fields, so load the FieldWidget provider first.
+    health:     { dependencies: ['coaching'], sources: ['src/screens-health.jsx'] },
+    // These screens reuse chart components provided by Health.
+    water:      { dependencies: ['health'], sources: ['src/screens-water.jsx'] },
+    food:       { dependencies: ['health'], sources: ['src/screens-food.jsx'] },
     medications:{ sources: ['src/screens-medications.jsx'] },
     onboarding: { sources: ['src/screens-onboarding.jsx'] },
     cardio:     { sources: ['src/screens-cardio.jsx'] },

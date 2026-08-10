@@ -2061,6 +2061,27 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
 
 // Shared drill-in row used by Settings and the Water tracker. Keeping it in
 // the common UI layer avoids a lazy-module cycle between those screens.
+function Row({ label, children, first = false }) {
+  // The row's text is the switch's name, but nothing associates the two: a
+  // screen reader on a bare Toggle reads "switch, on" with no idea of what.
+  // Hand the label down rather than repeating it at every call site. Only
+  // for a Toggle that has none of its own, so an explicit label always wins.
+  const named = React.Children.map(children, c => (
+    (React.isValidElement(c) && c.type === Toggle && !c.props.label && typeof label === 'string')
+      ? React.cloneElement(c, { label })
+      : c
+  ));
+  return (
+    <>
+      {!first && <div className="knurl" />}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0' }}>
+        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+        {named}
+      </div>
+    </>
+  );
+}
+
 function NavRow({ label, hint, onTap, first = false, accent = false }) {
   return (
     <>
@@ -2076,10 +2097,109 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
   );
 }
 
+// Shared block recap used by Home, Training and Library confirmation sheets.
+function BlockRecap({ recap, evidence = null, escalation = 0 }) {
+  const u = UI.unit();
+  const tile = (k, v) => (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
+      <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
+    </div>
+  );
+  return (
+    <div style={{ textAlign: 'left' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
+        {tile('Weight PRs', recap.prCount)}
+        {tile('Sessions', recap.sessionCount)}
+      </div>
+      {recap.loadPRs.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {recap.loadPRs.map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {recap.setGains.some(g => g.setDelta > 0) && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {recap.setGains.filter(g => g.setDelta > 0).map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {evidence && evidence.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div>{evidence.map((e, i) => <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>)}</div>
+      </>)}
+    </div>
+  );
+}
+
+// Screenshot-only grid and divider primitives shared by every module that
+// can export a poster. They must be available before any lazy screen runs.
+function SvgGrid({ style }) {
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+  const gridAlpha = getComputedStyle(document.documentElement).getPropertyValue('--grid-alpha').trim() || '0.16';
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', ...style }}>
+      <defs><pattern id="paperGridPattern" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M 22 0 L 0 0 0 22" fill="none" stroke={`rgba(${knurlRgb},${gridAlpha})`} strokeWidth="1" /></pattern></defs>
+      <rect width="100%" height="100%" fill="url(#paperGridPattern)" />
+    </svg>
+  );
+}
+
+function KnurlCanvas({ style }) {
+  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+}
+
+const FEEL_LEVELS = [
+  { key: 'easy', label: 'EASY', color: '#38bdf8', colorLight: '#0369a1' },
+  { key: 'good', label: 'GOOD', color: '#4ade80', colorLight: '#15803d' },
+  { key: 'hard', label: 'HARD', color: '#facc15', colorLight: '#a16207' },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316', colorLight: '#c2410c' },
+  { key: 'max', label: 'MAX', color: '#ef4444', colorLight: '#b91c1c' },
+];
+function feelColorOf(f) { return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint; }
+function feelColor(key) { return feelColorOf(FEEL_LEVELS.find(f => f.key === key)); }
+function feelLabel(key) { return FEEL_LEVELS.find(f => f.key === key)?.label ?? null; }
+const FEEL_ICONS = { easy: 'fa-face-smile', good: 'fa-bolt', hard: 'fa-fire', very_hard: 'fa-skull', max: 'fa-trophy' };
+function FeelSelector({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {FEEL_LEVELS.map(f => {
+        const active = value === f.key;
+        const fc = feelColorOf(f);
+        return <button key={f.key} onClick={() => onChange(active ? null : f.key)} style={{
+          flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+          border: `1px solid ${active ? fc : UI.hairStrong}`, background: active ? `${fc}22` : 'transparent', color: active ? fc : UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400, letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
+        }}><i className={`fa-solid ${FEEL_ICONS[f.key]}`} style={{ fontSize: 15 }} />{f.label}</button>;
+      })}
+    </div>
+  );
+}
+
+// Shared comparison aliases. Keeping them in the critical UI layer avoids a
+// coaching screen depending on the Library module for two pure store helpers.
+const isImprovement = LB.isImprovement;
+const isDecline = LB.isDecline;
+
 Object.assign(window, {
   UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
-  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList, NavRow,
+  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList, Row, NavRow,
+  BlockRecap, SvgGrid, KnurlCanvas, FeelSelector, feelColor, feelLabel,
+  FEEL_LEVELS, FEEL_ICONS, feelColorOf, isImprovement, isDecline,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // primitives
   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,
