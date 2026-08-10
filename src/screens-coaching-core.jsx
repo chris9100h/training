@@ -388,7 +388,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           const isMe = n.authorId === userId;
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}` }}>
+              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}`, textShadow: 'none' }}>
                 {(n.attachments || []).map((a, ai) => (
                   <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
                     style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />

@@ -4106,7 +4106,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
-    textShadow: sel ? 'var(--text-lift)' : 'none',
+    textShadow: 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -6227,7 +6227,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            textShadow: sel ? 'var(--text-lift)' : 'none',
+            textShadow: 'none',
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -7522,7 +7522,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
-                          textShadow: (s.done || s.skipped) ? 'var(--text-lift)' : 'none',
+                          textShadow: 'none',
                         }}>GO</button>}
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
@@ -8292,7 +8292,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
-            textShadow: active ? 'var(--text-lift)' : 'none',
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', gap: 14,
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',

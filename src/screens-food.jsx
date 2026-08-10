@@ -1235,7 +1235,7 @@ function FdCheckbox({ checked, onToggle, disabled, label }) {
         border: `1.5px solid var(--accent)`,
         background: checked ? 'var(--accent)' : 'transparent',
         color: checked ? 'var(--accent-ink)' : 'transparent',
-        textShadow: checked ? 'none' : 'var(--text-lift)',
+        textShadow: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -4784,11 +4784,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       use var(--surface-tint-lg) instead of a solid
                       background: an opaque card blocks the watermark
                       entirely wherever it sits, leaving it visible only in
-                      the thin gaps between cards. textShadow explicitly
-                      restored to the inherited lift (fdCategoryCard resets
-                      it to 'none' for its own opaque-background reason,
-                      which no longer applies once the fill is translucent). */}
-                  <div style={{ ...fdCategoryCard, background: 'var(--surface-tint-lg)', textShadow: 'var(--text-lift)' }}>
+                      the thin gaps between cards. The card and entry
+                      surfaces still reset textShadow so their text stays
+                      clean over the translucent fill. */}
+                  <div style={{ ...fdCategoryCard, background: 'var(--surface-tint-lg)', textShadow: 'none' }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                       <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
@@ -4808,7 +4807,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         </div>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {entries.map(e => (
-                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)',
+                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'none',
                               ...(e.moc ? { border: `var(--hair-width) dashed var(--hair-accent)` } : null) }}>
                               {e.moc && <div className="micro-gold">Meal of choice</div>}
                               <span style={fdEntryName}>{e.foodName}</span>
@@ -8261,7 +8260,7 @@ function ShoppingListScreen({ open, onClose, store, setStore, today, userId }) {
                 // sits, leaving it visible only in the gaps between rows.
                 // Excluded and well-stocked items never make it into
                 // includedList, neither belongs in a "what to buy" poster.
-                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)', cursor: 'default' }}>
+                <div key={item.key} style={{ ...fdQuickRowInner, background: 'var(--surface-tint-md)', textShadow: 'none', cursor: 'default' }}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{item.displayName}</div>
                     {!item.overridden && item.brand && <div style={fdEntryMeta}>{item.brand}</div>}
@@ -10233,7 +10232,7 @@ function FdStatsBody({ store }) {
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
       color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
-      textShadow: period === id ? 'none' : 'var(--text-lift)',
+      textShadow: 'none',
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );
@@ -11484,7 +11483,7 @@ function fdSegBtn(active, danger) {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? (danger ? UI.danger : 'var(--accent)') : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   };

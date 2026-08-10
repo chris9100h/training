@@ -578,7 +578,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
               color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: tf === t.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -1581,7 +1581,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                   flex: 1, padding: '14px 4px', cursor: disabled ? 'default' : 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  textShadow: active ? 'none' : 'var(--text-lift)',
+                  textShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   opacity: disabled ? 0.35 : 1,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
@@ -1650,7 +1650,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
               color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: netCarbs === o.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -2385,7 +2385,7 @@ function MacroEstimatorSheet({ open, onClose, store, setStore, onApply, standalo
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent)' : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   });
@@ -2932,7 +2932,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
               flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
               background: calc.goal === o.id ? 'var(--accent)' : 'transparent',
               color: calc.goal === o.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: calc.goal === o.id ? 'none' : 'var(--text-lift)',
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.03em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -3798,11 +3798,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
-              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
+              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'none' }}>
                 {WEEKDAYS[i]}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
-                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
+                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'none' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
               {/* Day-type indicator, ALWAYS shown: dumbbell = training, dot = rest.
@@ -3850,7 +3850,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
-                  textShadow: active ? 'none' : 'var(--text-lift)',
+                  textShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>

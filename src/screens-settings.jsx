@@ -652,7 +652,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent)' : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
-    textShadow: active ? 'none' : 'var(--text-lift)',
+    textShadow: 'none',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
   });
@@ -2540,7 +2540,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
                     color: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'none' : 'var(--text-lift)' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
               ))}
@@ -2565,7 +2565,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
                     color: LB.defaultTempUnit(store.settings) === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: LB.defaultTempUnit(store.settings) === u ? 'none' : 'var(--text-lift)' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'c' ? '°C' : '°F'}
                 </button>
               ))}
@@ -3528,7 +3528,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                           background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: supportCategoryDraft === c.key ? 'var(--text-lift)' : 'none',
+                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: 'none',
                         }}>
                           <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
                           {c.label}
@@ -3732,7 +3732,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       background: currentStatus === s.key ? sBg[s.key] : 'transparent',
                       color: currentStatus === s.key ? sColor[s.key] : UI.inkFaint,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                      textShadow: (currentStatus === s.key && s.key === 'in_progress') ? 'none' : 'var(--text-lift)',
+                      textShadow: 'none',
                     }}>{s.label}</button>
                   ))}
                 </div>

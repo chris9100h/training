@@ -203,16 +203,10 @@
     html, body { background: var(--bg); }
   }
   * { box-sizing: border-box; }
-  /* Form controls don't inherit text-shadow from ancestors by default (a
-     browser UA-stylesheet quirk, confirmed via computed-style inspection:
-     a plain div inherits --text-lift fine, a <button> wrapping the exact
-     same text computes text-shadow: none regardless of nesting depth).
-     Every plain-text nav row in the app (NavRow and its many lookalikes)
-     is a <button>, so paper's grid-lift silently never reached them. Force
-     it back to a normal inherited property; any component with its own
-     explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
-     since inline styles always beat an element-selector rule. */
-  button, input, select, textarea { text-shadow: inherit; }
+  /* Interactive controls are surfaces, so they must not inherit the paper
+     grid lift from Screen. Plain background text keeps the inherited lift;
+     a control that truly needs it must opt in explicitly. */
+  button, input, select, textarea { text-shadow: none; }
   /* No theme ever styled ::placeholder, so every input/textarea's hint
      text (an autofilled example, a computed "from macros" value shown as
      a placeholder, ...) fell back to each browser's own default fade of

@@ -3550,7 +3550,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
-    textShadow: sel ? 'var(--text-lift)' : 'none',
+    textShadow: 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -4603,7 +4603,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     width: '100%', marginBottom: 8, padding: '12px 14px',
                     background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                    textShadow: sel ? 'var(--text-lift)' : 'none',
+                    textShadow: 'none',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
@@ -4623,7 +4623,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     width: '100%', marginBottom: 8, padding: '12px 14px',
                     background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                    textShadow: sel ? 'var(--text-lift)' : 'none',
+                    textShadow: 'none',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
