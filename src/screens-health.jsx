@@ -3495,19 +3495,27 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
           {newTargets ? (
             <>
               {showCoachCompare && (
-                <>
-                  <div className="micro" style={{ color: 'var(--accent)', marginBottom: 4 }}>Your coach</div>
-                  {avgLine(coachAvg)}
+                <div style={{ marginBottom: 12, padding: '10px 12px', background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderLeft: '3px solid ' + UI.inkFaint, borderRadius: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
+                    <span className="micro" style={{ color: UI.inkSoft, flex: 1 }}>Your coach</span>
+                    <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Current targets</span>
+                  </div>
+                  {avgLine(coachAvg, 'Weekly average')}
                   {dayRow('Training', 'Training', coachingMacros, 'coach')}
                   <div style={{ height: 0.5, background: UI.hair }} />
                   {dayRow('Rest', 'Rest', coachingMacros, 'coach')}
-                  <div className="micro" style={{ color: UI.inkFaint, margin: '14px 0 4px' }}>The algorithm suggests</div>
-                </>
+                </div>
               )}
-              {avgLine(algoAvg, 'Suggested target', targetDeltaKcal)}
-              {dayRow('Training', 'Training', newTargets, 'algo')}
-              <div style={{ height: 0.5, background: UI.hair }} />
-              {dayRow('Rest', 'Rest', newTargets, 'algo')}
+              <div style={{ marginBottom: 12, padding: '10px 12px', background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hairStrong, borderLeft: '3px solid var(--accent)', borderRadius: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
+                  <span className="micro" style={{ color: 'var(--accent)', flex: 1 }}>Algorithm suggests</span>
+                  <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em', textTransform: 'uppercase' }}>This check-in</span>
+                </div>
+                {avgLine(algoAvg, 'Suggested target', targetDeltaKcal)}
+                {dayRow('Training', 'Training', newTargets, 'algo')}
+                <div style={{ height: 0.5, background: UI.hair }} />
+                {dayRow('Rest', 'Rest', newTargets, 'algo')}
+              </div>
               {coachHasMacros && (
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 12 }}>
                   Applying only updates your personal targets. Your coach's numbers stay active either way.
