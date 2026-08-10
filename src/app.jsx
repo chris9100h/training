@@ -1222,6 +1222,11 @@ function App() {
               medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...mergeById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds)],
               mesoStates,
               planDrafts,
+              // TDEE history is loaded by HealthScreen separately because it
+              // can be reconstructed from the health logs. The regular boot
+              // payload does not carry it, so never let this background merge
+              // erase rows that arrived through that dedicated loader.
+              adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []),
             };
           }
           prevStore.current = merged;

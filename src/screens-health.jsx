@@ -4752,7 +4752,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       setTdeeHistoryStatus('error');
     });
     return () => { cancelled = true; };
-  }, [userId, tdeeHistoryRetry]);
+  }, [userId, tdeeHistoryRetry, store.dailyLogs, store.statusMode, store.statusPeriods, store.settings?.unit, store.settings?.macroCalc?.lastCheckinAt, store.settings?.macroCalc?.lastAppliedAt]);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   // Whether the async coach-macros load has settled. Lets the targets cache
   // tell a transient load-null (protect the cache) from a genuine no/removed-
