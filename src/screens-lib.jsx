@@ -3390,7 +3390,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const reverted = LB.revertMesoSessionBoosts(cur, delSession, base.sessions);
       if (!reverted || reverted === cur) return base;
       const stamped = { ...reverted, updatedAt: new Date().toISOString() };
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
       return { ...base, mesoStates: (st.mesoStates || []).map(m => m.id === cur.id ? stamped : m) };
     });
     go({ name: 'hist' });
@@ -3419,12 +3419,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Feedback rows built from the durable raw answers (so each row carries its own
   // type + subject/exId to edit), grouped by muscle in this session's workout
   // order. Only used for the editable card; the read-only card keeps the stored
-  // display strings. primaryMuscleForExercise is a screens-train.jsx global.
+  // display strings. LB.primaryMuscleForExercise lives in store.js.
   const fbEditRows = () => {
     if (!fbRaw || !fbRaw.answers) return [];
     const a = fbRaw.answers;
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
     const order = [], seen = new Set();
     (s.entries || []).forEach(e => {
       if (e.isCardio) return;
@@ -3484,7 +3483,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     (s.entries || []).forEach(e => {
       if (e.isCardio || !e.exId) return;
       const ex = store.exercises?.find(x => x.id === e.exId);
-      const muscle = typeof primaryMuscleForExercise === 'function' ? primaryMuscleForExercise(ex) : null;
+      const muscle = LB.primaryMuscleForExercise(ex);
       const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
       // attempted mirrors computeMesoGains' `!workingSets.some(done) continue` guard:
       // an untouched exercise is neither a hit nor a rep miss and must not move the streak.
@@ -3500,8 +3499,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Rebuild the display groups (read-only shape { muscle, general[], joint[] }) so
   // the stored recap matches the edited answers on the next render / boot.
   const fbGroupsForStore = (answers) => {
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
     const order = [], seen = new Set();
     (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
     const wLbl = mesoVolumeLbl(true), workLbl = mesoVolumeLbl(false);
@@ -3580,9 +3578,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // updatedAt), INSIDE the updater so it is atomic with the store write and can
         // never be skipped by a deferred updater (mirrors saveMesoState's own in-updater
         // localStorage write). getMesoState then never masks the edit with a stale cache.
-        if (typeof MESO_KEY === 'string') {
-          try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
-        }
+        try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
         return {
           ...st,
           mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
@@ -3594,10 +3590,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }
     // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
     // edit freezes a positive set-add for an at-ceiling muscle exactly like the
-    // live session would have (spec 2.2 / 2.3). typeof-guarded: primaryMuscleForExercise
-    // is a screens-train.jsx global that may not be loaded in every context.
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    // live session would have (spec 2.2 / 2.3). LB.primaryMuscleForExercise lives
+    // in store.js, always loaded.
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
     const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
     // Compute at-ceiling over PRIOR exposures, EXCLUDING the edited session itself. The
     // live session decided its freezes over endedSessions while it was still in-progress
@@ -3638,9 +3633,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, stampedMeso.weightBoosts, earnInputs, s.dayId);
       const groups = fbGroupsForStore(r1.raw.answers);
       const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
-      if (typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
-      }
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
       return {
         ...st,
         mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
@@ -3665,9 +3658,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const nextDeclines = { ...prevDeclines };
       if (nextDeclines[key]) delete nextDeclines[key]; else nextDeclines[key] = true;
       const composedMeso = { ...cur, weightBoostDeclines: nextDeclines, updatedAt: new Date().toISOString() };
-      if (typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
-      }
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
       return { ...st, mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m) };
     });
   };

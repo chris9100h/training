@@ -20,55 +20,33 @@ function nearestDoneMyoBefore(sets, idx) {
 
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
-const MESO_KEY = 'logbook-meso-state';
-const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Ab/Adductors','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
-
-function primaryMuscleForExercise(ex) {
-  if (!ex?.tags?.length) return null;
-  for (const m of MESO_MUSCLE_PRIORITY) {
-    if (ex.tags.includes(m)) return m;
-  }
-  return ex.tags[0] || null;
-}
-// Read meso state: compares the store (DB-loaded, cross-device) copy against
-// the per-plan localStorage cache (in-session writes that haven't been
-// flushed to the store yet, see saveMesoState) and returns whichever is
-// actually newer by updatedAt. A store entry can be stale relative to
-// localStorage right after an app reload/crash mid-session, before the
-// session's feedback answers were ever flushed, always trusting the store
-// would silently discard those answers.
-function getMesoState(scheduleId, mesoStates) {
-  if (!scheduleId) return null;
-  const fromStore = mesoStates?.length ? (mesoStates.find(m => m.scheduleId === scheduleId) || null) : null;
-  let fromStorage = null;
-  try {
-    const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
-           || localStorage.getItem(MESO_KEY); // old single-key format
-    if (r) {
-      const parsed = JSON.parse(r);
-      // Old single-key format check
-      if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
-      if (parsed?.scheduleId === scheduleId) fromStorage = parsed;
-    }
-  } catch {}
-  if (!fromStore) return fromStorage;
-  if (!fromStorage) return fromStore;
-  const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
-  const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
-  const chosen = storageT > storeT ? fromStorage : fromStore;
-  const other = chosen === fromStore ? fromStorage : fromStore;
-  // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
-  // store copy can lack it while the localStorage cache still has it, carry it
-  // over so the flex meso-week anchor survives a reload on the same device.
-  if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
-  return chosen;
-}
-// Write meso state to per-plan localStorage key (in-session fast cache).
-// The store (DB) is updated via setStore at session end.
-function saveMesoStateToStorage(s) {
-  if (!s?.scheduleId) return;
-  try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
-}
+// MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState,
+// saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState and
+// applyMesoSetDelta moved to store.js (2026-08): every OTHER screen that reads
+// meso state used to guard each call with `typeof getMesoState === 'function'`
+// because these lived only here, in the lazily-loaded train bundle, which
+// silently broke (stuck badges, seeds started without their meso set-delta)
+// whenever that screen rendered before train had finished loading. store.js
+// is always loaded before any screen module runs, so living there removes the
+// race entirely. Function-valued exports are aliased here (once, this is the
+// only file that still uses them as bare identifiers, ~50 call sites below)
+// rather than rewriting every call site to LB.*: store.js declares them via
+// `function`, which this file's own top-level `const` (Babel downlevels it to
+// `var` for this build's target, see tools/build.cjs's compile()) can safely
+// redeclare, JS allows redeclaring a function/var-scoped global any number of
+// times. MESO_KEY and MESO_MUSCLE_PRIORITY are the one exception: store.js
+// declares THOSE as `const` (a lexical, non-redeclarable global once loaded,
+// store.js is a plain .js file, never Babel-transpiled, so it keeps its real
+// `const`), so aliasing them here too would collide, "already been declared",
+// and take down this entire file's load. Use LB.MESO_KEY directly at its few
+// call sites instead; MESO_MUSCLE_PRIORITY has no remaining bare use here
+// now that primaryMuscleForExercise itself moved to store.js.
+const primaryMuscleForExercise = LB.primaryMuscleForExercise;
+const getMesoState = LB.getMesoState;
+const saveMesoStateToStorage = LB.saveMesoStateToStorage;
+const mesoCurrentWeek = LB.mesoCurrentWeek;
+const applyMesoSetDeltaFromState = LB.applyMesoSetDeltaFromState;
+const applyMesoSetDelta = LB.applyMesoSetDelta;
 // Which soreness/joint/volume prompts have already been answered THIS
 // session, keyed by session id so a resumed session (app reload/crash mid-
 // session) doesn't re-ask a question that was already answered, the
@@ -115,86 +93,9 @@ function saveMesoAskedSets(sessionId, asked) {
     }));
   } catch {}
 }
-function mesoCurrentWeek(mesoState, store) {
-  if (!mesoState?.startDate) return 1;
-  const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
-  // Flex plans: "which rotation slot are we on" still uses cycleIndex (it also
-  // advances on a skip, which is correct for plan position). But the meso
-  // week/RIR target represents accumulated training fatigue, so it must only
-  // advance on actually-trained sessions, counting raw cycleIndex deltas
-  // would let a run of skips fast-forward the RIR target with zero training.
-  if (sch && sch.days?.length > 0 && LB.isFlexPlan(sch)) {
-    const startIdx = mesoState.startCycleIndex ?? 0;
-    const currentIdx = store.cycleIndex || 0;
-    if (currentIdx < startIdx) return null; // pending, waiting for next rotation start
-    // Count trained sessions since the block began. Prefer the precise
-    // startedAt timestamp over the date-only startDate: without it, sessions
-    // from a PREVIOUS block logged earlier the SAME day the new block starts
-    // (e.g. finishing Meso 1 then starting Meso 2 the same day) leak into the
-    // new block's count and fast-forward its week. Falls back to the date
-    // comparison for older mesos that predate startedAt.
-    const startedTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime() : null;
-    const trainedCount = (store?.sessions || []).filter(s =>
-      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
-      (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
-    ).length;
-    // Two independent inflation sources cancel by taking the min. The trained
-    // count over-counts sessions logged during the PENDING gap (a meso enabled
-    // mid-rotation has startedAt=creation but startCycleIndex aligned to a
-    // future D1, so gap sessions have ended > startedTs yet predate the block).
-    // The position count (currentIdx - startIdx) instead over-counts skips after
-    // activation. min() strips whichever source inflated; only a rare mix of
-    // both (gap sessions AND a later full skipped rotation) can still round up
-    // by one week.
-    const trainedRotations = Math.floor(trainedCount / sch.days.length);
-    const positionRotations = Math.floor((currentIdx - startIdx) / sch.days.length);
-    const week = Math.max(1, Math.min(trainedRotations, positionRotations) + 1);
-    return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
-  }
-  // Weekday and date-based cycle plans: date arithmetic.
-  // Cycle plans: one meso "week" = one full rotation (daysLen days).
-  // Weekday plans: one meso "week" = 7 calendar days.
-  const start = LB.parseDate(mesoState.startDate);
-  const today = new Date(); today.setHours(12, 0, 0, 0);
-  if (today < start) return null; // pending
-  const rawDays = Math.round((today - start) / 86400000);
-  // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
-  // break can't fast-forward the meso week / RIR target the way raw calendar
-  // arithmetic would, mirrors the flex path's "only training advances the
-  // meso" principle. Trained vacation days still count (they're not paused).
-  const trainedDates = new Set(
-    (store?.sessions || [])
-      .filter(s => s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && s.date)
-      .map(s => s.date.slice(0, 10))
-  );
-  const paused = LB.mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, LB.fmtISO(today));
-  const days = Math.max(0, rawDays - paused);
-  const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
-  const week = Math.max(1, Math.floor(days / cycleLen) + 1);
-  return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
-}
-// mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable,
-// linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
-// negative (beyond failure → auto lengthened partials, see mesoPartials).
-// Apply an already-resolved meso state's set-delta to a plan item before
-// building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
-// (can't cut below one set) but otherwise uncapped, repeated "not enough
-// volume" answers keep growing a lift indefinitely, and an over-grown lift
-// self-corrects via the decline signal instead of a hard ceiling; no-ops if
-// no meso or no delta. Split out from applyMesoSetDelta so callers resolving
-// meso state for every item in a plan (session start, plan viewer) can call
-// getMesoState once instead of once per item (each call touches localStorage).
-function applyMesoSetDeltaFromState(it, dayId, mesoState) {
-  if (!dayId || !mesoState) return it;
-  const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
-  if (!delta) return it;
-  const base = it.sets || 1;
-  return { ...it, sets: Math.max(1, base + delta) };
-}
-function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
-  if (!dayId || !scheduleId) return it;
-  return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
-}
+// mesoCurrentWeek, applyMesoSetDeltaFromState and applyMesoSetDelta now live
+// in store.js (LB.*, aliased above), same "cannot be a lazy-module-only
+// global" reasoning as getMesoState.
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
@@ -2766,8 +2667,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // abandoned session's delta survives and compounds on every cancel+restart
     // (base+1 -> base+2 -> ...). Mirror the exact cleanup a clean finish does.
     if (session.scheduleId) {
-      try { localStorage.removeItem(MESO_KEY + '-' + session.scheduleId); } catch {}
-      try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+      try { localStorage.removeItem(LB.MESO_KEY + '-' + session.scheduleId); } catch {}
+      try { localStorage.removeItem(LB.MESO_KEY); } catch {} // old single-key format
     }
     setStore(s => ({
       ...s,
@@ -3119,8 +3020,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return { ...s, mesoStates: [...others, stamped] };
     });
     // Clean up old localStorage keys after successful flush
-    try { localStorage.removeItem(MESO_KEY + '-' + finalState.scheduleId); } catch {}
-    try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+    try { localStorage.removeItem(LB.MESO_KEY + '-' + finalState.scheduleId); } catch {}
+    try { localStorage.removeItem(LB.MESO_KEY); } catch {} // old single-key format
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
   // Autoreg v2 P2: persist a change to this plan's autoreg_state blob (the anti-nag

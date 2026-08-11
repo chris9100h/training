@@ -426,8 +426,8 @@ function SupersetHeader({ size }) {
 // Program status card: 5/3/1 cycle/week + per-lift Training-Max progress, and
 // mesocycle block week / RIR target. Both come straight from the client's
 // schedule + mesoStates already in the coach's clientStore. Renders nothing for
-// a plain plan. mesoCurrentWeek / FiveThreeOneProgress are cross-file globals
-// (screens-train / screens-schedule), guarded like the athlete-side callers.
+// a plain plan. LB.mesoCurrentWeek lives in store.js; FiveThreeOneProgress is
+// a cross-file global (screens-schedule), guarded like the athlete-side callers.
 function ClientProgramStatus({ sch, clientStore }) {
   if (!sch) return null;
   const is531 = LB.is531Plan(sch);
@@ -443,7 +443,7 @@ function ClientProgramStatus({ sch, clientStore }) {
     if (clientStore.statusMode === 'deload') {
       mesoBadge = `${label} · DELOAD`;
     } else {
-      const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, clientStore) : null;
+      const week = m ? LB.mesoCurrentWeek(m, clientStore) : null;
       const rir = (week != null && LB.mesoRirEnabled(sch) && typeof LB.mesoRirForWeek === 'function')
         ? LB.mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0)
         : null;

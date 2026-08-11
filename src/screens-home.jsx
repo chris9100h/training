@@ -1294,11 +1294,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const deloadHintActive = useMemo(() => {
     if (!sch || !sch.mesocycle_autoregulate || sch.mesocycle_weeks != null) return false;
     if (store.statusMode) return false;
-    const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+    const m = LB.getMesoState(sch.id, store.mesoStates);
     const nudge = m && m.autoregState && m.autoregState.deloadNudge && m.autoregState.deloadNudge.block;
     if (!nudge || nudge.declinedAt == null) return false;
-    if (typeof primaryMuscleForExercise !== 'function' || typeof LB.detectOverreach !== 'function') return false;
-    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    if (typeof LB.detectOverreach !== 'function') return false;
+    const muscleOfExId = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
     const over = LB.detectOverreach(store.sessions, sch, muscleOfExId);
     return Object.keys(over).some(mm => over[mm] && over[mm].atCeiling);
   }, [sch?.id, sch?.mesocycle_autoregulate, sch?.mesocycle_weeks, store.statusMode, store.mesoStates, store.sessions, store.exercises]);
@@ -2209,7 +2209,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               startedAt: now, // fresh block-start anchor (flex week count)
               updatedAt: now,
             };
-            if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
+            LB.saveMesoStateToStorage(newMeso);
             return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] };
           });
         }
@@ -2367,7 +2367,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // before the deload nudge, so a cruising lifter who never overreaches still gets a
       // periodic recap of what they built. Plain cycle/weekday/flex plans have no
       // mesoState, so blockSessions returns [] and the gate below skips the recap.
-      const mesoState = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+      const mesoState = LB.getMesoState(sch.id, store.mesoStates);
       const bRecap = LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
       if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
         await confirm(<BlockRecap recap={bRecap} />, { title: 'Block complete 🎉', ok: "Let's go", cancel: null, preventBackdropClose: true });
@@ -2532,13 +2532,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const seedRefs = await LB.fetchSeedEntries(store, items, dayId, userId);
     // Resolve meso state once (it internally reads localStorage) instead of
     // once per item below.
-    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+    const resolvedMeso = LB.getMesoState(sch?.id, store.mesoStates);
     // Week 1 of the FIRST meso block has no prior feedback to defer to, so Smart
     // Progression is NOT vetoed there (it stays the weight authority until the
     // feedback engine has a completed session to earn from). Later weeks/blocks
     // keep the veto. See LB.resolveMesoSeedSuggestion.
-    const mesoNoPriorFeedback = (resolvedMeso && typeof mesoCurrentWeek === 'function')
-      ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
+    const mesoNoPriorFeedback = resolvedMeso
+      ? (LB.mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
       : false;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
     const mesoDeclines = resolvedMeso?.weightBoostDeclines ?? null;
@@ -2581,7 +2581,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         // weight path below), so a time exercise's set count autoregulates and
         // the real session matches the plan-viewer preview (which routes time
         // items through buildSeedSets -> buildTimeSeedSets WITH the delta).
-        const itAdjTime = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+        const itAdjTime = !LB.autoregLoadOnly(sch) ? LB.applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
         const sets = LB.buildTimeSeedSets(itAdjTime, lastTime);
         return {
           exId: it.exId, name: ex?.name || '?',
@@ -2597,7 +2597,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // Load-only autoregulate plans never apply set deltas (weight is tuned,
       // set count stays authored), this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+      const itAdj = !LB.autoregLoadOnly(sch) ? LB.applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       // A declined boost is withheld exactly like an un-earned one (falls through
       // to resolveMesoSeedSuggestion's veto branch, weight holds). declined is
       // passed through separately too (not just collapsed into weightBoost=null)
@@ -2964,10 +2964,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // one of which renders per plan) don't redo that work on every HomeScreen
   // render, e.g. every store sync, sheet toggle, or day-strip tap.
   const mesoBadgeState = useMemo(
-    () => (sch && typeof getMesoState === 'function' ? getMesoState(sch.id, store.mesoStates) : null),
+    () => (sch ? LB.getMesoState(sch.id, store.mesoStates) : null),
     [sch?.id, store.mesoStates]);
   const mesoBadgeWeek = useMemo(
-    () => (mesoBadgeState && typeof mesoCurrentWeek === 'function' ? mesoCurrentWeek(mesoBadgeState, store) : null),
+    () => (mesoBadgeState ? LB.mesoCurrentWeek(mesoBadgeState, store) : null),
     [mesoBadgeState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods]);
 
   return (

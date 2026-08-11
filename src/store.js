@@ -9143,6 +9143,156 @@ function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
   return Math.round(startRir - (week - 1) * (startRir - endRir) / (weeks - 1));
 }
 
+// ─── Mesocycle helpers, moved here from screens-train.jsx (2026-08) ───────────
+// These used to live as classic-script globals in screens-train.jsx, the lazy
+// `train` route bundle. Every other screen that reads meso state (Home's AUTO
+// badge, the deload hint, buildSessionEntries at session start, Library's
+// meso-feedback editor, the Schedule plan list/viewer, the coaching client
+// view) guarded every call with `typeof getMesoState === 'function'` because
+// store.js could not reference them directly, and none of those guards were
+// actually about "is this feature available", they were purely "has the
+// train bundle finished loading yet". On a cold boot the train bundle warms
+// in the background 1-4s after first paint; a HomeScreen useMemo whose
+// dependency array only tracks DATA (not "did the module finish loading")
+// computed once against the not-yet-loaded functions, cached a wrong "no meso
+// state" result, and never recomputed again for the life of that mount, e.g.
+// the AUTO badge stuck on "pending" long after the meso was active. Worse,
+// buildSessionEntries could silently start a session with resolvedMeso=null
+// (no set-delta, no weight boost) if the user started training in that same
+// window, persisting seeds that never got their autoregulation applied.
+// Living here instead removes the race entirely: store.js is always loaded
+// before any screen module runs.
+const MESO_KEY = 'logbook-meso-state';
+const MESO_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Ab/Adductors', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
+
+function primaryMuscleForExercise(ex) {
+  if (!ex?.tags?.length) return null;
+  for (const m of MESO_MUSCLE_PRIORITY) {
+    if (ex.tags.includes(m)) return m;
+  }
+  return ex.tags[0] || null;
+}
+
+// Read meso state: compares the store (DB-loaded, cross-device) copy against
+// the per-plan localStorage cache (in-session writes that haven't been
+// flushed to the store yet, see saveMesoStateToStorage) and returns whichever
+// is actually newer by updatedAt. A store entry can be stale relative to
+// localStorage right after an app reload/crash mid-session, before the
+// session's feedback answers were ever flushed, always trusting the store
+// would silently discard those answers.
+function getMesoState(scheduleId, mesoStates) {
+  if (!scheduleId) return null;
+  const fromStore = mesoStates?.length ? (mesoStates.find(m => m.scheduleId === scheduleId) || null) : null;
+  let fromStorage = null;
+  try {
+    const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
+           || localStorage.getItem(MESO_KEY); // old single-key format
+    if (r) {
+      const parsed = JSON.parse(r);
+      // Old single-key format check
+      if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
+      if (parsed?.scheduleId === scheduleId) fromStorage = parsed;
+    }
+  } catch {}
+  if (!fromStore) return fromStorage;
+  if (!fromStorage) return fromStore;
+  const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
+  const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
+  const chosen = storageT > storeT ? fromStorage : fromStore;
+  const other = chosen === fromStore ? fromStorage : fromStore;
+  // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
+  // store copy can lack it while the localStorage cache still has it, carry it
+  // over so the flex meso-week anchor survives a reload on the same device.
+  if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
+  return chosen;
+}
+
+// Write meso state to per-plan localStorage key (in-session fast cache).
+// The store (DB) is updated via setStore at session end.
+function saveMesoStateToStorage(s) {
+  if (!s?.scheduleId) return;
+  try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
+}
+
+function mesoCurrentWeek(mesoState, store) {
+  if (!mesoState?.startDate) return 1;
+  const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
+  // Flex plans: "which rotation slot are we on" still uses cycleIndex (it also
+  // advances on a skip, which is correct for plan position). But the meso
+  // week/RIR target represents accumulated training fatigue, so it must only
+  // advance on actually-trained sessions, counting raw cycleIndex deltas
+  // would let a run of skips fast-forward the RIR target with zero training.
+  if (sch && sch.days?.length > 0 && isFlexPlan(sch)) {
+    const startIdx = mesoState.startCycleIndex ?? 0;
+    const currentIdx = store.cycleIndex || 0;
+    if (currentIdx < startIdx) return null; // pending, waiting for next rotation start
+    // Count trained sessions since the block began. Prefer the precise
+    // startedAt timestamp over the date-only startDate: without it, sessions
+    // from a PREVIOUS block logged earlier the SAME day the new block starts
+    // (e.g. finishing Meso 1 then starting Meso 2 the same day) leak into the
+    // new block's count and fast-forward its week. Falls back to the date
+    // comparison for older mesos that predate startedAt.
+    const startedTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime() : null;
+    const trainedCount = (store?.sessions || []).filter(s =>
+      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
+      (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
+    ).length;
+    // Two independent inflation sources cancel by taking the min. The trained
+    // count over-counts sessions logged during the PENDING gap (a meso enabled
+    // mid-rotation has startedAt=creation but startCycleIndex aligned to a
+    // future D1, so gap sessions have ended > startedTs yet predate the block).
+    // The position count (currentIdx - startIdx) instead over-counts skips after
+    // activation. min() strips whichever source inflated; only a rare mix of
+    // both (gap sessions AND a later full skipped rotation) can still round up
+    // by one week.
+    const trainedRotations = Math.floor(trainedCount / sch.days.length);
+    const positionRotations = Math.floor((currentIdx - startIdx) / sch.days.length);
+    const week = Math.max(1, Math.min(trainedRotations, positionRotations) + 1);
+    return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
+  }
+  // Weekday and date-based cycle plans: date arithmetic.
+  // Cycle plans: one meso "week" = one full rotation (daysLen days).
+  // Weekday plans: one meso "week" = 7 calendar days.
+  const start = parseDate(mesoState.startDate);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (today < start) return null; // pending
+  const rawDays = Math.round((today - start) / 86400000);
+  // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
+  // break can't fast-forward the meso week / RIR target the way raw calendar
+  // arithmetic would, mirrors the flex path's "only training advances the
+  // meso" principle. Trained vacation days still count (they're not paused).
+  const trainedDates = new Set(
+    (store?.sessions || [])
+      .filter(s => s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && s.date)
+      .map(s => s.date.slice(0, 10))
+  );
+  const paused = mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, fmtISO(today));
+  const days = Math.max(0, rawDays - paused);
+  const cycleLen = (sch && !isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
+  const week = Math.max(1, Math.floor(days / cycleLen) + 1);
+  return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
+}
+
+// Apply an already-resolved meso state's set-delta to a plan item before
+// building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
+// (can't cut below one set) but otherwise uncapped, repeated "not enough
+// volume" answers keep growing a lift indefinitely, and an over-grown lift
+// self-corrects via the decline signal instead of a hard ceiling; no-ops if
+// no meso or no delta. Split out from applyMesoSetDelta so callers resolving
+// meso state for every item in a plan (session start, plan viewer) can call
+// getMesoState once instead of once per item (each call touches localStorage).
+function applyMesoSetDeltaFromState(it, dayId, mesoState) {
+  if (!dayId || !mesoState) return it;
+  const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
+  if (!delta) return it;
+  const base = it.sets || 1;
+  return { ...it, sets: Math.max(1, base + delta) };
+}
+function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
+  if (!dayId || !scheduleId) return it;
+  return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
+}
+
 // Whether an ended, non-deload session of this plan trained `muscle` before the
 // meso block started (startTs = the block's startedAt, or startDate for older
 // mesos). Week 1 of a genuinely fresh plan has nothing to be sore from, but when
@@ -9168,9 +9318,10 @@ function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, mus
 // ─── Autoreg v2 P1: microcycle accounting + overreach detector (pure) ──────────
 // Everything below is stateless and recomputed from the loaded session history:
 // no new persistence, no server aggregate (a microcycle always sits inside the
-// 70-day set window). `muscleOfExId(exId) -> muscle|null` is injected because
-// primaryMuscleForExercise lives in screens-train.jsx (classic-script global,
-// not on window.LB); pass it the same way mesoMuscleTrainedBeforeStart does.
+// 70-day set window). `muscleOfExId(exId) -> muscle|null` stays an injected
+// callback rather than calling primaryMuscleForExercise directly (both now
+// live in this file): callers resolve a system-catalog candidate not in
+// store.exercises differently, pass it the same way mesoMuscleTrainedBeforeStart does.
 
 // Count a session's HARD sets per muscle into `counts` (mutated in place). A hard
 // set is a completed working set: done && !warmup && !skipped. Technique sets
@@ -9491,10 +9642,13 @@ const REENTRY_MIN_BREAK_DAYS = 7;
 // A long break (weeks+) stretches the systemic ease-in over more than one
 // microcycle (spec 7: "Wochen: weiter runter starten, laengerer Ramp").
 const REENTRY_LONG_BREAK_DAYS = 28;
-// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY in screens-train.jsx
-// so a system-catalog candidate (not in store.exercises, so the injected muscleOf
-// cannot resolve it) buckets to the SAME primary muscle as primaryMuscleForExercise.
-// Keep the two lists in sync: if one changes, change the other.
+// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY above in this
+// file so a system-catalog candidate (not in store.exercises, so the injected
+// muscleOf cannot resolve it) buckets to the SAME primary muscle as
+// primaryMuscleForExercise. Keep the two lists in sync: if one changes, change
+// the other. (Both now live here; still two lists rather than one shared
+// constant, since primaryMuscleFromTags and primaryMuscleForExercise take
+// different inputs, tags vs. an exercise object, that's a separate cleanup.)
 const STALL_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Ab/Adductors', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
 function primaryMuscleFromTags(tags) {
   if (!tags || !tags.length) return null;
@@ -10483,6 +10637,7 @@ window.LB = {
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
