@@ -14,8 +14,8 @@ import { sendNotification } from '../_shared/notifications.ts';
 //     nudge. State-based, not window-based, so a tick skipped by cron
 //     downtime still nudges on the next tick instead of silently dropping
 //     the only chance (the old 1h-window predicate had that failure mode).
-//   - nudged once (reminder_count = 1) and >= 2h since that nudge: second
-//     nudge.
+//   - nudged once (reminder_count = 1) and >= 2h (minus NUDGE_SLACK_MS, see
+//     below) since that nudge: second nudge.
 //   - reminder_count >= 2: never again (cap: 2 nudges per day per dose).
 // The per-row count is naturally per-day: each local date materializes its
 // own planned row, so "per day" needs no separate reset.
@@ -53,6 +53,19 @@ const GRACE_MS = 60 * 60 * 1000;      // fire once a scheduled dose is this far 
 const NUDGE_MS = 2 * 60 * 60 * 1000;  // second nudge no sooner than this long after the first
 const WINDOW_MS = 60 * 60 * 1000;     // yesterday-row bound: only the tick that crosses a late dose's threshold
 const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-dose (>=23:00) day-boundary look-back
+// Tolerance on the NUDGE_MS check only (see `due` below): unlike GRACE_MS,
+// which compares THIS tick's own `now` against a fixed schedule time and so
+// can only ever run late relative to the hour it fires in, NUDGE_MS compares
+// this tick's `now` against `sentAt`, a timestamp stamped by a DIFFERENT,
+// earlier tick's own `Date.now()`. Both invocations carry independent
+// cron-dispatch/cold-start latency (observed a few seconds), so whenever the
+// later tick happens to start faster than the earlier one did, a strict
+// `now >= sentAt + NUDGE_MS` can miss by a couple seconds, deferring the
+// nudge a full hour, and if the dose gets logged before that next tick, the
+// second nudge silently never fires at all (confirmed happening 2026-08-11).
+// 5 minutes comfortably covers that jitter without blurring which hourly
+// tick is "meant" to catch a given row.
+const NUDGE_SLACK_MS = 5 * 60 * 1000;
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -232,7 +245,7 @@ async function sendReminders() {
       if (snoozeUntil > sentAt) return now >= snoozeUntil;
       if (e.date !== localDate && past >= WINDOW_MS) return false;
       if (count === 0) return true;
-      return now >= sentAt + NUDGE_MS;
+      return now >= sentAt + NUDGE_MS - NUDGE_SLACK_MS;
     });
     if (!due.length) continue;
 
