@@ -610,15 +610,18 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   // card's protocol resolver uses).
   const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => LB.fastingCustomHours(store.settings?.fastingProtocol));
   const fastingCustomActive = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
-  // Segmented-button style for the Intermittent Fasting protocol picker (same
-  // shape as fdSegBtn / the health estimator's segBtn).
-  const setSegBtn = (active) => ({
-    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'transparent',
-    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+  // Own card per protocol instead of one fused segmented bar: each option
+  // gets a real tap target and a clear selected state (accent border + tint,
+  // same rgba(--accent-rgb) recipe Card's own `accent` variant uses), rather
+  // than four labels squeezed into one thin strip.
+  const fastingChip = (active) => ({
+    padding: '14px 8px', borderRadius: 4, textAlign: 'center',
+    border: `1.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+    background: active ? 'rgba(var(--accent-rgb),0.13)' : UI.bgInset,
+    color: active ? 'var(--accent)' : UI.ink,
     textShadow: 'none',
-    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
-    WebkitTapHighlightColor: 'transparent',
+    fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.02em',
+    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
   });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
@@ -2413,38 +2416,37 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           preference lives here, the running fast is per-device ══ */}
       <SettingsSheet open={fastingSheet} onClose={() => setFastingSheet(false)} title="Intermittent Fasting">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
             Pick a fast/eat rhythm. The Food Tracker then shows a live fasting timer and tints today's eating window on the timeline. The protocol syncs to all your devices; the running fast itself stays on this device. Tap the active protocol again to switch it off.
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
-                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
-                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
-              ))}
-            </div>
-            <div className="micro" style={{ color: UI.inkFaint }}>Long fast</div>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
-                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
-                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
-              ))}
-              {/* Custom long fast: hours live in the id ('custom:96'), the
-                  stepper below edits them. The chip compares by resolved
-                  custom-ness, not the raw id. */}
-              <button onClick={() => {
-                const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
-                patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
-              }} style={setSegBtn(fastingCustomActive)}>Custom</button>
-            </div>
-            {fastingCustomActive && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
-                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
-                <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
-                  step={6} min={24} max={168} suffix="h" />
-              </div>
-            )}
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Daily</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 22 }}>
+            {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
+              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                style={fastingChip(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+            ))}
           </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Long fast</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
+              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                style={fastingChip(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+            ))}
+            {/* Custom long fast: hours live in the id ('custom:96'), the
+                stepper below edits them. The chip compares by resolved
+                custom-ness, not the raw id. */}
+            <button onClick={() => {
+              const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
+              patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
+            }} style={fastingChip(fastingCustomActive)}>Custom</button>
+          </div>
+          {fastingCustomActive && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
+              <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
+                step={6} min={24} max={168} suffix="h" />
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFastingSheet(false)}>Done</Btn>
           </div>
