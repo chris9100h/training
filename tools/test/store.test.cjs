@@ -784,6 +784,46 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions[0].entries[0].sets[0].kg, 130, 'the offline edit must survive even with no usable base to compare against');
   });
 
+  // ── mergeSessions: unsynced session-scalar edits (audit H2) ──────────────
+  // finish() (screens-train.jsx) sets `ended` and clears inProgress in the
+  // SAME action, so a real just-finished session always has isActive=false
+  // by the time any later boot merge runs. Before this fix `ended` had no
+  // "differs from base -> keep local" protection at all (only entries/sets
+  // did, H1), so a reload landing before the `ended` sync confirmed reverted
+  // it straight back to the server's stale null, silently forgetting the
+  // session had ever finished (real user report, 2026-08).
+  test('mergeSessions keeps an unsynced local `ended` even though inProgress is already cleared', () => {
+    const base = [{ id: 's1', date: '2026-06-10', ended: null, entries: [] }];
+    const cur = [{ id: 's1', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', durationMinutes: 42, entries: [] }];
+    const fresh = [{ id: 's1', date: '2026-06-10', ended: null, entries: [] }]; // server predates the finish
+    // inProgress is null: exactly finish()'s own post-condition, not the
+    // session's id, so isActive is false for this session either way.
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'the unsynced finish must survive the boot merge');
+    assert.strictEqual(sessions[0].durationMinutes, 42);
+  });
+  test('mergeSessions trusts the server ended when local matches the base (remote finish wins)', () => {
+    const base = [{ id: 's2', date: '2026-06-10', ended: null, entries: [] }];
+    const cur = [{ id: 's2', date: '2026-06-10', ended: null, entries: [] }]; // no local change
+    const fresh = [{ id: 's2', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', entries: [] }]; // finished on another device
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'server value must win when this device made no edit');
+  });
+  test('mergeSessions keeps an unsynced `ended` with no usable base (H2, mirrors the H1 gap)', () => {
+    const cur = [{ id: 's3', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', entries: [] }];
+    const fresh = [{ id: 's3', date: '2026-06-10', ended: null, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now); // no base at all (legacy cache)
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'nothing to compare against must not resolve to "trust the server"');
+  });
+  test('mergeSessions protects other synced session scalars the same way (feel, isCleanup)', () => {
+    const base = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: null, isCleanup: false, entries: [] }];
+    const cur = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: 'great', isCleanup: true, entries: [] }];
+    const fresh = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: null, isCleanup: false, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great');
+    assert.strictEqual(sessions[0].isCleanup, true);
+  });
+
   await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {
     rpcLog.length = 0;
     testFrom = () => builder({ data: null, error: null });

@@ -5150,6 +5150,36 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
   return false;
 }
 
+// Session-level scalar fields mergeSessions must NOT silently revert to a
+// stale server value (audit H2, 2026-08): every field sessionToRow actually
+// writes to zane_sessions, other than the ones already handled elsewhere in
+// mergeSessions for their own reasons (cyclePos: always prefers local,
+// entries/currentExIdx/restStart/restDuration: handled by the entries logic
+// above, progressionBumps/cleanupOptOuts: local-only, no column at all).
+// `ended` is the one that actually bit a real user: finish() (screens-
+// train.jsx) sets `ended` and clears `inProgress` in the SAME action, so by
+// the time any later boot merge runs, isActive (below) is already false for
+// that session, `ended` was never given the same "differs from the last
+// confirmed-synced base -> keep local" protection entries/sets get (H1), and
+// a hard reload (e.g. app backgrounded for 30+min doing Live Cardio, see
+// app.jsx's THRESHOLD) landing before the `ended` sync had confirmed reverted
+// it straight back to the server's stale null: the session vanished from
+// History, wasn't resumable (inProgress already cleared too), and nothing
+// ever retried the write again because the store itself no longer "knew" it
+// had finished.
+const SESSION_SYNC_SCALAR_FIELDS = ['ended', 'scheduleId', 'dayId', 'dayName', 'startedAt', 'durationMinutes', 'feel', 'isBonus', 'isFreestyle', 'isDeload', 'isCleanup', 'mesoRecap', 'readiness', 'signalWeight'];
+function sessionScalarsDifferFromBase(mem, baseMem) {
+  // No usable base (never confirmed synced for this device) must resolve the
+  // same direction as "genuinely differs", exactly the H1 bias above: there
+  // is nothing to compare against, so trusting the server here is how data
+  // gets silently dropped in the first place.
+  if (!baseMem) return true;
+  for (const k of SESSION_SYNC_SCALAR_FIELDS) {
+    if ((mem[k] ?? null) !== (baseMem[k] ?? null)) return true;
+  }
+  return false;
+}
+
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   const baseById = baseSessions ? new Map(baseSessions.map(s => [s.id, s])) : null;
@@ -5189,6 +5219,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     // diff exactly the edited fields and upload them, same unsynced-edit test
     // as mergeCollectionById below.
     const baseMem = baseById?.get(s.id);
+    // Deliberately NOT gated on isActive (audit H2): isActive requires
+    // inProgress still pointing at this session, but finish() clears
+    // inProgress in the very same action that sets `ended`, so gating this
+    // check on isActive would make it never fire for the one transition it
+    // exists to protect. An active session's `ended` is null on both sides
+    // anyway, so this can't regress the in-progress case.
+    const scalarsDifferFromBase = sessionScalarsDifferFromBase(mem, baseMem);
     const baseEntries = (baseMem?.entries || []).length ? baseMem.entries : null;
     // No usable base (this device's last confirmed-synced snapshot never
     // captured real entries for this session, e.g. it sat out-of-window
@@ -5204,6 +5241,12 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
     return {
       ...s,
+      // An unsynced local edit of any scalar field the server actually
+      // stores (audit H2, see sessionScalarsDifferFromBase above) must win
+      // over the server's stale copy, `ended` above all: the follow-up flush
+      // then diffs exactly this session and re-uploads it, same contract the
+      // entries-level H1 fix already established.
+      ...(scalarsDifferFromBase ? Object.fromEntries(SESSION_SYNC_SCALAR_FIELDS.map(k => [k, mem[k] ?? null])) : {}),
       currentExIdx: mem.currentExIdx ?? 0,
       // Prefer the cached value (this device's own, always correct at write
       // time), but fall back to the server's rather than jumping straight to
