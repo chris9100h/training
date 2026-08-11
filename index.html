@@ -1379,10 +1379,46 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 
   // Append as a classic inline script so it runs synchronously and in order,
   // sharing the global scope exactly like the original text/babel scripts.
+  //
+  // A classic script's own runtime errors never throw back into this call:
+  // the browser reports them via window.onerror instead (the same isolation
+  // model as a cross-origin "Script error."), so execute() used to always
+  // "succeed" from its caller's point of view even when the injected code
+  // threw before finishing, e.g. partway through a chain of top-level const
+  // declarations. That silently broke retry: runSource()/loadBuiltBundle()
+  // marked the source executed (or left their promise resolved) regardless,
+  // so window.Screens[name] was never actually populated, yet nothing was
+  // ever rejected for the caller's own .catch/Retry path to react to,
+  // leaving a lazy screen stuck at "Loading..." forever with no error and
+  // no way out. Capture the throw with a narrowly scoped, synchronous-only
+  // onerror hook instead: appendChild() runs a classic script synchronously,
+  // so any throw from it fires onerror before appendChild itself returns,
+  // still inside this function, and is re-thrown here so runSource() and
+  // loadBuiltBundle() correctly see a rejected promise and clean up
+  // (delete executedSources[src] / builtBundlePromises[name]) exactly like
+  // they already do for a fetch/transpile failure. This does NOT make a
+  // retry safe from "already been declared" if the failing script got
+  // partway through its own top-level consts before throwing (re-running it
+  // in the same shared global scope can collide with itself); that would
+  // need each source to run in its own isolated scope, a deliberately
+  // shared-scope design (CLAUDE.md) this does not change. What it does fix
+  // is the far more common case: the failure now surfaces as a real error
+  // with a working Retry instead of a silent, permanent hang.
   function execute(code, filename) {
     var s = document.createElement('script');
     s.textContent = code + '\n//# sourceURL=' + filename;
-    document.head.appendChild(s);
+    var caught = null;
+    var previousOnError = window.onerror;
+    window.onerror = function (message, source, line, col, error) {
+      caught = error instanceof Error ? error : new Error(String(message));
+      return true;
+    };
+    try {
+      document.head.appendChild(s);
+    } finally {
+      window.onerror = previousOnError;
+    }
+    if (caught) throw caught;
   }
 
   // Routes through showErrOverlay() (first script block above, same page,
@@ -1547,7 +1583,17 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
           }
           setRetry(function (n) { return n + 1; });
         }).catch(function (e) {
-          if (live) setError(e);
+          if (!live) return;
+          setError(e);
+          // Silent components (banners/widgets, e.g. CoachingPendingBanner,
+          // TodayCardioWidget) render nothing on error, below, so there is no
+          // Retry button and no other signal that a load ever failed: without
+          // this, a single transient blip left them blank for the rest of the
+          // session. Retry quietly a few times instead; capped so a genuinely
+          // broken module (bad deploy, permanent 404) does not poll forever.
+          if (options.silent && retry < 5) {
+            setTimeout(function () { if (live) setRetry(function (n) { return n + 1; }); }, 8000);
+          }
         });
         return function () { live = false; };
       }, [shouldLoad, retry]);
