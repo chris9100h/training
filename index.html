@@ -30,7 +30,16 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<!-- 'black' (opaque, OS-owned bar) instead of 'black-translucent' (full
+     bleed, app content shows through the status bar): a newer iOS version
+     started rendering the app's own blurred sticky headers (TopBar in
+     ui.jsx, the same pattern everywhere) visibly through the translucent
+     status bar, making the time/battery/signal glyphs look smeared. 'black'
+     matches the app's default dark theme (light/paper theme users still get
+     a black bar, this tag can't react to the in-app theme choice) and takes
+     the whole interaction off the table: whatever iOS does with translucent
+     chrome compositing next can't reach us if we never opt into it. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="apple-mobile-web-app-title" content="Zane" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
