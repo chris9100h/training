@@ -3307,18 +3307,265 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       .catch(() => {});
     return () => { on = false; };
   }, [needsEntries, sessionId]);
-  // Deleting this session clears it from store.sessions before the route change to
-  // 'hist' commits, so this component can still re-render once with `s` undefined
-  // (confirmed to only reproduce with certain platform/timing, e.g. desktop but not
-  // iOS). Bailing out here with an early return would skip the hooks declared below
-  // (prevEntryMap/prMap memos, the prior-session fetch effect), a Rules of Hooks
-  // violation (React error #300, "rendered fewer hooks than expected"). So the
-  // `!s` bailout moves past all hooks (see below); everything between here and
-  // there must tolerate `s` being undefined instead.
-  const vol = s ? LB.totalVolume(s, store.exercises, store.dailyLogs) : 0;
-  const duration = s && s.durationMinutes != null
+
+  // Deload sessions are deliberately light, comparing against one as "last
+  // time" would show every set as a fabricated "improvement" purely because
+  // it beats the artificially-reduced deload weights. store.js already
+  // excludes deload from lastSessionForExercise/recentSessionsForExercise;
+  // this mirrors that exclusion for the same reason.
+  // Iterates every entry of s against a filter+sort of ALL sessions per
+  // entry; memoized so it only recomputes when the session's own entries or
+  // the account's session history actually changes, not on every render
+  // (a keystroke in the template-name input below, a sheet/feel toggle, a
+  // background store sync unrelated to this data).
+  const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
+    if (!s) return { prevEntryMap: {}, prevPendingMap: {}, prevNeedIds: [] };
+    const map = {};
+    const pending = {};
+    const needIds = new Set();
+    const prevOccSeen = {};
+    // A prior session outside the boot history window carries aggregates only
+    // (entries: [], aggExercises > 0, see docs/internals.md "History-Windowing").
+    // Nothing here can tell whether it holds this exercise, so the candidate
+    // walk must not step past it and hand an older, unrelated session over as
+    // "last time". Mark the entry pending instead (the render suppresses its
+    // improvement and decline arrows, but NOT its PR star, which does not read
+    // the prior), queue the session, and let the fetch below rerun this memo,
+    // same mechanism as the Home recap's prior-session lookup.
+    const windowedGap = (x, idx) => {
+      if ((x.aggExercises || 0) <= 0) return false; // genuinely empty, safe to skip
+      needIds.add(x.id);
+      pending[idx] = true;
+      return true;
+    };
+    s.entries.forEach((e, idx) => {
+      // The Nth occurrence of an exercise in the day compares against the SAME Nth
+      // occurrence of past sessions (audit L3, matching the seed path). Keyed by
+      // entry index so a twice-in-a-day exercise's second slot reads its own prev
+      // instead of sharing the first slot's.
+      const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
+      // A 5/3/1 main lift's weekly weight is a fixed Training-Max percentage
+      // (FTO_WAVES), not progressive session-to-session, so its "last time" is
+      // the same week of the PREVIOUS cycle, not whichever session of this day
+      // happened to run most recently (see prev531MainLiftSession's own
+      // comment: that's very often a heavier week from last cycle, reading as
+      // a false decline). Only the main lift itself: assistance work on a
+      // 5/3/1 day still compares against the plain most-recent session below.
+      const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
+      let prev = null;
+      if (cyclePrev) {
+        // The wave-matched session can be windowed out just as well, and it has
+        // no fallback candidate: without its entries there is simply no prev.
+        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx);
+        else prev = cyclePrev;
+      } else {
+        const candidates = store.sessions
+          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+          .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+        for (const x of candidates) {
+          if (!(x.entries || []).length) {
+            if (windowedGap(x, idx)) break;
+            continue;
+          }
+          if (x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null)) { prev = x; break; }
+        }
+      }
+      map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
+    });
+    return { prevEntryMap: map, prevPendingMap: pending, prevNeedIds: [...needIds] };
+  }, [store.sessions, store.schedules, s]);
+
+  // Load the windowed prior sessions the comparison above ran into, so the
+  // suppressed entries resolve into a real verdict. Same merge guard as
+  // everywhere else: entries are re-checked as still empty at merge time so a
+  // concurrent update never gets clobbered, plus the same bail-out the Library's
+  // Recent list uses, since this effect is likewise re-armed by the memo it
+  // feeds and must not spin on a session the server answers with no rows.
+  useEffectL(() => {
+    if (!prevNeedIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(prevNeedIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => {
+          let merged = false;
+          const sessions = st.sessions.map(x => {
+            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
+            merged = true;
+            return { ...x, entries: bySession[x.id] };
+          });
+          return merged ? { ...st, sessions } : st;
+        });
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [prevNeedIds]);
+
+  // The whole PR-detection block below scans store.sessions/store.exercises
+  // (prMap: all sessions x entries x sets; prValueOf: a store.exercises.find
+  // per set), so it's memoized to only recompute when the session history,
+  // exercise list, or this session itself changes, not on every render (a
+  // keystroke in the template-name input below, a sheet/feel toggle, a
+  // background store sync unrelated to any of this).
+  const { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR } = useMemoL(() => {
+    if (!s) return { isLatestSession: false, prMap: {}, sessionBestMap: {}, sessionBestSetMap: {}, isPR: () => false };
+    const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
+    const prReps = (st, exId) => exIsUnilateral(exId)
+      ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
+      : (st.reps ?? 0);
+    const prRepsValid = (st, exId) => exIsUnilateral(exId)
+      ? (st.repsL != null && st.repsR != null)
+      : st.reps != null;
+
+    // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
+    // loses to a prior 90kg×10, matches the PR logic used everywhere else
+    // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
+    // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
+    // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
+    // has no such cutoff) so a session's PR status reflects only what was known
+    // at the time it happened, not later sessions bleeding backward into it.
+    // Per-exercise "best" ranking value on a per-type scale: weighted → e1RM,
+    // assisted → least-negative load (kg is stored negative), reps-only → reps,
+    // time → seconds. The maps are keyed by exId, so every value for one exId
+    // shares a scale and comparisons stay valid.
+    const prValueOf = (st, exId) => {
+      if (!st.done || st.warmup) return null;
+      const exObj = store.exercises.find(x => x.id === exId);
+      if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
+      if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
+      if (st.kg == null) { const r = LB.effReps(st); return (r != null && r > 0) ? r : null; }
+      if (!prRepsValid(st, exId)) return null;
+      return LB.e1rm(st.kg, prReps(st, exId));
+    };
+    // Whether `s` is the account's most recent ended session, full stop, across
+    // every exercise (not just this session's own dayId): if so, isPR below can
+    // safely fall back to the server aggregate to fill a local windowing gap,
+    // since nothing chronologically later exists that could have set a PR the
+    // aggregate shouldn't yet know about relative to `s`, the exact "later
+    // session bleeding backward" risk the e1RM comment above (and
+    // bestE1rmForExercise's own doc comment in store.js) warns about for an
+    // arbitrary PAST session.
+    const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
+    // Strictly local, strictly from OTHER sessions before s, so this can never
+    // be self-referential to s's own sets. A windowed-out prior session (entries:
+    // [] with aggExercises > 0, see docs/internals.md's History-Windowing section)
+    // simply contributes nothing here, same as a session that genuinely never
+    // trained that exercise, isPR below tells the two cases apart per exercise
+    // via its own fallback rather than a blanket flag, see there.
+    const prMap = {};
+    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload && !x.isCleanup).forEach(sess => {
+      sess.entries.forEach(e => e.sets.forEach(st => {
+        const val = prValueOf(st, e.exId);
+        if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
+        prMap[e.exId] = val;
+      }));
+    });
+    const sessionBestMap = {};
+    // Real object reference to whichever set FIRST reached this exercise's
+    // session-best value, keyed by exId. Needed because two sets can tie
+    // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
+    // both share the exact same e1RM value, but only the one that actually
+    // achieved it first is the PR, a repeat of the same number right after
+    // isn't a second, brand new record. Without this, `val !== sessionBest`
+    // below can't tell the two sets apart at all, both compare equal to the
+    // shared session best and both got badged, a real bug that only became
+    // visible once the windowing fix above stopped hiding every PR star
+    // outright.
+    const sessionBestSetMap = {};
+    s.entries.forEach(e => e.sets.forEach(st => {
+      const val = prValueOf(st, e.exId);
+      if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
+      sessionBestMap[e.exId] = val;
+      sessionBestSetMap[e.exId] = st;
+    }));
+    const isPR = (st, exId) => {
+      const val = prValueOf(st, exId);
+      if (val == null) return false;
+      // No PR claims on a multi-horn exercise. The stored bests (prMap and the
+      // server's exerciseBests) are bare numbers with no record of how the load
+      // was distributed, and on these machines the distribution decides the
+      // leverage and the resistance curve, so "higher than the old best" does
+      // not mean the same work was beaten. Gated here rather than at the badge
+      // so the star and the header's PR count can never disagree. The trend
+      // arrows still work: isImprovement/isDecline compare against a concrete
+      // prior set and know its split.
+      if (LB.isMultiHorn(store.exercises.find(x => x.id === exId))) return false;
+      // Tie-break: only the specific set that FIRST reached the session best
+      // is credited, see sessionBestSetMap above. Reference equality is safe
+      // here, filteredSets/e.sets below are the same array (filtered, not
+      // cloned), so this is genuinely the same object, not a lookalike. This
+      // also subsumes a plain value-equality check against sessionBestMap:
+      // sessionBestSetMap[exId] is by construction the set whose prValueOf
+      // equals sessionBestMap[exId], so the reference check alone already
+      // implies val equals the session best.
+      if (sessionBestSetMap[exId] !== st) return false;
+      const localBest = prMap[exId];
+      const exObj = store.exercises.find(x => x.id === exId);
+      // exerciseBests (below) is e1RM-scale only: same type gate prValueOf
+      // itself uses for assisted/time-mode exercises, PLUS this specific set,
+      // since a reps-only set of an otherwise ordinary weighted exercise (kg
+      // left empty) also lands on the reps scale via prValueOf's own fallback,
+      // not e1RM, even though the exercise itself isn't assisted/time-mode.
+      const valIsE1rmScale = st.kg != null && !LB.isAssisted(exObj) && LB.exerciseLogMode(exObj) !== 'time';
+      const serverBest = valIsE1rmScale ? (store.exerciseBests || {})[exId] : null;
+      // Local history for this exercise exists (from OTHER sessions before s,
+      // never s itself), so it's the most precise source available and wins
+      // outright, no prior history for this exercise at all also lands here
+      // as localBest == null, matches the two other isPR implementations in
+      // this file, which both gate on pr > 0: a first-ever session with an
+      // exercise isn't a PR.
+      if (localBest != null) {
+        if (!(val > localBest)) return false;
+        // A higher all-time best sitting in a windowed-out (>70 day old)
+        // session still has to block the badge even when SOME in-window local
+        // history exists, same reasoning as the pure-fallback branch below
+        // (only the latest session can safely trust the live server aggregate
+        // as an upper bound). Without this, any exercise with even one
+        // in-window session, however far below the real all-time best, lost
+        // the server floor entirely.
+        // 0.01 tolerance: serverBest is computed by Postgres (numeric, cast to
+        // float) and val by JS (chained double ops), confirmed live to
+        // sometimes land one ULP apart for the exact same real-world kg/reps
+        // (e.g. 40kg x 11 nets 54.666666666666664 vs 54.66666666666667), a
+        // strict < falsely treated that as "a higher real best exists" and
+        // blocked a genuine, badge-worthy set.
+        if (isLatestSession && serverBest != null && val < serverBest - 0.01) return false;
+        return true;
+      }
+      // No usable local history: either genuinely the first time this exercise
+      // was done, or its only prior occurrences sit in a windowed-out session.
+      // Both abstain the same way on a past session, a gap in this exercise's
+      // history must not block its own badge here, but also must not fabricate
+      // one, so only the account's latest session gets a second chance below.
+      if (!isLatestSession) return false;
+      if (serverBest == null) return false;
+      // >= rather than >: store.exerciseBests (the get_exercise_best_e1rm RPC
+      // result, see bestE1rmForExercise in store.js) is refetched fresh on every
+      // boot. Once s's own sets are saved server-side, the very next refresh
+      // (next app launch or training-screen mount) already includes s's own
+      // contribution, nothing excludes it after the fact, so a strict > would
+      // start comparing val against itself and always lose. An exact tie here
+      // is ambiguous between "s itself set this record" and "a genuine
+      // coincidental tie with old history", but the former is far more likely,
+      // and this app would rather badge that ambiguity than silently drop a
+      // real PR the moment the app gets killed and reopened.
+      // Same 0.01 tolerance as above: val and serverBest come from two
+      // different arithmetic engines and can be a ULP apart for an intended
+      // exact tie.
+      return val >= serverBest - 0.01;
+    };
+    return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
+  }, [store.sessions, store.exercises, s]);
+
+  // All hooks run unconditionally above; only now, after every hook has
+  // fired, is it safe to bail out for a deleted/missing session (Rules of
+  // Hooks: a conditional return before a hook call would skip it on some
+  // renders, which is exactly what caused React error #300 here).
+  if (!s) return null;
+  const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
+  const duration = s.durationMinutes != null
     ? s.durationMinutes
-    : (s && s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
+    : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
 
   const setFeel = (feel) => {
     setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
@@ -3693,264 +3940,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }));
   };
 
-  // Deload sessions are deliberately light, comparing against one as "last
-  // time" would show every set as a fabricated "improvement" purely because
-  // it beats the artificially-reduced deload weights. store.js already
-  // excludes deload from lastSessionForExercise/recentSessionsForExercise;
-  // this mirrors that exclusion for the same reason.
-  // Iterates every entry of s against a filter+sort of ALL sessions per
-  // entry; memoized so it only recomputes when the session's own entries or
-  // the account's session history actually changes, not on every render
-  // (a keystroke in the template-name input below, a sheet/feel toggle, a
-  // background store sync unrelated to this data).
-  const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
-    if (!s) return { prevEntryMap: {}, prevPendingMap: {}, prevNeedIds: [] };
-    const map = {};
-    const pending = {};
-    const needIds = new Set();
-    const prevOccSeen = {};
-    // A prior session outside the boot history window carries aggregates only
-    // (entries: [], aggExercises > 0, see docs/internals.md "History-Windowing").
-    // Nothing here can tell whether it holds this exercise, so the candidate
-    // walk must not step past it and hand an older, unrelated session over as
-    // "last time". Mark the entry pending instead (the render suppresses its
-    // improvement and decline arrows, but NOT its PR star, which does not read
-    // the prior), queue the session, and let the fetch below rerun this memo,
-    // same mechanism as the Home recap's prior-session lookup.
-    const windowedGap = (x, idx) => {
-      if ((x.aggExercises || 0) <= 0) return false; // genuinely empty, safe to skip
-      needIds.add(x.id);
-      pending[idx] = true;
-      return true;
-    };
-    s.entries.forEach((e, idx) => {
-      // The Nth occurrence of an exercise in the day compares against the SAME Nth
-      // occurrence of past sessions (audit L3, matching the seed path). Keyed by
-      // entry index so a twice-in-a-day exercise's second slot reads its own prev
-      // instead of sharing the first slot's.
-      const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
-      // A 5/3/1 main lift's weekly weight is a fixed Training-Max percentage
-      // (FTO_WAVES), not progressive session-to-session, so its "last time" is
-      // the same week of the PREVIOUS cycle, not whichever session of this day
-      // happened to run most recently (see prev531MainLiftSession's own
-      // comment: that's very often a heavier week from last cycle, reading as
-      // a false decline). Only the main lift itself: assistance work on a
-      // 5/3/1 day still compares against the plain most-recent session below.
-      const cyclePrev = LB.prev531MainLiftSession(store, s, e.exId);
-      let prev = null;
-      if (cyclePrev) {
-        // The wave-matched session can be windowed out just as well, and it has
-        // no fallback candidate: without its entries there is simply no prev.
-        if (!(cyclePrev.entries || []).length) windowedGap(cyclePrev, idx);
-        else prev = cyclePrev;
-      } else {
-        const candidates = store.sessions
-          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
-          .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
-        for (const x of candidates) {
-          if (!(x.entries || []).length) {
-            if (windowedGap(x, idx)) break;
-            continue;
-          }
-          if (x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null)) { prev = x; break; }
-        }
-      }
-      map[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
-    });
-    return { prevEntryMap: map, prevPendingMap: pending, prevNeedIds: [...needIds] };
-  }, [store.sessions, store.schedules, s]);
-
-  // Load the windowed prior sessions the comparison above ran into, so the
-  // suppressed entries resolve into a real verdict. Same merge guard as
-  // everywhere else: entries are re-checked as still empty at merge time so a
-  // concurrent update never gets clobbered, plus the same bail-out the Library's
-  // Recent list uses, since this effect is likewise re-armed by the memo it
-  // feeds and must not spin on a session the server answers with no rows.
-  useEffectL(() => {
-    if (!prevNeedIds.length) return;
-    let on = true;
-    LB.fetchSessionEntries(prevNeedIds)
-      .then(bySession => {
-        if (!on) return;
-        setStore(st => {
-          let merged = false;
-          const sessions = st.sessions.map(x => {
-            if (!bySession[x.id]?.length || (x.entries || []).length) return x;
-            merged = true;
-            return { ...x, entries: bySession[x.id] };
-          });
-          return merged ? { ...st, sessions } : st;
-        });
-      })
-      .catch(() => {});
-    return () => { on = false; };
-  }, [prevNeedIds]);
-
-  const prevSameDay = s ? store.sessions
+  const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
-    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] : null;
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
-  const compareCandidates = s ? sameDaySessions(store.sessions, s) : [];
-
-  // The whole PR-detection block below scans store.sessions/store.exercises
-  // (prMap: all sessions x entries x sets; prValueOf: a store.exercises.find
-  // per set), so it's memoized to only recompute when the session history,
-  // exercise list, or this session itself changes, not on every render (a
-  // keystroke in the template-name input below, a sheet/feel toggle, a
-  // background store sync unrelated to any of this).
-  const { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR } = useMemoL(() => {
-    if (!s) return { isLatestSession: false, prMap: {}, sessionBestMap: {}, sessionBestSetMap: {}, isPR: () => false };
-    const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
-    const prReps = (st, exId) => exIsUnilateral(exId)
-      ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
-      : (st.reps ?? 0);
-    const prRepsValid = (st, exId) => exIsUnilateral(exId)
-      ? (st.repsL != null && st.repsR != null)
-      : st.reps != null;
-
-    // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
-    // loses to a prior 90kg×10, matches the PR logic used everywhere else
-    // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
-    // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
-    // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
-    // has no such cutoff) so a session's PR status reflects only what was known
-    // at the time it happened, not later sessions bleeding backward into it.
-    // Per-exercise "best" ranking value on a per-type scale: weighted → e1RM,
-    // assisted → least-negative load (kg is stored negative), reps-only → reps,
-    // time → seconds. The maps are keyed by exId, so every value for one exId
-    // shares a scale and comparisons stay valid.
-    const prValueOf = (st, exId) => {
-      if (!st.done || st.warmup) return null;
-      const exObj = store.exercises.find(x => x.id === exId);
-      if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
-      if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
-      if (st.kg == null) { const r = LB.effReps(st); return (r != null && r > 0) ? r : null; }
-      if (!prRepsValid(st, exId)) return null;
-      return LB.e1rm(st.kg, prReps(st, exId));
-    };
-    // Whether `s` is the account's most recent ended session, full stop, across
-    // every exercise (not just this session's own dayId): if so, isPR below can
-    // safely fall back to the server aggregate to fill a local windowing gap,
-    // since nothing chronologically later exists that could have set a PR the
-    // aggregate shouldn't yet know about relative to `s`, the exact "later
-    // session bleeding backward" risk the e1RM comment above (and
-    // bestE1rmForExercise's own doc comment in store.js) warns about for an
-    // arbitrary PAST session.
-    const isLatestSession = !store.sessions.some(x => x.ended && x.id !== s.id && x.ended > s.ended);
-    // Strictly local, strictly from OTHER sessions before s, so this can never
-    // be self-referential to s's own sets. A windowed-out prior session (entries:
-    // [] with aggExercises > 0, see docs/internals.md's History-Windowing section)
-    // simply contributes nothing here, same as a session that genuinely never
-    // trained that exercise, isPR below tells the two cases apart per exercise
-    // via its own fallback rather than a blanket flag, see there.
-    const prMap = {};
-    store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload && !x.isCleanup).forEach(sess => {
-      sess.entries.forEach(e => e.sets.forEach(st => {
-        const val = prValueOf(st, e.exId);
-        if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
-        prMap[e.exId] = val;
-      }));
-    });
-    const sessionBestMap = {};
-    // Real object reference to whichever set FIRST reached this exercise's
-    // session-best value, keyed by exId. Needed because two sets can tie
-    // (same kg x reps, e.g. a straight pair of top sets both at 80kg x 12):
-    // both share the exact same e1RM value, but only the one that actually
-    // achieved it first is the PR, a repeat of the same number right after
-    // isn't a second, brand new record. Without this, `val !== sessionBest`
-    // below can't tell the two sets apart at all, both compare equal to the
-    // shared session best and both got badged, a real bug that only became
-    // visible once the windowing fix above stopped hiding every PR star
-    // outright.
-    const sessionBestSetMap = {};
-    s.entries.forEach(e => e.sets.forEach(st => {
-      const val = prValueOf(st, e.exId);
-      if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
-      sessionBestMap[e.exId] = val;
-      sessionBestSetMap[e.exId] = st;
-    }));
-    const isPR = (st, exId) => {
-      const val = prValueOf(st, exId);
-      if (val == null) return false;
-      // No PR claims on a multi-horn exercise. The stored bests (prMap and the
-      // server's exerciseBests) are bare numbers with no record of how the load
-      // was distributed, and on these machines the distribution decides the
-      // leverage and the resistance curve, so "higher than the old best" does
-      // not mean the same work was beaten. Gated here rather than at the badge
-      // so the star and the header's PR count can never disagree. The trend
-      // arrows still work: isImprovement/isDecline compare against a concrete
-      // prior set and know its split.
-      if (LB.isMultiHorn(store.exercises.find(x => x.id === exId))) return false;
-      // Tie-break: only the specific set that FIRST reached the session best
-      // is credited, see sessionBestSetMap above. Reference equality is safe
-      // here, filteredSets/e.sets below are the same array (filtered, not
-      // cloned), so this is genuinely the same object, not a lookalike. This
-      // also subsumes a plain value-equality check against sessionBestMap:
-      // sessionBestSetMap[exId] is by construction the set whose prValueOf
-      // equals sessionBestMap[exId], so the reference check alone already
-      // implies val equals the session best.
-      if (sessionBestSetMap[exId] !== st) return false;
-      const localBest = prMap[exId];
-      const exObj = store.exercises.find(x => x.id === exId);
-      // exerciseBests (below) is e1RM-scale only: same type gate prValueOf
-      // itself uses for assisted/time-mode exercises, PLUS this specific set,
-      // since a reps-only set of an otherwise ordinary weighted exercise (kg
-      // left empty) also lands on the reps scale via prValueOf's own fallback,
-      // not e1RM, even though the exercise itself isn't assisted/time-mode.
-      const valIsE1rmScale = st.kg != null && !LB.isAssisted(exObj) && LB.exerciseLogMode(exObj) !== 'time';
-      const serverBest = valIsE1rmScale ? (store.exerciseBests || {})[exId] : null;
-      // Local history for this exercise exists (from OTHER sessions before s,
-      // never s itself), so it's the most precise source available and wins
-      // outright, no prior history for this exercise at all also lands here
-      // as localBest == null, matches the two other isPR implementations in
-      // this file, which both gate on pr > 0: a first-ever session with an
-      // exercise isn't a PR.
-      if (localBest != null) {
-        if (!(val > localBest)) return false;
-        // A higher all-time best sitting in a windowed-out (>70 day old)
-        // session still has to block the badge even when SOME in-window local
-        // history exists, same reasoning as the pure-fallback branch below
-        // (only the latest session can safely trust the live server aggregate
-        // as an upper bound). Without this, any exercise with even one
-        // in-window session, however far below the real all-time best, lost
-        // the server floor entirely.
-        // 0.01 tolerance: serverBest is computed by Postgres (numeric, cast to
-        // float) and val by JS (chained double ops), confirmed live to
-        // sometimes land one ULP apart for the exact same real-world kg/reps
-        // (e.g. 40kg x 11 nets 54.666666666666664 vs 54.66666666666667), a
-        // strict < falsely treated that as "a higher real best exists" and
-        // blocked a genuine, badge-worthy set.
-        if (isLatestSession && serverBest != null && val < serverBest - 0.01) return false;
-        return true;
-      }
-      // No usable local history: either genuinely the first time this exercise
-      // was done, or its only prior occurrences sit in a windowed-out session.
-      // Both abstain the same way on a past session, a gap in this exercise's
-      // history must not block its own badge here, but also must not fabricate
-      // one, so only the account's latest session gets a second chance below.
-      if (!isLatestSession) return false;
-      if (serverBest == null) return false;
-      // >= rather than >: store.exerciseBests (the get_exercise_best_e1rm RPC
-      // result, see bestE1rmForExercise in store.js) is refetched fresh on every
-      // boot. Once s's own sets are saved server-side, the very next refresh
-      // (next app launch or training-screen mount) already includes s's own
-      // contribution, nothing excludes it after the fact, so a strict > would
-      // start comparing val against itself and always lose. An exact tie here
-      // is ambiguous between "s itself set this record" and "a genuine
-      // coincidental tie with old history", but the former is far more likely,
-      // and this app would rather badge that ambiguity than silently drop a
-      // real PR the moment the app gets killed and reopened.
-      // Same 0.01 tolerance as above: val and serverBest come from two
-      // different arithmetic engines and can be a ULP apart for an intended
-      // exact tie.
-      return val >= serverBest - 0.01;
-    };
-    return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
-  }, [store.sessions, store.exercises, s]);
-
-  // All hooks have now run unconditionally (see the comment above `vol`); safe to
-  // bail out for real from here on, everything below assumes `s` is defined.
-  if (!s) return null;
+  const compareCandidates = sameDaySessions(store.sessions, s);
 
   // How many exercises this session actually set a PR on, a counterpoint to
   // volDelta below: total volume can land lower than last time even on a
