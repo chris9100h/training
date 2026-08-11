@@ -601,7 +601,7 @@
      than strictly needed is invisible either way. */
   .status-bar-shield {
     position: fixed; top: 0; left: 0; right: 0;
-    height: calc(env(safe-area-inset-top, 0px) + 26px); /* BUFFER_PX = 26 (was 14, on-device: helped but not enough), still adjust after confirmation */
+    height: calc(env(safe-area-inset-top, 0px) + 14px); /* BUFFER_PX = 14, adjust after on-device confirmation */
     background: var(--bg);
     z-index: 999999;
     pointer-events: none;
