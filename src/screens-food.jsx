@@ -1753,6 +1753,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own date/time (its own commit path skips the staging entirely, an
   // in-place edit isn't a new item to batch). null the rest of the time.
   const [editingEntry, setEditingEntry] = useStateFd(null);
+  // Same idea as editingEntry, but for a row still sitting in `staged`
+  // (picked, not yet committed). Holds the staged item's id so
+  // confirmLogFood can replace it in place instead of pushing a second
+  // staged copy; keeps that item's own id/date/time/planned rather than the
+  // fresh ones buildQtyEntry() would generate. null the rest of the time.
+  const [editingStagedId, setEditingStagedId] = useStateFd(null);
   // Per-sheet oz/g override: defaults to the Settings-derived unit
   // (UI.massInOz(), "Health > Food > Grams instead of oz/lb") but can be
   // flipped right here for this logging session without touching Settings.
@@ -3454,7 +3460,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyFromG(unit && n != null ? fdRound1(n * unit.grams) : null);
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyFromG(null); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyFromG(null); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); setEditingStagedId(null); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -3463,6 +3469,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // of staging a new one.
   function openEditEntry(entry) {
     setEditingEntry(entry);
+    setQtyEditPlanned(!!entry.planned);
+    reAddFromRecent(entry);
+  }
+  // Same idea as openEditEntry, for a row still sitting in `staged` (not a
+  // real foodLogs row yet, so nothing to look up by id there). Non-recipe
+  // only, same restriction the real timeline's tap-to-edit already has:
+  // a staged recipe entry's quantity model is portions, not this sheet's
+  // per-100g scaling, and it has no editingStagedId counterpart here.
+  function openEditStaged(entry) {
+    setEditingStagedId(entry.id);
     setQtyEditPlanned(!!entry.planned);
     reAddFromRecent(entry);
   }
@@ -3650,6 +3666,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         protein: built.protein, carbs: built.carbs, fat: built.fat,
         fiber: built.fiber, sugar: built.sugar, satFat: built.satFat, sodiumMg: built.sodiumMg,
       } : i));
+      closeQtySheet();
+      return;
+    }
+    // Editing a row still sitting in `staged` (see openEditStaged): replace
+    // it in place, keeping its own id/date/time/planned rather than the
+    // fresh ones buildQtyEntry() just generated, same reasoning as the
+    // editingEntry branch below but for a pick that was never committed.
+    if (editingStagedId) {
+      const id = editingStagedId;
+      setStaged(list => list.map(e => e.id === id ? { ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt, planned: e.planned } : e));
       closeQtySheet();
       return;
     }
@@ -4612,21 +4638,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.98)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
         {pickedExpanded && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
-            {staged.map(e => (
-              <div key={e.id} style={fdDraftRow}>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                  <span style={fdEntryMeta}>
-                    {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
-                    <span style={fdMetaDivider} />
-                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
-                  </span>
+            {staged.map(e => {
+              const isRecipe = e.source === 'recipe';
+              return (
+                <div key={e.id} style={fdDraftRow}>
+                  {/* Reopens the quantity sheet on the amount this item was
+                      picked at, so a batch that turns out to overshoot
+                      Remaining (see the line below the header) can be
+                      corrected without removing and re-picking from scratch.
+                      Recipe picks are excluded: their quantity model is
+                      portions, not this sheet's per-100g scaling (same
+                      restriction the real timeline's tap-to-edit has). */}
+                  <div onClick={isRecipe ? undefined : () => openEditStaged(e)}
+                    style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, cursor: isRecipe ? 'default' : 'pointer' }}>
+                    <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+                    <span style={fdEntryMeta}>
+                      {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                    </span>
+                  </div>
+                  <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                  </button>
                 </div>
-                <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
@@ -4682,9 +4719,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {remainingTotals && (
           <>
             <div className="knurl" />
-            <div style={{ textAlign: 'center', padding: '6px 12px 8px' }}>
-              <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkFaint, marginRight: 6 }}>Remaining:</span>
-              <span className="num" style={{ fontSize: 10, fontWeight: 600, color: UI.warn }}>{remainingTotals.calories} kcal</span>
+            {/* fontSize set once on this wrapper (not per span) so FdMacroBits,
+                which sets no font-size of its own and inherits it same as
+                every other call site, actually comes out at 10px too instead
+                of the ambient default: the same "Adding N items" row's macro
+                span above sets it exactly this way. */}
+            <div style={{ textAlign: 'center', padding: '6px 12px 8px', fontSize: 10 }}>
+              <span style={{ fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkFaint, marginRight: 6 }}>Remaining:</span>
+              <span className="num" style={{ fontWeight: 600, color: UI.warn }}>{remainingTotals.calories} kcal</span>
               <span style={fdMetaDivider} />
               <FdMacroBits protein={remainingTotals.protein} carbs={remainingTotals.carbs} fat={remainingTotals.fat} />
             </div>
