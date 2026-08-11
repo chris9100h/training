@@ -1977,13 +1977,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                             {mdSlotDaysLabel(g.sample)} · {String(g.hour).padStart(2, '0')}:00
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                            {/* Same destination as renderMedListRow's own
+                                mode: 'schedule' row (the per-medication
+                                schedule sheet, dose field included): a dose
+                                change is per-medication, not something the
+                                bulk time editor above touches, so this is the
+                                route to it without switching back to By
+                                medication. */}
                             {g.items.map(({ med, slot }) => (
-                              <div key={slot.id} style={{ ...mdListRow, cursor: 'default' }}>
+                              <button key={slot.id} onClick={() => openSchedMed(med, viewedPlanId)} style={{ ...mdListRow, width: '100%', textAlign: 'left' }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={mdEntryName}>{med.name}</div>
                                   <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
                                 </div>
-                              </div>
+                              </button>
                             ))}
                           </div>
                           <button onClick={() => openBulkSlotDraft(g)} className="label" style={mdEditBtn}>
