@@ -386,6 +386,12 @@ function App() {
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
+  // Live snapshot of store, read (not subscribed to) by the What's New effect
+  // below so it can peek at the current onboarding-relevant fields without
+  // adding store as a dependency, keeping it a run-once-per-ready effect
+  // exactly like before whatsnew.js became a lazy load.
+  const storeRefA = useRefA(store);
+  storeRefA.current = store;
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
@@ -1570,10 +1576,30 @@ function App() {
   // What's New, the first time the app is 'ready' after an update, show every
   // changelog entry the user hasn't seen yet (bundled into one card), so anyone
   // returning after several releases catches up on all of them at once.
+  // whatsnew.js is a lazy load now (index.html's __ensureWhatsNew, moved out
+  // of the blocking boot script list, ~116KB of changelog text most boots
+  // never need): fetch it here instead of trusting window.WHATS_NEW to
+  // already be populated. Skips the fetch entirely when this boot is about
+  // to show the onboarding welcome prompt instead (below): that effect calls
+  // setWhatsNew(null) synchronously the moment it decides, but this effect's
+  // own fetch resolves later (async), so without this guard a brand-new
+  // user could see What's New flash back on top of onboarding once the
+  // fetch lands. Reads storeRefA rather than adding store as a dependency,
+  // same reasoning as before: this only ever needs to run once per
+  // ready-transition, not on every store update.
   useEffectA(() => {
     if (phase !== 'ready') return;
-    const unseen = unseenWhatsNew();
-    if (unseen.length) setWhatsNew(unseen);
+    const s = storeRefA.current;
+    const freshOnboarding = s && !onboardingChecked.current && s.settings?.unit != null
+      && !s.settings?.onboardingCompleted && !(s.sessions || []).some(x => x.ended);
+    if (freshOnboarding) return;
+    let live = true;
+    window.__ensureWhatsNew().then(() => {
+      if (!live) return;
+      const unseen = unseenWhatsNew();
+      if (unseen.length) setWhatsNew(unseen);
+    }).catch(() => {}); // best-effort: a failed lazy fetch just means no What's New this session
+    return () => { live = false; };
   }, [phase]);
 
   const dismissWhatsNew = useCallbackA(() => {
@@ -1598,13 +1624,20 @@ function App() {
       return;
     }
     if (!store.settings?.onboardingCompleted) {
-      // Pre-dismiss What's New so it doesn't stack with the welcome prompt
-      try {
-        const newest = (window.WHATS_NEW || [])[0];
-        if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
-          localStorage.setItem(WHATS_NEW_KEY, newest.id);
-        }
-      } catch (_) {}
+      // Pre-dismiss What's New so it doesn't stack with the welcome prompt.
+      // window.WHATS_NEW may not be loaded yet (lazy load, see the effect
+      // above, whose own guard skips its fetch specifically to defer to this
+      // decision): fetch it here so the seen-stamp still lands, but don't
+      // await it before clearing/prompting below, both fire synchronously
+      // exactly as before, only the stamp write is now async.
+      window.__ensureWhatsNew().then(() => {
+        try {
+          const newest = (window.WHATS_NEW || [])[0];
+          if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
+            localStorage.setItem(WHATS_NEW_KEY, newest.id);
+          }
+        } catch (_) {}
+      }).catch(() => {});
       setWhatsNew(null);
       setOnboardingState({ phase: 'prompt' });
     }

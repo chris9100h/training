@@ -15,10 +15,17 @@ const staticDirectories = ['src', 'icons', 'Background', 'screenshots'];
 const plainScripts = [
   'src/supabase.js',
   'src/store.js',
-  'src/whatsnew.js',
   'src/exercise-db.js',
-  'src/feature-map-db.js',
   'src/programs-db.js',
+];
+// Lazily loaded on demand instead (index.html's __ensureWhatsNew /
+// __ensureFeatureMapDb), not folded into core.js: both are large static data
+// tables (changelog text, feature catalog) most boots never touch. Still
+// individually copied into dist/src/ by staticDirectories below and still
+// precached (see patchServiceWorker) so the lazy load stays offline-safe.
+const lazyPlainScripts = [
+  'src/whatsnew.js',
+  'src/feature-map-db.js',
 ];
 const criticalSources = [
   'src/ui.jsx',
@@ -134,6 +141,7 @@ function patchServiceWorker(bundlePaths) {
     '/index.html',
     '/manifest.json',
     ...Object.values(bundlePaths).map(rel => `/${rel}`),
+    ...lazyPlainScripts.map(rel => `/${rel}`),
     '/icons/icon-192.png',
     '/icons/icon-512.png',
     '/icons/icon-180.png',

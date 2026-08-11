@@ -106,6 +106,20 @@ function FeatureMapScreen({ store, go }) {
   const isAdmin = store?.user?.email === FM_ADMIN_EMAIL;
   const catalog = fmCatalog();
 
+  // feature-map-db.js (window.FEATURE_MAP) is a lazy load now (index.html's
+  // __ensureFeatureMapDb, moved out of the blocking boot script list, this
+  // is the one screen that ever needs it). fmCatalog() re-reads
+  // window.FEATURE_MAP fresh on every render (never memoized itself), so
+  // this state exists purely to force a re-render once the fetch resolves;
+  // catalog/merged below pick the real data up automatically.
+  const [fmDbLoaded, setFmDbLoaded] = useStateFM(!!window.FEATURE_MAP);
+  useEffectFM(() => {
+    if (fmDbLoaded) return;
+    let alive = true;
+    window.__ensureFeatureMapDb().then(() => { if (alive) setFmDbLoaded(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [fmDbLoaded]);
+
   const [ov, setOv]           = useStateFM(null); // effective overrides rendered: draft (admin) or published (viewer); null = loading
   const [pub, setPub]         = useStateFM(null); // published overrides, admin only, for the unpublished-changes diff
   const [loadErr, setLoadErr] = useStateFM('');
@@ -393,7 +407,7 @@ function FeatureMapScreen({ store, go }) {
     return revertCardToPublished(ch.id);
   };
 
-  const loading = ov === null;
+  const loading = ov === null || !fmDbLoaded;
 
   return (
     <Screen>

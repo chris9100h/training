@@ -1166,13 +1166,19 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-<!-- Plain JS (no JSX), run directly, no transpile needed. -->
+<!-- Plain JS (no JSX), run directly, no transpile needed.
+     whatsnew.js and feature-map-db.js are deliberately NOT here: both are
+     large static data tables (changelog text, feature catalog) only ever
+     needed after boot (What's New's own unseen-entries check, the lazy
+     Feature Map screen), not before first paint. Loaded on demand via
+     __ensureWhatsNew()/__ensureFeatureMapDb() below instead, see those for
+     why. Still individually precached by the Service Worker (sw.js ASSETS,
+     and build.cjs's patchServiceWorker for the built version) so the lazy
+     load never depends on a live network fetch. -->
 <!-- BUILD_CORE_SCRIPTS_START -->
 <script src="src/supabase.js"></script>
 <script src="src/store.js"></script>
-<script src="src/whatsnew.js"></script>
 <script src="src/exercise-db.js"></script>
-<script src="src/feature-map-db.js"></script>
 <script src="src/programs-db.js"></script>
 <!-- BUILD_CORE_SCRIPTS_END -->
 
@@ -1735,6 +1741,42 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       });
     }
     return window.__h2cPromise;
+  };
+
+  // Same "inject a plain script tag, dedupe via a shared promise" idiom as
+  // __ensureHtml2Canvas above, for two large static data files that used to
+  // sit in the blocking BUILD_CORE_SCRIPTS block: whatsnew.js (changelog
+  // text, only needed for app.jsx's post-boot unseen-entries check) and
+  // feature-map-db.js (the feature catalog, only needed by the already-lazy
+  // Feature Map screen). Same relative path in both the raw source tree and
+  // the precompiled build: build.cjs's staticDirectories copy still puts an
+  // individual, unbundled copy of each at this exact path in dist/, even
+  // though they're no longer folded into core.js there.
+  window.__ensureWhatsNew = function () {
+    if (window.WHATS_NEW) return Promise.resolve(window.WHATS_NEW);
+    if (!window.__whatsNewPromise) {
+      window.__whatsNewPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'src/whatsnew.js';
+        s.onload = function () { resolve(window.WHATS_NEW); };
+        s.onerror = function () { reject(new Error('whatsnew.js failed to load')); };
+        document.head.appendChild(s);
+      });
+    }
+    return window.__whatsNewPromise;
+  };
+  window.__ensureFeatureMapDb = function () {
+    if (window.FEATURE_MAP) return Promise.resolve(window.FEATURE_MAP);
+    if (!window.__featureMapDbPromise) {
+      window.__featureMapDbPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'src/feature-map-db.js';
+        s.onload = function () { resolve(window.FEATURE_MAP); };
+        s.onerror = function () { reject(new Error('feature-map-db.js failed to load')); };
+        document.head.appendChild(s);
+      });
+    }
+    return window.__featureMapDbPromise;
   };
 
   // Lazily load ExcelJS the first time an XLSX export is actually requested

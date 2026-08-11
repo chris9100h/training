@@ -82,12 +82,10 @@ for (const rel of Object.values(bundles)) {
 // Everything above only checks that files exist and parse. None of it ever
 // EXECUTES a bundle, so a broken concatenation order, a dropped file, or a
 // throw at module-init time (e.g. window.SYSTEM_PROGRAMS never getting set)
-// would still pass every check here. core.js is plain JS (no JSX/React), so
-// it can run in a minimal vm sandbox without a DOM: run the real dist/
-// artifact and assert the globals it must set actually got set.
-function runCoreBundle() {
-  if (!bundles.core || !fs.existsSync(path.join(dist, bundles.core))) return; // already reported above
-  const code = fs.readFileSync(path.join(dist, bundles.core), 'utf8');
+// would still pass every check here. These plain-JS files (no JSX/React) can
+// run in a minimal vm sandbox without a DOM, shared by runCoreBundle and
+// runLazyPlainScripts below.
+function makeSandbox() {
   const sandbox = {};
   sandbox.window = sandbox;
   sandbox.self = sandbox;
@@ -113,22 +111,54 @@ function runCoreBundle() {
   sandbox.AbortController = AbortController;
   sandbox.Blob = Blob;
   vm.createContext(sandbox);
+  return sandbox;
+}
+
+function runCoreBundle() {
+  if (!bundles.core || !fs.existsSync(path.join(dist, bundles.core))) return; // already reported above
+  const code = fs.readFileSync(path.join(dist, bundles.core), 'utf8');
+  const sandbox = makeSandbox();
   try {
     vm.runInContext(code, sandbox, { filename: bundles.core });
   } catch (error) {
     fail(`${bundles.core} threw while executing: ${error.message}`);
     return;
   }
-  // window.LB is store.js's own export surface; the other four are each a
+  // window.LB is store.js's own export surface; the other two are each a
   // single file's entire reason for being in the core bundle at all, so a
   // silently dropped/misordered file shows up here as a missing global,
   // exactly the failure mode file-existence checks above cannot see.
-  const expectedGlobals = { LB: 'src/store.js', SYSTEM_PROGRAMS: 'src/programs-db.js', SYSTEM_EXERCISES: 'src/exercise-db.js', WHATS_NEW: 'src/whatsnew.js', FEATURE_MAP: 'src/feature-map-db.js' };
+  // WHATS_NEW/FEATURE_MAP used to live here too, see runLazyPlainScripts
+  // below for their own (no longer core-bundled) equivalent.
+  const expectedGlobals = { LB: 'src/store.js', SYSTEM_PROGRAMS: 'src/programs-db.js', SYSTEM_EXERCISES: 'src/exercise-db.js' };
   for (const [key, source] of Object.entries(expectedGlobals)) {
     if (!sandbox[key]) fail(`${bundles.core} ran without error but window.${key} (from ${source}) was never set.`);
   }
 }
 runCoreBundle();
+
+// whatsnew.js/feature-map-db.js are lazily loaded on demand (index.html's
+// __ensureWhatsNew/__ensureFeatureMapDb) rather than folded into core.js, so
+// they need their own executed-and-sets-its-global check: dist/ still keeps
+// an individual, unbundled copy of each (staticDirectories' plain `src/`
+// copy), that's the exact file the runtime lazy load actually fetches.
+function runLazyPlainScripts() {
+  const expected = { 'src/whatsnew.js': 'WHATS_NEW', 'src/feature-map-db.js': 'FEATURE_MAP' };
+  for (const [rel, globalKey] of Object.entries(expected)) {
+    const filePath = path.join(dist, rel);
+    if (!fs.existsSync(filePath)) { fail(`${rel} is missing from dist/ (lazily loaded on demand, must still ship as an individual file).`); continue; }
+    const code = fs.readFileSync(filePath, 'utf8');
+    const sandbox = makeSandbox();
+    try {
+      vm.runInContext(code, sandbox, { filename: rel });
+    } catch (error) {
+      fail(`${rel} threw while executing: ${error.message}`);
+      continue;
+    }
+    if (!sandbox[globalKey]) fail(`${rel} ran without error but window.${globalKey} was never set.`);
+  }
+}
+runLazyPlainScripts();
 
 if (process.exitCode) {
   console.error('\ncheck-build FAILED');
