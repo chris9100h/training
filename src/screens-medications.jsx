@@ -326,6 +326,19 @@ function mdSlotDaysLabel(slot) {
   if (slot.intervalDays > 0) return `Every ${slot.intervalDays}d`;
   return slot.weekdays.length === 7 ? 'Every day' : slot.weekdays.map(w => MD_WEEKDAY_SHORT[w]).join('/');
 }
+// Two slots share a bulk-editable "time group" (Schedule tab's By time view)
+// iff they fire on the exact same calendar days at the exact same hour.
+// Deliberately narrower than mdSlotDaysLabel's own display text: two
+// "Every 3d" slots with different startDate anchors are NOT the same
+// schedule even though the label alone can't tell them apart, so the key
+// includes startDate for interval mode. doseQty and endDate are excluded on
+// purpose: dose is always per-medication, and an end-of-phase date doesn't
+// change what hour something fires at.
+function mdSlotPatternKey(slot) {
+  return slot.intervalDays > 0
+    ? `iv:${slot.intervalDays}:${slot.startDate || ''}|h:${slot.hour}`
+    : `wd:${[...slot.weekdays].sort((a, b) => a - b).join(',')}|h:${slot.hour}`;
+}
 function mdMaterializeSlotEntry(med, slot, dateISO) {
   return {
     // Deterministic per (day, slot), same reasoning as fdMaterializeSlotEntry
@@ -1202,6 +1215,103 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setSlotDraft(d => ({ ...d, weekdays: [...MD_WEEKDAYS_EVERY_DAY] }));
   }
 
+  // Plan-detail Schedule list: 'medication' is the original per-medication
+  // list (renderMedListRow, mode: 'schedule'), 'time' groups every slot in
+  // this plan by mdSlotPatternKey (same days+hour) into one card per group,
+  // mirroring WeeklyPrepScreen's compartment cards but for bulk-editing
+  // rather than packing. Local, not persisted: reopening the plan always
+  // starts back on the per-medication list.
+  const [schedViewMode, setSchedViewMode] = useStateMd('medication');
+  const timeGroups = useMemoMd(() => {
+    const byKey = new Map();
+    for (const m of viewedPlanMeds) {
+      for (const sl of scheduleSlots) {
+        if (sl.medicationId !== m.id || sl.medicationPlanId !== viewedPlanId) continue;
+        const key = mdSlotPatternKey(sl);
+        if (!byKey.has(key)) byKey.set(key, { key, hour: sl.hour, sample: sl, items: [] });
+        byKey.get(key).items.push({ med: m, slot: sl });
+      }
+    }
+    return [...byKey.values()].sort((a, b) => a.hour - b.hour);
+  }, [viewedPlanMeds, scheduleSlots, viewedPlanId]);
+
+  // Bulk editor for one time-group card: same days+hour fields as slotDraft
+  // above, minus dose (always per-medication) and the phase date-range
+  // (an end-of-cycle date doesn't change what hour something fires at, and
+  // group members can each be mid-phase differently, so it stays untouched
+  // per slot). `items` carries one entry per member with its own checkbox,
+  // so a medication can be left out of this particular change without
+  // leaving the sheet. `startDate` only matters in interval mode, same as
+  // slotDraft: it's the shared count-from anchor, already common to every
+  // member by construction of the grouping key.
+  const [bulkDraft, setBulkDraft] = useStateMd(null);
+  // { groupKey, mode: 'weekdays'|'interval', weekdays, intervalDaysNum, hour, startDate,
+  //   items: [{ slotId, medId, medName, unitLabel, doseQty, checked }] }
+  const bulkDraftInitialSnap = useRefMd(null);
+  function snapBulkDraft(d) {
+    return JSON.stringify({ mode: d.mode, weekdays: d.weekdays, intervalDaysNum: d.intervalDaysNum, hour: d.hour, startDate: d.startDate, items: d.items });
+  }
+  function openBulkSlotDraft(group) {
+    const sample = group.sample;
+    const next = {
+      groupKey: group.key,
+      mode: sample.intervalDays > 0 ? 'interval' : 'weekdays',
+      weekdays: [...(sample.weekdays || [])],
+      intervalDaysNum: sample.intervalDays > 0 ? sample.intervalDays : 2,
+      hour: sample.hour,
+      startDate: sample.startDate || '',
+      items: group.items.map(({ med, slot }) => ({
+        slotId: slot.id, medId: med.id, medName: med.name, unitLabel: med.unitLabel, doseQty: slot.doseQty, checked: true,
+      })),
+    };
+    bulkDraftInitialSnap.current = snapBulkDraft(next);
+    setBulkDraft(next);
+  }
+  // Same backdrop-dismiss protection as requestCloseSlotDraft: this can touch
+  // several medications' schedules at once, an even higher-stakes typo to
+  // lose silently than the single-slot editor it's modeled on.
+  async function requestCloseBulkDraft() {
+    if (bulkDraft && snapBulkDraft(bulkDraft) !== bulkDraftInitialSnap.current
+      && !await confirm("Your changes won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setBulkDraft(null);
+  }
+  function toggleBulkWeekday(wd) {
+    setBulkDraft(d => {
+      const has = d.weekdays.includes(wd);
+      return { ...d, weekdays: has ? d.weekdays.filter(w => w !== wd) : [...d.weekdays, wd].sort((a, b) => a - b) };
+    });
+  }
+  function selectAllBulkWeekdays() {
+    setBulkDraft(d => ({ ...d, weekdays: [...MD_WEEKDAYS_EVERY_DAY] }));
+  }
+  function toggleBulkItem(slotId) {
+    setBulkDraft(d => ({ ...d, items: d.items.map(i => i.slotId === slotId ? { ...i, checked: !i.checked } : i) }));
+  }
+  function saveBulkSlotDraft() {
+    if (!bulkDraft) return;
+    const isInterval = bulkDraft.mode === 'interval';
+    if (isInterval ? !bulkDraft.startDate : !bulkDraft.weekdays.length) return;
+    const touchedIds = new Set(bulkDraft.items.filter(i => i.checked).map(i => i.slotId));
+    if (!touchedIds.size) return;
+    const weekdays = isInterval ? [] : bulkDraft.weekdays;
+    const intervalDays = isInterval ? bulkDraft.intervalDaysNum : null;
+    const nowISO = new Date().toISOString();
+    setStore(s => ({
+      ...s,
+      medicationScheduleSlots: (s.medicationScheduleSlots || []).map(sl => !touchedIds.has(sl.id) ? sl : {
+        ...sl, weekdays, hour: bulkDraft.hour, intervalDays,
+        // startDate only overwritten in interval mode (the shared anchor
+        // being edited here); weekday-mode slots keep their own existing
+        // startDate/endDate phase bounds untouched, same reasoning as the
+        // field being absent from this sheet entirely.
+        ...(isInterval ? { startDate: bulkDraft.startDate } : {}),
+        updatedAt: nowISO,
+      }),
+    }));
+    mdReconcilePlannedLogs(setStore, today, touchedIds);
+    setBulkDraft(null);
+  }
+
   // Coach: push a template plan (+ its medications + their schedule slots) to a client.
   const [pushPlan, setPushPlan] = useStateMd(null);
   const [pushTarget, setPushTarget] = useStateMd(null);
@@ -1837,9 +1947,47 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   action={activeMedications.length ? null : <Btn onClick={goCreateMedication}>Add medication</Btn>}
                   icon={<i className="fa-solid fa-pills" style={{ fontSize: 28, color: UI.inkFaint }} />} />
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {viewedPlanMeds.map(m => renderMedListRow(m, { mode: 'schedule', planId: viewedPlanId }))}
-                </div>
+                <>
+                  {/* By medication (original list) vs By time (mdSlotPatternKey
+                      groups, see timeGroups above): several medications sharing
+                      the exact same days+hour otherwise have to be retimed one
+                      by one, this groups them into one card with a single
+                      "Edit time" that moves them all at once. Local toggle,
+                      always reopens on By medication. */}
+                  <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10 }}>
+                    <button onClick={() => setSchedViewMode('medication')} style={mdSegBtn(schedViewMode === 'medication')}>By medication</button>
+                    <button onClick={() => setSchedViewMode('time')} style={mdSegBtn(schedViewMode === 'time')}>By time</button>
+                  </div>
+                  {schedViewMode === 'medication' ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {viewedPlanMeds.map(m => renderMedListRow(m, { mode: 'schedule', planId: viewedPlanId }))}
+                    </div>
+                  ) : timeGroups.length === 0 ? (
+                    <div style={mdEmptyHint}>No schedule yet. Add times under "By medication" first.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {timeGroups.map(g => (
+                        <div key={g.key}>
+                          <Bezel style={{ marginBottom: 8 }}>{mdSlotDaysLabel(g.sample)} · {String(g.hour).padStart(2, '0')}:00</Bezel>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                            {g.items.map(({ med, slot }) => (
+                              <div key={slot.id} style={{ ...mdListRow, cursor: 'default' }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={mdEntryName}>{med.name}</div>
+                                  <div style={mdEntryMeta}>{mdFmtQty(slot.doseQty, med.unitLabel)}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <button onClick={() => openBulkSlotDraft(g)} className="label" style={mdEditBtn}>
+                            <i className="fa-solid fa-pen" style={{ marginRight: 6, fontSize: 10 }} />
+                            {g.items.length > 1 ? `Edit time for all ${g.items.length}` : 'Edit time'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )
@@ -2397,6 +2545,82 @@ function MedicationsScreen({ store, setStore, go, userId }) {
               </>
             )}
             <Btn onClick={saveSlotDraft} disabled={(isInterval ? !slotDraft.startDate : !slotDraft.weekdays.length) || !mdNum(slotDraft.doseQtyStr) || reversedRange} style={{ width: '100%' }}>Save</Btn>
+          </>
+          );
+        })()}
+      </Sheet>
+
+      {/* Bulk editor for one By time card (see timeGroups above): same
+          Weekdays/Every-X-days/hour fields as the single-slot editor right
+          above, minus dose (always per-medication) and the phase date-range
+          (an end-of-cycle date doesn't belong to "what time", stays untouched
+          per slot, see saveBulkSlotDraft). The checklist lets one medication
+          sit out this particular change without leaving the sheet. */}
+      <Sheet open={!!bulkDraft} onClose={requestCloseBulkDraft} title="Edit time" titleColor="var(--accent)">
+        {bulkDraft && (() => {
+          const isInterval = bulkDraft.mode === 'interval';
+          const checkedCount = bulkDraft.items.filter(i => i.checked).length;
+          return (
+          <>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 16 }}>
+              <button onClick={() => setBulkDraft(d => ({ ...d, mode: 'weekdays' }))} style={mdSegBtn(!isInterval)}>Weekdays</button>
+              <button onClick={() => setBulkDraft(d => ({ ...d, mode: 'interval' }))} style={mdSegBtn(isInterval)}>Every X days</button>
+            </div>
+            {isInterval ? (
+              <>
+                <div className="micro" style={{ marginBottom: 6 }}>Every</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                  <Stepper value={bulkDraft.intervalDaysNum} step={1} min={2} max={90} suffix={bulkDraft.intervalDaysNum === 1 ? ' day' : ' days'}
+                    onChange={v => setBulkDraft(d => ({ ...d, intervalDaysNum: Math.max(2, Math.min(90, Math.round(v))) }))} big />
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div className="micro">Days</div>
+                  <button onClick={selectAllBulkWeekdays} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontFamily: UI.fontUi, cursor: 'pointer' }}>Select all days</button>
+                </div>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  {MD_WEEKDAY_SHORT.map((label, wd) => (
+                    <button key={wd} onClick={() => toggleBulkWeekday(wd)} style={{
+                      flex: 1, padding: '8px 2px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: UI.fontUi,
+                      border: `1px solid ${bulkDraft.weekdays.includes(wd) ? 'var(--accent)' : UI.hairStrong}`,
+                      background: bulkDraft.weekdays.includes(wd) ? 'var(--accent)' : 'transparent',
+                      color: bulkDraft.weekdays.includes(wd) ? 'var(--accent-ink)' : UI.inkFaint,
+                      textShadow: 'none',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="micro" style={{ marginBottom: 6 }}>Time</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <Stepper value={bulkDraft.hour} step={1} min={0} max={23} suffix=":00" onChange={v => setBulkDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
+            </div>
+            {isInterval && (
+              // Same "always shown, always required" reasoning as the
+              // single-slot editor: this is the shared count-from anchor in
+              // interval mode, not an optional phase bound.
+              <Field label="Starting" accent style={{ marginBottom: 16 }}>
+                <input type="date" value={bulkDraft.startDate} onChange={e => setBulkDraft(d => ({ ...d, startDate: e.target.value }))} style={mdInputStyle} />
+              </Field>
+            )}
+            <div className="micro" style={{ marginBottom: 6 }}>Applies to</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+              {bulkDraft.items.map(i => (
+                <div key={i.slotId} style={{ ...mdListRow, cursor: 'default', opacity: i.checked ? 1 : 0.6 }}>
+                  <MdCheckbox checked={i.checked} onToggle={() => toggleBulkItem(i.slotId)} label={i.checked ? `Exclude ${i.medName}` : `Include ${i.medName}`} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={mdEntryName}>{i.medName}</div>
+                    <div style={mdEntryMeta}>{mdFmtQty(i.doseQty, i.unitLabel)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Btn onClick={saveBulkSlotDraft} disabled={(isInterval ? !bulkDraft.startDate : !bulkDraft.weekdays.length) || !checkedCount} style={{ width: '100%' }}>
+              {checkedCount > 1 ? `Save for ${checkedCount}` : 'Save'}
+            </Btn>
           </>
           );
         })()}
