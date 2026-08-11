@@ -925,19 +925,40 @@ function App() {
       }
     }
 
+    let activatedViaWorker = false;
     if (worker) {
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
-    } else {
-      // No installed/waiting worker turned up in time, our own faster
-      // text-based update check (checkSwUpdate) can show the banner before
-      // the browser's native SW update/install has caught up, or install
-      // may still be running past the 6s wait above. A bare reload here
-      // would hit the OLD SW's stale-while-revalidate fetch handler and
-      // instantly re-serve the cached (old) app, the update button would
-      // look like it does nothing. Wipe the cache first, exactly like the
-      // "Reload App" quick action does, so the reload is guaranteed to
-      // actually fetch fresh code instead of silently staying on the old one.
+      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
+      // this page almost immediately, but a backgrounded/suspended tab (iOS
+      // throttles a PWA the instant it loses foreground, which can happen
+      // right after this tap) can swallow that event entirely: intentionalUpdate
+      // stays true forever with nothing to reload it, and the version is never
+      // persisted, so the next foreground/route check (checkSwUpdate) sees the
+      // exact same "new" version again and re-shows the banner, forever
+      // (confirmed: this produced a repeating update-banner loop). Race a
+      // timeout against the real event so this path self-heals into the same
+      // cache-wipe fallback below instead of silently stranding the update.
+      activatedViaWorker = await new Promise(resolve => {
+        const t = setTimeout(() => resolve(false), 8000);
+        navigator.serviceWorker.addEventListener('controllerchange', function h() {
+          navigator.serviceWorker.removeEventListener('controllerchange', h);
+          clearTimeout(t);
+          resolve(true);
+        });
+      });
+    }
+    if (!activatedViaWorker) {
+      // Either no installed/waiting worker turned up in time (our own faster
+      // text-based update check, checkSwUpdate, can show the banner before the
+      // browser's native SW update/install has caught up, or install may still
+      // be running past the 6s wait above), or one did but never actually took
+      // control (see the timeout above). A bare reload here would hit the OLD
+      // SW's stale-while-revalidate fetch handler and instantly re-serve the
+      // cached (old) app, the update button would look like it does nothing.
+      // Wipe the cache first, exactly like the "Reload App" quick action does,
+      // so the reload is guaranteed to actually fetch fresh code instead of
+      // silently staying on the old one.
       // Persist the version we're about to fetch fresh, otherwise
       // checkSwUpdate sees the same "new" version again right after reload
       // and re-shows the banner, forever (confirmed: this caused an
