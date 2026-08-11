@@ -3011,12 +3011,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {sch && <>
       <div style={{
         flexShrink: 0,
-        // +25px, not the original +12px: this is the actual header shown in
+        // +28px, not the original +12px: this is the actual header shown in
         // the reported iOS status-bar bleed-through (this branch renders
         // whenever a plan is active, TopBar in ui.jsx is only the no-plan
         // fallback a few lines up). +40px confirmed on-device that pushing
-        // this header down clears the blur, +20px undershot by a bit.
-        padding: `calc(env(safe-area-inset-top, 0px) + 25px) 22px 0`,
+        // this header down clears the blur; +20px and +25px both undershot
+        // by a bit.
+        padding: `calc(env(safe-area-inset-top, 0px) + 28px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         background: 'rgba(var(--bg-rgb),0.92)',
