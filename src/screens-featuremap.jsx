@@ -106,6 +106,30 @@ function FeatureMapScreen({ store, go }) {
   const isAdmin = store?.user?.email === FM_ADMIN_EMAIL;
   const catalog = fmCatalog();
 
+  // feature-map-db.js (window.FEATURE_MAP) is a lazy load now (index.html's
+  // __ensureFeatureMapDb, moved out of the blocking boot script list, this
+  // is the one screen that ever needs it). fmCatalog() re-reads
+  // window.FEATURE_MAP fresh on every render (never memoized itself), so
+  // this state exists purely to force a re-render once the fetch resolves;
+  // catalog/merged below pick the real data up automatically.
+  const [fmDbLoaded, setFmDbLoaded] = useStateFM(!!window.FEATURE_MAP);
+  // Bumped by the retry button below. __ensureFeatureMapDb no longer memoizes a
+  // rejection, so re-calling it genuinely re-fetches.
+  const [fmDbAttempt, setFmDbAttempt] = useStateFM(0);
+  const [fmDbFailed, setFmDbFailed] = useStateFM(false);
+  useEffectFM(() => {
+    if (fmDbLoaded) return;
+    let alive = true;
+    setFmDbFailed(false);
+    // Without the failure branch this screen sat on "Loading…" forever after a
+    // failed lazy fetch, with no error and no way back: feature-map-db.js stopped
+    // being a blocking core script, so it can simply be missing now.
+    window.__ensureFeatureMapDb()
+      .then(() => { if (alive) setFmDbLoaded(true); })
+      .catch(() => { if (alive) setFmDbFailed(true); });
+    return () => { alive = false; };
+  }, [fmDbLoaded, fmDbAttempt]);
+
   const [ov, setOv]           = useStateFM(null); // effective overrides rendered: draft (admin) or published (viewer); null = loading
   const [pub, setPub]         = useStateFM(null); // published overrides, admin only, for the unpublished-changes diff
   const [loadErr, setLoadErr] = useStateFM('');
@@ -393,7 +417,7 @@ function FeatureMapScreen({ store, go }) {
     return revertCardToPublished(ch.id);
   };
 
-  const loading = ov === null;
+  const loading = ov === null || !fmDbLoaded;
 
   return (
     <Screen>
@@ -474,6 +498,13 @@ function FeatureMapScreen({ store, go }) {
 
         {loadErr && (
           <div style={{ fontSize: 13, color: UI.danger, fontFamily: UI.fontUi, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 6 }}>{loadErr}</div>
+        )}
+
+        {fmDbFailed && !fmDbLoaded && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 6 }}>
+            <div style={{ fontSize: 13, color: UI.danger, fontFamily: UI.fontUi }}>Couldn't load the feature catalog.</div>
+            <Btn kind="ghost" onClick={() => setFmDbAttempt(a => a + 1)}>Retry</Btn>
+          </div>
         )}
 
         {!loading && grouped.map(g => {

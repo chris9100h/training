@@ -139,6 +139,70 @@ function AutoCloseBanner({ notify, onDismiss }) {
   );
 }
 
+// True while the onboarding flow still owns this boot's modal slot, i.e. the
+// account has neither finished onboarding nor ever finished a session.
+// Deliberately says nothing about settings.unit: an un-onboarded account
+// reaches 'ready' with a null unit (the unit picker opens first, and the
+// onboarding effect waits for it), so a unit test here would report "not
+// onboarding" during exactly the window where onboarding has yet to decide.
+function onboardingOwnsBoot(s) {
+  return !!s && !s.settings?.onboardingCompleted && !(s.sessions || []).some(x => x.ended);
+}
+
+// Asks the worker CURRENTLY controlling this page for its own CACHE constant
+// (sw.js answers GET_VERSION over the passed MessagePort). Resolves null when
+// there is no controller, when MessageChannel is unavailable, or when the
+// controller is an older sw.js with no GET_VERSION handler, in which case the
+// message is simply ignored and the timeout below fires.
+function askControllerSwVersion(timeoutMs = 1500) {
+  return new Promise(resolve => {
+    const ctrl = navigator.serviceWorker?.controller;
+    if (!ctrl || typeof MessageChannel !== 'function') return resolve(null);
+    let settled = false;
+    const finish = (v) => { if (settled) return; settled = true; clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    try {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (ev) => finish(typeof ev.data === 'string' ? ev.data : null);
+      ctrl.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+    } catch (_) { finish(null); }
+  });
+}
+
+// Records which app-shell version is now actually running, so the banner is not
+// re-offered for an update that has already been applied.
+//
+// Three sources in descending order of authority:
+//  1. The controlling worker's own CACHE constant. Listing CacheStorage is NOT
+//     a substitute: skipWaiting() hands control over as soon as the new worker
+//     activates, before its activate handler's old-cache sweep has settled, so
+//     at controllerchange both the old and the new key can still be present and
+//     detectCacheVersion's `find` returns whichever CacheStorage enumerates
+//     first, i.e. usually the OLD one. Recording that would re-offer the update
+//     that was just applied, the exact symptom this function exists to stop.
+//  2. `fallback`, normally pendingSwVersion: what checkSwUpdate actually read
+//     off the network. Trustworthy, but only ever set on the checkSwUpdate
+//     route, so the reg.waiting-at-boot and updatefound routes reach here with
+//     nothing (and those are precisely the routes that carry an update applied
+//     while offline, where the network check could not run).
+//  3. CacheStorage, as a last resort for an old controller with no GET_VERSION
+//     handler. detectCacheVersion strips the 'zane-' prefix; logbook-sw-version
+//     stores the raw `const CACHE = '...'` string, hence putting it back on.
+async function persistAppliedSwVersion(fallback) {
+  let applied = await askControllerSwVersion();
+  if (!applied) applied = fallback || null;
+  if (!applied) {
+    try {
+      const version = await Promise.race([
+        LB.detectCacheVersion(),
+        new Promise(r => setTimeout(() => r(null), 1500)),
+      ]);
+      if (version) applied = 'zane-' + version;
+    } catch (_) {}
+  }
+  if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
+}
+
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
@@ -386,6 +450,12 @@ function App() {
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
+  // Live snapshot of store, read (not subscribed to) by the What's New effect
+  // below so it can peek at the current onboarding-relevant fields without
+  // adding store as a dependency, keeping it a run-once-per-ready effect
+  // exactly like before whatsnew.js became a lazy load.
+  const storeRefA = useRefA(store);
+  storeRefA.current = store;
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
@@ -858,8 +928,27 @@ function App() {
         });
       };
       if (reg.waiting) {
-        waitingWorker.current = reg.waiting;
-        setUpdateAvailable(true);
+        // A boot that directly follows a deliberate cache wipe (clearCachesAndReload
+        // stamps zane-cold-boot) must not prompt: the reload already fetched the new
+        // code from the network, the old worker is simply still the registered one and
+        // has re-installed the update into `waiting`. The user asked for exactly this
+        // update moments ago, so take the worker silently. onControllerChange then
+        // records the version without reloading, because intentionalUpdate is false.
+        let coldBoot = false;
+        try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; } catch (_) {}
+        if (coldBoot) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        } else {
+          waitingWorker.current = reg.waiting;
+          setUpdateAvailable(true);
+        }
+      } else if (!reg.installing) {
+        // Nothing pending: whatever controls this page right now IS the current
+        // version, so record it. Without this, an update that activated while no
+        // tab was open (or during a boot whose network version check failed) left
+        // logbook-sw-version stale forever, and the next successful check raised a
+        // banner for an update that had already been applied.
+        persistAppliedSwVersion(null);
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
@@ -869,13 +958,16 @@ function App() {
     // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
       reportSwVersion();
-      // Persist the applied version only now that the new SW has actually taken
-      // control, not on the click, so an update that never activates (tab
-      // closed, SKIP_WAITING lost) keeps being re-offered after a cold start.
-      if (intentionalUpdate.current && pendingSwVersion.current) {
-        try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
-      }
-      if (intentionalUpdate.current) window.location.reload(true);
+      // Recording which version now controls the page is plain fact-keeping and
+      // is therefore done unconditionally, whoever triggered the change (this
+      // tab's banner tap, another tab's, or the silent cold-boot handoff above).
+      // Only the RELOAD is gated on this tab having asked for it. Persisting
+      // here rather than on the click is what keeps an update that never
+      // activates (tab closed, SKIP_WAITING lost) being re-offered later.
+      const persisted = persistAppliedSwVersion(pendingSwVersion.current);
+      // .finally, so a failure or timeout while recording the version can never
+      // cost the user the reload they actually asked for.
+      if (intentionalUpdate.current) persisted.finally(() => window.location.reload());
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
@@ -919,19 +1011,74 @@ function App() {
       }
     }
 
+    let activatedViaWorker = false;
     if (worker) {
+      const controllerBefore = navigator.serviceWorker.controller;
+      const waitingBefore = swReg.current?.waiting || null;
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
-    } else {
-      // No installed/waiting worker turned up in time, our own faster
-      // text-based update check (checkSwUpdate) can show the banner before
-      // the browser's native SW update/install has caught up, or install
-      // may still be running past the 6s wait above. A bare reload here
-      // would hit the OLD SW's stale-while-revalidate fetch handler and
-      // instantly re-serve the cached (old) app, the update button would
-      // look like it does nothing. Wipe the cache first, exactly like the
-      // "Reload App" quick action does, so the reload is guaranteed to
-      // actually fetch fresh code instead of silently staying on the old one.
+      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
+      // this page almost immediately, but a backgrounded/suspended tab (iOS
+      // throttles a PWA the instant it loses foreground, which can happen
+      // right after this tap) can swallow that event entirely: intentionalUpdate
+      // stays true forever with nothing to reload it, and the version is never
+      // persisted, so the next foreground/route check (checkSwUpdate) sees the
+      // exact same "new" version again and re-shows the banner, forever
+      // (confirmed: this produced a repeating update-banner loop). Race a
+      // timeout against the real event so this path always resolves.
+      activatedViaWorker = await new Promise(resolve => {
+        const t = setTimeout(() => {
+          navigator.serviceWorker.removeEventListener('controllerchange', h);
+          resolve(false);
+        }, 8000);
+        function h() {
+          navigator.serviceWorker.removeEventListener('controllerchange', h);
+          clearTimeout(t);
+          resolve(true);
+        }
+        navigator.serviceWorker.addEventListener('controllerchange', h);
+      });
+      // A timeout is NOT proof the handoff failed. The suspended-page case this
+      // exists for swallows the event while the worker activates normally with
+      // a fully populated cache, and falling through to the wipe below would
+      // then delete exactly the fresh cache the comment above says to protect
+      // (and strand an offline user on sw.js's empty-bodied ?_v= fallback).
+      // So re-read the real state: a moved controller, or the worker we posted
+      // to having left the waiting slot, both mean skipWaiting took and a plain
+      // reload lands on the new worker. onControllerChange never ran in that
+      // case, so do its job here instead of letting the update strand.
+      if (!activatedViaWorker) {
+        const controllerNow = navigator.serviceWorker.controller;
+        const controllerMoved = !!controllerNow && controllerNow !== controllerBefore;
+        // The waiting slot emptying is only evidence of a SUCCESSFUL handoff if
+        // the worker we posted to actually reached 'activating'/'activated'. It
+        // also empties when that worker goes 'redundant' (the browser evicted
+        // it, or a newer install replaced it), and treating that as success
+        // would skip the cache wipe and do a plain reload that the still-active
+        // OLD worker answers cache-first from the OLD cache: the user taps
+        // Update and gets the same app back, with no path forward.
+        const waitingCleared = !!waitingBefore
+          && swReg.current?.waiting !== waitingBefore
+          && waitingBefore.state !== 'redundant'
+          && waitingBefore.state !== 'installed';
+        if (controllerMoved || waitingCleared) {
+          await persistAppliedSwVersion(pendingSwVersion.current);
+          window.location.reload();
+          return;
+        }
+      }
+    }
+    if (!activatedViaWorker) {
+      // Either no installed/waiting worker turned up in time (our own faster
+      // text-based update check, checkSwUpdate, can show the banner before the
+      // browser's native SW update/install has caught up, or install may still
+      // be running past the 6s wait above), or one did but never actually took
+      // control (see the timeout above). A bare reload here would hit the OLD
+      // SW's stale-while-revalidate fetch handler and instantly re-serve the
+      // cached (old) app, the update button would look like it does nothing.
+      // Wipe the cache first, exactly like the "Reload App" quick action does,
+      // so the reload is guaranteed to actually fetch fresh code instead of
+      // silently staying on the old one.
       // Persist the version we're about to fetch fresh, otherwise
       // checkSwUpdate sees the same "new" version again right after reload
       // and re-shows the banner, forever (confirmed: this caused an
@@ -1108,6 +1255,15 @@ function App() {
           const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
           syncBase.current = diffBase;
           let merged = fresh;
+          // fresh.coaching is deliberately undefined when loadFromSupabase's
+          // coaching queries failed (see its own comment: unlike every other
+          // collection, that failure is isolated rather than aborting the
+          // whole boot). undefined here specifically means "could not check
+          // this time", never "no coaching relationship" (that's the object
+          // shape with null/empty fields), so keep whatever was already
+          // showing instead of blanking the coaching banner on a transient
+          // error.
+          if (merged.coaching === undefined && cur?.coaching !== undefined) merged.coaching = cur.coaching;
           if (cur) {
             // Same unsynced-edit test LB.mergeBootScalars applies below: an explicit
             // local null, "session just ended on this device", must still win
@@ -1561,10 +1717,35 @@ function App() {
   // What's New, the first time the app is 'ready' after an update, show every
   // changelog entry the user hasn't seen yet (bundled into one card), so anyone
   // returning after several releases catches up on all of them at once.
+  // whatsnew.js is a lazy load now (index.html's __ensureWhatsNew, moved out
+  // of the blocking boot script list, ~116KB of changelog text most boots
+  // never need): fetch it here instead of trusting window.WHATS_NEW to
+  // already be populated. Skips the fetch entirely when this boot is about
+  // to show the onboarding welcome prompt instead (below): that effect calls
+  // setWhatsNew(null) synchronously the moment it decides, but this effect's
+  // own fetch resolves later (async), so without this guard a brand-new
+  // user could see What's New flash back on top of onboarding once the
+  // fetch lands. Reads storeRefA rather than adding store as a dependency,
+  // same reasoning as before: this only ever needs to run once per
+  // ready-transition, not on every store update.
   useEffectA(() => {
     if (phase !== 'ready') return;
-    const unseen = unseenWhatsNew();
-    if (unseen.length) setWhatsNew(unseen);
+    const s = storeRefA.current;
+    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) return;
+    let live = true;
+    window.__ensureWhatsNew().then(() => {
+      if (!live) return;
+      // Re-check after the await, not only before it: the onboarding effect
+      // can reach its decision while the script is still loading (it waits on
+      // the unit picker, which the user answers in exactly that window), and
+      // its synchronous setWhatsNew(null) would otherwise be overwritten right
+      // here, leaving a What's New card mounted behind the onboarding overlay
+      // that surfaces the moment onboarding is dismissed.
+      if (onboardingOwnsBoot(storeRefA.current)) return;
+      const unseen = unseenWhatsNew();
+      if (unseen.length) setWhatsNew(unseen);
+    }).catch(() => {}); // best-effort: a failed lazy fetch just means no What's New this session
+    return () => { live = false; };
   }, [phase]);
 
   const dismissWhatsNew = useCallbackA(() => {
@@ -1589,13 +1770,20 @@ function App() {
       return;
     }
     if (!store.settings?.onboardingCompleted) {
-      // Pre-dismiss What's New so it doesn't stack with the welcome prompt
-      try {
-        const newest = (window.WHATS_NEW || [])[0];
-        if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
-          localStorage.setItem(WHATS_NEW_KEY, newest.id);
-        }
-      } catch (_) {}
+      // Pre-dismiss What's New so it doesn't stack with the welcome prompt.
+      // window.WHATS_NEW may not be loaded yet (lazy load, see the effect
+      // above, whose own guard skips its fetch specifically to defer to this
+      // decision): fetch it here so the seen-stamp still lands, but don't
+      // await it before clearing/prompting below, both fire synchronously
+      // exactly as before, only the stamp write is now async.
+      window.__ensureWhatsNew().then(() => {
+        try {
+          const newest = (window.WHATS_NEW || [])[0];
+          if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
+            localStorage.setItem(WHATS_NEW_KEY, newest.id);
+          }
+        } catch (_) {}
+      }).catch(() => {});
       setWhatsNew(null);
       setOnboardingState({ phase: 'prompt' });
     }

@@ -35,6 +35,24 @@ if (!CACHE_NAME || !PHOTOS_NAME) {
   process.exit(1);
 }
 
+// This file also runs against dist/sw.js (see the usage comment above),
+// whose ASSETS list build.cjs's patchServiceWorker rewrites to a handful of
+// src/_build/*.js bundle paths instead of the source tree's many individual
+// src/*.jsx entries. Scenarios below need one representative cache-first app
+// asset and, separately, a way to make precacheAll's install fail on one
+// asset: derive both from the ASSETS actually present in whichever sw.js is
+// under test, instead of hardcoding a source-tree-only path like
+// src/store.js or src/screens-water.jsx, which simply do not exist in
+// dist/sw.js's ASSETS and would make every scenario relying on them silently
+// exercise the wrong (pass-through) code path instead of the intended one.
+const assetsMatch = src.match(/const ASSETS = \[([\s\S]*?)\];/);
+const ASSET_PATHS = assetsMatch ? [...assetsMatch[1].matchAll(/'([^']+)'/g)].map(m => m[1]) : [];
+if (!ASSET_PATHS.length) {
+  console.error('FAIL could not parse ASSETS from ' + swPath);
+  process.exit(1);
+}
+const SHELL_ASSET = (ASSET_PATHS.find(p => p.startsWith('/src/')) || '/src/store.js').replace(/^\//, '');
+
 // ── Minimal browser fakes ───────────────────────────────────────────────────
 class FakeResponse {
   constructor(body, init = {}) {
@@ -165,7 +183,7 @@ const scenarios = [
   ['routing: supabase, POST and foreign origins stay untouched', async () => {
     const w = makeWorld(S);
     check('supabase', !(await w.hit('https://xyz.supabase.co/rest/v1/zane_sets')).ev.responded, 'respondWith was called for a supabase request');
-    check('post', !(await w.hit(S + 'src/store.js', { method: 'POST' })).ev.responded, 'respondWith was called for a POST');
+    check('post', !(await w.hit(S + SHELL_ASSET, { method: 'POST' })).ev.responded, 'respondWith was called for a POST');
     check('foreign', !(await w.hit('https://example.com/a.js')).ev.responded, 'respondWith was called for a foreign origin');
   }],
 
@@ -190,30 +208,30 @@ const scenarios = [
 
   ['version probe: ?_v= hits the network and is never cached', async () => {
     const w = makeWorld(S);
-    const { ev, res } = await w.hit(S + 'src/store.js?_v=123');
+    const { ev, res } = await w.hit(S + SHELL_ASSET + '?_v=123');
     await w.settle(ev);
-    check('probe-body', res.body === 'net:' + S + 'src/store.js?_v=123', `got ${res && res.body}`);
+    check('probe-body', res.body === 'net:' + S + SHELL_ASSET + '?_v=123', `got ${res && res.body}`);
     check('probe-uncached', ![...(w.stores.get(CACHE_NAME) || new Map()).keys()].length, 'the probe landed in the cache');
   }],
 
   ['app shell: warm cache is served without network revalidation', async () => {
     const w = makeWorld(S);
-    w.seed(CACHE_NAME, S + 'src/store.js', 'old');
-    const { ev, res } = await w.hit(S + 'src/store.js');
+    w.seed(CACHE_NAME, S + SHELL_ASSET, 'old');
+    const { ev, res } = await w.hit(S + SHELL_ASSET);
     check('shell-cached', res.body === 'old', `served ${res && res.body}, expected the cached copy`);
     check('shell-no-network', w.net.calls.length === 0, 'a warm versioned app asset still hit the network');
     check('shell-no-write', ev.ext.length === 0, 'a warm versioned app asset still scheduled a cache write');
     await w.settle(ev);
-    check('shell-unchanged', w.cacheBody(CACHE_NAME, S + 'src/store.js') === 'old', 'the immutable worker generation rewrote its cached asset');
+    check('shell-unchanged', w.cacheBody(CACHE_NAME, S + SHELL_ASSET) === 'old', 'the immutable worker generation rewrote its cached asset');
   }],
 
   ['app shell: a cold asset is fetched and written through', async () => {
     const w = makeWorld(S);
-    const { ev, res } = await w.hit(S + 'src/store.js');
-    check('shell-cold-network', res.body === 'net:' + S + 'src/store.js', `got ${res && res.body}`);
+    const { ev, res } = await w.hit(S + SHELL_ASSET);
+    check('shell-cold-network', res.body === 'net:' + S + SHELL_ASSET, `got ${res && res.body}`);
     check('shell-cold-waituntil', ev.ext.length >= 1, 'the cache.put is not protected by waitUntil');
     await w.settle(ev);
-    check('shell-cold-cached', w.cacheBody(CACHE_NAME, S + 'src/store.js') === 'net:' + S + 'src/store.js', 'the fetched app asset never reached the cache');
+    check('shell-cold-cached', w.cacheBody(CACHE_NAME, S + SHELL_ASSET) === 'net:' + S + SHELL_ASSET, 'the fetched app asset never reached the cache');
   }],
 
   ['app shell offline: warm serves, cold 504s', async () => {
@@ -290,7 +308,7 @@ const scenarios = [
   ['redirected responses are rebuilt before being served', async () => {
     const w = makeWorld(S);
     w.net.respond = (url) => { const r = new FakeResponse('net:' + url); r.redirected = true; return r; };
-    const shell = await w.hit(S + 'src/store.js');
+    const shell = await w.hit(S + SHELL_ASSET);
     check('redirect-swr', shell.res.redirected === false, 'the shell branch served a redirected response (rejected by the browser for navigations)');
     const pub = await w.hit(S + 'welcome.html', { mode: 'navigate' });
     check('redirect-public', pub.res.redirected === false, 'the public branch served a redirected response: welcome.html IS a navigation, the browser rejects this outright');
@@ -303,7 +321,7 @@ const scenarios = [
     let installed = true; await ev1.p.catch(() => { installed = false; });
     check('install-ok', installed, 'install failed although every asset resolved');
     const bad = makeWorld(S);
-    bad.net.respond = (url) => new FakeResponse('', { status: url.endsWith('/src/screens-water.jsx') ? 404 : 200 });
+    bad.net.respond = (url) => new FakeResponse('', { status: url.endsWith('/' + SHELL_ASSET) ? 404 : 200 });
     const ev2 = { waitUntil: (p) => { ev2.p = p; } };
     bad.handlers.install(ev2);
     let failed = false; await ev2.p.catch(() => { failed = true; });
@@ -328,8 +346,8 @@ const scenarios = [
     w.seed(CACHE_NAME, R + 'welcome.html', 'stale');
     const pub = await w.hit(R + 'welcome.html', { mode: 'navigate' });
     check('root-public', pub.res.body === 'net:' + R + 'welcome.html', 'public page not network-first under a root scope');
-    w.seed(CACHE_NAME, R + 'src/store.js', 'old');
-    const shell = await w.hit(R + 'src/store.js');
+    w.seed(CACHE_NAME, R + SHELL_ASSET, 'old');
+    const shell = await w.hit(R + SHELL_ASSET);
     check('root-shell', shell.res.body === 'old', 'app shell not cache-first under a root scope');
   }],
 ];
@@ -344,5 +362,8 @@ const scenarios = [
     console.error(`\ncheck-sw FAILED (${failures.length} assertion${failures.length === 1 ? '' : 's'})`);
     process.exit(1);
   }
-  console.log(`check-sw OK: ${scenarios.length} scenarios against ${path.basename(swPath)} (${CACHE_NAME}), routing + offline + waitUntil + install/activate all hold`);
+  // Relative path, not basename: CI runs this twice (source tree and dist/),
+  // and basename collapses both to "sw.js", so a silently skipped or
+  // misconfigured second pass read as a green source-tree run.
+  console.log(`check-sw OK: ${scenarios.length} scenarios against ${path.relative(root, swPath) || swPath} (${CACHE_NAME}), routing + offline + waitUntil + install/activate all hold`);
 })();

@@ -283,7 +283,7 @@ CREATE TABLE public.zane_adaptive_tdee_history (
   created_at          timestamp with time zone NOT NULL DEFAULT now(),
   updated_at          timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT zane_adaptive_tdee_history_pkey PRIMARY KEY (id),
-  CONSTRAINT zane_adaptive_tdee_history_user_date_key UNIQUE (user_id, as_of_date),
+  CONSTRAINT zane_adaptive_tdee_history_user_id_as_of_date_key UNIQUE (user_id, as_of_date),
   CONSTRAINT zane_adaptive_tdee_history_day_span_check CHECK ((day_span > 0)),
   CONSTRAINT zane_adaptive_tdee_history_calorie_days_check CHECK ((calorie_days > 0)),
   CONSTRAINT zane_adaptive_tdee_history_weigh_ins_check CHECK ((weigh_ins > 1)),
@@ -2603,6 +2603,8 @@ CREATE INDEX zane_meal_reminder_deliveries_user_idx
 
 ALTER TABLE zane_meal_reminder_deliveries ENABLE ROW LEVEL SECURITY;
 -- No policies: only the service role may read or write delivery state.
+REVOKE ALL ON public.zane_meal_reminder_deliveries FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.zane_meal_reminder_deliveries TO service_role;
 
 CREATE TABLE zane_food_favorites (
   id          text        PRIMARY KEY,

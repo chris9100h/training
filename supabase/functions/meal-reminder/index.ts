@@ -103,15 +103,6 @@ async function sendReminders() {
     });
     if (!due.length) continue;
 
-    const title = 'Zane · Meal Reminder';
-    const message = due.length === 1
-      ? `Still on the plan? Time to log your ${due[0].food_name || 'planned meal'}. 🍽️`
-      : `You have ${due.length} planned meals still to log. 🍽️`;
-
-    // Respect the user's channel choice: when Pushover is enabled (use_pushover
-    // and a key set) send only Pushover, otherwise send native Web Push. This
-    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
-    // so the user never gets the same nudge on both channels.
     const dueIds = due.map(entry => entry.id);
     const attemptRes = await dbFetch('zane_meal_reminder_deliveries', {
       method: 'POST',
@@ -138,6 +129,22 @@ async function sendReminders() {
     const claimed: { food_log_id: string }[] = await claimRes.json().catch(() => []);
     const claimedIds = new Set(claimed.map(entry => entry.food_log_id));
     if (!claimedIds.size) continue;
+
+    // Build the notification text from what THIS tick actually claimed, not
+    // the full pre-claim `due` list above: a concurrent invocation (e.g. a
+    // manual POST test racing the hourly cron, both explicitly supported by
+    // this handler) can claim only a subset of dueIds, and the sent text
+    // must describe exactly that subset, not a stale full count/name.
+    const toNotify = due.filter(entry => claimedIds.has(entry.id));
+    const title = 'Zane · Meal Reminder';
+    const message = toNotify.length === 1
+      ? `Still on the plan? Time to log your ${toNotify[0].food_name || 'planned meal'}. 🍽️`
+      : `You have ${toNotify.length} planned meals still to log. 🍽️`;
+
+    // Respect the user's channel choice: when Pushover is enabled (use_pushover
+    // and a key set) send only Pushover, otherwise send native Web Push. This
+    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
+    // so the user never gets the same nudge on both channels.
     const delivered = await sendNotification({
       userId: row.user_id,
       title,

@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.748';
+const CACHE = 'zane-v2.760';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
@@ -160,6 +160,13 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
+  // Authoritative answer to "which app-shell version is actually running".
+  // The page cannot work this out by listing CacheStorage: skipWaiting() hands
+  // control to this worker as soon as it activates, BEFORE the activate
+  // handler's waitUntil (and therefore its old-cache sweep) has settled, so a
+  // page reading caches.keys() at controllerchange can still see the previous
+  // cache and record the wrong version. Only the running worker knows.
+  if (e.data?.type === 'GET_VERSION') { e.ports?.[0]?.postMessage(CACHE); return; }
 });
 
 self.addEventListener('push', e => {

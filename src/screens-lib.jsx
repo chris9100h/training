@@ -3307,393 +3307,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       .catch(() => {});
     return () => { on = false; };
   }, [needsEntries, sessionId]);
-  if (!s) return null;
-  const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
-  const duration = s.durationMinutes != null
-    ? s.durationMinutes
-    : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
-
-  const setFeel = (feel) => {
-    setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
-  };
-
-  const saveAsTemplate = () => {
-    const name = tplName.trim();
-    if (!name) return;
-    const exercises = (s.entries || []).map(e => {
-      // Time-based entry: derive per-set duration targets from the logged sets
-      // so a template built from this session carries the times along (there is
-      // no editor UI authoring timeSecPerSet yet, this IS the authoring path).
-      const times = (e.sets || []).filter(st => !st.warmup).map(st => st.timeSec ?? null);
-      return {
-        exId: e.exId, name: e.name,
-        sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
-        reps: e.plannedReps ?? null,
-        repsPerSet: e.plannedRepsPerSet ?? null,
-        repsMax: e.plannedRepsMax ?? null,
-        progressionOffset: e.plannedProgressionOffset ?? null,
-        supersetGroup: e.supersetGroup ?? null,
-        ...(Array.isArray(e.plannedTechniques) && e.plannedTechniques.some(Boolean) ? { plannedTechniques: e.plannedTechniques } : {}),
-        ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
-      };
-    });
-    const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
-    setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
-    setTplFormOpen(false);
-    setTplSaved(true);
-  };
-
-  const deleteSession = async () => {
-    if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
-    // Roll back the meso weight boost / rep-miss counts this session earned, so a
-    // re-log (the common "delete, then log again with feedback" flow) doesn't seed
-    // on an older, lower weight with that orphaned boost still stacked on top. Both
-    // the store copy (DB / cross-device) and the per-plan localStorage cache must
-    // move together and be freshly stamped, or getMesoState would keep preferring
-    // the stale finished-session copy by updatedAt.
-    // Skip the meso rollback while a session for this plan is in progress: it owns
-    // the localStorage meso cache and will flush its own state at finish, so a
-    // stale rewrite here would corrupt it (mirrors isMesoSessionEditable).
-    const liveForPlan = store.sessions.some(x => x && !x.ended && x.scheduleId === s.scheduleId);
-    const doMesoRollback = !!(s.scheduleId && !s.isFreestyle && !liveForPlan
-      && (store.mesoStates || []).some(m => m.scheduleId === s.scheduleId));
-    // A windowed session renders with entries:[] until a lazy fetch resolves;
-    // revertMesoSessionBoosts needs the entries to build its exId keys, so load
-    // them first (falls through to a harmless no-op rollback if the fetch fails).
-    let delSession = s;
-    if (doMesoRollback && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
-      try {
-        const bySession = await LB.fetchSessionEntries([sessionId]);
-        if (bySession && bySession[sessionId] && bySession[sessionId].length) delSession = { ...s, entries: bySession[sessionId] };
-      } catch {}
-    }
-    // Compose the boost-rollback on the FRESHEST row INSIDE the updater: the await above
-    // (and any concurrent same-plan sync) can stale the closed-over row, and the old code
-    // wrote both localStorage and the store row from that stale copy, silently reverting a
-    // concurrent update. Read the fresh row + fresh remaining sessions here. #C
-    setStore(st => {
-      const base = {
-        ...st,
-        sessions: st.sessions.filter(x => x.id !== sessionId),
-        cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
-        // cycleIndex advances by exactly +1 when a session finishes (screens-train.jsx),
-        // but deleting one never rolled that back, leaving a permanent +1 "ghost"
-        // advance behind every deleted session. Only safe to undo when this was
-        // provably the LAST session to advance it (nothing has advanced past it
-        // since): rolling back an older deleted session would incorrectly regress
-        // a rotation position later training has already legitimately moved past.
-        ...(s.cyclePos != null && st.cycleIndex === s.cyclePos + 1 ? { cycleIndex: s.cyclePos } : {}),
-      };
-      if (!doMesoRollback) return base;
-      const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
-      if (!cur) return base;
-      const reverted = LB.revertMesoSessionBoosts(cur, delSession, base.sessions);
-      if (!reverted || reverted === cur) return base;
-      const stamped = { ...reverted, updatedAt: new Date().toISOString() };
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
-      return { ...base, mesoStates: (st.mesoStates || []).map(m => m.id === cur.id ? stamped : m) };
-    });
-    go({ name: 'hist' });
-  };
-
-  // ── Post-hoc meso feedback editing ──
-  // Toned option chip, identical to the live capture sheet (screens-train.jsx): calm at
-  // rest (neutral ink label + hairline border), the answer's semantic tone reveals only
-  // when selected. Keep in sync with the live sheet by hand.
-  const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
-  const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
-  const toneBtn = (tone, sel, extra) => ({
-    padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
-    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
-    textShadow: 'none',
-    ...(extra || {}),
-  });
-  const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
-  // The meso state for this session's plan (DB-synced copy; no live session can
-  // be open when a session is editable, so the localStorage cache and this agree).
-  const sessionMeso = s.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
-  const fbRaw = s.mesoRecap && s.mesoRecap.raw ? s.mesoRecap.raw : null;
-  const fbEditable = LB.isMesoSessionEditable(s, store.sessions, sessionMeso);
-  const fbLoadOnly = !!(s.mesoRecap && s.mesoRecap.loadOnly);
-  // Feedback rows built from the durable raw answers (so each row carries its own
-  // type + subject/exId to edit), grouped by muscle in this session's workout
-  // order. Only used for the editable card; the read-only card keeps the stored
-  // display strings. primaryMuscleForExercise is a screens-train.jsx global.
-  const fbEditRows = () => {
-    if (!fbRaw || !fbRaw.answers) return [];
-    const a = fbRaw.answers;
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
-    const order = [], seen = new Set();
-    (s.entries || []).forEach(e => {
-      if (e.isCardio) return;
-      const pm = muscleOf(e.exId);
-      if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); }
-    });
-    const wLbl = mesoVolumeLbl(true);    // weight-feel labels
-    const workLbl = mesoVolumeLbl(false); // workload labels
-    const groups = [];
-    order.forEach(muscle => {
-      const rows = [];
-      const sRec = a.soreness && a.soreness[muscle];
-      if (sRec && sRec.answer != null) rows.push({ type: 'soreness', subject: muscle, name: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer, sel: sRec.answer });
-      (s.entries || []).forEach(e => {
-        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
-        const jRec = a.joint && a.joint[e.exId];
-        if (!jRec || jRec.answer == null) {
-          // Never asked, or the sheet opened but the answer never landed (e.g.
-          // backgrounded/reloaded mid-session before the "asked, not answered"
-          // fix). Still offer a row when there's a completed set to judge, so
-          // it isn't silently stuck unrated forever: same "attempted" bar the
-          // live gate itself uses, opens the same blank joint sheet as a fresh
-          // ask, and the existing re-earn machinery below is already exId-
-          // agnostic (it just reads answers.joint[exId], present or not).
-          const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
-          if (workingSets.some(st => st.done)) {
-            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated, tap to add', sel: null });
-          }
-          return;
-        }
-        // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
-        // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
-        // predate the per-exercise move simply carry no weight/pump here.
-        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
-        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
-        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
-        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
-        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
-      });
-      const vRec = a.volume && a.volume[muscle];
-      // Per-muscle workload row (Volume+Load / non-final Meso weeks); drives set deltas.
-      if (vRec && vRec.volume != null) {
-        rows.push({ type: 'volume', subject: muscle, name: 'Workload', sub: workLbl[vRec.volume] || vRec.volume, volume: vRec.volume });
-      }
-      if (rows.length) groups.push({ muscle, rows });
-    });
-    return groups;
-  };
-  // Objective per-exercise earn inputs (exId, key, muscle, allHit, increment) for
-  // this session, mirroring computeMesoGains' earn loop, so a feedback edit can
-  // re-earn weight boosts. Rep-miss cuts are preserved inside the pure helper.
-  // Known limitation (autoreg-v2-spec.md 13.2, accepted): this scores the SEALED session
-  // while computeMesoGains scored PRE-seal, so a set with reps entered but never marked done
-  // (finish() seals it skipped) can flip allHit/earlyMiss here. Rare edge, one increment.
-  const fbEarnInputs = () => {
-    const out = [];
-    (s.entries || []).forEach(e => {
-      if (e.isCardio || !e.exId) return;
-      const ex = store.exercises?.find(x => x.id === e.exId);
-      const muscle = typeof primaryMuscleForExercise === 'function' ? primaryMuscleForExercise(ex) : null;
-      const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
-      // attempted mirrors computeMesoGains' `!workingSets.some(done) continue` guard:
-      // an untouched exercise is neither a hit nor a rep miss and must not move the streak.
-      const attempted = workingSets.length > 0 && workingSets.some(st => st.done);
-      const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
-      const allHit = attempted && outcome.allHit;
-      const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
-      const increment = LB.incrementForExercise(store, ex, null);
-      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
-    });
-    return out;
-  };
-  // Rebuild the display groups (read-only shape { muscle, general[], joint[] }) so
-  // the stored recap matches the edited answers on the next render / boot.
-  const fbGroupsForStore = (answers) => {
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
-    const order = [], seen = new Set();
-    (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
-    const wLbl = mesoVolumeLbl(true), workLbl = mesoVolumeLbl(false);
-    const groups = [];
-    order.forEach(muscle => {
-      const general = [], joint = [];
-      const sRec = answers.soreness && answers.soreness[muscle];
-      if (sRec && sRec.answer != null) general.push({ title: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer });
-      (s.entries || []).forEach(e => {
-        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
-        const jRec = answers.joint && answers.joint[e.exId];
-        if (!jRec || jRec.answer == null) return;
-        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
-        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
-        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
-        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
-        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
-      });
-      const vRec = answers.volume && answers.volume[muscle];
-      if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
-      if (general.length || joint.length) groups.push({ muscle, general, joint });
-    });
-    return groups;
-  };
-  const saveFeedbackEdit = (edit) => {
-    if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
-    // Readiness edit: change the session's readiness + signalWeight, and RESPECT the
-    // new signalWeight so it is not cosmetic. A full->discounted edit freezes the
-    // rep-miss cut (drops this session's -increment and restores the frozen streak);
-    // discounted->full re-enables it. The EARN side stays allowed on discounted, so
-    // it is re-earned unchanged from the (untouched) answers. There is no answer-record
-    // diff here, so bypass applyMesoFeedbackEdit entirely.
-    if (edit.type === 'readiness') {
-      const readiness = edit.readiness;
-      // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
-      // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
-      // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
-      // deload ended mid-session scored 'full' live, so oldCut must re-derive too,
-      // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
-      // are never deload (isMesoSessionEditable excludes them). #D
-      // Two values, not one, and only on a cleanup session do they differ.
-      // STORED: a cleanup session is pinned 'full' whatever the readiness says
-      // (mirrors chooseReadiness in screens-train.jsx), because 'discounted' would
-      // drop it out of detectOverreach's exposure chain and its reduced loads
-      // would then never move the detector's baseline, so the rebuild would read
-      // as a regression.
-      // CUT: the rep-miss cut still has to follow the lifter's own answer, exactly
-      // as computeMesoGains does with its cutSignal. Feeding the pinned 'full' to
-      // recomputeMesoRepMissCut on both sides would make every readiness edit on a
-      // cleanup session a same-side no-op, so a rough -> normal correction would
-      // never re-arm the cut it was meant to re-arm.
-      const oldCut = s.isCleanup
-        ? LB.deriveSignalWeight({ readiness: s.readiness }, false)
-        : LB.deriveSignalWeight(s, !!s.isDeload);
-      const newCut = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
-      const newSignal = s.isCleanup ? 'full' : newCut;
-      const earnInputs = fbEarnInputs();
-      const repMissBase = fbRaw.repMissBase || null;
-      const groups = fbGroupsForStore(fbRaw.answers);
-      // Recompute the CUT + re-earn on the FRESHEST mesoStates row INSIDE the updater:
-      // a background multi-device sync may have landed a newer row (e.g. fresh
-      // autoregState landmarks) since this sheet opened, and recompute/reearn spread
-      // the row through (...meso). Composing on the stale render-closure `sessionMeso`
-      // and writing it back wholesale would revert those concurrent fields. #3
-      setStore(st => {
-        const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
-        // 1. Recompute the CUT for the readiness flip (no-op on a same-side edit).
-        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldCut, newCut);
-        // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
-        //    reearn preserves a re-armed cut and drops a frozen one.
-        const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
-        const composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
-        const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, composedMeso.weightBoosts, earnInputs, s.dayId);
-        const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
-        // Write the per-plan localStorage cache in lockstep with the row (same fresh
-        // updatedAt), INSIDE the updater so it is atomic with the store write and can
-        // never be skipped by a deferred updater (mirrors saveMesoState's own in-updater
-        // localStorage write). getMesoState then never masks the edit with a stale cache.
-        if (typeof MESO_KEY === 'string') {
-          try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
-        }
-        return {
-          ...st,
-          mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
-          sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
-        };
-      });
-      setFbEdit(null);
-      return;
-    }
-    // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
-    // edit freezes a positive set-add for an at-ceiling muscle exactly like the
-    // live session would have (spec 2.2 / 2.3). typeof-guarded: primaryMuscleForExercise
-    // is a screens-train.jsx global that may not be loaded in every context.
-    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
-      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
-    const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
-    // Compute at-ceiling over PRIOR exposures, EXCLUDING the edited session itself. The
-    // live session decided its freezes over endedSessions while it was still in-progress
-    // (so its OWN hard sets were not yet counted); store.sessions now contains it as an
-    // ended session, so including it would flip a muscle to at-ceiling that was NOT
-    // capped live and silently strip a set the live session granted. #A
-    const priorSessions = (store.sessions || []).filter(x => x.id !== sessionId);
-    const overreach = editSch ? LB.detectOverreach(priorSessions, editSch, muscleOf) : {};
-    const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
-    // Autoreg v2 P3 numeric MRV cap: also freeze a muscle whose banked current-
-    // microcycle volume has reached its learned MRV (mirror of the live atCeiling
-    // helper). Degrades to detector-only when landmarks/mrv is absent.
-    const cycleSets = editSch ? LB.microcycleSetsByMuscle(priorSessions, editSch, muscleOf, {
-      which: 0, todayStr: LB.todayISO(),
-      startDate: sessionMeso?.startDate, startedAt: sessionMeso?.startedAt,
-      startCycleIndex: sessionMeso?.startCycleIndex, cycleIndex: store.cycleIndex,
-      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
-    }) : {};
-    const landmarks = sessionMeso?.autoregState?.landmarks || {};
-    Object.keys(landmarks).forEach(m => {
-      const lm = landmarks[m];
-      if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
-    });
-    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
-    const earnInputs = fbEarnInputs();
-    // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
-    // reasoning as the readiness branch above, #3): a background multi-device sync may
-    // have landed a newer row since the sheet opened, and applyMesoFeedbackEdit /
-    // reearnMesoBoostsFromAnswers spread the row through (...meso). Composing on the
-    // stale render-closure `sessionMeso` and writing it back wholesale would revert
-    // those concurrent fields. localStorage is written inside so it stays atomic with
-    // the store write (mirrors saveMesoState).
-    setStore(st => {
-      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
-      const r1 = LB.applyMesoFeedbackEdit(cur, fbRaw, edit, ctx);
-      const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
-      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
-      const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, stampedMeso.weightBoosts, earnInputs, s.dayId);
-      const groups = fbGroupsForStore(r1.raw.answers);
-      const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
-      if (typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
-      }
-      return {
-        ...st,
-        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
-        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
-      };
-    });
-    setFbEdit(null);
-  };
-
-  // Toggle a single earned weight boost's decline from the recap's "Changes
-  // earned" list, after the fact. Only offered while fbEditable (this session
-  // is still the plan's top-of-stack session, same gate saveFeedbackEdit
-  // already trusts for rewriting weightBoosts wholesale) so a misclick has a
-  // way back without needing the mid-session toast again a week later, and so
-  // toggling here can never land on a key a later session has already moved
-  // on from. Same freshest-row-inside-the-updater pattern as saveFeedbackEdit.
-  const toggleGainDecline = (key) => {
-    if (!fbEditable || !key) return;
-    setStore(st => {
-      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
-      const prevDeclines = cur.weightBoostDeclines || {};
-      const nextDeclines = { ...prevDeclines };
-      if (nextDeclines[key]) delete nextDeclines[key]; else nextDeclines[key] = true;
-      const composedMeso = { ...cur, weightBoostDeclines: nextDeclines, updatedAt: new Date().toISOString() };
-      if (typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
-      }
-      return { ...st, mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m) };
-    });
-  };
-
-  // Toggle a Smart Progression bump's declined flag, recorded on THIS session
-  // (session-local, never synced, see store.js sessionToRow) the moment the
-  // "PROGRESSION UNLOCKED" toast is answered, either way (Hell yeah or
-  // Decline). Bidirectional, same as the Meso "Changes earned" chip: an
-  // accepted bump can be declined after the fact and vice versa, any number
-  // of times, not just a one-shot undo. Only exposed while it would still
-  // matter: no LATER session has already trained the same exercise on this
-  // day, since progressionSuggestion only ever consults the MOST RECENT
-  // session for a given exId/dayId (recentSessionsForExercise), once a later
-  // one exists, this session's flag no longer feeds any seed and toggling it
-  // here would be a no-op the user could mistake for a fix.
-  const toggleProgressionBump = (key) => {
-    setStore(st => ({
-      ...st,
-      sessions: st.sessions.map(x => {
-        if (x.id !== s.id) return x;
-        const cur = x.progressionBumps?.[key];
-        if (!cur) return x;
-        return { ...x, progressionBumps: { ...x.progressionBumps, [key]: { ...cur, declined: !cur.declined } } };
-      }),
-    }));
-  };
 
   // Deload sessions are deliberately light, comparing against one as "last
   // time" would show every set as a fabricated "improvement" purely because
@@ -3706,6 +3319,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // (a keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to this data).
   const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
+    if (!s) return { prevEntryMap: {}, prevPendingMap: {}, prevNeedIds: [] };
     const map = {};
     const pending = {};
     const needIds = new Set();
@@ -3787,12 +3401,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return () => { on = false; };
   }, [prevNeedIds]);
 
-  const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
-    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
-  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
-  const compareCandidates = sameDaySessions(store.sessions, s);
-
   // The whole PR-detection block below scans store.sessions/store.exercises
   // (prMap: all sessions x entries x sets; prValueOf: a store.exercises.find
   // per set), so it's memoized to only recompute when the session history,
@@ -3800,6 +3408,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to any of this).
   const { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR } = useMemoL(() => {
+    if (!s) return { isLatestSession: false, prMap: {}, sessionBestMap: {}, sessionBestSetMap: {}, isPR: () => false };
     const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
     const prReps = (st, exId) => exIsUnilateral(exId)
       ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
@@ -3947,6 +3556,395 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     };
     return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
   }, [store.sessions, store.exercises, s]);
+
+  // All hooks run unconditionally above; only now, after every hook has
+  // fired, is it safe to bail out for a deleted/missing session (Rules of
+  // Hooks: a conditional return before a hook call would skip it on some
+  // renders, which is exactly what caused React error #300 here).
+  if (!s) return null;
+  const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
+  const duration = s.durationMinutes != null
+    ? s.durationMinutes
+    : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
+
+  const setFeel = (feel) => {
+    setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
+  };
+
+  const saveAsTemplate = () => {
+    const name = tplName.trim();
+    if (!name) return;
+    const exercises = (s.entries || []).map(e => {
+      // Time-based entry: derive per-set duration targets from the logged sets
+      // so a template built from this session carries the times along (there is
+      // no editor UI authoring timeSecPerSet yet, this IS the authoring path).
+      const times = (e.sets || []).filter(st => !st.warmup).map(st => st.timeSec ?? null);
+      return {
+        exId: e.exId, name: e.name,
+        sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
+        reps: e.plannedReps ?? null,
+        repsPerSet: e.plannedRepsPerSet ?? null,
+        repsMax: e.plannedRepsMax ?? null,
+        progressionOffset: e.plannedProgressionOffset ?? null,
+        supersetGroup: e.supersetGroup ?? null,
+        ...(Array.isArray(e.plannedTechniques) && e.plannedTechniques.some(Boolean) ? { plannedTechniques: e.plannedTechniques } : {}),
+        ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
+      };
+    });
+    const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
+    setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
+    setTplFormOpen(false);
+    setTplSaved(true);
+  };
+
+  const deleteSession = async () => {
+    if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
+    // Roll back the meso weight boost / rep-miss counts this session earned, so a
+    // re-log (the common "delete, then log again with feedback" flow) doesn't seed
+    // on an older, lower weight with that orphaned boost still stacked on top. Both
+    // the store copy (DB / cross-device) and the per-plan localStorage cache must
+    // move together and be freshly stamped, or getMesoState would keep preferring
+    // the stale finished-session copy by updatedAt.
+    // Skip the meso rollback while a session for this plan is in progress: it owns
+    // the localStorage meso cache and will flush its own state at finish, so a
+    // stale rewrite here would corrupt it (mirrors isMesoSessionEditable).
+    const liveForPlan = store.sessions.some(x => x && !x.ended && x.scheduleId === s.scheduleId);
+    const doMesoRollback = !!(s.scheduleId && !s.isFreestyle && !liveForPlan
+      && (store.mesoStates || []).some(m => m.scheduleId === s.scheduleId));
+    // A windowed session renders with entries:[] until a lazy fetch resolves;
+    // revertMesoSessionBoosts needs the entries to build its exId keys, so load
+    // them first (falls through to a harmless no-op rollback if the fetch fails).
+    let delSession = s;
+    if (doMesoRollback && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
+      try {
+        const bySession = await LB.fetchSessionEntries([sessionId]);
+        if (bySession && bySession[sessionId] && bySession[sessionId].length) delSession = { ...s, entries: bySession[sessionId] };
+      } catch {}
+    }
+    // Compose the boost-rollback on the FRESHEST row INSIDE the updater: the await above
+    // (and any concurrent same-plan sync) can stale the closed-over row, and the old code
+    // wrote both localStorage and the store row from that stale copy, silently reverting a
+    // concurrent update. Read the fresh row + fresh remaining sessions here. #C
+    setStore(st => {
+      const base = {
+        ...st,
+        sessions: st.sessions.filter(x => x.id !== sessionId),
+        cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+        // cycleIndex advances by exactly +1 when a session finishes (screens-train.jsx),
+        // but deleting one never rolled that back, leaving a permanent +1 "ghost"
+        // advance behind every deleted session. Only safe to undo when this was
+        // provably the LAST session to advance it (nothing has advanced past it
+        // since): rolling back an older deleted session would incorrectly regress
+        // a rotation position later training has already legitimately moved past.
+        ...(s.cyclePos != null && st.cycleIndex === s.cyclePos + 1 ? { cycleIndex: s.cyclePos } : {}),
+      };
+      if (!doMesoRollback) return base;
+      const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
+      if (!cur) return base;
+      const reverted = LB.revertMesoSessionBoosts(cur, delSession, base.sessions);
+      if (!reverted || reverted === cur) return base;
+      const stamped = { ...reverted, updatedAt: new Date().toISOString() };
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
+      return { ...base, mesoStates: (st.mesoStates || []).map(m => m.id === cur.id ? stamped : m) };
+    });
+    go({ name: 'hist' });
+  };
+
+  // ── Post-hoc meso feedback editing ──
+  // Toned option chip, identical to the live capture sheet (screens-train.jsx): calm at
+  // rest (neutral ink label + hairline border), the answer's semantic tone reveals only
+  // when selected. Keep in sync with the live sheet by hand.
+  const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
+  const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
+  const toneBtn = (tone, sel, extra) => ({
+    padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
+    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    textShadow: 'none',
+    ...(extra || {}),
+  });
+  const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
+  // The meso state for this session's plan (DB-synced copy; no live session can
+  // be open when a session is editable, so the localStorage cache and this agree).
+  const sessionMeso = s.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
+  const fbRaw = s.mesoRecap && s.mesoRecap.raw ? s.mesoRecap.raw : null;
+  const fbEditable = LB.isMesoSessionEditable(s, store.sessions, sessionMeso);
+  const fbLoadOnly = !!(s.mesoRecap && s.mesoRecap.loadOnly);
+  // Feedback rows built from the durable raw answers (so each row carries its own
+  // type + subject/exId to edit), grouped by muscle in this session's workout
+  // order. Only used for the editable card; the read-only card keeps the stored
+  // display strings. LB.primaryMuscleForExercise lives in store.js.
+  const fbEditRows = () => {
+    if (!fbRaw || !fbRaw.answers) return [];
+    const a = fbRaw.answers;
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const order = [], seen = new Set();
+    (s.entries || []).forEach(e => {
+      if (e.isCardio) return;
+      const pm = muscleOf(e.exId);
+      if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); }
+    });
+    const wLbl = mesoVolumeLbl(true);    // weight-feel labels
+    const workLbl = mesoVolumeLbl(false); // workload labels
+    const groups = [];
+    order.forEach(muscle => {
+      const rows = [];
+      const sRec = a.soreness && a.soreness[muscle];
+      if (sRec && sRec.answer != null) rows.push({ type: 'soreness', subject: muscle, name: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer, sel: sRec.answer });
+      (s.entries || []).forEach(e => {
+        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
+        const jRec = a.joint && a.joint[e.exId];
+        if (!jRec || jRec.answer == null) {
+          // Never asked, or the sheet opened but the answer never landed (e.g.
+          // backgrounded/reloaded mid-session before the "asked, not answered"
+          // fix). Still offer a row when there's a completed set to judge, so
+          // it isn't silently stuck unrated forever: same "attempted" bar the
+          // live gate itself uses, opens the same blank joint sheet as a fresh
+          // ask, and the existing re-earn machinery below is already exId-
+          // agnostic (it just reads answers.joint[exId], present or not).
+          const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
+          if (workingSets.some(st => st.done)) {
+            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated, tap to add', sel: null });
+          }
+          return;
+        }
+        // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
+        // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
+        // predate the per-exercise move simply carry no weight/pump here.
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
+        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
+      });
+      const vRec = a.volume && a.volume[muscle];
+      // Per-muscle workload row (Volume+Load / non-final Meso weeks); drives set deltas.
+      if (vRec && vRec.volume != null) {
+        rows.push({ type: 'volume', subject: muscle, name: 'Workload', sub: workLbl[vRec.volume] || vRec.volume, volume: vRec.volume });
+      }
+      if (rows.length) groups.push({ muscle, rows });
+    });
+    return groups;
+  };
+  // Objective per-exercise earn inputs (exId, key, muscle, allHit, increment) for
+  // this session, mirroring computeMesoGains' earn loop, so a feedback edit can
+  // re-earn weight boosts. Rep-miss cuts are preserved inside the pure helper.
+  // Known limitation (autoreg-v2-spec.md 13.2, accepted): this scores the SEALED session
+  // while computeMesoGains scored PRE-seal, so a set with reps entered but never marked done
+  // (finish() seals it skipped) can flip allHit/earlyMiss here. Rare edge, one increment.
+  const fbEarnInputs = () => {
+    const out = [];
+    (s.entries || []).forEach(e => {
+      if (e.isCardio || !e.exId) return;
+      const ex = store.exercises?.find(x => x.id === e.exId);
+      const muscle = LB.primaryMuscleForExercise(ex);
+      const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
+      // attempted mirrors computeMesoGains' `!workingSets.some(done) continue` guard:
+      // an untouched exercise is neither a hit nor a rep miss and must not move the streak.
+      const attempted = workingSets.length > 0 && workingSets.some(st => st.done);
+      const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+      const allHit = attempted && outcome.allHit;
+      const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
+      const increment = LB.incrementForExercise(store, ex, null);
+      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
+    });
+    return out;
+  };
+  // Rebuild the display groups (read-only shape { muscle, general[], joint[] }) so
+  // the stored recap matches the edited answers on the next render / boot.
+  const fbGroupsForStore = (answers) => {
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const order = [], seen = new Set();
+    (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
+    const wLbl = mesoVolumeLbl(true), workLbl = mesoVolumeLbl(false);
+    const groups = [];
+    order.forEach(muscle => {
+      const general = [], joint = [];
+      const sRec = answers.soreness && answers.soreness[muscle];
+      if (sRec && sRec.answer != null) general.push({ title: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer });
+      (s.entries || []).forEach(e => {
+        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
+        const jRec = answers.joint && answers.joint[e.exId];
+        if (!jRec || jRec.answer == null) return;
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
+        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
+      });
+      const vRec = answers.volume && answers.volume[muscle];
+      if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
+      if (general.length || joint.length) groups.push({ muscle, general, joint });
+    });
+    return groups;
+  };
+  const saveFeedbackEdit = (edit) => {
+    if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
+    // Readiness edit: change the session's readiness + signalWeight, and RESPECT the
+    // new signalWeight so it is not cosmetic. A full->discounted edit freezes the
+    // rep-miss cut (drops this session's -increment and restores the frozen streak);
+    // discounted->full re-enables it. The EARN side stays allowed on discounted, so
+    // it is re-earned unchanged from the (untouched) answers. There is no answer-record
+    // diff here, so bypass applyMesoFeedbackEdit entirely.
+    if (edit.type === 'readiness') {
+      const readiness = edit.readiness;
+      // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
+      // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
+      // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
+      // deload ended mid-session scored 'full' live, so oldCut must re-derive too,
+      // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
+      // are never deload (isMesoSessionEditable excludes them). #D
+      // Two values, not one, and only on a cleanup session do they differ.
+      // STORED: a cleanup session is pinned 'full' whatever the readiness says
+      // (mirrors chooseReadiness in screens-train.jsx), because 'discounted' would
+      // drop it out of detectOverreach's exposure chain and its reduced loads
+      // would then never move the detector's baseline, so the rebuild would read
+      // as a regression.
+      // CUT: the rep-miss cut still has to follow the lifter's own answer, exactly
+      // as computeMesoGains does with its cutSignal. Feeding the pinned 'full' to
+      // recomputeMesoRepMissCut on both sides would make every readiness edit on a
+      // cleanup session a same-side no-op, so a rough -> normal correction would
+      // never re-arm the cut it was meant to re-arm.
+      const oldCut = s.isCleanup
+        ? LB.deriveSignalWeight({ readiness: s.readiness }, false)
+        : LB.deriveSignalWeight(s, !!s.isDeload);
+      const newCut = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      const newSignal = s.isCleanup ? 'full' : newCut;
+      const earnInputs = fbEarnInputs();
+      const repMissBase = fbRaw.repMissBase || null;
+      const groups = fbGroupsForStore(fbRaw.answers);
+      // Recompute the CUT + re-earn on the FRESHEST mesoStates row INSIDE the updater:
+      // a background multi-device sync may have landed a newer row (e.g. fresh
+      // autoregState landmarks) since this sheet opened, and recompute/reearn spread
+      // the row through (...meso). Composing on the stale render-closure `sessionMeso`
+      // and writing it back wholesale would revert those concurrent fields. #3
+      setStore(st => {
+        const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+        // 1. Recompute the CUT for the readiness flip (no-op on a same-side edit).
+        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldCut, newCut);
+        // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
+        //    reearn preserves a re-armed cut and drops a frozen one.
+        const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
+        const composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+        const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, composedMeso.weightBoosts, earnInputs, s.dayId);
+        const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
+        // Write the per-plan localStorage cache in lockstep with the row (same fresh
+        // updatedAt), INSIDE the updater so it is atomic with the store write and can
+        // never be skipped by a deferred updater (mirrors saveMesoState's own in-updater
+        // localStorage write). getMesoState then never masks the edit with a stale cache.
+        try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
+        return {
+          ...st,
+          mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
+          sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
+        };
+      });
+      setFbEdit(null);
+      return;
+    }
+    // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
+    // edit freezes a positive set-add for an at-ceiling muscle exactly like the
+    // live session would have (spec 2.2 / 2.3). LB.primaryMuscleForExercise lives
+    // in store.js, always loaded.
+    const muscleOf = (exId) => LB.primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
+    // Compute at-ceiling over PRIOR exposures, EXCLUDING the edited session itself. The
+    // live session decided its freezes over endedSessions while it was still in-progress
+    // (so its OWN hard sets were not yet counted); store.sessions now contains it as an
+    // ended session, so including it would flip a muscle to at-ceiling that was NOT
+    // capped live and silently strip a set the live session granted. #A
+    const priorSessions = (store.sessions || []).filter(x => x.id !== sessionId);
+    const overreach = editSch ? LB.detectOverreach(priorSessions, editSch, muscleOf) : {};
+    const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
+    // Autoreg v2 P3 numeric MRV cap: also freeze a muscle whose banked current-
+    // microcycle volume has reached its learned MRV (mirror of the live atCeiling
+    // helper). Degrades to detector-only when landmarks/mrv is absent.
+    const cycleSets = editSch ? LB.microcycleSetsByMuscle(priorSessions, editSch, muscleOf, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: sessionMeso?.startDate, startedAt: sessionMeso?.startedAt,
+      startCycleIndex: sessionMeso?.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    }) : {};
+    const landmarks = sessionMeso?.autoregState?.landmarks || {};
+    Object.keys(landmarks).forEach(m => {
+      const lm = landmarks[m];
+      if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
+    });
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
+    const earnInputs = fbEarnInputs();
+    // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
+    // reasoning as the readiness branch above, #3): a background multi-device sync may
+    // have landed a newer row since the sheet opened, and applyMesoFeedbackEdit /
+    // reearnMesoBoostsFromAnswers spread the row through (...meso). Composing on the
+    // stale render-closure `sessionMeso` and writing it back wholesale would revert
+    // those concurrent fields. localStorage is written inside so it stays atomic with
+    // the store write (mirrors saveMesoState).
+    setStore(st => {
+      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+      const r1 = LB.applyMesoFeedbackEdit(cur, fbRaw, edit, ctx);
+      const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
+      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+      const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, stampedMeso.weightBoosts, earnInputs, s.dayId);
+      const groups = fbGroupsForStore(r1.raw.answers);
+      const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+      return {
+        ...st,
+        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
+        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
+      };
+    });
+    setFbEdit(null);
+  };
+
+  // Toggle a single earned weight boost's decline from the recap's "Changes
+  // earned" list, after the fact. Only offered while fbEditable (this session
+  // is still the plan's top-of-stack session, same gate saveFeedbackEdit
+  // already trusts for rewriting weightBoosts wholesale) so a misclick has a
+  // way back without needing the mid-session toast again a week later, and so
+  // toggling here can never land on a key a later session has already moved
+  // on from. Same freshest-row-inside-the-updater pattern as saveFeedbackEdit.
+  const toggleGainDecline = (key) => {
+    if (!fbEditable || !key) return;
+    setStore(st => {
+      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+      const prevDeclines = cur.weightBoostDeclines || {};
+      const nextDeclines = { ...prevDeclines };
+      if (nextDeclines[key]) delete nextDeclines[key]; else nextDeclines[key] = true;
+      const composedMeso = { ...cur, weightBoostDeclines: nextDeclines, updatedAt: new Date().toISOString() };
+      try { localStorage.setItem(LB.MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
+      return { ...st, mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m) };
+    });
+  };
+
+  // Toggle a Smart Progression bump's declined flag, recorded on THIS session
+  // (session-local, never synced, see store.js sessionToRow) the moment the
+  // "PROGRESSION UNLOCKED" toast is answered, either way (Hell yeah or
+  // Decline). Bidirectional, same as the Meso "Changes earned" chip: an
+  // accepted bump can be declined after the fact and vice versa, any number
+  // of times, not just a one-shot undo. Only exposed while it would still
+  // matter: no LATER session has already trained the same exercise on this
+  // day, since progressionSuggestion only ever consults the MOST RECENT
+  // session for a given exId/dayId (recentSessionsForExercise), once a later
+  // one exists, this session's flag no longer feeds any seed and toggling it
+  // here would be a no-op the user could mistake for a fix.
+  const toggleProgressionBump = (key) => {
+    setStore(st => ({
+      ...st,
+      sessions: st.sessions.map(x => {
+        if (x.id !== s.id) return x;
+        const cur = x.progressionBumps?.[key];
+        if (!cur) return x;
+        return { ...x, progressionBumps: { ...x.progressionBumps, [key]: { ...cur, declined: !cur.declined } } };
+      }),
+    }));
+  };
+
+  const prevSameDay = store.sessions
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
+  const compareCandidates = sameDaySessions(store.sessions, s);
 
   // How many exercises this session actually set a PR on, a counterpoint to
   // volDelta below: total volume can land lower than last time even on a
@@ -6341,7 +6339,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       {/* TopBar */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 30px) 22px 14px`, // +16 iOS status-bar-blur delta, see ui.jsx TopBar
         borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',

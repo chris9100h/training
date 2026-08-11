@@ -1753,6 +1753,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own date/time (its own commit path skips the staging entirely, an
   // in-place edit isn't a new item to batch). null the rest of the time.
   const [editingEntry, setEditingEntry] = useStateFd(null);
+  // Same idea as editingEntry, but for a row still sitting in `staged`
+  // (picked, not yet committed). Holds the staged item's id so
+  // confirmLogFood can replace it in place instead of pushing a second
+  // staged copy; keeps that item's own id/date/time/planned rather than the
+  // fresh ones buildQtyEntry() would generate. null the rest of the time.
+  const [editingStagedId, setEditingStagedId] = useStateFd(null);
   // Per-sheet oz/g override: defaults to the Settings-derived unit
   // (UI.massInOz(), "Health > Food > Grams instead of oz/lb") but can be
   // flipped right here for this logging session without touching Settings.
@@ -1893,6 +1899,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // A day that hasn't happened yet can't have anything "already eaten" on it:
   // Log it is unavailable and an edited entry can't be flipped back to logged.
   const curDateIsFuture = curDate > today;
+  // The date the quantity sheet is about to write to. Normally curDate, but a
+  // staged row carries the date it was picked on and survives day navigation,
+  // so editing tomorrow's staged pick from today must still be judged future.
+  const qtyEditingStagedDate = editingStagedId ? staged.find(e => e.id === editingStagedId)?.date : null;
+  const qtyTargetIsFuture = (qtyEditingStagedDate || curDate) > today;
 
   // Plan Mode (settings.planMode, off by default): entries carry a `planned`
   // flag. A planned entry sits in the timeline but does NOT count toward the
@@ -3454,7 +3465,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyFromG(unit && n != null ? fdRound1(n * unit.grams) : null);
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyFromG(null); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyFromG(null); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); setQtyEditPlanned(false); setEditingMealItemId(null); setEditingStagedId(null); }
   // Reopens an already-logged (non-recipe) timeline entry through the same
   // scalable quantity sheet used to log it in the first place, deriving
   // per-100g rates from what it was actually logged at (reAddFromRecent
@@ -3464,6 +3475,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function openEditEntry(entry) {
     setEditingEntry(entry);
     setQtyEditPlanned(!!entry.planned);
+    reAddFromRecent(entry);
+  }
+  // Same idea as openEditEntry, for a row still sitting in `staged` (not a
+  // real foodLogs row yet, so nothing to look up by id there). Non-recipe
+  // only, same restriction the real timeline's tap-to-edit already has:
+  // a staged recipe entry's quantity model is portions, not this sheet's
+  // per-100g scaling, and it has no editingStagedId counterpart here.
+  function openEditStaged(entry) {
+    setEditingStagedId(entry.id);
+    // No setQtyEditPlanned here: the Logged/Planned switch is gated on
+    // editingEntry, so it never renders for a staged edit. Plan vs Logged for a
+    // staged row is decided by the sheet's own Plan it / Log it buttons, which
+    // pass the choice straight into confirmLogFood.
     reAddFromRecent(entry);
   }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
@@ -3650,6 +3674,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         protein: built.protein, carbs: built.carbs, fat: built.fat,
         fiber: built.fiber, sugar: built.sugar, satFat: built.satFat, sodiumMg: built.sodiumMg,
       } : i));
+      closeQtySheet();
+      return;
+    }
+    // Editing a row still sitting in `staged` (see openEditStaged): replace
+    // it in place, keeping its own id/date/time rather than the fresh ones
+    // buildQtyEntry() just generated, same reasoning as the editingEntry
+    // branch below but for a pick that was never committed.
+    // `planned` comes from the caller, NOT from the row: this sheet renders
+    // its Plan it / Log it buttons for a staged edit too (the
+    // `planMode && !editingEntry` branch, editingEntry is null here), so
+    // carrying the old flag over made both buttons silent no-ops in either
+    // direction. With Plan Mode off the only button passes false, which is
+    // also the only valid state for a staged row there.
+    if (editingStagedId) {
+      const id = editingStagedId;
+      setStaged(list => list.map(e => e.id === id ? {
+        ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt,
+        // Keyed on the ROW's own date, not curDate: staged rows survive day
+        // navigation, so a row staged for tomorrow can be edited while the
+        // screen shows today, where curDateIsFuture is false and the footer
+        // therefore offers "Log it". A logged entry on a future date is the one
+        // state Plan Mode forbids, so a future-dated row stays planned whatever
+        // was tapped. The footer hides "Log it" for these rows as well, this is
+        // the backstop, not the only guard.
+        planned: e.date > today ? true : planned,
+      } : e));
       closeQtySheet();
       return;
     }
@@ -4025,7 +4075,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // neither field, so it always falls through to the portions branch below
     // unchanged.
     const gramsMode = entry.loggedCookedGrams != null && entry.loggedCookedWeightG > 0;
-    const m = !gramsMode ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
+    // applyBlockRecipe (merge multiple timeline items into one recipe) reuses
+    // this exact "(x/y)" suffix for a DIFFERENT purpose: x there is just a
+    // running display index (1st, 2nd, ... of the merge), not a chosen/total
+    // portions fraction, every merge-split entry's recipeItems snapshot
+    // always holds exactly ONE portion's worth of the batch regardless of x.
+    // Confirmed via splitBatch.kind, which survives the round trip to
+    // Supabase (split_batch column) and back, so this holds after a reload
+    // too. Without this check, origChosen below took x itself (2, 3, ...)
+    // as if it meant "this entry's snapshot is x/y of the batch", so every
+    // portion past the first reconstructed the wrong full-batch size the
+    // moment its amount was edited.
+    const isMergeSplitPortion = entry.splitBatch?.kind === 'merge';
+    const m = !gramsMode && !isMergeSplitPortion ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
     // The total-portions-at-log-time must come from the entry itself, not the
     // live recipe (recipe.portions may have changed since logging, which
     // would silently rescale this entry's macros against the wrong base).
@@ -4036,6 +4098,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
     const origChosen = gramsMode ? (entry.loggedCookedGrams / entry.loggedCookedWeightG) * totalPortions
+      : isMergeSplitPortion ? 1
       : m ? parseFloat(m[1])
       : totalPortions;
     // Rescale from the entry's OWN frozen ingredient snapshot, not the live
@@ -4539,6 +4602,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     carbs: fdRound1(staged.reduce((a, e) => a + (e.carbs || 0), 0)),
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
+  // What's left of the day's target once this batch is actually added,
+  // shown in the staged bar so a heavy add (rice, etc.) reveals an overshoot
+  // BEFORE committing instead of after. projectedTotals already covers
+  // logged + planned for curDate (Plan Mode's "where the day is headed"
+  // figure) since a planned meal still claims its share of the budget;
+  // stagedTotals is layered on top because it isn't part of dayEntries yet.
+  // null when there's no day target at all, same guard the hero uses for its
+  // ring. Per-macro null (a target with e.g. no carbs set) is passed through
+  // rather than coerced to 0, FdMacroBits below skips it.
+  const remainingTotals = useMemoFd(() => {
+    if (!dayTarget) return null;
+    return {
+      calories: Math.round((goalCalories || 0) - projectedTotals.calories - stagedTotals.calories),
+      protein: dayTarget.protein != null ? fdRound1(dayTarget.protein - projectedTotals.protein - stagedTotals.protein) : null,
+      carbs: dayTarget.carbs != null ? fdRound1(dayTarget.carbs - projectedTotals.carbs - stagedTotals.carbs) : null,
+      fat: dayTarget.fat != null ? fdRound1(dayTarget.fat - projectedTotals.fat - stagedTotals.fat) : null,
+    };
+  }, [dayTarget, goalCalories, projectedTotals, stagedTotals]);
 
   // Docked bar shown whenever there's a staged (picked, quantity already
   // chosen, but not yet logged) batch, on ANY tab, not just Search/Quick Add:
@@ -4581,21 +4662,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <div ref={stagedBarRef} className="intensity-glow" style={{ position: 'relative', zIndex: 1, borderTop: `var(--hair-width) solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.98)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
         {pickedExpanded && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
-            {staged.map(e => (
-              <div key={e.id} style={fdDraftRow}>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                  <span style={fdEntryMeta}>
-                    {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
-                    <span style={fdMetaDivider} />
-                    <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
-                  </span>
+            {staged.map(e => {
+              const isRecipe = e.source === 'recipe';
+              return (
+                <div key={e.id} style={fdDraftRow}>
+                  {/* Reopens the quantity sheet on the amount this item was
+                      picked at, so a batch that turns out to overshoot
+                      Remaining (see the line below the header) can be
+                      corrected without removing and re-picking from scratch.
+                      Recipe picks are excluded: their quantity model is
+                      portions, not this sheet's per-100g scaling (same
+                      restriction the real timeline's tap-to-edit has). */}
+                  <div onClick={isRecipe ? undefined : () => openEditStaged(e)}
+                    style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, cursor: isRecipe ? 'default' : 'pointer' }}>
+                    <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+                    <span style={fdEntryMeta}>
+                      {e.time} · {fdDisplayG(e) ? `${fdMassOf(e)} · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                    </span>
+                  </div>
+                  <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                  </button>
                 </div>
-                <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                  <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
@@ -4642,6 +4734,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </Btn>
           </span>
         </div>
+        {/* Budget left for the day once this batch actually lands, so a heavy
+            add (a cup of rice, say) shows the overshoot BEFORE the tap on Add
+            instead of after, when it's a correction. Always visible (not
+            just expanded) since it's exactly the moment-of-decision info the
+            collapsed bar exists for. Hidden with no day target set, same as
+            the rest of the module's target-driven UI. */}
+        {remainingTotals && (
+          <>
+            <div className="knurl" />
+            {/* fontSize set once on this wrapper (not per span) so FdMacroBits,
+                which sets no font-size of its own and inherits it same as
+                every other call site, actually comes out at 10px too instead
+                of the ambient default: the same "Adding N items" row's macro
+                span above sets it exactly this way. */}
+            <div style={{ textAlign: 'center', padding: '6px 12px 8px', fontSize: 10 }}>
+              <span style={{ fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkFaint, marginRight: 6 }}>Remaining:</span>
+              <span className="num" style={{ fontWeight: 600, color: UI.warn }}>{remainingTotals.calories} kcal</span>
+              <span style={fdMetaDivider} />
+              <FdMacroBits protein={remainingTotals.protein} carbs={remainingTotals.carbs} fat={remainingTotals.fat} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   ) : null;
@@ -5583,17 +5697,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ) : planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                {/* Always a fresh pick here (never editingEntry, the branch condition
-                    guarantees it), so this always stages: the chip flight always fires. */}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
+                {/* Never an editingEntry here (the branch condition guarantees it), so
+                    this either stages a fresh pick, with the chip flight, or replaces a
+                    row already staged (editingStagedId, no flight since the chip is
+                    already on screen). Either way the button pressed IS the plan/log
+                    decision, which confirmLogFood takes from its argument.
+                    "Future" is the EDITED ROW's date when editing a staged row, not
+                    curDate: staged rows survive day navigation, so a row staged for
+                    tomorrow can be edited from today and must not be offered "Log it". */}
+                <Btn kind={qtyTargetIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: qtyTargetIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!qtyTargetIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                {/* "Add" (fresh pick, stages) fires the chip flight; "Save" (editingEntry,
-                    an in-place update, never touches staged) does not. */}
-                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
+                {/* "Add" (fresh pick, stages) fires the chip flight; "Save" does not:
+                    editingEntry is an in-place update that never touches staged, and
+                    editingStagedId replaces a staged row that is already on screen. */}
+                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry || editingStagedId ? 'Save' : 'Add'}</Btn>
               </div>
             )}
           </>
@@ -11585,7 +11706,7 @@ function FdScanner({ onClose, onDetect }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000', display: 'flex', flexDirection: 'column', animation: 'sheet-up 0.22s ease' }}>
-      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 28px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
         <span style={{ flex: 1, color: '#fff', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600 }}>Scan barcode</span>
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>
@@ -11819,21 +11940,30 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // (Plan Mode's timeline category card), folded into this SAME line rather
 // than a second one, so showing a planned amount never changes a card's
 // height, only how much this one line says.
+// val == null skips that macro entirely (rather than printing "0") so a
+// caller with a partial target (e.g. only protein/fat set, no carbs) can
+// pass null for the missing one instead of faking a zero.
 function FdMacroBits({ protein, carbs, fat, strong, plannedProtein, plannedCarbs, plannedFat }) {
   const w = strong ? 700 : 600;
-  const bit = (val, planned, color, label) => (
-    <span className="num" style={{ fontWeight: w, color }}>
+  const bit = (val, planned, color, label) => val == null ? null : (
+    <span key={label} className="num" style={{ fontWeight: w, color }}>
       {label}{Math.round(val)}
       {planned > 0 && <span style={{ fontWeight: 600, opacity: 0.65 }}>+{Math.round(planned)}</span>}
     </span>
   );
+  const bits = [
+    bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P'),
+    bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C'),
+    bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F'),
+  ].filter(Boolean);
+  const parts = [];
+  bits.forEach((el, i) => {
+    if (i > 0) parts.push(<span key={`d${i}`} style={{ color: UI.inkGhost }}>·</span>);
+    parts.push(el);
+  });
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      {bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P')}
-      <span style={{ color: UI.inkGhost }}>·</span>
-      {bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C')}
-      <span style={{ color: UI.inkGhost }}>·</span>
-      {bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F')}
+      {parts}
     </span>
   );
 }

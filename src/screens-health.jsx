@@ -3357,7 +3357,7 @@ function AdaptiveTdeeChart({ history }) {
       const weightStart = displayWeight(p.weightStartKg);
       const weightEnd = displayWeight(p.weightEndKg);
       const rate = displayWeight(p.weightRateKgWeek);
-      const weightUnit = isLbs ? 'lbs' : 'kg';
+      const weightUnit = UI.unit();
       const rows = [
         { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
         { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
@@ -3378,7 +3378,7 @@ function AdaptiveTdeeChart({ history }) {
       }
       const sub = [
         statusLabel(p),
-        rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
+        rate != null ? 'trend ' + signed(rate) + UI.unit() + '/wk' : null,
       ].filter(Boolean).join(' · ');
       return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
     });
@@ -3458,6 +3458,12 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
         </div>
       ) : (
         <>
+          {loadStatus === 'offline' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4 }}>
+              <span style={{ flex: 1, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '14px' }}>Showing history rebuilt from your logs. Could not confirm with the server.</span>
+              {onRetry && <button onClick={onRetry} style={{ flexShrink: 0, padding: '6px 10px', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, background: 'transparent', color: UI.ink, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Retry</button>}
+            </div>
+          )}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 10 }}>
             Drag across the chart to inspect each estimate. TDEE is the accent line, the gold line is the suggested intake, and the dashed line is what you actually averaged. Weight uses the full two-week window, while the trend is shown as a one-week rate. Both are included in the inspected point.
           </div>
@@ -3472,14 +3478,14 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
             ? <AdaptiveTdeeChart history={history} />
             : weightSeries.length > 0
               ? <HealthLineChart series={weightSeries} from={weightSeries[0].date} to={weightSeries[weightSeries.length - 1].date}
-                format={v => String(v) + (isLbs ? 'lbs' : 'kg')} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
+                format={v => String(v) + UI.unit()} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
               : <HealthChartEmpty label="No weight signal in this history yet" />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
             {history.map(row => {
               const weightStart = displayWeight(row.weightStartKg);
               const weightEnd = displayWeight(row.weightEndKg);
               const rate = displayWeight(row.weightRateKgWeek);
-              const weightUnit = isLbs ? 'lbs' : 'kg';
+              const weightUnit = UI.unit();
               const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
               const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
               return (
@@ -3611,7 +3617,19 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
         targetsSnapshot: targetSnapshot,
       })
       : null;
-    const historyRows = [...previousRows, currentRow].filter(Boolean);
+    const rawRows = [...previousRows, currentRow].filter(Boolean);
+    // mergeAdaptiveTdeeHistory prefers source:'live' over any other source
+    // for the same date. Merging against whatever the store already holds
+    // for these exact dates (not just the raw reconstructed+current rows)
+    // means a reconstructed row here can never silently downgrade an
+    // already-confirmed live row, e.g. if calc.lastCheckinAt/lastAppliedAt
+    // point at a date the server already has a live decision for. Scoped to
+    // just the dates this checkin touched, not the whole history, so this
+    // still only writes what changed.
+    const existingForTheseDates = (store.adaptiveTdeeHistory || []).filter(
+      row => rawRows.some(r => r.asOfDate === row.asOfDate)
+    );
+    const historyRows = LB.mergeAdaptiveTdeeHistory(existingForTheseDates, rawRows);
     setStore(s => ({
       ...s,
       adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(s.adaptiveTdeeHistory || [], historyRows),
@@ -3728,7 +3746,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
                 </div>
                 <div style={{ marginTop: 5, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
                   {previousWeight != null && currentWeight != null
-                    ? 'Weight signal: ' + String(previousWeight) + ' → ' + String(currentWeight) + ' ' + (isLbs ? 'lbs' : 'kg')
+                    ? 'Weight signal: ' + String(previousWeight) + ' → ' + String(currentWeight) + ' ' + UI.unit()
                     : 'Weight signal from the previous estimate is available in history.'}
                 </div>
               </div>
@@ -4804,7 +4822,26 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     const processRows = serverRows => {
       if (cancelled) return;
       if (serverRows == null) {
-        setTdeeHistoryStatus('error');
+        // loadAdaptiveTdeeHistory swallows a Supabase {error} (network blip,
+        // 500, ...) and resolves null rather than rejecting (see its own
+        // comment), so this is the "server unreachable" branch, not "no
+        // history yet". Reconstruction is a pure, network-free computation
+        // over already-loaded local logs, the exact fallback the happy path
+        // below already uses to fill in gaps, so use it here too instead of
+        // leaving the user with a bare error while perfectly reconstructable
+        // history sits in already-loaded local logs.
+        const rebuilt = LB.reconstructAdaptiveTdeeHistory(store, userId, [calc.lastCheckinAt, calc.lastAppliedAt]);
+        const mergedHistory = LB.mergeAdaptiveTdeeHistory(rebuilt, store.adaptiveTdeeHistory || []);
+        if (mergedHistory.length) {
+          setStore(s => s ? { ...s, adaptiveTdeeHistory: LB.mergeAdaptiveTdeeHistory(mergedHistory, s.adaptiveTdeeHistory || []) } : s);
+          // Deliberately not cached (unlike the real success path below):
+          // this was never confirmed by the server, so the next open (or a
+          // Retry tap) must try the real fetch again, not quietly reuse a
+          // reconstructed stand-in forever.
+          setTdeeHistoryStatus('offline');
+        } else {
+          setTdeeHistoryStatus('error');
+        }
         return;
       }
       const rawServerHistory = serverRows || [];
@@ -4844,7 +4881,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     LB.loadAdaptiveTdeeHistory(userId).then(processRows).catch(error => {
       if (cancelled) return;
       console.error('adaptive TDEE history refresh failed:', error);
-      setTdeeHistoryStatus('error');
+      processRows(null); // same offline-reconstruction fallback as a resolved null
     });
     return () => { cancelled = true; };
   }, [tdeeHistoryOpen, tdeeHistoryInputKey, tdeeHistoryRetry, userId]);

@@ -100,7 +100,17 @@ function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
       flexShrink: 0,
-      padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0',
+      // +30px, not the original +14px: a newer iOS shows a smeared clock/
+      // battery/signal readout right at a screen header's top edge on at
+      // least one phone (2026-08). Confirmed NOT a bleed-through-the-status-
+      // bar issue (a solid, maxed-z-index shield covering the whole reported
+      // env(safe-area-inset-top), at several heights, had zero effect on the
+      // blur itself), so this isn't chasing that theory, just giving the
+      // real header content clearance from whatever renders that way.
+      // +16px is the on-device-confirmed delta (screens-home.jsx's own
+      // plan-active header, +12 -> +28), applied uniformly here and at
+      // every other screen-header safe-area offset in the app.
+      padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0',
       position: 'sticky', top: 0,
       background: 'rgba(var(--bg-rgb),0.97)',
       backdropFilter: 'blur(8px)',
@@ -838,6 +848,27 @@ function Toggle({ on, onToggle, disabled = false, label }) {
   );
 }
 
+// Every currently open Sheet registers its own token here in mount order, so
+// a stacked Escape press (e.g. a zIndex:200 child opened over its still-open
+// zIndex:100 parent, a real pattern in this app) closes only the TOPMOST
+// sheet. A plain per-Sheet `document.addEventListener('keydown', ...)` with
+// only stopPropagation() cannot do this alone: stopPropagation blocks
+// bubbling to ancestor DOM nodes, not sibling listeners registered on the
+// same document node, so both sheets' handlers still fire from one keypress.
+// Also gates the Tab focus trap below the same way: only the topmost sheet
+// should constrain Tab, a background parent doing the same would fight it.
+const _openSheetStack = [];
+
+// Standard interactive-element selector for a lightweight focus trap.
+// offsetParent === null filters out display:none descendants (a collapsed
+// accordion section, a hidden tab panel) without pulling in a full
+// visibility library for what is deliberately a minimal trap.
+function focusableIn(container) {
+  if (!container) return [];
+  const nodes = container.querySelectorAll('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  return Array.prototype.filter.call(nodes, el => el.offsetParent !== null || el === document.activeElement);
+}
+
 // ─── Sheet ──────────────────────────────────────────────────────────
 // keyboardHeight: lets a caller report a non-native on-screen keyboard (e.g.
 // this app's custom numeric keypad, which focuses no real <input> so the
@@ -900,16 +931,66 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       }
     };
   }, [open]);
+  const stackTokenRef = React.useRef({});
+  // onClose is read through a ref, and is deliberately NOT a dependency of the
+  // stack effect below. Practically every call site passes a fresh closure each
+  // render (a bare `function` in the component body, or an inline arrow), so
+  // depending on it made the effect tear down and re-push on EVERY render:
+  // React flushes passive effects destroy-all-then-create-all in tree order, so
+  // the stack re-sorted itself into JSX declaration order instead of the order
+  // the sheets actually opened. Any sheet that opens ON TOP of one declared
+  // earlier in the same component then lost Escape (and the Tab trap) to the
+  // sheet behind it, e.g. the Food Tracker's quantity sheet over its still-open
+  // "Review meal" list, or useConfirm's portal dialog in any screen that
+  // renders {confirmEl} above its own sheets. Depending on [open] alone makes
+  // the push order exactly the open order again.
+  // Synced in an effect, not during render: a concurrent render React discards
+  // must not leave a handler the app never committed sitting in the ref. The
+  // useRef initializer covers the very first render, and the ref is only ever
+  // read from a DOM event, which cannot fire before a commit.
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; });
   React.useEffect(() => {
     if (!open) return;
+    const token = stackTokenRef.current;
+    _openSheetStack.push(token);
+    const isTopmost = () => _openSheetStack[_openSheetStack.length - 1] === token;
     const onKeyDown = (event) => {
-      if (event.key !== 'Escape' || !onClose) return;
-      event.stopPropagation();
-      onClose();
+      if (event.key === 'Escape') {
+        const close = onCloseRef.current;
+        if (!close || !isTopmost()) return;
+        event.stopPropagation();
+        close();
+        return;
+      }
+      // Trap Tab within this sheet's own focusable elements while it's the
+      // topmost open one, same "keyboard stays down until the user taps a
+      // field" spirit as the blur-on-open effect above: the initial focus
+      // sits on the panel container itself (not a child), so the first Tab
+      // must still land on the sheet's first real control instead of
+      // escaping straight to whatever the background screen would be next
+      // in document order.
+      if (event.key === 'Tab' && isTopmost()) {
+        const focusable = focusableIn(panelNodeRef.current);
+        if (!focusable.length) { event.preventDefault(); panelNodeRef.current?.focus?.(); return; }
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        const current = document.activeElement;
+        const onPanel = current === panelNodeRef.current;
+        const outside = !panelNodeRef.current?.contains(current);
+        if (event.shiftKey) {
+          if (onPanel || outside || current === first) { event.preventDefault(); last.focus(); }
+        } else {
+          if (onPanel || outside || current === last) { event.preventDefault(); first.focus(); }
+        }
+      }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const idx = _openSheetStack.indexOf(token);
+      if (idx !== -1) _openSheetStack.splice(idx, 1);
+    };
+  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -1007,6 +1088,10 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
+          // The dialog container receives programmatic focus to keep the
+          // keyboard down when a sheet opens. iOS otherwise paints its
+          // native blue focus ring around the whole panel.
+          outline: 'none',
           // The panel draws the same paper grid as Screen does (bg-texture
           // above), so plain text sitting on it needs the same lift Screen
           // gives its own children (verified directly: without this, the
@@ -1305,7 +1390,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
-      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 14px',
+      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 14px', // +16 iOS status-bar-blur delta, see TopBar above
       position: 'relative', ...style,
     }}>
       {sub && (

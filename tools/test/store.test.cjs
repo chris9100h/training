@@ -68,26 +68,54 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.todayISO(), expected);
   });
 
-  test('saveSyncedState stores one snapshot and loadLocalState reuses it as the base', () => {
+  test('saveSyncedState stores one atomic pair entry and loadLocalState reuses it as the base', () => {
     const state = { user: { name: 'A' }, sessions: [] };
     assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);
-    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-cache-user'));
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-pair-cache-user'));
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-cache-user'), null);
     assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-cache-user'), null);
     const loaded = LB.loadLocalState('cache-user');
     assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(state));
     assert.strictEqual(loaded.base, loaded.store);
   });
 
-  test('saveLocalState keeps a separate base only while local edits are pending', () => {
+  test('saveLocalState folds a distinct base into the same atomic entry only while local edits are pending', () => {
     const base = { settings: { unit: 'kg' }, sessions: [] };
     const edited = { settings: { unit: 'lbs' }, sessions: [] };
     assert.strictEqual(LB.saveLocalState(edited, base, 'pending-user'), true);
-    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'));
+    const rawPending = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-user'));
+    assert.ok(rawPending.base, 'a pending edit must persist its own base inside the pair entry');
     const pending = LB.loadLocalState('pending-user');
     assert.strictEqual(pending.store.settings.unit, 'lbs');
     assert.strictEqual(pending.base.settings.unit, 'kg');
     assert.strictEqual(LB.saveSyncedState(edited, 'pending-user'), true);
-    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'), null);
+    const rawSynced = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-user'));
+    assert.strictEqual(rawSynced.base, null, 'base is omitted from the pair entry once local state is confirmed synced');
+  });
+
+  test('loadLocalState falls back to the pre-migration two-key format, then saveLocalState migrates it', () => {
+    const legacyBase = { settings: { unit: 'kg' } };
+    const legacyStore = { settings: { unit: 'lbs' } };
+    storeWindow.__testLocalStorage.setItem('logbook-legacy-user', JSON.stringify(legacyStore));
+    storeWindow.__testLocalStorage.setItem('logbook-base-legacy-user', JSON.stringify(legacyBase));
+    const loaded = LB.loadLocalState('legacy-user');
+    assert.strictEqual(loaded.store.settings.unit, 'lbs');
+    assert.strictEqual(loaded.base.settings.unit, 'kg');
+    assert.strictEqual(LB.saveLocalState(loaded.store, loaded.base, 'legacy-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-pair-legacy-user'), 'the atomic entry must exist after migrating');
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-legacy-user'), null, 'the old store key must be cleaned up');
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-legacy-user'), null, 'the old base key must be cleaned up');
+  });
+
+  test('saveToLocal (emergency flush) writes through the same atomic entry and keeps the last known base', () => {
+    const base = { settings: { unit: 'kg' }, sessions: [] };
+    const edited = { settings: { unit: 'lbs' }, sessions: [] };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'flush-user'), true);
+    const flushed = { settings: { unit: 'lbs' }, sessions: [{ id: 'mid-typing' }] };
+    assert.strictEqual(LB.saveToLocal(flushed, 'flush-user'), true);
+    const loaded = LB.loadLocalState('flush-user');
+    assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(flushed), 'the emergency flush value must be readable back');
+    assert.strictEqual(loaded.base.settings.unit, 'kg', 'the emergency flush must not silently mark the edit as already synced');
   });
 
   await testAsync('refreshHealthLogs does not issue medication reads while the feature is disabled', async () => {
@@ -754,6 +782,158 @@ async function testAsync(name, fn) {
     const fresh = [mkInWindow(90)]; // server's stale pre-edit value
     const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
     assert.strictEqual(sessions[0].entries[0].sets[0].kg, 130, 'the offline edit must survive even with no usable base to compare against');
+  });
+
+  // ── mergeSessions: unsynced session-scalar edits (audit H2) ──────────────
+  // finish() (screens-train.jsx) sets `ended` and clears inProgress in the
+  // SAME action, so a real just-finished session always has isActive=false
+  // by the time any later boot merge runs. Before this fix `ended` had no
+  // "differs from base -> keep local" protection at all (only entries/sets
+  // did, H1), so a reload landing before the `ended` sync confirmed reverted
+  // it straight back to the server's stale null, silently forgetting the
+  // session had ever finished (real user report, 2026-08).
+  test('mergeSessions keeps an unsynced local `ended` even though inProgress is already cleared', () => {
+    const base = [{ id: 's1', date: '2026-06-10', ended: null, entries: [] }];
+    const cur = [{ id: 's1', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', durationMinutes: 42, entries: [] }];
+    const fresh = [{ id: 's1', date: '2026-06-10', ended: null, entries: [] }]; // server predates the finish
+    // inProgress is null: exactly finish()'s own post-condition, not the
+    // session's id, so isActive is false for this session either way.
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'the unsynced finish must survive the boot merge');
+    assert.strictEqual(sessions[0].durationMinutes, 42);
+  });
+  test('mergeSessions trusts the server ended when local matches the base (remote finish wins)', () => {
+    const base = [{ id: 's2', date: '2026-06-10', ended: null, entries: [] }];
+    const cur = [{ id: 's2', date: '2026-06-10', ended: null, entries: [] }]; // no local change
+    const fresh = [{ id: 's2', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', entries: [] }]; // finished on another device
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'server value must win when this device made no edit');
+  });
+  test('mergeSessions keeps an unsynced `ended` with no usable base (H2, mirrors the H1 gap)', () => {
+    const cur = [{ id: 's3', date: '2026-06-10', ended: '2026-06-10T11:00:00Z', entries: [] }];
+    const fresh = [{ id: 's3', date: '2026-06-10', ended: null, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now); // no base at all (legacy cache)
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'nothing to compare against must not resolve to "trust the server"');
+  });
+  test('mergeSessions protects other synced session scalars the same way (feel, isCleanup)', () => {
+    const base = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: null, isCleanup: false, entries: [] }];
+    const cur = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: 'great', isCleanup: true, entries: [] }];
+    const fresh = [{ id: 's4', date: '2026-06-10', ended: 'x', feel: null, isCleanup: false, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great');
+    assert.strictEqual(sessions[0].isCleanup, true);
+  });
+  // The H2 scalar test above compared jsonb by reference, so ANY session
+  // carrying a mesoRecap counted as "locally edited" forever: store and base
+  // are two separately parsed subtrees of the persisted cache pair, never
+  // reference-equal even when deep-equal. Every one of the 14 fields then got
+  // pinned to the stale cache and pushed back over a newer server value.
+  test('mergeSessions does not treat a deep-equal mesoRecap as a local edit', () => {
+    const recap = { groups: [{ muscle: 'chest', general: [{ title: 'Soreness', sub: 'None' }], joint: [] }], gains: [] };
+    const base = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'ok', mesoRecap: recap, entries: [] }];
+    // Separately parsed copy, exactly what loadLocalState's `parsed.base ?? store`
+    // hands back whenever a sync was still pending when the cache was written.
+    const cur = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'ok', mesoRecap: JSON.parse(JSON.stringify(recap)), entries: [] }];
+    const fresh = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'great', mesoRecap: JSON.parse(JSON.stringify(recap)), entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great', 'no local edit was made, so the other device\'s feel must win');
+  });
+  test('mergeSessions ignores jsonb key order when deciding "locally edited"', () => {
+    // Postgres jsonb normalizes key order, the in-memory object keeps insertion
+    // order, so a plain JSON.stringify compare would also have been wrong here.
+    const base = [{ id: 's6', ended: 'x', feel: 'ok', mesoRecap: { a: 1, b: { x: 1, y: 2 } }, entries: [] }];
+    const cur = [{ id: 's6', ended: 'x', feel: 'ok', mesoRecap: { b: { y: 2, x: 1 }, a: 1 }, entries: [] }];
+    const fresh = [{ id: 's6', ended: 'x', feel: 'great', mesoRecap: { a: 1, b: { x: 1, y: 2 } }, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great');
+  });
+  test('mergeSessions still keeps a genuinely edited mesoRecap', () => {
+    const base = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [] }, entries: [] }];
+    const cur = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [{ key: 'bench_d1' }] }, entries: [] }];
+    const fresh = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [] }, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.deepStrictEqual(sessions[0].mesoRecap.gains, [{ key: 'bench_d1' }], 'a real post-hoc feedback edit must still survive');
+  });
+  test('mergeSessions only overrides the fields this device actually edited', () => {
+    // An older cache has no signalWeight at all while the server does. The
+    // all-or-nothing override nulled it out purely because `feel` differed.
+    const base = [{ id: 's8', ended: 'x', feel: null, entries: [] }];
+    const cur = [{ id: 's8', ended: 'x', feel: 'great', entries: [] }];
+    const fresh = [{ id: 's8', ended: 'x', feel: null, signalWeight: 'full', readiness: 4, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great', 'the edited field still wins');
+    assert.strictEqual(sessions[0].signalWeight, 'full', 'an untouched field must keep the server value, not be nulled');
+    assert.strictEqual(sessions[0].readiness, 4);
+  });
+  test('mergeSessions with no base does not null fields the cache never had', () => {
+    const cur = [{ id: 's9', ended: '2026-06-10T11:00:00Z', entries: [] }];
+    const fresh = [{ id: 's9', ended: null, signalWeight: 'full', entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'the H2 no-base bias still holds for what the cache does carry');
+    assert.strictEqual(sessions[0].signalWeight, 'full', 'but a field the cache never had must not be nulled');
+  });
+  // Per-field granularity must not split fields that are only meaningful
+  // together. deriveSignalWeight maps readiness MANY-to-one onto signalWeight,
+  // so a local 'rough' -> 'reentry' correction leaves signalWeight untouched;
+  // taking the server's signalWeight next to the local readiness would score a
+  // re-entry day as a full autoregulation signal.
+  test('mergeSessions keeps readiness and signalWeight together when either is edited', () => {
+    const base = [{ id: 's10', ended: 'x', readiness: 'rough', signalWeight: 'discounted', entries: [] }];
+    const cur = [{ id: 's10', ended: 'x', readiness: 'reentry', signalWeight: 'discounted', entries: [] }];
+    const fresh = [{ id: 's10', ended: 'x', readiness: 'normal', signalWeight: 'full', entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].readiness, 'reentry');
+    assert.strictEqual(sessions[0].signalWeight, 'discounted', 'signalWeight must follow its own readiness, not the server\'s');
+  });
+  test('mergeSessions keeps ended and durationMinutes together', () => {
+    const base = [{ id: 's11', ended: null, startedAt: 'a', durationMinutes: null, entries: [] }];
+    const cur = [{ id: 's11', ended: '2026-06-10T11:00:00Z', startedAt: 'a', durationMinutes: 42, entries: [] }];
+    const fresh = [{ id: 's11', ended: null, startedAt: 'a', durationMinutes: 99, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z');
+    assert.strictEqual(sessions[0].durationMinutes, 42, 'the duration belonging to the local finish, not the server\'s');
+  });
+
+  // ── the same jsonb key-order trap, one level down ────────────────────────
+  // normSet feeds BOTH the sync diff and the boot merge's set-level test, and
+  // drops/hornLoads are jsonb: the app writes {partials, stretch}, Postgres
+  // hands back {stretch, partials}. A raw JSON.stringify called that an edit.
+  test('normSet ignores jsonb key order in a set\'s drops', () => {
+    // The app writes drops in this order (screens-train.jsx)...
+    const local = { kg: 100, reps: 5, done: true, technique: 'lengthened_partial', drops: { partials: 3, stretch: 1 } };
+    // ...and anything that has been through the jsonb column comes back in the
+    // order Postgres normalizes to, which is what the persisted base holds.
+    const fromJsonb = { kg: 100, reps: 5, done: true, technique: 'lengthened_partial', drops: { stretch: 1, partials: 3 } };
+    assert.strictEqual(LB.normSet(local), LB.normSet(fromJsonb), 'key order alone must not read as a changed set');
+    const reallyChanged = { ...local, drops: { partials: 4, stretch: 1 } };
+    assert.notStrictEqual(LB.normSet(local), LB.normSet(reallyChanged), 'a real change must still register');
+  });
+  test('mergeSessions ignores jsonb key order in a set\'s drops', () => {
+    const mkSet = (drops, kg) => ({ kg, reps: 5, done: true, technique: 'lengthened_partial', drops });
+    const mkEntry = (drops, kg) => [{ exId: 'e1', name: 'Bench', sets: [mkSet(drops, kg)] }];
+    // base is the last confirmed-synced snapshot, i.e. server-shaped (jsonb key
+    // order); cur is this device's in-memory copy, in the app's own order. They
+    // are the SAME set, and nothing was edited locally.
+    const base = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ stretch: 1, partials: 3 }, 100) }];
+    const cur = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ partials: 3, stretch: 1 }, 100) }];
+    // Another device raised the load since.
+    const fresh = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ stretch: 1, partials: 3 }, 105) }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 105, 'no local edit was made, so the other device\'s load must win');
+  });
+  test('mergeCollectionById ignores jsonb key order but still keeps a real local edit', () => {
+    const base = [{ id: 'p1', name: 'Push', days: [{ id: 'd1', name: 'A' }] }];
+    const unchangedLocal = [{ id: 'p1', name: 'Push', days: [{ name: 'A', id: 'd1' }] }]; // jsonb order
+    const renamedOnServer = [{ id: 'p1', name: 'Push v2', days: [{ id: 'd1', name: 'A' }] }];
+    assert.strictEqual(
+      LB.mergeCollectionById(renamedOnServer, unchangedLocal, base, null)[0].name, 'Push v2',
+      'key order alone must not count as a local edit',
+    );
+    const editedLocal = [{ id: 'p1', name: 'Push local', days: [{ id: 'd1', name: 'A' }] }];
+    assert.strictEqual(
+      LB.mergeCollectionById(renamedOnServer, editedLocal, base, null)[0].name, 'Push local',
+      'a genuine unsynced local edit must still win',
+    );
   });
 
   await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {

@@ -1,5 +1,6 @@
 // Medication reminder cron function (Medications feature). Mirrors the meal
 import { localClock } from '../_shared/time.ts';
+import { sendNotification } from '../_shared/notifications.ts';
 
 // reminder's channel mechanics (opted-in users, push via Pushover or Web
 // Push) but firing is STATE-BASED rather than window-based since the
@@ -13,8 +14,8 @@ import { localClock } from '../_shared/time.ts';
 //     nudge. State-based, not window-based, so a tick skipped by cron
 //     downtime still nudges on the next tick instead of silently dropping
 //     the only chance (the old 1h-window predicate had that failure mode).
-//   - nudged once (reminder_count = 1) and >= 2h since that nudge: second
-//     nudge.
+//   - nudged once (reminder_count = 1) and >= 2h (minus NUDGE_SLACK_MS, see
+//     below) since that nudge: second nudge.
 //   - reminder_count >= 2: never again (cap: 2 nudges per day per dose).
 // The per-row count is naturally per-day: each local date materializes its
 // own planned row, so "per day" needs no separate reset.
@@ -48,12 +49,23 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a scheduled dose is this far past its time
 const NUDGE_MS = 2 * 60 * 60 * 1000;  // second nudge no sooner than this long after the first
 const WINDOW_MS = 60 * 60 * 1000;     // yesterday-row bound: only the tick that crosses a late dose's threshold
 const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-dose (>=23:00) day-boundary look-back
+// Tolerance on the NUDGE_MS check only (see `due` below): unlike GRACE_MS,
+// which compares THIS tick's own `now` against a fixed schedule time and so
+// can only ever run late relative to the hour it fires in, NUDGE_MS compares
+// this tick's `now` against `sentAt`, a timestamp stamped by a DIFFERENT,
+// earlier tick's own `Date.now()`. Both invocations carry independent
+// cron-dispatch/cold-start latency (observed a few seconds), so whenever the
+// later tick happens to start faster than the earlier one did, a strict
+// `now >= sentAt + NUDGE_MS` can miss by a couple seconds, deferring the
+// nudge a full hour, and if the dose gets logged before that next tick, the
+// second nudge silently never fires at all (confirmed happening 2026-08-11).
+// 5 minutes comfortably covers that jitter without blurring which hourly
+// tick is "meant" to catch a given row.
+const NUDGE_SLACK_MS = 5 * 60 * 1000;
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -67,39 +79,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
       ...(options.headers ?? {}),
     },
   });
-}
-
-async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  // Everything is inside one try/catch: a fetch-level rejection here (DNS,
-  // connection reset, timeout) must degrade to "failed, retry next tick"
-  // like any other push failure, never abort the whole cron loop mid-tick
-  // and rob every later user of their nudge.
-  try {
-    // Pre-check the subscription: web-push itself answers 202 before async
-    // delivery and returns 202 even with no subscription rows, so a dead
-    // subscription would otherwise count as "pushed" and silently consume
-    // the nudge budget (count advances, the user never receives it, no
-    // retry). Without any subscription there is nothing to deliver to, so
-    // report failure and let the next tick retry (one cheap query per tick;
-    // a later re-subscription then delivers).
-    const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${userId}&select=id`);
-    if (!subRes.ok) return false;
-    const subs: { id: string }[] = await subRes.json().catch(() => []);
-    if (!subs.length) {
-      console.error(`[medication-reminder] no web-push subscription for ${userId}, skipping nudge`);
-      return false;
-    }
-    const res = await fetch(`${base}/functions/v1/web-push`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, title, message }),
-    });
-    return res.ok;
-  } catch (e) {
-    console.error(`[medication-reminder] web-push error for ${userId}:`, e);
-    return false;
-  }
 }
 
 interface Row {
@@ -266,7 +245,7 @@ async function sendReminders() {
       if (snoozeUntil > sentAt) return now >= snoozeUntil;
       if (e.date !== localDate && past >= WINDOW_MS) return false;
       if (count === 0) return true;
-      return now >= sentAt + NUDGE_MS;
+      return now >= sentAt + NUDGE_MS - NUDGE_SLACK_MS;
     });
     if (!due.length) continue;
 
@@ -280,11 +259,10 @@ async function sendReminders() {
     // possible to protect on both sides of, via the rollback below). Rows in
     // one tick can sit at different counts (a first nudge for one dose, a
     // second for another), so group by the target count and PATCH each
-    // group once. return=minimal: nothing to read back. Only touches the
-    // reminder columns, never planned/date/etc, so logging the dose later
-    // works unchanged. Rows whose state failed to persist are NOT pushed
-    // this tick: they retry next tick with the count unchanged, one attempt
-    // per tick instead of unbounded duplicates.
+    // group once. Only touches the reminder columns, never planned/date/etc,
+    // so logging the dose later works unchanged. Rows whose state failed to
+    // persist are NOT pushed this tick: they retry next tick with the count
+    // unchanged, one attempt per tick instead of unbounded duplicates.
     const byCount = new Map<number, string[]>();
     for (const e of due) {
       const target = (e.reminder_count ?? 0) + 1;
@@ -292,19 +270,49 @@ async function sendReminders() {
       ids.push(e.id);
       byCount.set(target, ids);
     }
-    const failedIds = new Set<string>();
+    // Compare-and-swap, not a blind write, exactly like meal-reminder's own
+    // claim: the filter pins reminder_count to the value this tick READ, so
+    // PostgREST applies it atomically and a concurrent invocation (a manual
+    // POST racing the hourly cron, both explicitly supported by this handler)
+    // matches zero rows instead of claiming the same dose a second time. With
+    // a bare id filter both invocations got a 2xx, both pushed the identical
+    // nudge, and the row was left one short of its target, so the 2h follow-up
+    // branch fired a THIRD nudge past the 2-per-day cap documented above.
+    // return=representation rather than minimal so `claimed` is what this tick
+    // actually won, which is also what the message below must describe.
+    const claimedIds = new Set<string>();
     for (const [target, ids] of byCount) {
-      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
+      // reminder_count is NOT NULL DEFAULT 0 (migration 0246), so eq.<target-1>
+      // covers the first nudge (eq.0) as well, no null branch needed.
+      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})&reminder_count=eq.${target - 1}`, {
         method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
+        headers: { 'Prefer': 'return=representation' },
         body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
       });
       if (!patchRes.ok) {
         console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
-        ids.forEach(id => failedIds.add(id));
+        continue;
+      }
+      // The PATCH is COMMITTED at this point, so an unreadable body must not be
+      // treated as "claimed nothing": that would skip the push AND skip the
+      // compensating rollback below, leaving every row in this group marked as
+      // nudged with nothing sent and no trace. Fall back to the ids this group
+      // asked for, which is what the pre-CAS code effectively did on a 2xx. The
+      // Array.isArray guard matters too: a 2xx body that parses to a non-array
+      // would make .forEach throw, and sendReminders has no try/catch above it,
+      // so one odd response would abort the whole tick and skip every user
+      // after this one.
+      const parsed = await patchRes.json().catch(() => null);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((r: { id?: string }) => { if (r?.id) claimedIds.add(r.id); });
+      } else {
+        console.error(`[medication-reminder] unreadable claim response for ${row.user_id}, assuming the committed PATCH claimed all ${ids.length} rows`);
+        ids.forEach(id => claimedIds.add(id));
       }
     }
-    const toPush = due.filter(e => !failedIds.has(e.id));
+    // Only what this tick actually claimed, so the count/name in the message
+    // can never describe a dose another invocation is nudging about.
+    const toPush = due.filter(e => claimedIds.has(e.id));
     if (!toPush.length) continue;
 
     const title = 'Zane · Medication Reminder';
@@ -312,30 +320,19 @@ async function sendReminders() {
       ? `Still due: ${toPush[0].medication_name || 'a scheduled dose'}. 💊`
       : `You have ${toPush.length} scheduled doses still to log. 💊`;
 
-    // Respect the user's channel choice: when Pushover is enabled (use_pushover
-    // and a key set) send only Pushover, otherwise send native Web Push (which
-    // pre-checks the user actually has a subscription, see sendWebPush). This
-    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
-    // so the user never gets the same nudge on both channels.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    let delivered: boolean;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
-        });
-        delivered = res.ok;
-        if (!delivered) console.error(`[medication-reminder] pushover failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
-        else console.log(`[medication-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        delivered = false;
-        console.error(`[medication-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      delivered = await sendWebPush(row.user_id, title, message);
-    }
+    // Shared with the other reminder crons: picks Pushover INSTEAD of Web
+    // Push when the user chose that channel (so the user never gets the same
+    // nudge on both), calls the Pushover API directly for a real synchronous
+    // status, and pre-checks zane_push_subscriptions before calling web-push
+    // so a dead/missing subscription is detected instead of counted as sent.
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'medication-reminder',
+    });
 
     // Compensating rollback: the state PATCH above already advanced every
     // row in toPush, but delivery just failed (including the "no

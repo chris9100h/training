@@ -30,7 +30,16 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<!-- 'black' (opaque, OS-owned bar) instead of 'black-translucent' (full
+     bleed, app content shows through the status bar): a newer iOS version
+     started rendering the app's own blurred sticky headers (TopBar in
+     ui.jsx, the same pattern everywhere) visibly through the translucent
+     status bar, making the time/battery/signal glyphs look smeared. 'black'
+     matches the app's default dark theme (light/paper theme users still get
+     a black bar, this tag can't react to the in-app theme choice) and takes
+     the whole interaction off the table: whatever iOS does with translucent
+     chrome compositing next can't reach us if we never opt into it. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="apple-mobile-web-app-title" content="Zane" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -560,6 +569,22 @@
     box-shadow: 0 0 8px rgba(var(--accent-rgb),0.6);
   }
 
+  /* iOS status bar bleed-through (2026-08): a newer iOS shows the app's own
+     blurred sticky headers (TopBar in ui.jsx) smeared through the status bar
+     clock/battery/signal readout, on this phone only, every other app and
+     the home screen look normal. Two dead ends already ruled out on-device:
+     switching apple-mobile-web-app-status-bar-style black-translucent ->
+     black (zero visible change), and a solid opaque shield pinned over
+     env(safe-area-inset-top) at max z-index, at several heights including
+     taller than the reported value (zero effect on the blur itself at ANY
+     height, the only measurable effect was covering more of the app's own
+     header). That rules out both "iOS ignores the meta tag" workarounds and
+     "our shield is too short": whatever renders the smeared look isn't
+     coming from our content bleeding through, and doesn't respond to
+     anything we stack on top of it either. Current approach instead: push
+     TopBar's own content down a few extra px (see ui.jsx), directly, no
+     separate covering element. */
+
   /* Dumbbell knurling, diagonal hash marks like grip texture */
   .knurl {
     height: 3px;
@@ -617,9 +642,10 @@ var BENIGN_NOISE = /ResizeObserver loop|translateDisabled|ethereum/i;
 // is untouched and stays up for the user to read/dismiss as intended. This
 // covers every trigger path (onerror/onunhandledrejection/BOOT-catch/
 // timeout) with one mechanism instead of each site managing its own poll.
-// Without it, an error that fires mid-boot but self-recovers (e.g. boot()
-// fails over to fallback() and fallback() succeeds) left the overlay stuck
-// open forever over a working app.
+// Without it, an error that fires mid-boot but the app still recovers from
+// (e.g. a transient fetch blip absorbed by fetchTextRetry's single retry, or
+// a stray console error unrelated to boot) left the overlay stuck open
+// forever over a working app.
 var earlyMountPoll = setInterval(function() {
   if (document.getElementById('root').children.length) {
     clearInterval(earlyMountPoll);
@@ -638,6 +664,10 @@ function makeClearCacheButton() {
   btn.style.cssText = 'margin-top:16px;margin-right:8px;display:inline-block;padding:10px 20px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
   btn.onclick = async function() {
     btn.textContent = 'Clearing…';
+    // No unregister here either, for the reasons spelled out on
+    // LB.clearCachesAndReload (it would destroy the push subscription, which
+    // nothing re-creates). zane-cold-boot below is what stops the reload from
+    // re-prompting for the pending update.
     if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
     // Also nuke the IndexedDB precompile cache, a poisoned record there bricks
     // boot just as badly as a bad Cache Storage entry, and clearing only caches
@@ -1165,13 +1195,21 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-<!-- Plain JS (no JSX), run directly, no transpile needed. -->
+<!-- Plain JS (no JSX), run directly, no transpile needed.
+     whatsnew.js and feature-map-db.js are deliberately NOT here: both are
+     large static data tables (changelog text, feature catalog) only ever
+     needed after boot (What's New's own unseen-entries check, the lazy
+     Feature Map screen), not before first paint. Loaded on demand via
+     __ensureWhatsNew()/__ensureFeatureMapDb() below instead, see those for
+     why. Still individually precached by the Service Worker (sw.js ASSETS,
+     and build.cjs's patchServiceWorker for the built version) so the lazy
+     load never depends on a live network fetch. -->
+<!-- BUILD_CORE_SCRIPTS_START -->
 <script src="src/supabase.js"></script>
 <script src="src/store.js"></script>
-<script src="src/whatsnew.js"></script>
 <script src="src/exercise-db.js"></script>
-<script src="src/feature-map-db.js"></script>
 <script src="src/programs-db.js"></script>
+<!-- BUILD_CORE_SCRIPTS_END -->
 
 <!-- ────────────────────────────────────────────────────────────────────────
      Precompile loader, boots the app without re-running Babel every start.
@@ -1256,6 +1294,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // options change so previously cached output is invalidated.
   var PRESETS = ['react', ['env', { targets: { esmodules: true } }]];
   var PRESET_TAG = 'react+env-esm.script.v2';
+  // The raw source tree keeps this false. The build output flips it to true
+  // after every JSX source has been compiled ahead of time.
+  var PRECOMPILED_BUILD = false;
+  // The built output replaces the source loader with one core script and
+  // route-level chunks. The raw source tree keeps this null as its fallback.
+  var PRECOMPILED_BUNDLES = null;
   var DB_NAME = 'zane-precompile';
   var STORE = 'modules';
 
@@ -1332,8 +1376,20 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         s.src = BABEL_URL;
         s.integrity = 'sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y';
         s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.Babel); };
-        s.onerror = function () { reject(new Error('Babel failed to load')); };
+        // Same "never memoize a rejection" rule as __lazyScript further down:
+        // this one gates the whole boot on a cache miss, so a single transient
+        // CDN blip must not permanently poison every later transpile attempt
+        // (including the retry the loader below performs on purpose).
+        var fail = function (why) {
+          babelPromise = null;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          reject(new Error(why));
+        };
+        s.onload = function () {
+          if (!window.Babel) return fail('Babel loaded but set no global');
+          resolve(window.Babel);
+        };
+        s.onerror = function () { fail('Babel failed to load'); };
         document.head.appendChild(s);
       });
     }
@@ -1341,6 +1397,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   }
 
   function transpile(src, filename) {
+    if (PRECOMPILED_BUILD) return Promise.resolve(src);
     return ensureBabel().then(function (Babel) {
       return Babel.transform(src, {
         presets: PRESETS,
@@ -1353,7 +1410,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // A wiped cache (via "Clear cache & reload") forces every one of these into
   // an uncached network round-trip with no local fallback if it fails, one
   // retry absorbs a single transient blip instead of aborting the whole boot
-  // and dropping to the much slower no-cache fallback() path below.
+  // outright (boot() has no further automatic recovery, see showError below).
   function fetchTextOk(url) {
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error('fetch ' + url + ' → ' + r.status);
@@ -1369,18 +1426,52 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 
   // Append as a classic inline script so it runs synchronously and in order,
   // sharing the global scope exactly like the original text/babel scripts.
+  //
+  // A classic script's own runtime errors never throw back into this call:
+  // the browser reports them via window.onerror instead (the same isolation
+  // model as a cross-origin "Script error."), so execute() used to always
+  // "succeed" from its caller's point of view even when the injected code
+  // threw before finishing, e.g. partway through a chain of top-level const
+  // declarations. That silently broke retry: runSource()/loadBuiltBundle()
+  // marked the source executed (or left their promise resolved) regardless,
+  // so window.Screens[name] was never actually populated, yet nothing was
+  // ever rejected for the caller's own .catch/Retry path to react to,
+  // leaving a lazy screen stuck at "Loading..." forever with no error and
+  // no way out. Capture the throw with a narrowly scoped, synchronous-only
+  // onerror hook instead: appendChild() runs a classic script synchronously,
+  // so any throw from it fires onerror before appendChild itself returns,
+  // still inside this function, and is re-thrown here so runSource() and
+  // loadBuiltBundle() correctly see a rejected promise and clean up
+  // (delete executedSources[src] / builtBundlePromises[name]) exactly like
+  // they already do for a fetch/transpile failure. This does NOT make a
+  // retry safe from "already been declared" if the failing script got
+  // partway through its own top-level consts before throwing (re-running it
+  // in the same shared global scope can collide with itself); that would
+  // need each source to run in its own isolated scope, a deliberately
+  // shared-scope design (CLAUDE.md) this does not change. What it does fix
+  // is the far more common case: the failure now surfaces as a real error
+  // with a working Retry instead of a silent, permanent hang.
   function execute(code, filename) {
     var s = document.createElement('script');
     s.textContent = code + '\n//# sourceURL=' + filename;
-    document.head.appendChild(s);
+    var caught = null;
+    var previousOnError = window.onerror;
+    window.onerror = function (message, source, line, col, error) {
+      caught = error instanceof Error ? error : new Error(String(message));
+      return true;
+    };
+    try {
+      document.head.appendChild(s);
+    } finally {
+      window.onerror = previousOnError;
+    }
+    if (caught) throw caught;
   }
 
   // Routes through showErrOverlay() (first script block above, same page,
   // already defined by the time this can run) instead of toggling #err
-  // directly: a bare "no button, no auto-hide" overlay here previously left
-  // the user stuck with literally no way out if fallback() then quietly
-  // mounted successfully afterward: the overlay stayed up forever, covering
-  // a now-working app.
+  // directly: that gives the user a "Clear cache & reload" button, since
+  // boot() has no automatic recovery of its own once it reaches this catch.
   function showError(e) {
     if (typeof showErrOverlay === 'function') {
       showErrOverlay().textContent += '[BOOT] ' + (e && e.message || e) + '\n';
@@ -1391,10 +1482,24 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   var preparedSources = Object.create(null);
   var executedSources = Object.create(null);
   var modulePromises = Object.create(null);
+  var builtBundlePromises = Object.create(null);
+
+  function loadBuiltBundle(name) {
+    var url = PRECOMPILED_BUNDLES && PRECOMPILED_BUNDLES[name];
+    if (!url) return Promise.reject(new Error('Unknown built bundle: ' + name));
+    if (builtBundlePromises[name]) return builtBundlePromises[name];
+    builtBundlePromises[name] = fetchTextRetry(url).then(function (code) {
+      execute(code, url);
+    }).catch(function (e) {
+      delete builtBundlePromises[name];
+      throw e;
+    });
+    return builtBundlePromises[name];
+  }
 
   // Guard against rare environments where IndexedDB.open() hangs. The loader
   // remains fully functional without it, only the compiled-code reuse is lost.
-  var dbPromise = Promise.race([
+  var dbPromise = PRECOMPILED_BUILD ? Promise.resolve(null) : Promise.race([
     idbOpen().catch(function () { return null; }),
     new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); }),
   ]).then(function (db) { openedDb = db; return db; });
@@ -1402,6 +1507,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // Speculatively fetch Babel only for a truly cold precompile cache. Warm
   // starts never download it, and lazy modules reuse the same promise.
   dbPromise.then(function (db) {
+    if (PRECOMPILED_BUILD) return;
     if (!db) { ensureBabel(); return; }
     idbCount(db).then(function (n) { if (n <= 0) ensureBabel(); });
   });
@@ -1458,7 +1564,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         });
         return chain;
       })
-      .then(function () { return runSourcesInOrder(spec.sources); })
+      .then(function () {
+        if (PRECOMPILED_BUNDLES && PRECOMPILED_BUNDLES[name]) {
+          return loadBuiltBundle(name);
+        }
+        return runSourcesInOrder(spec.sources);
+      })
       .catch(function (e) {
         delete modulePromises[name];
         throw e;
@@ -1519,7 +1630,17 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
           }
           setRetry(function (n) { return n + 1; });
         }).catch(function (e) {
-          if (live) setError(e);
+          if (!live) return;
+          setError(e);
+          // Silent components (banners/widgets, e.g. CoachingPendingBanner,
+          // TodayCardioWidget) render nothing on error, below, so there is no
+          // Retry button and no other signal that a load ever failed: without
+          // this, a single transient blip left them blank for the rest of the
+          // session. Retry quietly a few times instead; capped so a genuinely
+          // broken module (bad deploy, permanent 404) does not poll forever.
+          if (options.silent && retry < 5) {
+            setTimeout(function () { if (live) setRetry(function (n) { return n + 1; }); }, 8000);
+          }
         });
         return function () { live = false; };
       }, [shouldLoad, retry]);
@@ -1633,6 +1754,10 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   };
 
   function boot() {
+    if (PRECOMPILED_BUNDLES && PRECOMPILED_BUNDLES.critical) {
+      loadBuiltBundle('critical').catch(showError);
+      return;
+    }
     // Prepare the three critical files in parallel, then execute them in their
     // original order. No noncritical source is fetched or hashed on this path.
     Promise.all(CRITICAL_SOURCES.map(prepareSource)).then(function (compiled) {
@@ -1643,40 +1768,77 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     }).catch(showError);
   }
 
-  // Lazily load html2canvas the first time a screenshot is actually taken.
-  window.__ensureHtml2Canvas = function () {
-    if (window.html2canvas) return Promise.resolve(window.html2canvas);
-    if (!window.__h2cPromise) {
-      window.__h2cPromise = new Promise(function (resolve, reject) {
+  // "Inject a plain script tag once, dedupe concurrent callers via one shared
+  // promise" loader, shared by every lazy <script>-based dependency below.
+  //
+  // A REJECTION is deliberately NOT memoized: the promise slot is cleared (and
+  // the dead tag removed) on failure, so a later call retries with a fresh
+  // script tag instead of handing every future caller the same permanent
+  // failure. Each of these used to keep its rejected promise forever, which
+  // meant one flaky fetch disabled the feature for the whole session with no
+  // recovery short of a reload. That bites hardest right after a cache wipe,
+  // when nothing is precached and the network is often exactly what was flaky
+  // in the first place. __ensureZbarWasm below already worked this way; this
+  // brings the script-tag loaders in line with it.
+  function __lazyScript(promiseKey, src, read, crossOrigin) {
+    var already = read();
+    if (already) return Promise.resolve(already);
+    if (!window[promiseKey]) {
+      window[promiseKey] = new Promise(function (resolve, reject) {
         var s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.html2canvas); };
-        s.onerror = function () { reject(new Error('html2canvas failed to load')); };
+        s.src = src;
+        if (crossOrigin) s.crossOrigin = 'anonymous';
+        var fail = function (why) {
+          window[promiseKey] = null;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          reject(new Error(why));
+        };
+        s.onload = function () {
+          // A 200 that did not set the global is a FAILURE, not a success: an
+          // SPA fallback or a captive-portal page answers 200 with HTML, and
+          // resolving with undefined would memoize that as a good load, so
+          // every retry (including the Changelog's Retry button) hands back the
+          // same empty result forever.
+          var value = read();
+          if (!value) return fail(src + ' loaded but set no global');
+          resolve(value);
+        };
+        s.onerror = function () { fail(src + ' failed to load'); };
         document.head.appendChild(s);
       });
     }
-    return window.__h2cPromise;
+    return window[promiseKey];
+  }
+
+  // Lazily load html2canvas the first time a screenshot is actually taken.
+  window.__ensureHtml2Canvas = function () {
+    return __lazyScript('__h2cPromise', 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+      function () { return window.html2canvas; }, true);
+  };
+
+  // Two large static data files that used to sit in the blocking
+  // BUILD_CORE_SCRIPTS block: whatsnew.js (changelog text, needed by app.jsx's
+  // post-boot unseen-entries check and by Settings' Changelog sheet) and
+  // feature-map-db.js (the feature catalog, needed by the already-lazy Feature
+  // Map screen). Same relative path in both the raw source tree and the
+  // precompiled build: build.cjs's staticDirectories copy still puts an
+  // individual, unbundled copy of each at this exact path in dist/, even
+  // though they're no longer folded into core.js there.
+  window.__ensureWhatsNew = function () {
+    return __lazyScript('__whatsNewPromise', 'src/whatsnew.js', function () { return window.WHATS_NEW; });
+  };
+  window.__ensureFeatureMapDb = function () {
+    return __lazyScript('__featureMapDbPromise', 'src/feature-map-db.js', function () { return window.FEATURE_MAP; });
   };
 
   // Lazily load ExcelJS the first time an XLSX export is actually requested
-  // (Settings → Data → Export Training). Same pattern as html2canvas above.
-  // Not SheetJS: its free build parses styles but silently drops them on
-  // write (no border/fill/alignment survives, confirmed against its own
-  // output XML), so borders and vertical centering weren't achievable there.
+  // (Settings → Data → Export Training). Not SheetJS: its free build parses
+  // styles but silently drops them on write (no border/fill/alignment
+  // survives, confirmed against its own output XML), so borders and vertical
+  // centering weren't achievable there.
   window.__ensureXLSX = function () {
-    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
-    if (!window.__xlsxPromise) {
-      window.__xlsxPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.ExcelJS); };
-        s.onerror = function () { reject(new Error('XLSX library failed to load')); };
-        document.head.appendChild(s);
-      });
-    }
-    return window.__xlsxPromise;
+    return __lazyScript('__xlsxPromise', 'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js',
+      function () { return window.ExcelJS; }, true);
   };
 
   // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build

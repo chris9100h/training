@@ -41,8 +41,10 @@ CREATE POLICY "zane_adaptive_tdee_history_own"
   USING ((select auth.uid()) = user_id)
   WITH CHECK ((select auth.uid()) = user_id);
 
--- PostgREST does not automatically expose newly created public tables. Keep
--- this table owner-only at the Data API boundary as well as at RLS level.
+-- Postgres's default privileges grant new public tables full access to anon
+-- and authenticated by default (see migration 0057's zane_pushover_active
+-- incident, where PostgREST exposed an unRLS'd table to anyone holding the
+-- anon key). Revoke that default explicitly rather than relying on RLS alone.
 REVOKE ALL ON public.zane_adaptive_tdee_history FROM PUBLIC, anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.zane_adaptive_tdee_history TO authenticated;
 

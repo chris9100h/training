@@ -4,7 +4,8 @@ import { localClock } from '../_shared/time.ts';
 // Water reminder cron function. Mirrors the training `reminder` function but
 // computes a hydration ramp: for each opted-in user it places "now" on the
 // linear expected curve between their daily start and end time (using the
-// client-written tz_offset_minutes so no timezone guessing), compares against
+// client-written time_zone, tz_offset_minutes only as a fallback for rows
+// without a saved zone), compares against
 // today's logged water, and if they are behind by more than THRESHOLD_ML sends
 // a nudge through the existing web-push + Pushover channels. Throttled per user
 // via water_last_push_at so a frequent cron tick never spams.

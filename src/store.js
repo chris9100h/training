@@ -1731,10 +1731,29 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   if (waterLogsRes.error) throw waterLogsRes.error;
   if (foodLogsRes.error) throw foodLogsRes.error;
-  // Coaching queries are null on coach loads (skipped), guard with optional chaining.
-  if (coachInfoRes?.error) throw coachInfoRes.error;
-  if (coachClientsRes?.error) throw coachClientsRes.error;
-  if (unreadNotesRes?.error) throw unreadNotesRes.error;
+  // Coaching queries are null on coach loads (skipped), guard with optional
+  // chaining. Unlike every other collection above, coaching is deliberately
+  // NOT thrown on error: it is not part of the ID-merge/anti-resurrection
+  // system (nothing diffs fresh.coaching against cur.coaching by id), so a
+  // failure here cannot corrupt or resurrect any stored data the way a
+  // silently-empty exercises/schedules/foodLogs list would. Throwing would
+  // only mean one transient error in this one feature discards every other
+  // already-fetched source (Food, Water, Medications, ...) for the whole
+  // boot. Same soft-fail reasoning and PGRST116 tolerance as
+  // reloadCoachingState (used on realtime reconnect): a dropped request
+  // must not be read as "your coach ended the relationship", so the
+  // `coaching` result below is entirely omitted (undefined) on any failure
+  // here, and the caller keeps whatever coaching state it already has
+  // instead of overwriting it with a false empty one.
+  const coachingSoft = (res) => !res?.error || res.error.code === 'PGRST116';
+  const coachingLoadFailed = !isCoachLoad && (
+    !!coachInfoRes?.error || !!coachClientsRes?.error || !!unreadNotesRes?.error
+    || !coachingSoft(coachingRowRes) || !coachingSoft(selfRowRes)
+  );
+  if (coachingLoadFailed) {
+    console.warn('coaching state load failed during boot, keeping previous state:',
+      coachInfoRes?.error || coachClientsRes?.error || unreadNotesRes?.error || coachingRowRes?.error || selfRowRes?.error);
+  }
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
@@ -2001,7 +2020,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     customDayTypes: sett.custom_day_types ?? [],
     settings: mapUserSettings(sett),
     nextReminderAt: sett.next_reminder_at ?? null,
-    coaching: isCoachLoad ? undefined : {
+    coaching: (isCoachLoad || coachingLoadFailed) ? undefined : {
       asClient: (coachInfoRes?.data?.[0]) ? {
         id: coachInfoRes.data[0].coaching_id,
         coachId: coachInfoRes.data[0].coach_id,
@@ -2121,17 +2140,37 @@ function diffCollectionById(prevList, nextList) {
   return { upsert, removed };
 }
 
+// JSON with keys sorted at every level, so two structurally identical values
+// always produce the same string. Plain JSON.stringify does not: a value that
+// has been through Postgres jsonb comes back with jsonb's own key order (by
+// length, then bytewise), while the in-memory copy keeps insertion order, so
+// stringifying both and comparing reports a difference that does not exist.
+// Anywhere a jsonb-backed value decides "did this change", this is the
+// serializer to use. undefined-valued keys are dropped, matching JSON itself.
+function stableJson(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableJson).join(',') + ']';
+  const keys = Object.keys(v).filter(k => v[k] !== undefined).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableJson(v[k])).join(',') + '}';
+}
+
 // Normalize set fields for comparison, guards against null vs undefined and missing
 // keys when comparing sets from an old (pre-migration) store format with new format.
 // Shared by the sync diff (_syncEntryRelational: only sets whose norm differs get
 // re-written) and the boot merge's unsynced-edit test (entrySetsDifferFromBase,
 // audit H1), so both always agree on what counts as a set change.
+// drops/hornLoads are jsonb columns, hence stableJson and not JSON.stringify:
+// the app writes drops as {partials, stretch} and the server hands it back as
+// {stretch, partials}, which a raw stringify reports as an edit that never
+// happened, marking the whole session locally-edited and reverting whatever
+// another device changed on it (same failure as the mesoRecap compare below).
 function normSet(s) {
   return [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
           s.timeSec ?? null, s.addedKg ?? null,
           s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
-          s.technique ?? '', JSON.stringify(s.drops ?? null),
-          JSON.stringify(s.hornLoads ?? null)].join('|');
+          s.technique ?? '', stableJson(s.drops ?? null),
+          stableJson(s.hornLoads ?? null)].join('|');
 }
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
@@ -5104,6 +5143,67 @@ function resolveInProgressId(cur, fresh, base) {
   return (!base || cur.inProgress !== base.inProgress) ? cur.inProgress : fresh.inProgress;
 }
 
+// Value equality for the "did this device edit this field since its last
+// confirmed sync" tests below. A plain !== is wrong for the jsonb/array-valued
+// members of the field lists (mesoRecap, plannedTechniques, plannedRepsPerSet):
+// the store side and the base side are two SEPARATELY PARSED object trees
+// whenever the persisted cache pair carries its own base (loadLocalState's
+// `parsed.base ?? store`), so deep-equal values are never reference-equal and
+// every such session/entry would be judged "locally edited" forever, pinning
+// the whole field set to the stale cache and pushing it back over a newer
+// server value on the next flush.
+// JSON.stringify is NOT good enough here either: the base side usually comes
+// from Postgres jsonb, which normalizes key order, while the local side keeps
+// insertion order, so two semantically identical recaps stringify differently.
+// Hence a real, key-order-insensitive structural compare. Scalars short-circuit
+// on the identity check, so this is behaviour-identical to the old !== for
+// every non-object field.
+// Scope: JSON-shaped values only (that is all these fields ever hold, since
+// every one of them round-trips through jsonb or through localStorage). Any
+// non-plain object reaching here (Date, Map, Set, RegExp) is deliberately
+// treated as "not equal unless identical", never as equal-because-both-empty.
+// `seen` guards against a cyclic in-memory value: JSON-parsed trees cannot be
+// cyclic, but the live store side is built by app code and a future cycle must
+// degrade to "differs" rather than blow the stack.
+function syncValuesEqual(a, b, seen) {
+  if (a === b) return true;
+  if (a == null || b == null) return (a ?? null) === (b ?? null);
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  const aArr = Array.isArray(a);
+  if (aArr !== Array.isArray(b)) return false;
+  // Anything that is neither a plain object nor an array is out of contract.
+  if (!aArr && (!isPlainJsonObject(a) || !isPlainJsonObject(b))) return false;
+  if (seen) { if (seen.has(a)) return false; } else { seen = new WeakSet(); }
+  seen.add(a);
+  if (aArr) {
+    if (a.length !== b.length) return false;
+    // Index loop, not .every: .every SKIPS array holes, so [<hole>,1] would
+    // compare equal to [5,1].
+    for (let i = 0; i < a.length; i++) if (!syncValuesEqual(a[i], b[i], seen)) return false;
+    return true;
+  }
+  // undefined-valued keys are dropped by JSON, so a round-tripped copy
+  // legitimately has fewer own keys than its in-memory twin: compare the
+  // JSON-visible keys on BOTH sides. Testing membership with hasOwnProperty
+  // would accept a key b owns with value undefined and, paired with the
+  // null-vs-undefined branch above, let an extra key on b slip through.
+  const ak = Object.keys(a).filter(k => a[k] !== undefined);
+  const bk = Object.keys(b).filter(k => b[k] !== undefined);
+  if (ak.length !== bk.length) return false;
+  const bSet = new Set(bk);
+  return ak.every(k => bSet.has(k) && syncValuesEqual(a[k], b[k], seen));
+}
+// Realm-agnostic plain-object test: comparing the prototype against
+// Object.prototype by identity fails for any object minted in another realm
+// (a vm context, an iframe), which would silently make syncValuesEqual answer
+// "not equal" for every object it is given there. A plain object's prototype
+// is instead recognised by having no prototype of its own; Date/Map/Set/RegExp
+// all fail that, which is exactly the intended exclusion.
+function isPlainJsonObject(v) {
+  const proto = Object.getPrototypeOf(v);
+  return proto === null || Object.getPrototypeOf(proto) === null;
+}
+
 // Entry/set-level unsynced-edit test for the boot merge (audit H1): the exact
 // same fields the sync diff uploads (normSet below plus the entry columns
 // written by _syncEntryRelational), so "differs from the persisted base" means
@@ -5119,7 +5219,7 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
     const be = baseEntries[ei];
     if (!be) return true;
     for (const k of ENTRY_SYNC_FIELDS) {
-      if ((ce[k] ?? null) !== (be[k] ?? null)) return true;
+      if (!syncValuesEqual(ce[k] ?? null, be[k] ?? null)) return true;
     }
     const cs = ce.sets || [];
     const bs = be.sets || [];
@@ -5129,6 +5229,67 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
     }
   }
   return false;
+}
+
+// Session-level scalar fields mergeSessions must NOT silently revert to a
+// stale server value (audit H2, 2026-08): every field sessionToRow actually
+// writes to zane_sessions, other than the ones already handled elsewhere in
+// mergeSessions for their own reasons (cyclePos: always prefers local,
+// entries/currentExIdx/restStart/restDuration: handled by the entries logic
+// above, progressionBumps/cleanupOptOuts: local-only, no column at all).
+// `ended` is the one that actually bit a real user: finish() (screens-
+// train.jsx) sets `ended` and clears `inProgress` in the SAME action, so by
+// the time any later boot merge runs, isActive (below) is already false for
+// that session, `ended` was never given the same "differs from the last
+// confirmed-synced base -> keep local" protection entries/sets get (H1), and
+// a hard reload (e.g. app backgrounded for 30+min doing Live Cardio, see
+// app.jsx's THRESHOLD) landing before the `ended` sync had confirmed reverted
+// it straight back to the server's stale null: the session vanished from
+// History, wasn't resumable (inProgress already cleared too), and nothing
+// ever retried the write again because the store itself no longer "knew" it
+// had finished.
+const SESSION_SYNC_SCALAR_FIELDS = ['ended', 'scheduleId', 'dayId', 'dayName', 'startedAt', 'durationMinutes', 'feel', 'isBonus', 'isFreestyle', 'isDeload', 'isCleanup', 'mesoRecap', 'readiness', 'signalWeight'];
+// Fields that are only meaningful together, so the merge must never take one
+// from local and its partner from the server: the result would be a state
+// neither device ever had.
+//  - readiness/signalWeight/mesoRecap: deriveSignalWeight maps readiness
+//    MANY-to-one onto signalWeight ('rough'/'reentry' -> 'discounted', else
+//    'full'), and screens-lib.jsx's feedback editor always writes the three
+//    together. A local 'rough' -> 'reentry' correction leaves signalWeight
+//    untouched (both map to 'discounted'), so a field-by-field merge against a
+//    device that corrected the same session to 'normal' would keep the local
+//    readiness and take the server's 'full', scoring a re-entry day as a full
+//    autoregulation signal, exactly what signalWeight exists to prevent.
+//  - ended/durationMinutes/startedAt: finish() writes all three at once, and
+//    duration is derived from the other two wherever it is null.
+const SESSION_SCALAR_GROUPS = [
+  ['readiness', 'signalWeight', 'mesoRecap'],
+  ['ended', 'startedAt', 'durationMinutes'],
+];
+// Returns the subset of those fields this device has actually edited since its
+// last confirmed sync, i.e. exactly what the follow-up flush is going to push,
+// widened to whole groups above. Per-field rather than an all-or-nothing
+// boolean on purpose: overriding the whole list off a single edited field also
+// forces every field the local cache happens to LACK down to null (a cache
+// written before a column existed, or one another device has since filled in),
+// which is the same silent data drop this protection exists to prevent, just
+// pointed the other way.
+function locallyEditedSessionScalars(mem, baseMem) {
+  // No usable base (never confirmed synced for this device) must resolve the
+  // same direction as "genuinely differs", exactly the H1 bias above: there
+  // is nothing to compare against, so trusting the server here is how data
+  // gets silently dropped in the first place. Still only for fields this cache
+  // actually carries, for the nulling reason above.
+  if (!baseMem) return SESSION_SYNC_SCALAR_FIELDS.filter(k => mem[k] !== undefined);
+  const edited = new Set(SESSION_SYNC_SCALAR_FIELDS.filter(k => !syncValuesEqual(mem[k] ?? null, baseMem[k] ?? null)));
+  if (!edited.size) return [];
+  // Any member edited pulls in its whole group, but still only the members this
+  // cache actually carries, so grouping cannot reintroduce the nulling above.
+  for (const group of SESSION_SCALAR_GROUPS) {
+    if (!group.some(k => edited.has(k))) continue;
+    group.forEach(k => { if (mem[k] !== undefined) edited.add(k); });
+  }
+  return SESSION_SYNC_SCALAR_FIELDS.filter(k => edited.has(k));
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
@@ -5170,6 +5331,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     // diff exactly the edited fields and upload them, same unsynced-edit test
     // as mergeCollectionById below.
     const baseMem = baseById?.get(s.id);
+    // Deliberately NOT gated on isActive (audit H2): isActive requires
+    // inProgress still pointing at this session, but finish() clears
+    // inProgress in the very same action that sets `ended`, so gating this
+    // check on isActive would make it never fire for the one transition it
+    // exists to protect. An active session's `ended` is null on both sides
+    // anyway, so this can't regress the in-progress case.
+    const editedScalars = locallyEditedSessionScalars(mem, baseMem);
     const baseEntries = (baseMem?.entries || []).length ? baseMem.entries : null;
     // No usable base (this device's last confirmed-synced snapshot never
     // captured real entries for this session, e.g. it sat out-of-window
@@ -5185,6 +5353,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
     return {
       ...s,
+      // An unsynced local edit of any scalar field the server actually
+      // stores (audit H2, see locallyEditedSessionScalars above) must win
+      // over the server's stale copy, `ended` above all: the follow-up flush
+      // then diffs exactly this session and re-uploads it, same contract the
+      // entries-level H1 fix already established. Only the edited fields are
+      // overridden, every untouched one keeps the server's value.
+      ...Object.fromEntries(editedScalars.map(k => [k, mem[k] ?? null])),
       currentExIdx: mem.currentExIdx ?? 0,
       // Prefer the cached value (this device's own, always correct at write
       // time), but fall back to the server's rather than jumping straight to
@@ -5245,6 +5420,23 @@ const _localSnapshotState = new Map();
 
 function loadLocalState(userId) {
   try {
+    const pairKey = `logbook-pair-${userId}`;
+    const pairRaw = localStorage.getItem(pairKey);
+    if (pairRaw) {
+      const parsed = JSON.parse(pairRaw);
+      const store = parsed.store;
+      if (!store) return { store: null, base: null };
+      const base = parsed.base ?? store;
+      _localSnapshotState.set(userId, { storeRef: store, baseRef: base, raw: pairRaw });
+      return { store, base };
+    }
+    // Backward-compatible fallback for a device that has not written the
+    // atomic single-key format yet: the previous design stored base and
+    // store as two SEPARATE localStorage entries (base absent meaning
+    // "equals store"), which let a device killed exactly between the two
+    // writes boot into a new base paired with an old store. Read the old
+    // format once here; the next saveLocalState call below migrates this
+    // device to the atomic pair and removes these two keys.
     const storeKey = `logbook-${userId}`;
     const baseKey = `logbook-base-${userId}`;
     const storeRaw = localStorage.getItem(storeKey);
@@ -5252,45 +5444,42 @@ function loadLocalState(userId) {
     const store = JSON.parse(storeRaw);
     const storedBaseRaw = localStorage.getItem(baseKey);
     const baseMatchesStore = !storedBaseRaw || storedBaseRaw === storeRaw;
-    const baseRaw = baseMatchesStore ? null : storedBaseRaw;
     const base = baseMatchesStore ? store : JSON.parse(storedBaseRaw);
-    _localSnapshotState.set(userId, { storeRef: store, storeRaw, baseRef: base, baseRaw });
     return { store, base };
   } catch (_) {
     return { store: null, base: null };
   }
 }
 
-// The full base snapshot only exists while local state actually differs from
-// the last confirmed server state. Once synced, absence of the base key means
-// "base equals cache", so the next boot parses one large JSON payload instead
-// of two. Repeated idle saves reuse the previous serialized strings when the
-// immutable store/base references did not change.
+// base and store are written together as ONE JSON payload under a single
+// localStorage key (logbook-pair-*), so a device killed mid-write (tab
+// close, OS kill, storage quota hit) can never end up pairing a NEW base
+// with an OLD store or vice versa: a single setItem either lands whole or
+// not at all, unlike the previous two-separate-keys design this replaced.
+// The base only adds to the payload while local state actually differs from
+// the last confirmed server state; once synced, base is omitted (implying
+// "equals store") so the next boot parses a smaller payload. Repeated idle
+// saves reuse the previous serialized string when the immutable store/base
+// references did not change.
 function saveLocalState(store, base, userId) {
   try {
-    const storeKey = `logbook-${userId}`;
-    const baseKey = `logbook-base-${userId}`;
+    const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
     const baseIsStore = !base || base === store;
-    let baseRaw = null;
-
-    // Preserve the confirmed base before replacing the current cache. If the
-    // cache write then fails, the older local store and its base remain a valid
-    // pair rather than becoming an ambiguous partial update.
-    if (!baseIsStore) {
-      baseRaw = prev.baseRef === base && prev.baseRaw ? prev.baseRaw : JSON.stringify(base);
-      if (prev.baseRaw !== baseRaw) localStorage.setItem(baseKey, baseRaw);
-    }
-
-    const storeRaw = prev.storeRef === store && prev.storeRaw ? prev.storeRaw : JSON.stringify(store);
-    if (prev.storeRaw !== storeRaw) localStorage.setItem(storeKey, storeRaw);
-    if (baseIsStore) localStorage.removeItem(baseKey);
-    _localSnapshotState.set(userId, {
-      storeRef: store,
-      storeRaw,
-      baseRef: baseIsStore ? store : base,
-      baseRaw: baseIsStore ? null : baseRaw,
-    });
+    const effectiveBase = baseIsStore ? store : base;
+    const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
+      ? prev.raw
+      : JSON.stringify({ v: 2, store, base: baseIsStore ? null : base });
+    if (prev.raw !== raw) localStorage.setItem(pairKey, raw);
+    // Best-effort cleanup of the pre-migration two-key format: a failure
+    // here does not affect the atomic pair write above, which already
+    // landed, it just leaves a harmless stale copy that loadLocalState
+    // never reads once the pair key exists.
+    try {
+      localStorage.removeItem(`logbook-${userId}`);
+      localStorage.removeItem(`logbook-base-${userId}`);
+    } catch (_) {}
+    _localSnapshotState.set(userId, { storeRef: store, baseRef: effectiveBase, raw });
     return true;
   } catch (_) {
     return false;
@@ -5301,11 +5490,14 @@ function saveSyncedState(store, userId) {
   return saveLocalState(store, store, userId);
 }
 
+// Emergency/best-effort flush (visibilitychange/pagehide keyboard-commit,
+// see screens-train.jsx): must stay synchronous and has no way to know the
+// caller's own confirmed-sync base, so it reuses whatever saveLocalState
+// last tracked for this user here, the same base the old two-separate-keys
+// format effectively kept by simply never touching the separate base key.
 function saveToLocal(store, userId) {
-  try {
-    localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
-    return true;
-  } catch (_) { return false; }
+  const prev = _localSnapshotState.get(userId);
+  return saveLocalState(store, prev?.baseRef ?? null, userId);
 }
 
 function loadFromLocal(userId) {
@@ -5336,6 +5528,7 @@ function clearLocal(userId) {
     if (userId) {
       localStorage.removeItem(`logbook-${userId}`);
       localStorage.removeItem(`logbook-base-${userId}`);
+      localStorage.removeItem(`logbook-pair-${userId}`);
       _localSnapshotState.delete(userId);
       return;
     }
@@ -6465,18 +6658,21 @@ function dayTargetFromMacros(m, isTraining) {
 }
 
 // Macro adherence as a 0–100 %, defined as the calorie-weighted average of
-// per-macro closeness scores. Per macro: clamp(1 − |actual − target| / target,
-// 0, 1). Each macro's weight = its caloric share of the target day (protein/
-// carbs × 4 kcal/g, fat × 9 kcal/g), so a small fat target counts less than
-// a large carb target, proportionally to its caloric significance.
+// per-macro closeness scores. Daily logs persist whole grams and the UI shows
+// whole grams, so normalize live food sums to the same precision before
+// scoring. Per macro: clamp(1 − |actual − target| / target, 0, 1). Each
+// macro's weight = its caloric share of the target day (protein/carbs × 4
+// kcal/g, fat × 9 kcal/g), so a small fat target counts less than a large carb
+// target, proportionally to its caloric significance.
 // Returns null unless all three macros AND their targets are present.
 function macroAdherence(actual, target) {
   if (!actual || !target) return null;
   const kcalPer = { protein: 4, carbs: 4, fat: 9 };
   const entries = [];
   for (const k of ['protein', 'carbs', 'fat']) {
-    const t = target[k]; const a = actual[k];
-    if (t == null || t <= 0 || a == null) return null;
+    const t = target[k]; const raw = actual[k];
+    if (t == null || t <= 0 || raw == null) return null;
+    const a = Math.round(raw);
     entries.push({ score: Math.max(0, 1 - Math.abs(a - t) / t), kcal: t * kcalPer[k] });
   }
   const totalKcal = entries.reduce((s, e) => s + e.kcal, 0);
@@ -9103,6 +9299,156 @@ function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
   return Math.round(startRir - (week - 1) * (startRir - endRir) / (weeks - 1));
 }
 
+// ─── Mesocycle helpers, moved here from screens-train.jsx (2026-08) ───────────
+// These used to live as classic-script globals in screens-train.jsx, the lazy
+// `train` route bundle. Every other screen that reads meso state (Home's AUTO
+// badge, the deload hint, buildSessionEntries at session start, Library's
+// meso-feedback editor, the Schedule plan list/viewer, the coaching client
+// view) guarded every call with `typeof getMesoState === 'function'` because
+// store.js could not reference them directly, and none of those guards were
+// actually about "is this feature available", they were purely "has the
+// train bundle finished loading yet". On a cold boot the train bundle warms
+// in the background 1-4s after first paint; a HomeScreen useMemo whose
+// dependency array only tracks DATA (not "did the module finish loading")
+// computed once against the not-yet-loaded functions, cached a wrong "no meso
+// state" result, and never recomputed again for the life of that mount, e.g.
+// the AUTO badge stuck on "pending" long after the meso was active. Worse,
+// buildSessionEntries could silently start a session with resolvedMeso=null
+// (no set-delta, no weight boost) if the user started training in that same
+// window, persisting seeds that never got their autoregulation applied.
+// Living here instead removes the race entirely: store.js is always loaded
+// before any screen module runs.
+const MESO_KEY = 'logbook-meso-state';
+const MESO_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Ab/Adductors', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
+
+function primaryMuscleForExercise(ex) {
+  if (!ex?.tags?.length) return null;
+  for (const m of MESO_MUSCLE_PRIORITY) {
+    if (ex.tags.includes(m)) return m;
+  }
+  return ex.tags[0] || null;
+}
+
+// Read meso state: compares the store (DB-loaded, cross-device) copy against
+// the per-plan localStorage cache (in-session writes that haven't been
+// flushed to the store yet, see saveMesoStateToStorage) and returns whichever
+// is actually newer by updatedAt. A store entry can be stale relative to
+// localStorage right after an app reload/crash mid-session, before the
+// session's feedback answers were ever flushed, always trusting the store
+// would silently discard those answers.
+function getMesoState(scheduleId, mesoStates) {
+  if (!scheduleId) return null;
+  const fromStore = mesoStates?.length ? (mesoStates.find(m => m.scheduleId === scheduleId) || null) : null;
+  let fromStorage = null;
+  try {
+    const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
+           || localStorage.getItem(MESO_KEY); // old single-key format
+    if (r) {
+      const parsed = JSON.parse(r);
+      // Old single-key format check
+      if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
+      if (parsed?.scheduleId === scheduleId) fromStorage = parsed;
+    }
+  } catch {}
+  if (!fromStore) return fromStorage;
+  if (!fromStorage) return fromStore;
+  const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
+  const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
+  const chosen = storageT > storeT ? fromStorage : fromStore;
+  const other = chosen === fromStore ? fromStorage : fromStore;
+  // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
+  // store copy can lack it while the localStorage cache still has it, carry it
+  // over so the flex meso-week anchor survives a reload on the same device.
+  if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
+  return chosen;
+}
+
+// Write meso state to per-plan localStorage key (in-session fast cache).
+// The store (DB) is updated via setStore at session end.
+function saveMesoStateToStorage(s) {
+  if (!s?.scheduleId) return;
+  try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
+}
+
+function mesoCurrentWeek(mesoState, store) {
+  if (!mesoState?.startDate) return 1;
+  const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
+  // Flex plans: "which rotation slot are we on" still uses cycleIndex (it also
+  // advances on a skip, which is correct for plan position). But the meso
+  // week/RIR target represents accumulated training fatigue, so it must only
+  // advance on actually-trained sessions, counting raw cycleIndex deltas
+  // would let a run of skips fast-forward the RIR target with zero training.
+  if (sch && sch.days?.length > 0 && isFlexPlan(sch)) {
+    const startIdx = mesoState.startCycleIndex ?? 0;
+    const currentIdx = store.cycleIndex || 0;
+    if (currentIdx < startIdx) return null; // pending, waiting for next rotation start
+    // Count trained sessions since the block began. Prefer the precise
+    // startedAt timestamp over the date-only startDate: without it, sessions
+    // from a PREVIOUS block logged earlier the SAME day the new block starts
+    // (e.g. finishing Meso 1 then starting Meso 2 the same day) leak into the
+    // new block's count and fast-forward its week. Falls back to the date
+    // comparison for older mesos that predate startedAt.
+    const startedTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime() : null;
+    const trainedCount = (store?.sessions || []).filter(s =>
+      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
+      (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
+    ).length;
+    // Two independent inflation sources cancel by taking the min. The trained
+    // count over-counts sessions logged during the PENDING gap (a meso enabled
+    // mid-rotation has startedAt=creation but startCycleIndex aligned to a
+    // future D1, so gap sessions have ended > startedTs yet predate the block).
+    // The position count (currentIdx - startIdx) instead over-counts skips after
+    // activation. min() strips whichever source inflated; only a rare mix of
+    // both (gap sessions AND a later full skipped rotation) can still round up
+    // by one week.
+    const trainedRotations = Math.floor(trainedCount / sch.days.length);
+    const positionRotations = Math.floor((currentIdx - startIdx) / sch.days.length);
+    const week = Math.max(1, Math.min(trainedRotations, positionRotations) + 1);
+    return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
+  }
+  // Weekday and date-based cycle plans: date arithmetic.
+  // Cycle plans: one meso "week" = one full rotation (daysLen days).
+  // Weekday plans: one meso "week" = 7 calendar days.
+  const start = parseDate(mesoState.startDate);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (today < start) return null; // pending
+  const rawDays = Math.round((today - start) / 86400000);
+  // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
+  // break can't fast-forward the meso week / RIR target the way raw calendar
+  // arithmetic would, mirrors the flex path's "only training advances the
+  // meso" principle. Trained vacation days still count (they're not paused).
+  const trainedDates = new Set(
+    (store?.sessions || [])
+      .filter(s => s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && s.date)
+      .map(s => s.date.slice(0, 10))
+  );
+  const paused = mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, fmtISO(today));
+  const days = Math.max(0, rawDays - paused);
+  const cycleLen = (sch && !isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
+  const week = Math.max(1, Math.floor(days / cycleLen) + 1);
+  return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
+}
+
+// Apply an already-resolved meso state's set-delta to a plan item before
+// building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
+// (can't cut below one set) but otherwise uncapped, repeated "not enough
+// volume" answers keep growing a lift indefinitely, and an over-grown lift
+// self-corrects via the decline signal instead of a hard ceiling; no-ops if
+// no meso or no delta. Split out from applyMesoSetDelta so callers resolving
+// meso state for every item in a plan (session start, plan viewer) can call
+// getMesoState once instead of once per item (each call touches localStorage).
+function applyMesoSetDeltaFromState(it, dayId, mesoState) {
+  if (!dayId || !mesoState) return it;
+  const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
+  if (!delta) return it;
+  const base = it.sets || 1;
+  return { ...it, sets: Math.max(1, base + delta) };
+}
+function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
+  if (!dayId || !scheduleId) return it;
+  return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
+}
+
 // Whether an ended, non-deload session of this plan trained `muscle` before the
 // meso block started (startTs = the block's startedAt, or startDate for older
 // mesos). Week 1 of a genuinely fresh plan has nothing to be sore from, but when
@@ -9128,9 +9474,10 @@ function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, mus
 // ─── Autoreg v2 P1: microcycle accounting + overreach detector (pure) ──────────
 // Everything below is stateless and recomputed from the loaded session history:
 // no new persistence, no server aggregate (a microcycle always sits inside the
-// 70-day set window). `muscleOfExId(exId) -> muscle|null` is injected because
-// primaryMuscleForExercise lives in screens-train.jsx (classic-script global,
-// not on window.LB); pass it the same way mesoMuscleTrainedBeforeStart does.
+// 70-day set window). `muscleOfExId(exId) -> muscle|null` stays an injected
+// callback rather than calling primaryMuscleForExercise directly (both now
+// live in this file): callers resolve a system-catalog candidate not in
+// store.exercises differently, pass it the same way mesoMuscleTrainedBeforeStart does.
 
 // Count a session's HARD sets per muscle into `counts` (mutated in place). A hard
 // set is a completed working set: done && !warmup && !skipped. Technique sets
@@ -9451,10 +9798,13 @@ const REENTRY_MIN_BREAK_DAYS = 7;
 // A long break (weeks+) stretches the systemic ease-in over more than one
 // microcycle (spec 7: "Wochen: weiter runter starten, laengerer Ramp").
 const REENTRY_LONG_BREAK_DAYS = 28;
-// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY in screens-train.jsx
-// so a system-catalog candidate (not in store.exercises, so the injected muscleOf
-// cannot resolve it) buckets to the SAME primary muscle as primaryMuscleForExercise.
-// Keep the two lists in sync: if one changes, change the other.
+// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY above in this
+// file so a system-catalog candidate (not in store.exercises, so the injected
+// muscleOf cannot resolve it) buckets to the SAME primary muscle as
+// primaryMuscleForExercise. Keep the two lists in sync: if one changes, change
+// the other. (Both now live here; still two lists rather than one shared
+// constant, since primaryMuscleFromTags and primaryMuscleForExercise take
+// different inputs, tags vs. an exercise object, that's a separate cleanup.)
 const STALL_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Ab/Adductors', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
 function primaryMuscleFromTags(tags) {
   if (!tags || !tags.length) return null;
@@ -10203,7 +10553,13 @@ function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
     const c = curMap.get(r.id);
     const b = baseMap?.get(r.id);
-    if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+    // syncValuesEqual, not JSON.stringify: several of the collections routed
+    // through here carry jsonb columns (zane_schedules.days/.versions above
+    // all), and jsonb normalizes key order while the in-memory copy keeps
+    // insertion order. A raw stringify therefore reports an edit that never
+    // happened, keeps the stale local row and pushes it back over whatever
+    // another device changed. Same failure the session merge above documents.
+    if (c && b && !syncValuesEqual(c, b)) return c;
     return r;
   });
 }
@@ -10376,6 +10732,18 @@ async function clearPrecompileCaches() {
 // exact URL, and sw.js's fetch handler already treats any ?_v= request as
 // always-network (see the version-check probe in checkSwUpdate), so this
 // reliably gets the same fresh result an actual SW update does.
+// Deliberately does NOT unregister the service worker, even though leaving the
+// old one registered means the reload is still controlled by it and it will
+// re-install the pending update. Unregistering looks like the tidier fix and is
+// a trap: registration.unregister() also destroys the device's PushSubscription,
+// and nothing in this app ever re-subscribes on its own (subscribeWebPush is
+// reached only from the Settings toggle), so every push would silently stop
+// while the UI kept showing push as enabled. It is also deferred for as long as
+// any other client of the scope is open, so it would not even reliably do its
+// job. The re-install is handled where it actually surfaces instead: app.jsx's
+// boot effect takes a waiting worker SILENTLY when sessionStorage's
+// zane-cold-boot flag (set just below) says this boot follows a deliberate
+// wipe, so no update banner is raised for the update the user just asked for.
 async function clearCachesAndReload() {
   await clearPrecompileCaches();
   // Flags this as a deliberate cache wipe so index.html's "React did not
@@ -10428,6 +10796,7 @@ window.LB = {
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
@@ -10443,6 +10812,7 @@ window.LB = {
   refreshHealthLogs,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,

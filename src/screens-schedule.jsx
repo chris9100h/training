@@ -314,7 +314,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           // Autoregulate-only badge: pending until the meso's aligned start (flex
           // plans start on a rotation boundary, so prefer the cycle-aware week over
           // the date-only mesoPending), then a running AUTO / AUTO · LOAD tag.
-          const autoWeek = (mesoSt && s.mesocycle_autoregulate && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(mesoSt, store) : null;
+          const autoWeek = (mesoSt && s.mesocycle_autoregulate) ? LB.mesoCurrentWeek(mesoSt, store) : null;
           const autoPending = s.mesocycle_autoregulate && autoWeek == null;
           // Current plan revision (newest version = highest number, like the editor's
           // version bar). Only shown once a plan has actually been re-versioned (≥2).
@@ -1133,12 +1133,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // this preview silently falls back to a per-device localStorage cache that
   // may not exist here, showing the un-adjusted baseline plan. Resolved once
   // (it internally reads localStorage) rather than once per item below.
-  const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+  const resolvedMeso = LB.getMesoState(sch?.id, store.mesoStates);
   // Week 1 of the FIRST meso block has no prior feedback to defer to, so Smart
   // Progression is NOT vetoed there (mirrors the real session-start seeding in
   // screens-home.jsx). See LB.resolveMesoSeedSuggestion.
-  const mesoNoPriorFeedback = (resolvedMeso && typeof mesoCurrentWeek === 'function')
-    ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
+  const mesoNoPriorFeedback = resolvedMeso
+    ? (LB.mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
     : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
   const mesoDeclines = resolvedMeso?.weightBoostDeclines ?? null;
@@ -1185,7 +1185,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
         // Load-only autoregulate plans never apply set deltas (mirrors the real
         // seeding in screens-home.jsx so this preview agrees with it).
-        const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
+        const itAdj = !LB.autoregLoadOnly(sch) ? LB.applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         // A declined boost is withheld exactly like an un-earned one (falls
         // through to resolveMesoSeedSuggestion's veto branch, weight holds).
         // declined is passed through separately too (not just collapsed into

@@ -3,8 +3,9 @@ import { localClock } from '../_shared/time.ts';
 
 // Daily log reminder cron function. Nudges once per local day when the user
 // has NOT logged a weight for that day yet: after the user's chosen time
-// (daily_log_reminder_time, HH:MM in their local wall clock via
-// tz_offset_minutes) the function checks zane_daily_logs.weight for today and
+// (daily_log_reminder_time, HH:MM in their local wall clock via time_zone,
+// tz_offset_minutes only as a fallback for rows without a saved zone) the
+// function checks zane_daily_logs.weight for today and
 // fires a push through the existing web-push + Pushover channels. At most one
 // nudge per local day per user, enforced by the server-written
 // daily_log_reminder_last_date throttle column (the client never maps or

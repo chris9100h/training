@@ -107,7 +107,7 @@ function SettingsSheet(props) {
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
@@ -268,6 +268,26 @@ function ChangelogSheet({ open, onClose }) {
   const [selectedYear, setSelectedYear] = useStateSet(null); // older year -> its weeks
   const handleClose = () => { onClose(); setSelected(null); setSelectedWeek(null); setSelectedYear(null); };
 
+  // whatsnew.js is a lazy load (index.html's __ensureWhatsNew), so this screen
+  // cannot assume window.WHATS_NEW is populated: app.jsx's own What's New effect
+  // may not have run yet, may still be in flight, or may have skipped the fetch
+  // entirely (it defers to onboarding). Fetch it here rather than rendering a
+  // silently empty changelog. __ensureWhatsNew no longer memoizes a rejection,
+  // so bumping `attempt` genuinely retries with a fresh script tag.
+  const [wnState, setWnState] = useStateSet(window.WHATS_NEW ? 'ready' : 'loading');
+  const [attempt, setAttempt] = useStateSet(0);
+  React.useEffect(() => {
+    if (!open) return;
+    if (window.WHATS_NEW) { setWnState('ready'); return; }
+    let live = true;
+    setWnState('loading');
+    window.__ensureWhatsNew()
+      .then(() => { if (live) setWnState(window.WHATS_NEW ? 'ready' : 'error'); })
+      .catch(() => { if (live) setWnState('error'); });
+    return () => { live = false; };
+  }, [open, attempt]);
+  const retryWhatsNew = () => setAttempt(a => a + 1);
+
   // Newest 5 shown directly; the rest grouped by ISO week. Weeks of the newest
   // year stay on the top level; older years collapse into a year group, so the
   // list stays short no matter how many releases pile up.
@@ -289,7 +309,10 @@ function ChangelogSheet({ open, onClose }) {
       const g = yearMap.get(w.year); g.weeks.push(w); g.count += w.entries.length;
     }
     return { latest, currentWeeks: weeks.filter(w => w.year === newestYear), olderYears: [...yearMap.values()] };
-  }, []);
+    // wnState, not []: window.WHATS_NEW is filled in by a lazy script tag, so a
+    // memo computed once on mount would keep serving the empty snapshot it took
+    // before the file landed.
+  }, [wnState]);
 
   const rowBtn = { width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' };
   const chevron = () => <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>;
@@ -335,6 +358,18 @@ function ChangelogSheet({ open, onClose }) {
     <>
       <SettingsSheet open={open} onClose={handleClose} title="Changelog">
         <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          {/* The changelog text is a lazy fetch, so say so instead of showing an
+              empty list: an offline or flaky load is otherwise indistinguishable
+              from "there are no releases", with nothing to act on. */}
+          {wnState === 'loading' && !topRows.length && (
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '16px 0' }}>Loading…</div>
+          )}
+          {wnState === 'error' && !topRows.length && (
+            <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>Couldn't load the changelog.</div>
+              <button onClick={retryWhatsNew} style={accentBtn}>Retry</button>
+            </div>
+          )}
           {topRows.map((node, i) => (
             <React.Fragment key={node.key}>
               {i === earlierStart && topRows.length > earlierStart && (
@@ -610,15 +645,18 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   // card's protocol resolver uses).
   const [fastingCustomHours, setFastingCustomHours] = useStateSet(() => LB.fastingCustomHours(store.settings?.fastingProtocol));
   const fastingCustomActive = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
-  // Segmented-button style for the Intermittent Fasting protocol picker (same
-  // shape as fdSegBtn / the health estimator's segBtn).
-  const setSegBtn = (active) => ({
-    flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'transparent',
-    color: active ? 'var(--accent-ink)' : UI.inkFaint,
+  // Own card per protocol instead of one fused segmented bar: each option
+  // gets a real tap target and a clear selected state (accent border + tint,
+  // same rgba(--accent-rgb) recipe Card's own `accent` variant uses), rather
+  // than four labels squeezed into one thin strip.
+  const fastingChip = (active) => ({
+    padding: '14px 8px', borderRadius: 4, textAlign: 'center',
+    border: `1.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+    background: active ? 'rgba(var(--accent-rgb),0.13)' : UI.bgInset,
+    color: active ? 'var(--accent)' : UI.ink,
     textShadow: 'none',
-    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
-    WebkitTapHighlightColor: 'transparent',
+    fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.02em',
+    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
   });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
@@ -651,6 +689,18 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
   const [dataSheet, setDataSheet] = useStateSet(false);
   const [changelogSheet, setChangelogSheet] = useStateSet(false);
+  // The Changelog row's version hint reads window.WHATS_NEW inline, which is a
+  // lazy script now: without this the hint is silently blank on any boot where
+  // app.jsx's own What's New effect hasn't fetched it (still in flight, or
+  // skipped entirely because it deferred to onboarding). The ensure call is
+  // deduped, so this shares one request with ChangelogSheet's own fetch.
+  const [whatsNewLoaded, setWhatsNewLoaded] = useStateSet(!!window.WHATS_NEW);
+  useEffectSet(() => {
+    if (whatsNewLoaded) return;
+    let live = true;
+    window.__ensureWhatsNew().then(() => { if (live) setWhatsNewLoaded(true); }).catch(() => {});
+    return () => { live = false; };
+  }, [whatsNewLoaded]);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
   const [howToSheet, setHowToSheet] = useStateSet(false);
 
@@ -2413,38 +2463,37 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           preference lives here, the running fast is per-device ══ */}
       <SettingsSheet open={fastingSheet} onClose={() => setFastingSheet(false)} title="Intermittent Fasting">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
             Pick a fast/eat rhythm. The Food Tracker then shows a live fasting timer and tints today's eating window on the timeline. The protocol syncs to all your devices; the running fast itself stays on this device. Tap the active protocol again to switch it off.
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
-                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
-                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
-              ))}
-            </div>
-            <div className="micro" style={{ color: UI.inkFaint }}>Long fast</div>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
-              {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
-                <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
-                  style={setSegBtn(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
-              ))}
-              {/* Custom long fast: hours live in the id ('custom:96'), the
-                  stepper below edits them. The chip compares by resolved
-                  custom-ness, not the raw id. */}
-              <button onClick={() => {
-                const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
-                patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
-              }} style={setSegBtn(fastingCustomActive)}>Custom</button>
-            </div>
-            {fastingCustomActive && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
-                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
-                <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
-                  step={6} min={24} max={168} suffix="h" />
-              </div>
-            )}
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Daily</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 22 }}>
+            {LB.FD_FASTING_PRESETS.filter(p => !p.long).map(p => (
+              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                style={fastingChip(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+            ))}
           </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Long fast</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            {LB.FD_FASTING_PRESETS.filter(p => p.long && !p.custom).map(p => (
+              <button key={p.id} onClick={() => patchSettings({ fastingProtocol: store.settings?.fastingProtocol === p.id ? null : p.id })}
+                style={fastingChip(store.settings?.fastingProtocol === p.id)}>{p.label}</button>
+            ))}
+            {/* Custom long fast: hours live in the id ('custom:96'), the
+                stepper below edits them. The chip compares by resolved
+                custom-ness, not the raw id. */}
+            <button onClick={() => {
+              const active = typeof store.settings?.fastingProtocol === 'string' && store.settings.fastingProtocol.startsWith('custom:');
+              patchSettings({ fastingProtocol: active ? null : `custom:${fastingCustomHours}` });
+            }} style={fastingChip(fastingCustomActive)}>Custom</button>
+          </div>
+          {fastingCustomActive && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Fast hours</span>
+              <Stepper value={fastingCustomHours} onChange={h => { setFastingCustomHours(h); patchSettings({ fastingProtocol: `custom:${h}` }); }}
+                step={6} min={24} max={168} suffix="h" />
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFastingSheet(false)}>Done</Btn>
           </div>
