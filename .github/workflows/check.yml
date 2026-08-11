@@ -19,6 +19,11 @@ jobs:
       - run: node tools/check-syntax.cjs
       - run: npm run build
       - run: node tools/check-build.cjs
+      # check-sw.cjs defaults to the checked-in root sw.js; run it a second
+      # time against the patched dist/sw.js (rewritten ASSETS list, see
+      # build.cjs's patchServiceWorker) so a bad rewrite gets the same
+      # vm-driven routing/offline/waitUntil coverage as the source file.
+      - run: node tools/check-sw.cjs dist/sw.js
       # Edge Functions are TypeScript modules outside the browser loader. Keep
       # their syntax covered by the same CI job so a deploy cannot hide a
       # broken cron/helper file from the green app check.

@@ -53,6 +53,19 @@ function readSources() {
   return [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
 }
 
+// The plain-JS core files (store.js etc.) aren't in SOURCES, the precompile
+// loader's JSX list: index.html loads them directly via <script src> tags
+// between the BUILD_CORE_SCRIPTS markers, the same block patchIndex() below
+// replaces with the single bundled core.js tag. Read that block back so
+// plainScripts can be cross-checked the same way validateCoverage() already
+// cross-checks the JSX bundles, instead of drifting silently.
+function readCoreScripts() {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const block = html.match(/<!-- BUILD_CORE_SCRIPTS_START -->([\s\S]*?)<!-- BUILD_CORE_SCRIPTS_END -->/);
+  if (!block) throw new Error('Could not find BUILD_CORE_SCRIPTS markers in index.html');
+  return [...block[1].matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
+}
+
 function copy(rel) {
   const from = path.join(root, rel);
   const to = path.join(dist, rel);
@@ -140,6 +153,16 @@ function validateCoverage(jsxSources) {
   if (extra.length) throw new Error(`Route bundle references unknown JSX sources: ${extra.join(', ')}`);
 }
 
+function validatePlainScripts(coreScripts) {
+  const missing = coreScripts.filter(rel => !plainScripts.includes(rel));
+  const extra = plainScripts.filter(rel => !coreScripts.includes(rel));
+  if (missing.length) throw new Error(`index.html loads plain scripts missing from build.cjs's plainScripts: ${missing.join(', ')}`);
+  if (extra.length) throw new Error(`build.cjs's plainScripts references scripts not loaded by index.html: ${extra.join(', ')}`);
+  if (coreScripts.join('|') !== plainScripts.join('|')) {
+    throw new Error(`plainScripts order does not match index.html's BUILD_CORE_SCRIPTS order: [${plainScripts.join(', ')}] vs [${coreScripts.join(', ')}]`);
+  }
+}
+
 function build() {
   fs.rmSync(dist, { recursive: true, force: true });
   fs.mkdirSync(dist, { recursive: true });
@@ -153,6 +176,7 @@ function build() {
 
   const jsxSources = readSources().filter(rel => rel.endsWith('.jsx'));
   validateCoverage(jsxSources);
+  validatePlainScripts(readCoreScripts());
   const totals = { input: 0, output: 0 };
   const bundlePaths = {};
   bundlePaths.core = writeBundle('core', plainScripts, totals);
