@@ -617,9 +617,10 @@ var BENIGN_NOISE = /ResizeObserver loop|translateDisabled|ethereum/i;
 // is untouched and stays up for the user to read/dismiss as intended. This
 // covers every trigger path (onerror/onunhandledrejection/BOOT-catch/
 // timeout) with one mechanism instead of each site managing its own poll.
-// Without it, an error that fires mid-boot but self-recovers (e.g. boot()
-// fails over to fallback() and fallback() succeeds) left the overlay stuck
-// open forever over a working app.
+// Without it, an error that fires mid-boot but the app still recovers from
+// (e.g. a transient fetch blip absorbed by fetchTextRetry's single retry, or
+// a stray console error unrelated to boot) left the overlay stuck open
+// forever over a working app.
 var earlyMountPoll = setInterval(function() {
   if (document.getElementById('root').children.length) {
     clearInterval(earlyMountPoll);
@@ -1362,7 +1363,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // A wiped cache (via "Clear cache & reload") forces every one of these into
   // an uncached network round-trip with no local fallback if it fails, one
   // retry absorbs a single transient blip instead of aborting the whole boot
-  // and dropping to the much slower no-cache fallback() path below.
+  // outright (boot() has no further automatic recovery, see showError below).
   function fetchTextOk(url) {
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error('fetch ' + url + ' → ' + r.status);
@@ -1386,10 +1387,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 
   // Routes through showErrOverlay() (first script block above, same page,
   // already defined by the time this can run) instead of toggling #err
-  // directly: a bare "no button, no auto-hide" overlay here previously left
-  // the user stuck with literally no way out if fallback() then quietly
-  // mounted successfully afterward: the overlay stayed up forever, covering
-  // a now-working app.
+  // directly: that gives the user a "Clear cache & reload" button, since
+  // boot() has no automatic recovery of its own once it reaches this catch.
   function showError(e) {
     if (typeof showErrOverlay === 'function') {
       showErrOverlay().textContent += '[BOOT] ' + (e && e.message || e) + '\n';
