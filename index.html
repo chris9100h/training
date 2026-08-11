@@ -583,10 +583,25 @@
      what was showing through as a smeared clock/battery/signal readout).
      Static markup below, not a React component: present from first paint,
      unaffected by route/screen state or a boot error. pointer-events: none
-     since safe-area-inset-top never holds real tappable content. */
+     since safe-area-inset-top never holds real tappable content.
+
+     On-device follow-up (2026-08): a solid shield sized to EXACTLY
+     env(safe-area-inset-top) still showed the same bleed-through, on this
+     phone only, every other app/the home screen looked normal, ruling out
+     "iOS renders all status bars as glass now". The working theory instead:
+     this specific iOS 27 build grew the real status bar taller than what it
+     reports via env(safe-area-inset-top), i.e. WebKit hasn't caught up to
+     its own OS's new chrome dimensions yet, so an exactly-sized shield left
+     the bottom sliver of the real status bar sitting over the app's own
+     blurred header again. BUFFER_PX is a guessed safety margin on top of
+     the reported value, not a measured one (no device access here to
+     measure the actual gap) - confirm on-device whether this closes the
+     remaining gap, overshoots, or needs adjusting. Harmless if the OS value
+     turns out accurate after all: a same-color flat strip a few px taller
+     than strictly needed is invisible either way. */
   .status-bar-shield {
     position: fixed; top: 0; left: 0; right: 0;
-    height: env(safe-area-inset-top, 0px);
+    height: calc(env(safe-area-inset-top, 0px) + 14px); /* BUFFER_PX = 14, adjust after on-device confirmation */
     background: var(--bg);
     z-index: 999999;
     pointer-events: none;
