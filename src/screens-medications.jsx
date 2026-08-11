@@ -1965,10 +1965,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   ) : timeGroups.length === 0 ? (
                     <div style={mdEmptyHint}>No schedule yet. Add times under "By medication" first.</div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {/* One category card per group, same shape as the Daily
+                          Log's own CatSection (screens-health.jsx): gold left
+                          accent + uppercase label header. Medications inside
+                          keep their own mdListRow card look, there's plenty of
+                          room for both levels to read as cards. */}
                       {timeGroups.map(g => (
-                        <div key={g.key}>
-                          <Bezel style={{ marginBottom: 8 }}>{mdSlotDaysLabel(g.sample)} · {String(g.hour).padStart(2, '0')}:00</Bezel>
+                        <Card key={g.key} style={{ padding: '12px 14px', borderLeft: `3px solid ${UI.gold}` }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 10 }}>
+                            {mdSlotDaysLabel(g.sample)} · {String(g.hour).padStart(2, '0')}:00
+                          </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
                             {g.items.map(({ med, slot }) => (
                               <div key={slot.id} style={{ ...mdListRow, cursor: 'default' }}>
@@ -1983,7 +1990,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                             <i className="fa-solid fa-pen" style={{ marginRight: 6, fontSize: 10 }} />
                             {g.items.length > 1 ? `Edit time for all ${g.items.length}` : 'Edit time'}
                           </button>
-                        </div>
+                        </Card>
                       ))}
                     </div>
                   )}
