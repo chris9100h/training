@@ -6254,7 +6254,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Empty freestyle/bonus session, show exercise picker immediately
     return (
       <Screen scroll={false}>
-        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0', display: 'flex' }}>
+        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0', display: 'flex' }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
           <button onClick={abandon} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.danger, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>×</button>
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 }}>
@@ -6619,7 +6619,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       )}
 
       {/* Top: close + session timer */}
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
         <button onClick={abandon} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',

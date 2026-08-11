@@ -184,7 +184,7 @@ function LoginScreen() {
     <Screen scroll style={{ position: 'relative' }}>
       <div className="guilloche" style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }} />
 
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
         <span className="micro">ZANE TRAINING</span>
       </div>
 

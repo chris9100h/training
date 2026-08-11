@@ -11675,7 +11675,7 @@ function FdScanner({ onClose, onDetect }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000', display: 'flex', flexDirection: 'column', animation: 'sheet-up 0.22s ease' }}>
-      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 28px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
         <span style={{ flex: 1, color: '#fff', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600 }}>Scan barcode</span>
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>

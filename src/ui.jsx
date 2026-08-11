@@ -100,16 +100,17 @@ function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
       flexShrink: 0,
-      // +22px, not the original +14px: a newer iOS shows a smeared clock/
-      // battery/signal readout right at this header's top edge on at least
-      // one phone (2026-08). Confirmed NOT a bleed-through-the-status-bar
-      // issue (a solid, maxed-z-index shield covering the whole reported
-      // env(safe-area-inset-top), at several heights, had zero effect on
-      // the blur itself), so this isn't chasing that theory anymore, just
-      // giving the real header content a bit more clearance from whatever
-      // is rendering that way. Guessed amount, not measured, confirm
-      // on-device before adjusting further.
-      padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 22px 0',
+      // +30px, not the original +14px: a newer iOS shows a smeared clock/
+      // battery/signal readout right at a screen header's top edge on at
+      // least one phone (2026-08). Confirmed NOT a bleed-through-the-status-
+      // bar issue (a solid, maxed-z-index shield covering the whole reported
+      // env(safe-area-inset-top), at several heights, had zero effect on the
+      // blur itself), so this isn't chasing that theory, just giving the
+      // real header content clearance from whatever renders that way.
+      // +16px is the on-device-confirmed delta (screens-home.jsx's own
+      // plan-active header, +12 -> +28), applied uniformly here and at
+      // every other screen-header safe-area offset in the app.
+      padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0',
       position: 'sticky', top: 0,
       background: 'rgba(var(--bg-rgb),0.97)',
       backdropFilter: 'blur(8px)',
@@ -1370,7 +1371,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
-      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 14px',
+      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 14px', // +16 iOS status-bar-blur delta, see TopBar above
       position: 'relative', ...style,
     }}>
       {sub && (

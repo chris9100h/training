@@ -6332,7 +6332,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       {/* TopBar */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 30px) 22px 14px`, // +16 iOS status-bar-blur delta, see ui.jsx TopBar
         borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',
