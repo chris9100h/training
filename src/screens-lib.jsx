@@ -3307,11 +3307,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       .catch(() => {});
     return () => { on = false; };
   }, [needsEntries, sessionId]);
-  if (!s) return null;
-  const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
-  const duration = s.durationMinutes != null
+  // Deleting this session clears it from store.sessions before the route change to
+  // 'hist' commits, so this component can still re-render once with `s` undefined
+  // (confirmed to only reproduce with certain platform/timing, e.g. desktop but not
+  // iOS). Bailing out here with an early return would skip the hooks declared below
+  // (prevEntryMap/prMap memos, the prior-session fetch effect), a Rules of Hooks
+  // violation (React error #300, "rendered fewer hooks than expected"). So the
+  // `!s` bailout moves past all hooks (see below); everything between here and
+  // there must tolerate `s` being undefined instead.
+  const vol = s ? LB.totalVolume(s, store.exercises, store.dailyLogs) : 0;
+  const duration = s && s.durationMinutes != null
     ? s.durationMinutes
-    : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
+    : (s && s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
 
   const setFeel = (feel) => {
     setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
@@ -3697,6 +3704,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // (a keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to this data).
   const { prevEntryMap, prevPendingMap, prevNeedIds } = useMemoL(() => {
+    if (!s) return { prevEntryMap: {}, prevPendingMap: {}, prevNeedIds: [] };
     const map = {};
     const pending = {};
     const needIds = new Set();
@@ -3778,11 +3786,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return () => { on = false; };
   }, [prevNeedIds]);
 
-  const prevSameDay = store.sessions
+  const prevSameDay = s ? store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
-    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] : null;
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
-  const compareCandidates = sameDaySessions(store.sessions, s);
+  const compareCandidates = s ? sameDaySessions(store.sessions, s) : [];
 
   // The whole PR-detection block below scans store.sessions/store.exercises
   // (prMap: all sessions x entries x sets; prValueOf: a store.exercises.find
@@ -3791,6 +3799,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // keystroke in the template-name input below, a sheet/feel toggle, a
   // background store sync unrelated to any of this).
   const { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR } = useMemoL(() => {
+    if (!s) return { isLatestSession: false, prMap: {}, sessionBestMap: {}, sessionBestSetMap: {}, isPR: () => false };
     const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
     const prReps = (st, exId) => exIsUnilateral(exId)
       ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
@@ -3938,6 +3947,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     };
     return { isLatestSession, prMap, sessionBestMap, sessionBestSetMap, isPR };
   }, [store.sessions, store.exercises, s]);
+
+  // All hooks have now run unconditionally (see the comment above `vol`); safe to
+  // bail out for real from here on, everything below assumes `s` is defined.
+  if (!s) return null;
 
   // How many exercises this session actually set a PR on, a counterpoint to
   // volDelta below: total volume can land lower than last time even on a
