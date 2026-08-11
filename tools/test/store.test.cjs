@@ -68,26 +68,54 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.todayISO(), expected);
   });
 
-  test('saveSyncedState stores one snapshot and loadLocalState reuses it as the base', () => {
+  test('saveSyncedState stores one atomic pair entry and loadLocalState reuses it as the base', () => {
     const state = { user: { name: 'A' }, sessions: [] };
     assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);
-    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-cache-user'));
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-pair-cache-user'));
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-cache-user'), null);
     assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-cache-user'), null);
     const loaded = LB.loadLocalState('cache-user');
     assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(state));
     assert.strictEqual(loaded.base, loaded.store);
   });
 
-  test('saveLocalState keeps a separate base only while local edits are pending', () => {
+  test('saveLocalState folds a distinct base into the same atomic entry only while local edits are pending', () => {
     const base = { settings: { unit: 'kg' }, sessions: [] };
     const edited = { settings: { unit: 'lbs' }, sessions: [] };
     assert.strictEqual(LB.saveLocalState(edited, base, 'pending-user'), true);
-    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'));
+    const rawPending = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-user'));
+    assert.ok(rawPending.base, 'a pending edit must persist its own base inside the pair entry');
     const pending = LB.loadLocalState('pending-user');
     assert.strictEqual(pending.store.settings.unit, 'lbs');
     assert.strictEqual(pending.base.settings.unit, 'kg');
     assert.strictEqual(LB.saveSyncedState(edited, 'pending-user'), true);
-    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-pending-user'), null);
+    const rawSynced = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-user'));
+    assert.strictEqual(rawSynced.base, null, 'base is omitted from the pair entry once local state is confirmed synced');
+  });
+
+  test('loadLocalState falls back to the pre-migration two-key format, then saveLocalState migrates it', () => {
+    const legacyBase = { settings: { unit: 'kg' } };
+    const legacyStore = { settings: { unit: 'lbs' } };
+    storeWindow.__testLocalStorage.setItem('logbook-legacy-user', JSON.stringify(legacyStore));
+    storeWindow.__testLocalStorage.setItem('logbook-base-legacy-user', JSON.stringify(legacyBase));
+    const loaded = LB.loadLocalState('legacy-user');
+    assert.strictEqual(loaded.store.settings.unit, 'lbs');
+    assert.strictEqual(loaded.base.settings.unit, 'kg');
+    assert.strictEqual(LB.saveLocalState(loaded.store, loaded.base, 'legacy-user'), true);
+    assert.ok(storeWindow.__testLocalStorage.getItem('logbook-pair-legacy-user'), 'the atomic entry must exist after migrating');
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-legacy-user'), null, 'the old store key must be cleaned up');
+    assert.strictEqual(storeWindow.__testLocalStorage.getItem('logbook-base-legacy-user'), null, 'the old base key must be cleaned up');
+  });
+
+  test('saveToLocal (emergency flush) writes through the same atomic entry and keeps the last known base', () => {
+    const base = { settings: { unit: 'kg' }, sessions: [] };
+    const edited = { settings: { unit: 'lbs' }, sessions: [] };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'flush-user'), true);
+    const flushed = { settings: { unit: 'lbs' }, sessions: [{ id: 'mid-typing' }] };
+    assert.strictEqual(LB.saveToLocal(flushed, 'flush-user'), true);
+    const loaded = LB.loadLocalState('flush-user');
+    assert.strictEqual(JSON.stringify(loaded.store), JSON.stringify(flushed), 'the emergency flush value must be readable back');
+    assert.strictEqual(loaded.base.settings.unit, 'kg', 'the emergency flush must not silently mark the edit as already synced');
   });
 
   await testAsync('refreshHealthLogs does not issue medication reads while the feature is disabled', async () => {

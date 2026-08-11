@@ -5264,6 +5264,23 @@ const _localSnapshotState = new Map();
 
 function loadLocalState(userId) {
   try {
+    const pairKey = `logbook-pair-${userId}`;
+    const pairRaw = localStorage.getItem(pairKey);
+    if (pairRaw) {
+      const parsed = JSON.parse(pairRaw);
+      const store = parsed.store;
+      if (!store) return { store: null, base: null };
+      const base = parsed.base ?? store;
+      _localSnapshotState.set(userId, { storeRef: store, baseRef: base, raw: pairRaw });
+      return { store, base };
+    }
+    // Backward-compatible fallback for a device that has not written the
+    // atomic single-key format yet: the previous design stored base and
+    // store as two SEPARATE localStorage entries (base absent meaning
+    // "equals store"), which let a device killed exactly between the two
+    // writes boot into a new base paired with an old store. Read the old
+    // format once here; the next saveLocalState call below migrates this
+    // device to the atomic pair and removes these two keys.
     const storeKey = `logbook-${userId}`;
     const baseKey = `logbook-base-${userId}`;
     const storeRaw = localStorage.getItem(storeKey);
@@ -5271,45 +5288,42 @@ function loadLocalState(userId) {
     const store = JSON.parse(storeRaw);
     const storedBaseRaw = localStorage.getItem(baseKey);
     const baseMatchesStore = !storedBaseRaw || storedBaseRaw === storeRaw;
-    const baseRaw = baseMatchesStore ? null : storedBaseRaw;
     const base = baseMatchesStore ? store : JSON.parse(storedBaseRaw);
-    _localSnapshotState.set(userId, { storeRef: store, storeRaw, baseRef: base, baseRaw });
     return { store, base };
   } catch (_) {
     return { store: null, base: null };
   }
 }
 
-// The full base snapshot only exists while local state actually differs from
-// the last confirmed server state. Once synced, absence of the base key means
-// "base equals cache", so the next boot parses one large JSON payload instead
-// of two. Repeated idle saves reuse the previous serialized strings when the
-// immutable store/base references did not change.
+// base and store are written together as ONE JSON payload under a single
+// localStorage key (logbook-pair-*), so a device killed mid-write (tab
+// close, OS kill, storage quota hit) can never end up pairing a NEW base
+// with an OLD store or vice versa: a single setItem either lands whole or
+// not at all, unlike the previous two-separate-keys design this replaced.
+// The base only adds to the payload while local state actually differs from
+// the last confirmed server state; once synced, base is omitted (implying
+// "equals store") so the next boot parses a smaller payload. Repeated idle
+// saves reuse the previous serialized string when the immutable store/base
+// references did not change.
 function saveLocalState(store, base, userId) {
   try {
-    const storeKey = `logbook-${userId}`;
-    const baseKey = `logbook-base-${userId}`;
+    const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
     const baseIsStore = !base || base === store;
-    let baseRaw = null;
-
-    // Preserve the confirmed base before replacing the current cache. If the
-    // cache write then fails, the older local store and its base remain a valid
-    // pair rather than becoming an ambiguous partial update.
-    if (!baseIsStore) {
-      baseRaw = prev.baseRef === base && prev.baseRaw ? prev.baseRaw : JSON.stringify(base);
-      if (prev.baseRaw !== baseRaw) localStorage.setItem(baseKey, baseRaw);
-    }
-
-    const storeRaw = prev.storeRef === store && prev.storeRaw ? prev.storeRaw : JSON.stringify(store);
-    if (prev.storeRaw !== storeRaw) localStorage.setItem(storeKey, storeRaw);
-    if (baseIsStore) localStorage.removeItem(baseKey);
-    _localSnapshotState.set(userId, {
-      storeRef: store,
-      storeRaw,
-      baseRef: baseIsStore ? store : base,
-      baseRaw: baseIsStore ? null : baseRaw,
-    });
+    const effectiveBase = baseIsStore ? store : base;
+    const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
+      ? prev.raw
+      : JSON.stringify({ v: 2, store, base: baseIsStore ? null : base });
+    if (prev.raw !== raw) localStorage.setItem(pairKey, raw);
+    // Best-effort cleanup of the pre-migration two-key format: a failure
+    // here does not affect the atomic pair write above, which already
+    // landed, it just leaves a harmless stale copy that loadLocalState
+    // never reads once the pair key exists.
+    try {
+      localStorage.removeItem(`logbook-${userId}`);
+      localStorage.removeItem(`logbook-base-${userId}`);
+    } catch (_) {}
+    _localSnapshotState.set(userId, { storeRef: store, baseRef: effectiveBase, raw });
     return true;
   } catch (_) {
     return false;
@@ -5320,11 +5334,14 @@ function saveSyncedState(store, userId) {
   return saveLocalState(store, store, userId);
 }
 
+// Emergency/best-effort flush (visibilitychange/pagehide keyboard-commit,
+// see screens-train.jsx): must stay synchronous and has no way to know the
+// caller's own confirmed-sync base, so it reuses whatever saveLocalState
+// last tracked for this user here, the same base the old two-separate-keys
+// format effectively kept by simply never touching the separate base key.
 function saveToLocal(store, userId) {
-  try {
-    localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
-    return true;
-  } catch (_) { return false; }
+  const prev = _localSnapshotState.get(userId);
+  return saveLocalState(store, prev?.baseRef ?? null, userId);
 }
 
 function loadFromLocal(userId) {
@@ -5355,6 +5372,7 @@ function clearLocal(userId) {
     if (userId) {
       localStorage.removeItem(`logbook-${userId}`);
       localStorage.removeItem(`logbook-base-${userId}`);
+      localStorage.removeItem(`logbook-pair-${userId}`);
       _localSnapshotState.delete(userId);
       return;
     }
