@@ -823,6 +823,55 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions[0].feel, 'great');
     assert.strictEqual(sessions[0].isCleanup, true);
   });
+  // The H2 scalar test above compared jsonb by reference, so ANY session
+  // carrying a mesoRecap counted as "locally edited" forever: store and base
+  // are two separately parsed subtrees of the persisted cache pair, never
+  // reference-equal even when deep-equal. Every one of the 14 fields then got
+  // pinned to the stale cache and pushed back over a newer server value.
+  test('mergeSessions does not treat a deep-equal mesoRecap as a local edit', () => {
+    const recap = { groups: [{ muscle: 'chest', general: [{ title: 'Soreness', sub: 'None' }], joint: [] }], gains: [] };
+    const base = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'ok', mesoRecap: recap, entries: [] }];
+    // Separately parsed copy, exactly what loadLocalState's `parsed.base ?? store`
+    // hands back whenever a sync was still pending when the cache was written.
+    const cur = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'ok', mesoRecap: JSON.parse(JSON.stringify(recap)), entries: [] }];
+    const fresh = [{ id: 's5', date: '2026-06-10', ended: 'x', feel: 'great', mesoRecap: JSON.parse(JSON.stringify(recap)), entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great', 'no local edit was made, so the other device\'s feel must win');
+  });
+  test('mergeSessions ignores jsonb key order when deciding "locally edited"', () => {
+    // Postgres jsonb normalizes key order, the in-memory object keeps insertion
+    // order, so a plain JSON.stringify compare would also have been wrong here.
+    const base = [{ id: 's6', ended: 'x', feel: 'ok', mesoRecap: { a: 1, b: { x: 1, y: 2 } }, entries: [] }];
+    const cur = [{ id: 's6', ended: 'x', feel: 'ok', mesoRecap: { b: { y: 2, x: 1 }, a: 1 }, entries: [] }];
+    const fresh = [{ id: 's6', ended: 'x', feel: 'great', mesoRecap: { a: 1, b: { x: 1, y: 2 } }, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great');
+  });
+  test('mergeSessions still keeps a genuinely edited mesoRecap', () => {
+    const base = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [] }, entries: [] }];
+    const cur = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [{ key: 'bench_d1' }] }, entries: [] }];
+    const fresh = [{ id: 's7', ended: 'x', mesoRecap: { groups: [], gains: [] }, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.deepStrictEqual(sessions[0].mesoRecap.gains, [{ key: 'bench_d1' }], 'a real post-hoc feedback edit must still survive');
+  });
+  test('mergeSessions only overrides the fields this device actually edited', () => {
+    // An older cache has no signalWeight at all while the server does. The
+    // all-or-nothing override nulled it out purely because `feel` differed.
+    const base = [{ id: 's8', ended: 'x', feel: null, entries: [] }];
+    const cur = [{ id: 's8', ended: 'x', feel: 'great', entries: [] }];
+    const fresh = [{ id: 's8', ended: 'x', feel: null, signalWeight: 'full', readiness: 4, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].feel, 'great', 'the edited field still wins');
+    assert.strictEqual(sessions[0].signalWeight, 'full', 'an untouched field must keep the server value, not be nulled');
+    assert.strictEqual(sessions[0].readiness, 4);
+  });
+  test('mergeSessions with no base does not null fields the cache never had', () => {
+    const cur = [{ id: 's9', ended: '2026-06-10T11:00:00Z', entries: [] }];
+    const fresh = [{ id: 's9', ended: null, signalWeight: 'full', entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'the H2 no-base bias still holds for what the cache does carry');
+    assert.strictEqual(sessions[0].signalWeight, 'full', 'but a field the cache never had must not be nulled');
+  });
 
   await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {
     rpcLog.length = 0;

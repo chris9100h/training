@@ -362,5 +362,8 @@ const scenarios = [
     console.error(`\ncheck-sw FAILED (${failures.length} assertion${failures.length === 1 ? '' : 's'})`);
     process.exit(1);
   }
-  console.log(`check-sw OK: ${scenarios.length} scenarios against ${path.basename(swPath)} (${CACHE_NAME}), routing + offline + waitUntil + install/activate all hold`);
+  // Relative path, not basename: CI runs this twice (source tree and dist/),
+  // and basename collapses both to "sw.js", so a silently skipped or
+  // misconfigured second pass read as a green source-tree run.
+  console.log(`check-sw OK: ${scenarios.length} scenarios against ${path.relative(root, swPath) || swPath} (${CACHE_NAME}), routing + offline + waitUntil + install/activate all hold`);
 })();

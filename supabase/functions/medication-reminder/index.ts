@@ -271,19 +271,35 @@ async function sendReminders() {
       ids.push(e.id);
       byCount.set(target, ids);
     }
-    const failedIds = new Set<string>();
+    // Compare-and-swap, not a blind write, exactly like meal-reminder's own
+    // claim: the filter pins reminder_count to the value this tick READ, so
+    // PostgREST applies it atomically and a concurrent invocation (a manual
+    // POST racing the hourly cron, both explicitly supported by this handler)
+    // matches zero rows instead of claiming the same dose a second time. With
+    // a bare id filter both invocations got a 2xx, both pushed the identical
+    // nudge, and the row was left one short of its target, so the 2h follow-up
+    // branch fired a THIRD nudge past the 2-per-day cap documented above.
+    // return=representation rather than minimal so `claimed` is what this tick
+    // actually won, which is also what the message below must describe.
+    const claimedIds = new Set<string>();
     for (const [target, ids] of byCount) {
-      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})`, {
+      // reminder_count is NOT NULL DEFAULT 0 (migration 0246), so eq.<target-1>
+      // covers the first nudge (eq.0) as well, no null branch needed.
+      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})&reminder_count=eq.${target - 1}`, {
         method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
+        headers: { 'Prefer': 'return=representation' },
         body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
       });
       if (!patchRes.ok) {
         console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
-        ids.forEach(id => failedIds.add(id));
+        continue;
       }
+      const claimed: { id: string }[] = await patchRes.json().catch(() => []);
+      claimed.forEach(r => claimedIds.add(r.id));
     }
-    const toPush = due.filter(e => !failedIds.has(e.id));
+    // Only what this tick actually claimed, so the count/name in the message
+    // can never describe a dose another invocation is nudging about.
+    const toPush = due.filter(e => claimedIds.has(e.id));
     if (!toPush.length) continue;
 
     const title = 'Zane · Medication Reminder';

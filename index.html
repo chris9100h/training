@@ -664,6 +664,16 @@ function makeClearCacheButton() {
   btn.style.cssText = 'margin-top:16px;margin-right:8px;display:inline-block;padding:10px 20px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
   btn.onclick = async function() {
     btn.textContent = 'Clearing…';
+    // Unregister first, so the reload is not still controlled by the old
+    // worker (which would re-install the pending update and re-raise the
+    // update banner) and so an in-flight install cannot activate on the
+    // cache this wipe is about to delete. Mirrors LB.clearCachesAndReload.
+    if ('serviceWorker' in navigator) {
+      try {
+        var regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(function(r){ return r.unregister().catch(function(){}); }));
+      } catch (e) {}
+    }
     if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
     // Also nuke the IndexedDB precompile cache, a poisoned record there bricks
     // boot just as badly as a bad Cache Storage entry, and clearing only caches
@@ -1752,76 +1762,67 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     }).catch(showError);
   }
 
-  // Lazily load html2canvas the first time a screenshot is actually taken.
-  window.__ensureHtml2Canvas = function () {
-    if (window.html2canvas) return Promise.resolve(window.html2canvas);
-    if (!window.__h2cPromise) {
-      window.__h2cPromise = new Promise(function (resolve, reject) {
+  // "Inject a plain script tag once, dedupe concurrent callers via one shared
+  // promise" loader, shared by every lazy <script>-based dependency below.
+  //
+  // A REJECTION is deliberately NOT memoized: the promise slot is cleared (and
+  // the dead tag removed) on failure, so a later call retries with a fresh
+  // script tag instead of handing every future caller the same permanent
+  // failure. Each of these used to keep its rejected promise forever, which
+  // meant one flaky fetch disabled the feature for the whole session with no
+  // recovery short of a reload. That bites hardest right after a cache wipe,
+  // when nothing is precached and the network is often exactly what was flaky
+  // in the first place. __ensureZbarWasm below already worked this way; this
+  // brings the script-tag loaders in line with it.
+  function __lazyScript(promiseKey, src, read, crossOrigin) {
+    var already = read();
+    if (already) return Promise.resolve(already);
+    if (!window[promiseKey]) {
+      window[promiseKey] = new Promise(function (resolve, reject) {
         var s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.html2canvas); };
-        s.onerror = function () { reject(new Error('html2canvas failed to load')); };
+        s.src = src;
+        if (crossOrigin) s.crossOrigin = 'anonymous';
+        s.onload = function () { resolve(read()); };
+        s.onerror = function () {
+          window[promiseKey] = null;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          reject(new Error(src + ' failed to load'));
+        };
         document.head.appendChild(s);
       });
     }
-    return window.__h2cPromise;
+    return window[promiseKey];
+  }
+
+  // Lazily load html2canvas the first time a screenshot is actually taken.
+  window.__ensureHtml2Canvas = function () {
+    return __lazyScript('__h2cPromise', 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+      function () { return window.html2canvas; }, true);
   };
 
-  // Same "inject a plain script tag, dedupe via a shared promise" idiom as
-  // __ensureHtml2Canvas above, for two large static data files that used to
-  // sit in the blocking BUILD_CORE_SCRIPTS block: whatsnew.js (changelog
-  // text, only needed for app.jsx's post-boot unseen-entries check) and
-  // feature-map-db.js (the feature catalog, only needed by the already-lazy
-  // Feature Map screen). Same relative path in both the raw source tree and
-  // the precompiled build: build.cjs's staticDirectories copy still puts an
+  // Two large static data files that used to sit in the blocking
+  // BUILD_CORE_SCRIPTS block: whatsnew.js (changelog text, needed by app.jsx's
+  // post-boot unseen-entries check and by Settings' Changelog sheet) and
+  // feature-map-db.js (the feature catalog, needed by the already-lazy Feature
+  // Map screen). Same relative path in both the raw source tree and the
+  // precompiled build: build.cjs's staticDirectories copy still puts an
   // individual, unbundled copy of each at this exact path in dist/, even
   // though they're no longer folded into core.js there.
   window.__ensureWhatsNew = function () {
-    if (window.WHATS_NEW) return Promise.resolve(window.WHATS_NEW);
-    if (!window.__whatsNewPromise) {
-      window.__whatsNewPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'src/whatsnew.js';
-        s.onload = function () { resolve(window.WHATS_NEW); };
-        s.onerror = function () { reject(new Error('whatsnew.js failed to load')); };
-        document.head.appendChild(s);
-      });
-    }
-    return window.__whatsNewPromise;
+    return __lazyScript('__whatsNewPromise', 'src/whatsnew.js', function () { return window.WHATS_NEW; });
   };
   window.__ensureFeatureMapDb = function () {
-    if (window.FEATURE_MAP) return Promise.resolve(window.FEATURE_MAP);
-    if (!window.__featureMapDbPromise) {
-      window.__featureMapDbPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'src/feature-map-db.js';
-        s.onload = function () { resolve(window.FEATURE_MAP); };
-        s.onerror = function () { reject(new Error('feature-map-db.js failed to load')); };
-        document.head.appendChild(s);
-      });
-    }
-    return window.__featureMapDbPromise;
+    return __lazyScript('__featureMapDbPromise', 'src/feature-map-db.js', function () { return window.FEATURE_MAP; });
   };
 
   // Lazily load ExcelJS the first time an XLSX export is actually requested
-  // (Settings → Data → Export Training). Same pattern as html2canvas above.
-  // Not SheetJS: its free build parses styles but silently drops them on
-  // write (no border/fill/alignment survives, confirmed against its own
-  // output XML), so borders and vertical centering weren't achievable there.
+  // (Settings → Data → Export Training). Not SheetJS: its free build parses
+  // styles but silently drops them on write (no border/fill/alignment
+  // survives, confirmed against its own output XML), so borders and vertical
+  // centering weren't achievable there.
   window.__ensureXLSX = function () {
-    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
-    if (!window.__xlsxPromise) {
-      window.__xlsxPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.ExcelJS); };
-        s.onerror = function () { reject(new Error('XLSX library failed to load')); };
-        document.head.appendChild(s);
-      });
-    }
-    return window.__xlsxPromise;
+    return __lazyScript('__xlsxPromise', 'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js',
+      function () { return window.ExcelJS; }, true);
   };
 
   // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build

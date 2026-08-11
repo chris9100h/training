@@ -932,6 +932,24 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     };
   }, [open]);
   const stackTokenRef = React.useRef({});
+  // onClose is read through a ref, and is deliberately NOT a dependency of the
+  // stack effect below. Practically every call site passes a fresh closure each
+  // render (a bare `function` in the component body, or an inline arrow), so
+  // depending on it made the effect tear down and re-push on EVERY render:
+  // React flushes passive effects destroy-all-then-create-all in tree order, so
+  // the stack re-sorted itself into JSX declaration order instead of the order
+  // the sheets actually opened. Any sheet that opens ON TOP of one declared
+  // earlier in the same component then lost Escape (and the Tab trap) to the
+  // sheet behind it, e.g. the Food Tracker's quantity sheet over its still-open
+  // "Review meal" list, or useConfirm's portal dialog in any screen that
+  // renders {confirmEl} above its own sheets. Depending on [open] alone makes
+  // the push order exactly the open order again.
+  // Synced in an effect, not during render: a concurrent render React discards
+  // must not leave a handler the app never committed sitting in the ref. The
+  // useRef initializer covers the very first render, and the ref is only ever
+  // read from a DOM event, which cannot fire before a commit.
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; });
   React.useEffect(() => {
     if (!open) return;
     const token = stackTokenRef.current;
@@ -939,9 +957,10 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     const isTopmost = () => _openSheetStack[_openSheetStack.length - 1] === token;
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
-        if (!onClose || !isTopmost()) return;
+        const close = onCloseRef.current;
+        if (!close || !isTopmost()) return;
         event.stopPropagation();
-        onClose();
+        close();
         return;
       }
       // Trap Tab within this sheet's own focusable elements while it's the
@@ -971,7 +990,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       const idx = _openSheetStack.indexOf(token);
       if (idx !== -1) _openSheetStack.splice(idx, 1);
     };
-  }, [open, onClose]);
+  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;

@@ -139,6 +139,41 @@ function AutoCloseBanner({ notify, onDismiss }) {
   );
 }
 
+// True while the onboarding flow still owns this boot's modal slot, i.e. the
+// account has neither finished onboarding nor ever finished a session.
+// Deliberately says nothing about settings.unit: an un-onboarded account
+// reaches 'ready' with a null unit (the unit picker opens first, and the
+// onboarding effect waits for it), so a unit test here would report "not
+// onboarding" during exactly the window where onboarding has yet to decide.
+function onboardingOwnsBoot(s) {
+  return !!s && !s.settings?.onboardingCompleted && !(s.sessions || []).some(x => x.ended);
+}
+
+// Records which app-shell version is now actually running, so the banner is not
+// re-offered for an update that has already been applied.
+// Reads the live CacheStorage key rather than trusting a pre-recorded version
+// string: only checkSwUpdate's network fetch of sw.js ever sets
+// pendingSwVersion, and that fetch is exactly what fails when someone updates
+// while offline, so the reg.waiting-at-boot and updatefound routes to the
+// banner reach it with no version at all. Keying the write on pendingSwVersion
+// therefore left those two routes with no durable seen-marker: the update
+// activated fine, nothing was written, and the next successful version check
+// re-showed the banner on an already-current app (whose second tap then finds
+// no waiting worker and needlessly wipes the whole cache).
+// detectCacheVersion strips the 'zane-' prefix; logbook-sw-version stores the
+// raw `const CACHE = '...'` string, hence putting it back on. The SW's activate
+// handler sweeps every other app-shell cache before clients.claim(), so by the
+// time this runs there is exactly one 'zane-v*' key: the new one.
+async function persistAppliedSwVersion(fallback) {
+  let applied = null;
+  try {
+    const version = await LB.detectCacheVersion();
+    if (version) applied = 'zane-' + version;
+  } catch (_) {}
+  applied = applied || fallback || null;
+  if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
+}
+
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
@@ -875,13 +910,14 @@ function App() {
     // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
       reportSwVersion();
+      if (!intentionalUpdate.current) return;
       // Persist the applied version only now that the new SW has actually taken
       // control, not on the click, so an update that never activates (tab
       // closed, SKIP_WAITING lost) keeps being re-offered after a cold start.
-      if (intentionalUpdate.current && pendingSwVersion.current) {
-        try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
-      }
-      if (intentionalUpdate.current) window.location.reload(true);
+      // Sourced from the live cache, not pendingSwVersion, see
+      // persistAppliedSwVersion for why that mattered. .finally so a failure
+      // to record the version can never cost the user their reload.
+      persistAppliedSwVersion(pendingSwVersion.current).finally(() => window.location.reload());
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
@@ -927,6 +963,8 @@ function App() {
 
     let activatedViaWorker = false;
     if (worker) {
+      const controllerBefore = navigator.serviceWorker.controller;
+      const waitingBefore = swReg.current?.waiting || null;
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
       // skipWaiting()/clients.claim() should fire 'controllerchange' back on
@@ -937,16 +975,38 @@ function App() {
       // persisted, so the next foreground/route check (checkSwUpdate) sees the
       // exact same "new" version again and re-shows the banner, forever
       // (confirmed: this produced a repeating update-banner loop). Race a
-      // timeout against the real event so this path self-heals into the same
-      // cache-wipe fallback below instead of silently stranding the update.
+      // timeout against the real event so this path always resolves.
       activatedViaWorker = await new Promise(resolve => {
-        const t = setTimeout(() => resolve(false), 8000);
-        navigator.serviceWorker.addEventListener('controllerchange', function h() {
+        const t = setTimeout(() => {
+          navigator.serviceWorker.removeEventListener('controllerchange', h);
+          resolve(false);
+        }, 8000);
+        function h() {
           navigator.serviceWorker.removeEventListener('controllerchange', h);
           clearTimeout(t);
           resolve(true);
-        });
+        }
+        navigator.serviceWorker.addEventListener('controllerchange', h);
       });
+      // A timeout is NOT proof the handoff failed. The suspended-page case this
+      // exists for swallows the event while the worker activates normally with
+      // a fully populated cache, and falling through to the wipe below would
+      // then delete exactly the fresh cache the comment above says to protect
+      // (and strand an offline user on sw.js's empty-bodied ?_v= fallback).
+      // So re-read the real state: a moved controller, or the worker we posted
+      // to having left the waiting slot, both mean skipWaiting took and a plain
+      // reload lands on the new worker. onControllerChange never ran in that
+      // case, so do its job here instead of letting the update strand.
+      if (!activatedViaWorker) {
+        const controllerNow = navigator.serviceWorker.controller;
+        const controllerMoved = !!controllerNow && controllerNow !== controllerBefore;
+        const waitingCleared = !!waitingBefore && swReg.current?.waiting !== waitingBefore;
+        if (controllerMoved || waitingCleared) {
+          await persistAppliedSwVersion(pendingSwVersion.current);
+          window.location.reload();
+          return;
+        }
+      }
     }
     if (!activatedViaWorker) {
       // Either no installed/waiting worker turned up in time (our own faster
@@ -1611,12 +1671,17 @@ function App() {
   useEffectA(() => {
     if (phase !== 'ready') return;
     const s = storeRefA.current;
-    const freshOnboarding = s && !onboardingChecked.current && s.settings?.unit != null
-      && !s.settings?.onboardingCompleted && !(s.sessions || []).some(x => x.ended);
-    if (freshOnboarding) return;
+    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) return;
     let live = true;
     window.__ensureWhatsNew().then(() => {
       if (!live) return;
+      // Re-check after the await, not only before it: the onboarding effect
+      // can reach its decision while the script is still loading (it waits on
+      // the unit picker, which the user answers in exactly that window), and
+      // its synchronous setWhatsNew(null) would otherwise be overwritten right
+      // here, leaving a What's New card mounted behind the onboarding overlay
+      // that surfaces the moment onboarding is dismissed.
+      if (onboardingOwnsBoot(storeRefA.current)) return;
       const unseen = unseenWhatsNew();
       if (unseen.length) setWhatsNew(unseen);
     }).catch(() => {}); // best-effort: a failed lazy fetch just means no What's New this session

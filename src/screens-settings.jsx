@@ -268,6 +268,26 @@ function ChangelogSheet({ open, onClose }) {
   const [selectedYear, setSelectedYear] = useStateSet(null); // older year -> its weeks
   const handleClose = () => { onClose(); setSelected(null); setSelectedWeek(null); setSelectedYear(null); };
 
+  // whatsnew.js is a lazy load (index.html's __ensureWhatsNew), so this screen
+  // cannot assume window.WHATS_NEW is populated: app.jsx's own What's New effect
+  // may not have run yet, may still be in flight, or may have skipped the fetch
+  // entirely (it defers to onboarding). Fetch it here rather than rendering a
+  // silently empty changelog. __ensureWhatsNew no longer memoizes a rejection,
+  // so bumping `attempt` genuinely retries with a fresh script tag.
+  const [wnState, setWnState] = useStateSet(window.WHATS_NEW ? 'ready' : 'loading');
+  const [attempt, setAttempt] = useStateSet(0);
+  React.useEffect(() => {
+    if (!open) return;
+    if (window.WHATS_NEW) { setWnState('ready'); return; }
+    let live = true;
+    setWnState('loading');
+    window.__ensureWhatsNew()
+      .then(() => { if (live) setWnState(window.WHATS_NEW ? 'ready' : 'error'); })
+      .catch(() => { if (live) setWnState('error'); });
+    return () => { live = false; };
+  }, [open, attempt]);
+  const retryWhatsNew = () => setAttempt(a => a + 1);
+
   // Newest 5 shown directly; the rest grouped by ISO week. Weeks of the newest
   // year stay on the top level; older years collapse into a year group, so the
   // list stays short no matter how many releases pile up.
@@ -289,7 +309,10 @@ function ChangelogSheet({ open, onClose }) {
       const g = yearMap.get(w.year); g.weeks.push(w); g.count += w.entries.length;
     }
     return { latest, currentWeeks: weeks.filter(w => w.year === newestYear), olderYears: [...yearMap.values()] };
-  }, []);
+    // wnState, not []: window.WHATS_NEW is filled in by a lazy script tag, so a
+    // memo computed once on mount would keep serving the empty snapshot it took
+    // before the file landed.
+  }, [wnState]);
 
   const rowBtn = { width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' };
   const chevron = () => <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>;
@@ -335,6 +358,18 @@ function ChangelogSheet({ open, onClose }) {
     <>
       <SettingsSheet open={open} onClose={handleClose} title="Changelog">
         <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          {/* The changelog text is a lazy fetch, so say so instead of showing an
+              empty list: an offline or flaky load is otherwise indistinguishable
+              from "there are no releases", with nothing to act on. */}
+          {wnState === 'loading' && !topRows.length && (
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '16px 0' }}>Loading…</div>
+          )}
+          {wnState === 'error' && !topRows.length && (
+            <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>Couldn't load the changelog.</div>
+              <button onClick={retryWhatsNew} style={accentBtn}>Retry</button>
+            </div>
+          )}
           {topRows.map((node, i) => (
             <React.Fragment key={node.key}>
               {i === earlierStart && topRows.length > earlierStart && (
@@ -654,6 +689,18 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
   const [dataSheet, setDataSheet] = useStateSet(false);
   const [changelogSheet, setChangelogSheet] = useStateSet(false);
+  // The Changelog row's version hint reads window.WHATS_NEW inline, which is a
+  // lazy script now: without this the hint is silently blank on any boot where
+  // app.jsx's own What's New effect hasn't fetched it (still in flight, or
+  // skipped entirely because it deferred to onboarding). The ensure call is
+  // deduped, so this shares one request with ChangelogSheet's own fetch.
+  const [whatsNewLoaded, setWhatsNewLoaded] = useStateSet(!!window.WHATS_NEW);
+  useEffectSet(() => {
+    if (whatsNewLoaded) return;
+    let live = true;
+    window.__ensureWhatsNew().then(() => { if (live) setWhatsNewLoaded(true); }).catch(() => {});
+    return () => { live = false; };
+  }, [whatsNewLoaded]);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
   const [howToSheet, setHowToSheet] = useStateSet(false);
 

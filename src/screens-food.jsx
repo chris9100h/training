@@ -3479,7 +3479,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // per-100g scaling, and it has no editingStagedId counterpart here.
   function openEditStaged(entry) {
     setEditingStagedId(entry.id);
-    setQtyEditPlanned(!!entry.planned);
+    // No setQtyEditPlanned here: the Logged/Planned switch is gated on
+    // editingEntry, so it never renders for a staged edit. Plan vs Logged for a
+    // staged row is decided by the sheet's own Plan it / Log it buttons, which
+    // pass the choice straight into confirmLogFood.
     reAddFromRecent(entry);
   }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
@@ -3670,12 +3673,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return;
     }
     // Editing a row still sitting in `staged` (see openEditStaged): replace
-    // it in place, keeping its own id/date/time/planned rather than the
-    // fresh ones buildQtyEntry() just generated, same reasoning as the
-    // editingEntry branch below but for a pick that was never committed.
+    // it in place, keeping its own id/date/time rather than the fresh ones
+    // buildQtyEntry() just generated, same reasoning as the editingEntry
+    // branch below but for a pick that was never committed.
+    // `planned` comes from the caller, NOT from the row: this sheet renders
+    // its Plan it / Log it buttons for a staged edit too (the
+    // `planMode && !editingEntry` branch, editingEntry is null here), so
+    // carrying the old flag over made both buttons silent no-ops in either
+    // direction. With Plan Mode off the only button passes false, which is
+    // also the only valid state for a staged row there.
     if (editingStagedId) {
       const id = editingStagedId;
-      setStaged(list => list.map(e => e.id === id ? { ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt, planned: e.planned } : e));
+      setStaged(list => list.map(e => e.id === id ? { ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt, planned } : e));
       closeQtySheet();
       return;
     }
@@ -5681,9 +5690,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                {/* "Add" (fresh pick, stages) fires the chip flight; "Save" (editingEntry,
-                    an in-place update, never touches staged) does not. */}
-                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry ? 'Save' : 'Add'}</Btn>
+                {/* "Add" (fresh pick, stages) fires the chip flight; "Save" does not:
+                    editingEntry is an in-place update that never touches staged, and
+                    editingStagedId replaces a staged row that is already on screen. */}
+                <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{editingEntry || editingStagedId ? 'Save' : 'Add'}</Btn>
               </div>
             )}
           </>

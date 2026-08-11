@@ -5123,6 +5123,38 @@ function resolveInProgressId(cur, fresh, base) {
   return (!base || cur.inProgress !== base.inProgress) ? cur.inProgress : fresh.inProgress;
 }
 
+// Value equality for the "did this device edit this field since its last
+// confirmed sync" tests below. A plain !== is wrong for the jsonb/array-valued
+// members of the field lists (mesoRecap, plannedTechniques, plannedRepsPerSet):
+// the store side and the base side are two SEPARATELY PARSED object trees
+// whenever the persisted cache pair carries its own base (loadLocalState's
+// `parsed.base ?? store`), so deep-equal values are never reference-equal and
+// every such session/entry would be judged "locally edited" forever, pinning
+// the whole field set to the stale cache and pushing it back over a newer
+// server value on the next flush.
+// JSON.stringify is NOT good enough here either: the base side usually comes
+// from Postgres jsonb, which normalizes key order, while the local side keeps
+// insertion order, so two semantically identical recaps stringify differently.
+// Hence a real, key-order-insensitive structural compare. Scalars short-circuit
+// on the identity check, so this is behaviour-identical to the old !== for
+// every non-object field.
+function syncValuesEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return (a ?? null) === (b ?? null);
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    return a.every((x, i) => syncValuesEqual(x, b[i]));
+  }
+  // undefined-valued keys are dropped by JSON, so a roundtripped copy legitimately
+  // has fewer own keys than its in-memory twin: compare the JSON-visible keys only.
+  const ak = Object.keys(a).filter(k => a[k] !== undefined);
+  const bk = Object.keys(b).filter(k => b[k] !== undefined);
+  if (ak.length !== bk.length) return false;
+  return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && syncValuesEqual(a[k], b[k]));
+}
+
 // Entry/set-level unsynced-edit test for the boot merge (audit H1): the exact
 // same fields the sync diff uploads (normSet below plus the entry columns
 // written by _syncEntryRelational), so "differs from the persisted base" means
@@ -5138,7 +5170,7 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
     const be = baseEntries[ei];
     if (!be) return true;
     for (const k of ENTRY_SYNC_FIELDS) {
-      if ((ce[k] ?? null) !== (be[k] ?? null)) return true;
+      if (!syncValuesEqual(ce[k] ?? null, be[k] ?? null)) return true;
     }
     const cs = ce.sets || [];
     const bs = be.sets || [];
@@ -5168,16 +5200,21 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
 // ever retried the write again because the store itself no longer "knew" it
 // had finished.
 const SESSION_SYNC_SCALAR_FIELDS = ['ended', 'scheduleId', 'dayId', 'dayName', 'startedAt', 'durationMinutes', 'feel', 'isBonus', 'isFreestyle', 'isDeload', 'isCleanup', 'mesoRecap', 'readiness', 'signalWeight'];
-function sessionScalarsDifferFromBase(mem, baseMem) {
+// Returns the subset of those fields this device has actually edited since its
+// last confirmed sync, i.e. exactly what the follow-up flush is going to push.
+// Per-field rather than an all-or-nothing boolean on purpose: overriding the
+// whole list off a single edited field also forces every field the local cache
+// happens to LACK down to null (a cache written before a column existed, or one
+// another device has since filled in), which is the same silent data drop this
+// protection exists to prevent, just pointed the other way.
+function locallyEditedSessionScalars(mem, baseMem) {
   // No usable base (never confirmed synced for this device) must resolve the
   // same direction as "genuinely differs", exactly the H1 bias above: there
   // is nothing to compare against, so trusting the server here is how data
-  // gets silently dropped in the first place.
-  if (!baseMem) return true;
-  for (const k of SESSION_SYNC_SCALAR_FIELDS) {
-    if ((mem[k] ?? null) !== (baseMem[k] ?? null)) return true;
-  }
-  return false;
+  // gets silently dropped in the first place. Still only for fields this cache
+  // actually carries, for the nulling reason above.
+  if (!baseMem) return SESSION_SYNC_SCALAR_FIELDS.filter(k => mem[k] !== undefined);
+  return SESSION_SYNC_SCALAR_FIELDS.filter(k => !syncValuesEqual(mem[k] ?? null, baseMem[k] ?? null));
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
@@ -5225,7 +5262,7 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     // check on isActive would make it never fire for the one transition it
     // exists to protect. An active session's `ended` is null on both sides
     // anyway, so this can't regress the in-progress case.
-    const scalarsDifferFromBase = sessionScalarsDifferFromBase(mem, baseMem);
+    const editedScalars = locallyEditedSessionScalars(mem, baseMem);
     const baseEntries = (baseMem?.entries || []).length ? baseMem.entries : null;
     // No usable base (this device's last confirmed-synced snapshot never
     // captured real entries for this session, e.g. it sat out-of-window
@@ -5242,11 +5279,12 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     return {
       ...s,
       // An unsynced local edit of any scalar field the server actually
-      // stores (audit H2, see sessionScalarsDifferFromBase above) must win
+      // stores (audit H2, see locallyEditedSessionScalars above) must win
       // over the server's stale copy, `ended` above all: the follow-up flush
       // then diffs exactly this session and re-uploads it, same contract the
-      // entries-level H1 fix already established.
-      ...(scalarsDifferFromBase ? Object.fromEntries(SESSION_SYNC_SCALAR_FIELDS.map(k => [k, mem[k] ?? null])) : {}),
+      // entries-level H1 fix already established. Only the edited fields are
+      // overridden, every untouched one keeps the server's value.
+      ...Object.fromEntries(editedScalars.map(k => [k, mem[k] ?? null])),
       currentExIdx: mem.currentExIdx ?? 0,
       // Prefer the cached value (this device's own, always correct at write
       // time), but fall back to the server's rather than jumping straight to
@@ -10614,6 +10652,22 @@ async function clearPrecompileCaches() {
 // always-network (see the version-check probe in checkSwUpdate), so this
 // reliably gets the same fresh result an actual SW update does.
 async function clearCachesAndReload() {
+  // Unregister first, or the OLD sw.js stays the registered, active script: the
+  // reload then runs fresh network code but is still controlled by the previous
+  // worker, so the boot effect's reg.update() promptly installs the new one,
+  // reg.waiting fires and the update banner reappears seconds after the user
+  // just updated. Unregistering also aborts an in-flight install, which is what
+  // we want here: without it, the cache wipe below dooms the CACHE handle that
+  // install is writing into and the worker can activate on an empty precache,
+  // silently costing offline support. After the navigation, index.html
+  // registers sw.js again from scratch and the new worker activates directly,
+  // with no waiting phase and therefore no banner.
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+    } catch {}
+  }
   await clearPrecompileCaches();
   // Flags this as a deliberate cache wipe so index.html's "React did not
   // mount" watchdog gives the next boot more time before giving up, see
