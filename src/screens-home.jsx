@@ -3011,12 +3011,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {sch && <>
       <div style={{
         flexShrink: 0,
-        // Preview experiment: restore the compact header inset and remove
-        // the blur layer from this sticky Home header. The former +28px
-        // status-bar workaround fixed the smear on one device but consumed
-        // useful vertical space; this isolates whether the blur layer is the
-        // actual trigger before we touch the shared headers.
-        padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 0`,
+        // Preview experiment: reserve only the system-reported safe area and
+        // keep the blur layer off this sticky Home header. The former +28px
+        // workaround, and then the compact +12px inset, both consumed useful
+        // vertical space; this keeps only the OS-required clearance.
+        padding: `env(safe-area-inset-top, 0px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
