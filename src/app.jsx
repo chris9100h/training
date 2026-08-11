@@ -149,28 +149,57 @@ function onboardingOwnsBoot(s) {
   return !!s && !s.settings?.onboardingCompleted && !(s.sessions || []).some(x => x.ended);
 }
 
+// Asks the worker CURRENTLY controlling this page for its own CACHE constant
+// (sw.js answers GET_VERSION over the passed MessagePort). Resolves null when
+// there is no controller, when MessageChannel is unavailable, or when the
+// controller is an older sw.js with no GET_VERSION handler, in which case the
+// message is simply ignored and the timeout below fires.
+function askControllerSwVersion(timeoutMs = 1500) {
+  return new Promise(resolve => {
+    const ctrl = navigator.serviceWorker?.controller;
+    if (!ctrl || typeof MessageChannel !== 'function') return resolve(null);
+    let settled = false;
+    const finish = (v) => { if (settled) return; settled = true; clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    try {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (ev) => finish(typeof ev.data === 'string' ? ev.data : null);
+      ctrl.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+    } catch (_) { finish(null); }
+  });
+}
+
 // Records which app-shell version is now actually running, so the banner is not
 // re-offered for an update that has already been applied.
-// Reads the live CacheStorage key rather than trusting a pre-recorded version
-// string: only checkSwUpdate's network fetch of sw.js ever sets
-// pendingSwVersion, and that fetch is exactly what fails when someone updates
-// while offline, so the reg.waiting-at-boot and updatefound routes to the
-// banner reach it with no version at all. Keying the write on pendingSwVersion
-// therefore left those two routes with no durable seen-marker: the update
-// activated fine, nothing was written, and the next successful version check
-// re-showed the banner on an already-current app (whose second tap then finds
-// no waiting worker and needlessly wipes the whole cache).
-// detectCacheVersion strips the 'zane-' prefix; logbook-sw-version stores the
-// raw `const CACHE = '...'` string, hence putting it back on. The SW's activate
-// handler sweeps every other app-shell cache before clients.claim(), so by the
-// time this runs there is exactly one 'zane-v*' key: the new one.
+//
+// Three sources in descending order of authority:
+//  1. The controlling worker's own CACHE constant. Listing CacheStorage is NOT
+//     a substitute: skipWaiting() hands control over as soon as the new worker
+//     activates, before its activate handler's old-cache sweep has settled, so
+//     at controllerchange both the old and the new key can still be present and
+//     detectCacheVersion's `find` returns whichever CacheStorage enumerates
+//     first, i.e. usually the OLD one. Recording that would re-offer the update
+//     that was just applied, the exact symptom this function exists to stop.
+//  2. `fallback`, normally pendingSwVersion: what checkSwUpdate actually read
+//     off the network. Trustworthy, but only ever set on the checkSwUpdate
+//     route, so the reg.waiting-at-boot and updatefound routes reach here with
+//     nothing (and those are precisely the routes that carry an update applied
+//     while offline, where the network check could not run).
+//  3. CacheStorage, as a last resort for an old controller with no GET_VERSION
+//     handler. detectCacheVersion strips the 'zane-' prefix; logbook-sw-version
+//     stores the raw `const CACHE = '...'` string, hence putting it back on.
 async function persistAppliedSwVersion(fallback) {
-  let applied = null;
-  try {
-    const version = await LB.detectCacheVersion();
-    if (version) applied = 'zane-' + version;
-  } catch (_) {}
-  applied = applied || fallback || null;
+  let applied = await askControllerSwVersion();
+  if (!applied) applied = fallback || null;
+  if (!applied) {
+    try {
+      const version = await Promise.race([
+        LB.detectCacheVersion(),
+        new Promise(r => setTimeout(() => r(null), 1500)),
+      ]);
+      if (version) applied = 'zane-' + version;
+    } catch (_) {}
+  }
   if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
 }
 
@@ -899,8 +928,27 @@ function App() {
         });
       };
       if (reg.waiting) {
-        waitingWorker.current = reg.waiting;
-        setUpdateAvailable(true);
+        // A boot that directly follows a deliberate cache wipe (clearCachesAndReload
+        // stamps zane-cold-boot) must not prompt: the reload already fetched the new
+        // code from the network, the old worker is simply still the registered one and
+        // has re-installed the update into `waiting`. The user asked for exactly this
+        // update moments ago, so take the worker silently. onControllerChange then
+        // records the version without reloading, because intentionalUpdate is false.
+        let coldBoot = false;
+        try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; } catch (_) {}
+        if (coldBoot) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        } else {
+          waitingWorker.current = reg.waiting;
+          setUpdateAvailable(true);
+        }
+      } else if (!reg.installing) {
+        // Nothing pending: whatever controls this page right now IS the current
+        // version, so record it. Without this, an update that activated while no
+        // tab was open (or during a boot whose network version check failed) left
+        // logbook-sw-version stale forever, and the next successful check raised a
+        // banner for an update that had already been applied.
+        persistAppliedSwVersion(null);
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
@@ -910,14 +958,16 @@ function App() {
     // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
       reportSwVersion();
-      if (!intentionalUpdate.current) return;
-      // Persist the applied version only now that the new SW has actually taken
-      // control, not on the click, so an update that never activates (tab
-      // closed, SKIP_WAITING lost) keeps being re-offered after a cold start.
-      // Sourced from the live cache, not pendingSwVersion, see
-      // persistAppliedSwVersion for why that mattered. .finally so a failure
-      // to record the version can never cost the user their reload.
-      persistAppliedSwVersion(pendingSwVersion.current).finally(() => window.location.reload());
+      // Recording which version now controls the page is plain fact-keeping and
+      // is therefore done unconditionally, whoever triggered the change (this
+      // tab's banner tap, another tab's, or the silent cold-boot handoff above).
+      // Only the RELOAD is gated on this tab having asked for it. Persisting
+      // here rather than on the click is what keeps an update that never
+      // activates (tab closed, SKIP_WAITING lost) being re-offered later.
+      const persisted = persistAppliedSwVersion(pendingSwVersion.current);
+      // .finally, so a failure or timeout while recording the version can never
+      // cost the user the reload they actually asked for.
+      if (intentionalUpdate.current) persisted.finally(() => window.location.reload());
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
@@ -1000,7 +1050,17 @@ function App() {
       if (!activatedViaWorker) {
         const controllerNow = navigator.serviceWorker.controller;
         const controllerMoved = !!controllerNow && controllerNow !== controllerBefore;
-        const waitingCleared = !!waitingBefore && swReg.current?.waiting !== waitingBefore;
+        // The waiting slot emptying is only evidence of a SUCCESSFUL handoff if
+        // the worker we posted to actually reached 'activating'/'activated'. It
+        // also empties when that worker goes 'redundant' (the browser evicted
+        // it, or a newer install replaced it), and treating that as success
+        // would skip the cache wipe and do a plain reload that the still-active
+        // OLD worker answers cache-first from the OLD cache: the user taps
+        // Update and gets the same app back, with no path forward.
+        const waitingCleared = !!waitingBefore
+          && swReg.current?.waiting !== waitingBefore
+          && waitingBefore.state !== 'redundant'
+          && waitingBefore.state !== 'installed';
         if (controllerMoved || waitingCleared) {
           await persistAppliedSwVersion(pendingSwVersion.current);
           window.location.reload();

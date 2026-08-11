@@ -2140,17 +2140,37 @@ function diffCollectionById(prevList, nextList) {
   return { upsert, removed };
 }
 
+// JSON with keys sorted at every level, so two structurally identical values
+// always produce the same string. Plain JSON.stringify does not: a value that
+// has been through Postgres jsonb comes back with jsonb's own key order (by
+// length, then bytewise), while the in-memory copy keeps insertion order, so
+// stringifying both and comparing reports a difference that does not exist.
+// Anywhere a jsonb-backed value decides "did this change", this is the
+// serializer to use. undefined-valued keys are dropped, matching JSON itself.
+function stableJson(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableJson).join(',') + ']';
+  const keys = Object.keys(v).filter(k => v[k] !== undefined).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableJson(v[k])).join(',') + '}';
+}
+
 // Normalize set fields for comparison, guards against null vs undefined and missing
 // keys when comparing sets from an old (pre-migration) store format with new format.
 // Shared by the sync diff (_syncEntryRelational: only sets whose norm differs get
 // re-written) and the boot merge's unsynced-edit test (entrySetsDifferFromBase,
 // audit H1), so both always agree on what counts as a set change.
+// drops/hornLoads are jsonb columns, hence stableJson and not JSON.stringify:
+// the app writes drops as {partials, stretch} and the server hands it back as
+// {stretch, partials}, which a raw stringify reports as an edit that never
+// happened, marking the whole session locally-edited and reverting whatever
+// another device changed on it (same failure as the mesoRecap compare below).
 function normSet(s) {
   return [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
           s.timeSec ?? null, s.addedKg ?? null,
           s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
-          s.technique ?? '', JSON.stringify(s.drops ?? null),
-          JSON.stringify(s.hornLoads ?? null)].join('|');
+          s.technique ?? '', stableJson(s.drops ?? null),
+          stableJson(s.hornLoads ?? null)].join('|');
 }
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
@@ -5138,21 +5158,50 @@ function resolveInProgressId(cur, fresh, base) {
 // Hence a real, key-order-insensitive structural compare. Scalars short-circuit
 // on the identity check, so this is behaviour-identical to the old !== for
 // every non-object field.
-function syncValuesEqual(a, b) {
+// Scope: JSON-shaped values only (that is all these fields ever hold, since
+// every one of them round-trips through jsonb or through localStorage). Any
+// non-plain object reaching here (Date, Map, Set, RegExp) is deliberately
+// treated as "not equal unless identical", never as equal-because-both-empty.
+// `seen` guards against a cyclic in-memory value: JSON-parsed trees cannot be
+// cyclic, but the live store side is built by app code and a future cycle must
+// degrade to "differs" rather than blow the stack.
+function syncValuesEqual(a, b, seen) {
   if (a === b) return true;
   if (a == null || b == null) return (a ?? null) === (b ?? null);
   if (typeof a !== 'object' || typeof b !== 'object') return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a)) {
+  const aArr = Array.isArray(a);
+  if (aArr !== Array.isArray(b)) return false;
+  // Anything that is neither a plain object nor an array is out of contract.
+  if (!aArr && (!isPlainJsonObject(a) || !isPlainJsonObject(b))) return false;
+  if (seen) { if (seen.has(a)) return false; } else { seen = new WeakSet(); }
+  seen.add(a);
+  if (aArr) {
     if (a.length !== b.length) return false;
-    return a.every((x, i) => syncValuesEqual(x, b[i]));
+    // Index loop, not .every: .every SKIPS array holes, so [<hole>,1] would
+    // compare equal to [5,1].
+    for (let i = 0; i < a.length; i++) if (!syncValuesEqual(a[i], b[i], seen)) return false;
+    return true;
   }
-  // undefined-valued keys are dropped by JSON, so a roundtripped copy legitimately
-  // has fewer own keys than its in-memory twin: compare the JSON-visible keys only.
+  // undefined-valued keys are dropped by JSON, so a round-tripped copy
+  // legitimately has fewer own keys than its in-memory twin: compare the
+  // JSON-visible keys on BOTH sides. Testing membership with hasOwnProperty
+  // would accept a key b owns with value undefined and, paired with the
+  // null-vs-undefined branch above, let an extra key on b slip through.
   const ak = Object.keys(a).filter(k => a[k] !== undefined);
   const bk = Object.keys(b).filter(k => b[k] !== undefined);
   if (ak.length !== bk.length) return false;
-  return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && syncValuesEqual(a[k], b[k]));
+  const bSet = new Set(bk);
+  return ak.every(k => bSet.has(k) && syncValuesEqual(a[k], b[k], seen));
+}
+// Realm-agnostic plain-object test: comparing the prototype against
+// Object.prototype by identity fails for any object minted in another realm
+// (a vm context, an iframe), which would silently make syncValuesEqual answer
+// "not equal" for every object it is given there. A plain object's prototype
+// is instead recognised by having no prototype of its own; Date/Map/Set/RegExp
+// all fail that, which is exactly the intended exclusion.
+function isPlainJsonObject(v) {
+  const proto = Object.getPrototypeOf(v);
+  return proto === null || Object.getPrototypeOf(proto) === null;
 }
 
 // Entry/set-level unsynced-edit test for the boot merge (audit H1): the exact
@@ -5200,13 +5249,31 @@ function entrySetsDifferFromBase(cachedEntries, baseEntries) {
 // ever retried the write again because the store itself no longer "knew" it
 // had finished.
 const SESSION_SYNC_SCALAR_FIELDS = ['ended', 'scheduleId', 'dayId', 'dayName', 'startedAt', 'durationMinutes', 'feel', 'isBonus', 'isFreestyle', 'isDeload', 'isCleanup', 'mesoRecap', 'readiness', 'signalWeight'];
+// Fields that are only meaningful together, so the merge must never take one
+// from local and its partner from the server: the result would be a state
+// neither device ever had.
+//  - readiness/signalWeight/mesoRecap: deriveSignalWeight maps readiness
+//    MANY-to-one onto signalWeight ('rough'/'reentry' -> 'discounted', else
+//    'full'), and screens-lib.jsx's feedback editor always writes the three
+//    together. A local 'rough' -> 'reentry' correction leaves signalWeight
+//    untouched (both map to 'discounted'), so a field-by-field merge against a
+//    device that corrected the same session to 'normal' would keep the local
+//    readiness and take the server's 'full', scoring a re-entry day as a full
+//    autoregulation signal, exactly what signalWeight exists to prevent.
+//  - ended/durationMinutes/startedAt: finish() writes all three at once, and
+//    duration is derived from the other two wherever it is null.
+const SESSION_SCALAR_GROUPS = [
+  ['readiness', 'signalWeight', 'mesoRecap'],
+  ['ended', 'startedAt', 'durationMinutes'],
+];
 // Returns the subset of those fields this device has actually edited since its
-// last confirmed sync, i.e. exactly what the follow-up flush is going to push.
-// Per-field rather than an all-or-nothing boolean on purpose: overriding the
-// whole list off a single edited field also forces every field the local cache
-// happens to LACK down to null (a cache written before a column existed, or one
-// another device has since filled in), which is the same silent data drop this
-// protection exists to prevent, just pointed the other way.
+// last confirmed sync, i.e. exactly what the follow-up flush is going to push,
+// widened to whole groups above. Per-field rather than an all-or-nothing
+// boolean on purpose: overriding the whole list off a single edited field also
+// forces every field the local cache happens to LACK down to null (a cache
+// written before a column existed, or one another device has since filled in),
+// which is the same silent data drop this protection exists to prevent, just
+// pointed the other way.
 function locallyEditedSessionScalars(mem, baseMem) {
   // No usable base (never confirmed synced for this device) must resolve the
   // same direction as "genuinely differs", exactly the H1 bias above: there
@@ -5214,7 +5281,15 @@ function locallyEditedSessionScalars(mem, baseMem) {
   // gets silently dropped in the first place. Still only for fields this cache
   // actually carries, for the nulling reason above.
   if (!baseMem) return SESSION_SYNC_SCALAR_FIELDS.filter(k => mem[k] !== undefined);
-  return SESSION_SYNC_SCALAR_FIELDS.filter(k => !syncValuesEqual(mem[k] ?? null, baseMem[k] ?? null));
+  const edited = new Set(SESSION_SYNC_SCALAR_FIELDS.filter(k => !syncValuesEqual(mem[k] ?? null, baseMem[k] ?? null)));
+  if (!edited.size) return [];
+  // Any member edited pulls in its whole group, but still only the members this
+  // cache actually carries, so grouping cannot reintroduce the nulling above.
+  for (const group of SESSION_SCALAR_GROUPS) {
+    if (!group.some(k => edited.has(k))) continue;
+    group.forEach(k => { if (mem[k] !== undefined) edited.add(k); });
+  }
+  return SESSION_SYNC_SCALAR_FIELDS.filter(k => edited.has(k));
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
@@ -10478,7 +10553,13 @@ function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
     const c = curMap.get(r.id);
     const b = baseMap?.get(r.id);
-    if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+    // syncValuesEqual, not JSON.stringify: several of the collections routed
+    // through here carry jsonb columns (zane_schedules.days/.versions above
+    // all), and jsonb normalizes key order while the in-memory copy keeps
+    // insertion order. A raw stringify therefore reports an edit that never
+    // happened, keeps the stale local row and pushes it back over whatever
+    // another device changed. Same failure the session merge above documents.
+    if (c && b && !syncValuesEqual(c, b)) return c;
     return r;
   });
 }
@@ -10651,23 +10732,19 @@ async function clearPrecompileCaches() {
 // exact URL, and sw.js's fetch handler already treats any ?_v= request as
 // always-network (see the version-check probe in checkSwUpdate), so this
 // reliably gets the same fresh result an actual SW update does.
+// Deliberately does NOT unregister the service worker, even though leaving the
+// old one registered means the reload is still controlled by it and it will
+// re-install the pending update. Unregistering looks like the tidier fix and is
+// a trap: registration.unregister() also destroys the device's PushSubscription,
+// and nothing in this app ever re-subscribes on its own (subscribeWebPush is
+// reached only from the Settings toggle), so every push would silently stop
+// while the UI kept showing push as enabled. It is also deferred for as long as
+// any other client of the scope is open, so it would not even reliably do its
+// job. The re-install is handled where it actually surfaces instead: app.jsx's
+// boot effect takes a waiting worker SILENTLY when sessionStorage's
+// zane-cold-boot flag (set just below) says this boot follows a deliberate
+// wipe, so no update banner is raised for the update the user just asked for.
 async function clearCachesAndReload() {
-  // Unregister first, or the OLD sw.js stays the registered, active script: the
-  // reload then runs fresh network code but is still controlled by the previous
-  // worker, so the boot effect's reg.update() promptly installs the new one,
-  // reg.waiting fires and the update banner reappears seconds after the user
-  // just updated. Unregistering also aborts an in-flight install, which is what
-  // we want here: without it, the cache wipe below dooms the CACHE handle that
-  // install is writing into and the worker can activate on an empty precache,
-  // silently costing offline support. After the navigation, index.html
-  // registers sw.js again from scratch and the new worker activates directly,
-  // with no waiting phase and therefore no banner.
-  if ('serviceWorker' in navigator) {
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
-    } catch {}
-  }
   await clearPrecompileCaches();
   // Flags this as a deliberate cache wipe so index.html's "React did not
   // mount" watchdog gives the next boot more time before giving up, see
@@ -10719,6 +10796,7 @@ window.LB = {
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
+  normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,

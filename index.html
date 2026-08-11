@@ -664,16 +664,10 @@ function makeClearCacheButton() {
   btn.style.cssText = 'margin-top:16px;margin-right:8px;display:inline-block;padding:10px 20px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
   btn.onclick = async function() {
     btn.textContent = 'Clearing…';
-    // Unregister first, so the reload is not still controlled by the old
-    // worker (which would re-install the pending update and re-raise the
-    // update banner) and so an in-flight install cannot activate on the
-    // cache this wipe is about to delete. Mirrors LB.clearCachesAndReload.
-    if ('serviceWorker' in navigator) {
-      try {
-        var regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(function(r){ return r.unregister().catch(function(){}); }));
-      } catch (e) {}
-    }
+    // No unregister here either, for the reasons spelled out on
+    // LB.clearCachesAndReload (it would destroy the push subscription, which
+    // nothing re-creates). zane-cold-boot below is what stops the reload from
+    // re-prompting for the pending update.
     if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
     // Also nuke the IndexedDB precompile cache, a poisoned record there bricks
     // boot just as badly as a bad Cache Storage entry, and clearing only caches
@@ -1382,8 +1376,20 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         s.src = BABEL_URL;
         s.integrity = 'sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y';
         s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.Babel); };
-        s.onerror = function () { reject(new Error('Babel failed to load')); };
+        // Same "never memoize a rejection" rule as __lazyScript further down:
+        // this one gates the whole boot on a cache miss, so a single transient
+        // CDN blip must not permanently poison every later transpile attempt
+        // (including the retry the loader below performs on purpose).
+        var fail = function (why) {
+          babelPromise = null;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          reject(new Error(why));
+        };
+        s.onload = function () {
+          if (!window.Babel) return fail('Babel loaded but set no global');
+          resolve(window.Babel);
+        };
+        s.onerror = function () { fail('Babel failed to load'); };
         document.head.appendChild(s);
       });
     }
@@ -1782,12 +1788,22 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         var s = document.createElement('script');
         s.src = src;
         if (crossOrigin) s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(read()); };
-        s.onerror = function () {
+        var fail = function (why) {
           window[promiseKey] = null;
           if (s.parentNode) s.parentNode.removeChild(s);
-          reject(new Error(src + ' failed to load'));
+          reject(new Error(why));
         };
+        s.onload = function () {
+          // A 200 that did not set the global is a FAILURE, not a success: an
+          // SPA fallback or a captive-portal page answers 200 with HTML, and
+          // resolving with undefined would memoize that as a good load, so
+          // every retry (including the Changelog's Retry button) hands back the
+          // same empty result forever.
+          var value = read();
+          if (!value) return fail(src + ' loaded but set no global');
+          resolve(value);
+        };
+        s.onerror = function () { fail(src + ' failed to load'); };
         document.head.appendChild(s);
       });
     }

@@ -1899,6 +1899,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // A day that hasn't happened yet can't have anything "already eaten" on it:
   // Log it is unavailable and an edited entry can't be flipped back to logged.
   const curDateIsFuture = curDate > today;
+  // The date the quantity sheet is about to write to. Normally curDate, but a
+  // staged row carries the date it was picked on and survives day navigation,
+  // so editing tomorrow's staged pick from today must still be judged future.
+  const qtyEditingStagedDate = editingStagedId ? staged.find(e => e.id === editingStagedId)?.date : null;
+  const qtyTargetIsFuture = (qtyEditingStagedDate || curDate) > today;
 
   // Plan Mode (settings.planMode, off by default): entries carry a `planned`
   // flag. A planned entry sits in the timeline but does NOT count toward the
@@ -3684,7 +3689,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // also the only valid state for a staged row there.
     if (editingStagedId) {
       const id = editingStagedId;
-      setStaged(list => list.map(e => e.id === id ? { ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt, planned } : e));
+      setStaged(list => list.map(e => e.id === id ? {
+        ...built, id: e.id, date: e.date, time: e.time, createdAt: e.createdAt,
+        // Keyed on the ROW's own date, not curDate: staged rows survive day
+        // navigation, so a row staged for tomorrow can be edited while the
+        // screen shows today, where curDateIsFuture is false and the footer
+        // therefore offers "Log it". A logged entry on a future date is the one
+        // state Plan Mode forbids, so a future-dated row stays planned whatever
+        // was tapped. The footer hides "Log it" for these rows as well, this is
+        // the backstop, not the only guard.
+        planned: e.date > today ? true : planned,
+      } : e));
       closeQtySheet();
       return;
     }
@@ -5682,10 +5697,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             ) : planMode && !editingEntry ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-                {/* Always a fresh pick here (never editingEntry, the branch condition
-                    guarantees it), so this always stages: the chip flight always fires. */}
-                <Btn kind={curDateIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: curDateIsFuture ? 2 : 1.5 }}>Plan it</Btn>
-                {!curDateIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
+                {/* Never an editingEntry here (the branch condition guarantees it), so
+                    this either stages a fresh pick, with the chip flight, or replaces a
+                    row already staged (editingStagedId, no flight since the chip is
+                    already on screen). Either way the button pressed IS the plan/log
+                    decision, which confirmLogFood takes from its argument.
+                    "Future" is the EDITED ROW's date when editing a staged row, not
+                    curDate: staged rows survive day navigation, so a row staged for
+                    tomorrow can be edited from today and must not be offered "Log it". */}
+                <Btn kind={qtyTargetIsFuture ? undefined : 'ghost'} onClick={() => confirmLogFood(true)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: qtyTargetIsFuture ? 2 : 1.5 }}>Plan it</Btn>
+                {!qtyTargetIsFuture && <Btn onClick={() => confirmLogFood(false)} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 1.5 }}>Log it</Btn>}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>

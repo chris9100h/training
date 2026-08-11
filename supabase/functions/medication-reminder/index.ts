@@ -259,11 +259,10 @@ async function sendReminders() {
     // possible to protect on both sides of, via the rollback below). Rows in
     // one tick can sit at different counts (a first nudge for one dose, a
     // second for another), so group by the target count and PATCH each
-    // group once. return=minimal: nothing to read back. Only touches the
-    // reminder columns, never planned/date/etc, so logging the dose later
-    // works unchanged. Rows whose state failed to persist are NOT pushed
-    // this tick: they retry next tick with the count unchanged, one attempt
-    // per tick instead of unbounded duplicates.
+    // group once. Only touches the reminder columns, never planned/date/etc,
+    // so logging the dose later works unchanged. Rows whose state failed to
+    // persist are NOT pushed this tick: they retry next tick with the count
+    // unchanged, one attempt per tick instead of unbounded duplicates.
     const byCount = new Map<number, string[]>();
     for (const e of due) {
       const target = (e.reminder_count ?? 0) + 1;
@@ -294,8 +293,22 @@ async function sendReminders() {
         console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
         continue;
       }
-      const claimed: { id: string }[] = await patchRes.json().catch(() => []);
-      claimed.forEach(r => claimedIds.add(r.id));
+      // The PATCH is COMMITTED at this point, so an unreadable body must not be
+      // treated as "claimed nothing": that would skip the push AND skip the
+      // compensating rollback below, leaving every row in this group marked as
+      // nudged with nothing sent and no trace. Fall back to the ids this group
+      // asked for, which is what the pre-CAS code effectively did on a 2xx. The
+      // Array.isArray guard matters too: a 2xx body that parses to a non-array
+      // would make .forEach throw, and sendReminders has no try/catch above it,
+      // so one odd response would abort the whole tick and skip every user
+      // after this one.
+      const parsed = await patchRes.json().catch(() => null);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((r: { id?: string }) => { if (r?.id) claimedIds.add(r.id); });
+      } else {
+        console.error(`[medication-reminder] unreadable claim response for ${row.user_id}, assuming the committed PATCH claimed all ${ids.length} rows`);
+        ids.forEach(id => claimedIds.add(id));
+      }
     }
     // Only what this tick actually claimed, so the count/name in the message
     // can never describe a dose another invocation is nudging about.

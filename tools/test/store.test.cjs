@@ -872,6 +872,69 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z', 'the H2 no-base bias still holds for what the cache does carry');
     assert.strictEqual(sessions[0].signalWeight, 'full', 'but a field the cache never had must not be nulled');
   });
+  // Per-field granularity must not split fields that are only meaningful
+  // together. deriveSignalWeight maps readiness MANY-to-one onto signalWeight,
+  // so a local 'rough' -> 'reentry' correction leaves signalWeight untouched;
+  // taking the server's signalWeight next to the local readiness would score a
+  // re-entry day as a full autoregulation signal.
+  test('mergeSessions keeps readiness and signalWeight together when either is edited', () => {
+    const base = [{ id: 's10', ended: 'x', readiness: 'rough', signalWeight: 'discounted', entries: [] }];
+    const cur = [{ id: 's10', ended: 'x', readiness: 'reentry', signalWeight: 'discounted', entries: [] }];
+    const fresh = [{ id: 's10', ended: 'x', readiness: 'normal', signalWeight: 'full', entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].readiness, 'reentry');
+    assert.strictEqual(sessions[0].signalWeight, 'discounted', 'signalWeight must follow its own readiness, not the server\'s');
+  });
+  test('mergeSessions keeps ended and durationMinutes together', () => {
+    const base = [{ id: 's11', ended: null, startedAt: 'a', durationMinutes: null, entries: [] }];
+    const cur = [{ id: 's11', ended: '2026-06-10T11:00:00Z', startedAt: 'a', durationMinutes: 42, entries: [] }];
+    const fresh = [{ id: 's11', ended: null, startedAt: 'a', durationMinutes: 99, entries: [] }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].ended, '2026-06-10T11:00:00Z');
+    assert.strictEqual(sessions[0].durationMinutes, 42, 'the duration belonging to the local finish, not the server\'s');
+  });
+
+  // ── the same jsonb key-order trap, one level down ────────────────────────
+  // normSet feeds BOTH the sync diff and the boot merge's set-level test, and
+  // drops/hornLoads are jsonb: the app writes {partials, stretch}, Postgres
+  // hands back {stretch, partials}. A raw JSON.stringify called that an edit.
+  test('normSet ignores jsonb key order in a set\'s drops', () => {
+    // The app writes drops in this order (screens-train.jsx)...
+    const local = { kg: 100, reps: 5, done: true, technique: 'lengthened_partial', drops: { partials: 3, stretch: 1 } };
+    // ...and anything that has been through the jsonb column comes back in the
+    // order Postgres normalizes to, which is what the persisted base holds.
+    const fromJsonb = { kg: 100, reps: 5, done: true, technique: 'lengthened_partial', drops: { stretch: 1, partials: 3 } };
+    assert.strictEqual(LB.normSet(local), LB.normSet(fromJsonb), 'key order alone must not read as a changed set');
+    const reallyChanged = { ...local, drops: { partials: 4, stretch: 1 } };
+    assert.notStrictEqual(LB.normSet(local), LB.normSet(reallyChanged), 'a real change must still register');
+  });
+  test('mergeSessions ignores jsonb key order in a set\'s drops', () => {
+    const mkSet = (drops, kg) => ({ kg, reps: 5, done: true, technique: 'lengthened_partial', drops });
+    const mkEntry = (drops, kg) => [{ exId: 'e1', name: 'Bench', sets: [mkSet(drops, kg)] }];
+    // base is the last confirmed-synced snapshot, i.e. server-shaped (jsonb key
+    // order); cur is this device's in-memory copy, in the app's own order. They
+    // are the SAME set, and nothing was edited locally.
+    const base = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ stretch: 1, partials: 3 }, 100) }];
+    const cur = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ partials: 3, stretch: 1 }, 100) }];
+    // Another device raised the load since.
+    const fresh = [{ id: 's12', ended: 'x', aggExercises: 1, entries: mkEntry({ stretch: 1, partials: 3 }, 105) }];
+    const { sessions } = LB.mergeSessions(fresh, cur, null, base, now);
+    assert.strictEqual(sessions[0].entries[0].sets[0].kg, 105, 'no local edit was made, so the other device\'s load must win');
+  });
+  test('mergeCollectionById ignores jsonb key order but still keeps a real local edit', () => {
+    const base = [{ id: 'p1', name: 'Push', days: [{ id: 'd1', name: 'A' }] }];
+    const unchangedLocal = [{ id: 'p1', name: 'Push', days: [{ name: 'A', id: 'd1' }] }]; // jsonb order
+    const renamedOnServer = [{ id: 'p1', name: 'Push v2', days: [{ id: 'd1', name: 'A' }] }];
+    assert.strictEqual(
+      LB.mergeCollectionById(renamedOnServer, unchangedLocal, base, null)[0].name, 'Push v2',
+      'key order alone must not count as a local edit',
+    );
+    const editedLocal = [{ id: 'p1', name: 'Push local', days: [{ id: 'd1', name: 'A' }] }];
+    assert.strictEqual(
+      LB.mergeCollectionById(renamedOnServer, editedLocal, base, null)[0].name, 'Push local',
+      'a genuine unsynced local edit must still win',
+    );
+  });
 
   await testAsync('H1 end-to-end: merged offline edit is pushed by the follow-up flush', async () => {
     rpcLog.length = 0;
