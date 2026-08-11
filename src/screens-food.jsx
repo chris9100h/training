@@ -4552,6 +4552,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     carbs: fdRound1(staged.reduce((a, e) => a + (e.carbs || 0), 0)),
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
+  // What's left of the day's target once this batch is actually added,
+  // shown in the staged bar so a heavy add (rice, etc.) reveals an overshoot
+  // BEFORE committing instead of after. projectedTotals already covers
+  // logged + planned for curDate (Plan Mode's "where the day is headed"
+  // figure) since a planned meal still claims its share of the budget;
+  // stagedTotals is layered on top because it isn't part of dayEntries yet.
+  // null when there's no day target at all, same guard the hero uses for its
+  // ring. Per-macro null (a target with e.g. no carbs set) is passed through
+  // rather than coerced to 0, FdMacroBits below skips it.
+  const remainingTotals = useMemoFd(() => {
+    if (!dayTarget) return null;
+    return {
+      calories: Math.round((goalCalories || 0) - projectedTotals.calories - stagedTotals.calories),
+      protein: dayTarget.protein != null ? fdRound1(dayTarget.protein - projectedTotals.protein - stagedTotals.protein) : null,
+      carbs: dayTarget.carbs != null ? fdRound1(dayTarget.carbs - projectedTotals.carbs - stagedTotals.carbs) : null,
+      fat: dayTarget.fat != null ? fdRound1(dayTarget.fat - projectedTotals.fat - stagedTotals.fat) : null,
+    };
+  }, [dayTarget, goalCalories, projectedTotals, stagedTotals]);
 
   // Docked bar shown whenever there's a staged (picked, quantity already
   // chosen, but not yet logged) batch, on ANY tab, not just Search/Quick Add:
@@ -4655,6 +4673,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </Btn>
           </span>
         </div>
+        {/* Budget left for the day once this batch actually lands, so a heavy
+            add (a cup of rice, say) shows the overshoot BEFORE the tap on Add
+            instead of after, when it's a correction. Always visible (not
+            just expanded) since it's exactly the moment-of-decision info the
+            collapsed bar exists for. Hidden with no day target set, same as
+            the rest of the module's target-driven UI. */}
+        {remainingTotals && (
+          <>
+            <div className="knurl" />
+            <div style={{ textAlign: 'center', padding: '6px 12px 8px' }}>
+              <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkFaint, marginRight: 6 }}>Remaining:</span>
+              <span className="num" style={{ fontSize: 10, fontWeight: 600, color: UI.warn }}>{remainingTotals.calories} kcal</span>
+              <span style={fdMetaDivider} />
+              <FdMacroBits protein={remainingTotals.protein} carbs={remainingTotals.carbs} fat={remainingTotals.fat} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   ) : null;
@@ -11832,21 +11867,30 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // (Plan Mode's timeline category card), folded into this SAME line rather
 // than a second one, so showing a planned amount never changes a card's
 // height, only how much this one line says.
+// val == null skips that macro entirely (rather than printing "0") so a
+// caller with a partial target (e.g. only protein/fat set, no carbs) can
+// pass null for the missing one instead of faking a zero.
 function FdMacroBits({ protein, carbs, fat, strong, plannedProtein, plannedCarbs, plannedFat }) {
   const w = strong ? 700 : 600;
-  const bit = (val, planned, color, label) => (
-    <span className="num" style={{ fontWeight: w, color }}>
+  const bit = (val, planned, color, label) => val == null ? null : (
+    <span key={label} className="num" style={{ fontWeight: w, color }}>
       {label}{Math.round(val)}
       {planned > 0 && <span style={{ fontWeight: 600, opacity: 0.65 }}>+{Math.round(planned)}</span>}
     </span>
   );
+  const bits = [
+    bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P'),
+    bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C'),
+    bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F'),
+  ].filter(Boolean);
+  const parts = [];
+  bits.forEach((el, i) => {
+    if (i > 0) parts.push(<span key={`d${i}`} style={{ color: UI.inkGhost }}>·</span>);
+    parts.push(el);
+  });
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      {bit(protein, plannedProtein, FD_MACRO_COLORS.protein, 'P')}
-      <span style={{ color: UI.inkGhost }}>·</span>
-      {bit(carbs, plannedCarbs, FD_MACRO_COLORS.carbs, 'C')}
-      <span style={{ color: UI.inkGhost }}>·</span>
-      {bit(fat, plannedFat, FD_MACRO_COLORS.fat, 'F')}
+      {parts}
     </span>
   );
 }
