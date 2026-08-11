@@ -569,6 +569,29 @@
     box-shadow: 0 0 8px rgba(var(--accent-rgb),0.6);
   }
 
+  /* iOS status bar bleed-through: a newer iOS ignores the
+     apple-mobile-web-app-status-bar-style distinction (verified on-device:
+     switching black-translucent -> black produced zero visible change) and
+     renders system chrome as translucent glass over app content regardless
+     of what the meta tag requests. This is the fallback that doesn't depend
+     on iOS respecting anything: a solid, unblurred strip pinned above
+     literally everything (higher than reorder's own transient drag ghost,
+     which never operates this close to the status bar edge in practice), so
+     whatever glass effect iOS layers on top at least composites against a
+     crisp flat color instead of a screen's own blurred sticky header
+     (TopBar in ui.jsx and its copies use backdrop-filter, which is exactly
+     what was showing through as a smeared clock/battery/signal readout).
+     Static markup below, not a React component: present from first paint,
+     unaffected by route/screen state or a boot error. pointer-events: none
+     since safe-area-inset-top never holds real tappable content. */
+  .status-bar-shield {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: env(safe-area-inset-top, 0px);
+    background: var(--bg);
+    z-index: 999999;
+    pointer-events: none;
+  }
+
   /* Dumbbell knurling, diagonal hash marks like grip texture */
   .knurl {
     height: 3px;
@@ -592,6 +615,7 @@
 </style>
 </head>
 <body>
+<div class="status-bar-shield"></div>
 <div id="root"></div>
 <!-- Global, zero-size SVG defs: any <text filter="url(#chart-text-lift)">
      anywhere in the app can reference this one filter (SVG filter refs work
