@@ -1108,6 +1108,15 @@ function App() {
           const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
           syncBase.current = diffBase;
           let merged = fresh;
+          // fresh.coaching is deliberately undefined when loadFromSupabase's
+          // coaching queries failed (see its own comment: unlike every other
+          // collection, that failure is isolated rather than aborting the
+          // whole boot). undefined here specifically means "could not check
+          // this time", never "no coaching relationship" (that's the object
+          // shape with null/empty fields), so keep whatever was already
+          // showing instead of blanking the coaching banner on a transient
+          // error.
+          if (merged.coaching === undefined && cur?.coaching !== undefined) merged.coaching = cur.coaching;
           if (cur) {
             // Same unsynced-edit test LB.mergeBootScalars applies below: an explicit
             // local null, "session just ended on this device", must still win

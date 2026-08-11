@@ -1731,10 +1731,29 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   if (waterLogsRes.error) throw waterLogsRes.error;
   if (foodLogsRes.error) throw foodLogsRes.error;
-  // Coaching queries are null on coach loads (skipped), guard with optional chaining.
-  if (coachInfoRes?.error) throw coachInfoRes.error;
-  if (coachClientsRes?.error) throw coachClientsRes.error;
-  if (unreadNotesRes?.error) throw unreadNotesRes.error;
+  // Coaching queries are null on coach loads (skipped), guard with optional
+  // chaining. Unlike every other collection above, coaching is deliberately
+  // NOT thrown on error: it is not part of the ID-merge/anti-resurrection
+  // system (nothing diffs fresh.coaching against cur.coaching by id), so a
+  // failure here cannot corrupt or resurrect any stored data the way a
+  // silently-empty exercises/schedules/foodLogs list would. Throwing would
+  // only mean one transient error in this one feature discards every other
+  // already-fetched source (Food, Water, Medications, ...) for the whole
+  // boot. Same soft-fail reasoning and PGRST116 tolerance as
+  // reloadCoachingState (used on realtime reconnect): a dropped request
+  // must not be read as "your coach ended the relationship", so the
+  // `coaching` result below is entirely omitted (undefined) on any failure
+  // here, and the caller keeps whatever coaching state it already has
+  // instead of overwriting it with a false empty one.
+  const coachingSoft = (res) => !res?.error || res.error.code === 'PGRST116';
+  const coachingLoadFailed = !isCoachLoad && (
+    !!coachInfoRes?.error || !!coachClientsRes?.error || !!unreadNotesRes?.error
+    || !coachingSoft(coachingRowRes) || !coachingSoft(selfRowRes)
+  );
+  if (coachingLoadFailed) {
+    console.warn('coaching state load failed during boot, keeping previous state:',
+      coachInfoRes?.error || coachClientsRes?.error || unreadNotesRes?.error || coachingRowRes?.error || selfRowRes?.error);
+  }
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
@@ -2001,7 +2020,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     customDayTypes: sett.custom_day_types ?? [],
     settings: mapUserSettings(sett),
     nextReminderAt: sett.next_reminder_at ?? null,
-    coaching: isCoachLoad ? undefined : {
+    coaching: (isCoachLoad || coachingLoadFailed) ? undefined : {
       asClient: (coachInfoRes?.data?.[0]) ? {
         id: coachInfoRes.data[0].coaching_id,
         coachId: coachInfoRes.data[0].coach_id,
