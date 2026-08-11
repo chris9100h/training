@@ -4025,7 +4025,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // neither field, so it always falls through to the portions branch below
     // unchanged.
     const gramsMode = entry.loggedCookedGrams != null && entry.loggedCookedWeightG > 0;
-    const m = !gramsMode ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
+    // applyBlockRecipe (merge multiple timeline items into one recipe) reuses
+    // this exact "(x/y)" suffix for a DIFFERENT purpose: x there is just a
+    // running display index (1st, 2nd, ... of the merge), not a chosen/total
+    // portions fraction, every merge-split entry's recipeItems snapshot
+    // always holds exactly ONE portion's worth of the batch regardless of x.
+    // Confirmed via splitBatch.kind, which survives the round trip to
+    // Supabase (split_batch column) and back, so this holds after a reload
+    // too. Without this check, origChosen below took x itself (2, 3, ...)
+    // as if it meant "this entry's snapshot is x/y of the batch", so every
+    // portion past the first reconstructed the wrong full-batch size the
+    // moment its amount was edited.
+    const isMergeSplitPortion = entry.splitBatch?.kind === 'merge';
+    const m = !gramsMode && !isMergeSplitPortion ? entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/) : null;
     // The total-portions-at-log-time must come from the entry itself, not the
     // live recipe (recipe.portions may have changed since logging, which
     // would silently rescale this entry's macros against the wrong base).
@@ -4036,6 +4048,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
     const origChosen = gramsMode ? (entry.loggedCookedGrams / entry.loggedCookedWeightG) * totalPortions
+      : isMergeSplitPortion ? 1
       : m ? parseFloat(m[1])
       : totalPortions;
     // Rescale from the entry's OWN frozen ingredient snapshot, not the live
