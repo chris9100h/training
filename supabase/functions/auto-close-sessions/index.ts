@@ -1,40 +1,10 @@
+import { sendNotification } from '../_shared/notifications.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-
-async function sendPushover(userKey: string, userId: string, message: string): Promise<boolean> {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  try {
-    const response = await fetch(`${base}/functions/v1/pushover`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, title: 'Zane', userKey, userId }),
-    });
-    if (!response.ok) console.error(`[auto-close] pushover handoff failed for ${userId}: ${response.status}`);
-    return response.ok;
-  } catch (e) {
-    console.error('[auto-close] pushover error:', e);
-    return false;
-  }
-}
-
-async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  try {
-    const response = await fetch(`${base}/functions/v1/web-push`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, title, message }),
-    });
-    if (!response.ok) console.error(`[auto-close] web-push handoff failed for ${userId}: ${response.status}`);
-    return response.ok;
-  } catch (e) {
-    console.error('[auto-close] web-push error:', e);
-    return false;
-  }
-}
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -233,16 +203,22 @@ Deno.serve(async (req) => {
             const msg = durationMinutes != null
               ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
               : `Session auto-ended after ${timeoutMin} min of inactivity.`;
-            // Pushover INSTEAD of Web Push when the user chose that channel, the
-            // same rule the three reminder functions follow. This used to send
-            // both whenever a key existed, so a Pushover user got every
-            // auto-close twice.
-            const viaPushover = !!sett.use_pushover && !!sett.pushover_user_key;
-            if (viaPushover) {
-              await sendPushover(sett.pushover_user_key, sess.user_id, msg);
-            } else {
-              await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
-            }
+            // sendNotification (shared with the reminder crons) picks Pushover
+            // INSTEAD of Web Push when the user chose that channel, so this
+            // still sends at most once. Unlike this function's own former
+            // sendPushover/sendWebPush, it calls the Pushover API directly for
+            // a real synchronous status instead of trusting the pushover relay
+            // function's always-202 response, and pre-checks
+            // zane_push_subscriptions before calling web-push, so a genuine
+            // delivery failure here is now actually detected and logged.
+            await sendNotification({
+              userId: sess.user_id,
+              title: 'Zane · Session ended',
+              message: msg,
+              usePushover: sett.use_pushover,
+              pushoverUserKey: sett.pushover_user_key,
+              logPrefix: 'auto-close',
+            });
           }
         }
         closed++;

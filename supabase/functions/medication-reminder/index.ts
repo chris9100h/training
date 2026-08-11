@@ -1,5 +1,6 @@
 // Medication reminder cron function (Medications feature). Mirrors the meal
 import { localClock } from '../_shared/time.ts';
+import { sendNotification } from '../_shared/notifications.ts';
 
 // reminder's channel mechanics (opted-in users, push via Pushover or Web
 // Push) but firing is STATE-BASED rather than window-based since the
@@ -48,8 +49,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Secret, never a literal: set it with `supabase secrets set PUSHOVER_TOKEN=...`.
-const PUSHOVER_TOKEN = Deno.env.get('PUSHOVER_TOKEN') ?? '';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a scheduled dose is this far past its time
 const NUDGE_MS = 2 * 60 * 60 * 1000;  // second nudge no sooner than this long after the first
 const WINDOW_MS = 60 * 60 * 1000;     // yesterday-row bound: only the tick that crosses a late dose's threshold
@@ -67,39 +66,6 @@ function dbFetch(path: string, options: RequestInit = {}) {
       ...(options.headers ?? {}),
     },
   });
-}
-
-async function sendWebPush(userId: string, title: string, message: string): Promise<boolean> {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  // Everything is inside one try/catch: a fetch-level rejection here (DNS,
-  // connection reset, timeout) must degrade to "failed, retry next tick"
-  // like any other push failure, never abort the whole cron loop mid-tick
-  // and rob every later user of their nudge.
-  try {
-    // Pre-check the subscription: web-push itself answers 202 before async
-    // delivery and returns 202 even with no subscription rows, so a dead
-    // subscription would otherwise count as "pushed" and silently consume
-    // the nudge budget (count advances, the user never receives it, no
-    // retry). Without any subscription there is nothing to deliver to, so
-    // report failure and let the next tick retry (one cheap query per tick;
-    // a later re-subscription then delivers).
-    const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${userId}&select=id`);
-    if (!subRes.ok) return false;
-    const subs: { id: string }[] = await subRes.json().catch(() => []);
-    if (!subs.length) {
-      console.error(`[medication-reminder] no web-push subscription for ${userId}, skipping nudge`);
-      return false;
-    }
-    const res = await fetch(`${base}/functions/v1/web-push`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, title, message }),
-    });
-    return res.ok;
-  } catch (e) {
-    console.error(`[medication-reminder] web-push error for ${userId}:`, e);
-    return false;
-  }
 }
 
 interface Row {
@@ -312,30 +278,19 @@ async function sendReminders() {
       ? `Still due: ${toPush[0].medication_name || 'a scheduled dose'}. 💊`
       : `You have ${toPush.length} scheduled doses still to log. 💊`;
 
-    // Respect the user's channel choice: when Pushover is enabled (use_pushover
-    // and a key set) send only Pushover, otherwise send native Web Push (which
-    // pre-checks the user actually has a subscription, see sendWebPush). This
-    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
-    // so the user never gets the same nudge on both channels.
-    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
-    let delivered: boolean;
-    if (viaPushover) {
-      try {
-        const res = await fetch('https://api.pushover.net/1/messages.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 10800 }),
-        });
-        delivered = res.ok;
-        if (!delivered) console.error(`[medication-reminder] pushover failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
-        else console.log(`[medication-reminder] pushover sent to ${row.user_id}: ${res.status}`);
-      } catch (e) {
-        delivered = false;
-        console.error(`[medication-reminder] pushover error for ${row.user_id}:`, e);
-      }
-    } else {
-      delivered = await sendWebPush(row.user_id, title, message);
-    }
+    // Shared with the other reminder crons: picks Pushover INSTEAD of Web
+    // Push when the user chose that channel (so the user never gets the same
+    // nudge on both), calls the Pushover API directly for a real synchronous
+    // status, and pre-checks zane_push_subscriptions before calling web-push
+    // so a dead/missing subscription is detected instead of counted as sent.
+    const delivered = await sendNotification({
+      userId: row.user_id,
+      title,
+      message,
+      usePushover: row.use_pushover,
+      pushoverUserKey: row.pushover_user_key,
+      logPrefix: 'medication-reminder',
+    });
 
     // Compensating rollback: the state PATCH above already advanced every
     // row in toPush, but delivery just failed (including the "no
