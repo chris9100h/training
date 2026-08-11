@@ -838,6 +838,27 @@ function Toggle({ on, onToggle, disabled = false, label }) {
   );
 }
 
+// Every currently open Sheet registers its own token here in mount order, so
+// a stacked Escape press (e.g. a zIndex:200 child opened over its still-open
+// zIndex:100 parent, a real pattern in this app) closes only the TOPMOST
+// sheet. A plain per-Sheet `document.addEventListener('keydown', ...)` with
+// only stopPropagation() cannot do this alone: stopPropagation blocks
+// bubbling to ancestor DOM nodes, not sibling listeners registered on the
+// same document node, so both sheets' handlers still fire from one keypress.
+// Also gates the Tab focus trap below the same way: only the topmost sheet
+// should constrain Tab, a background parent doing the same would fight it.
+const _openSheetStack = [];
+
+// Standard interactive-element selector for a lightweight focus trap.
+// offsetParent === null filters out display:none descendants (a collapsed
+// accordion section, a hidden tab panel) without pulling in a full
+// visibility library for what is deliberately a minimal trap.
+function focusableIn(container) {
+  if (!container) return [];
+  const nodes = container.querySelectorAll('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  return Array.prototype.filter.call(nodes, el => el.offsetParent !== null || el === document.activeElement);
+}
+
 // ─── Sheet ──────────────────────────────────────────────────────────
 // keyboardHeight: lets a caller report a non-native on-screen keyboard (e.g.
 // this app's custom numeric keypad, which focuses no real <input> so the
@@ -900,15 +921,46 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       }
     };
   }, [open]);
+  const stackTokenRef = React.useRef({});
   React.useEffect(() => {
     if (!open) return;
+    const token = stackTokenRef.current;
+    _openSheetStack.push(token);
+    const isTopmost = () => _openSheetStack[_openSheetStack.length - 1] === token;
     const onKeyDown = (event) => {
-      if (event.key !== 'Escape' || !onClose) return;
-      event.stopPropagation();
-      onClose();
+      if (event.key === 'Escape') {
+        if (!onClose || !isTopmost()) return;
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      // Trap Tab within this sheet's own focusable elements while it's the
+      // topmost open one, same "keyboard stays down until the user taps a
+      // field" spirit as the blur-on-open effect above: the initial focus
+      // sits on the panel container itself (not a child), so the first Tab
+      // must still land on the sheet's first real control instead of
+      // escaping straight to whatever the background screen would be next
+      // in document order.
+      if (event.key === 'Tab' && isTopmost()) {
+        const focusable = focusableIn(panelNodeRef.current);
+        if (!focusable.length) { event.preventDefault(); panelNodeRef.current?.focus?.(); return; }
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        const current = document.activeElement;
+        const onPanel = current === panelNodeRef.current;
+        const outside = !panelNodeRef.current?.contains(current);
+        if (event.shiftKey) {
+          if (onPanel || outside || current === first) { event.preventDefault(); last.focus(); }
+        } else {
+          if (onPanel || outside || current === last) { event.preventDefault(); first.focus(); }
+        }
+      }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const idx = _openSheetStack.indexOf(token);
+      if (idx !== -1) _openSheetStack.splice(idx, 1);
+    };
   }, [open, onClose]);
   React.useEffect(() => {
     if (!open) return;
