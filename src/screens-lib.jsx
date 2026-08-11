@@ -6339,11 +6339,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       {/* TopBar */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 30px) 22px 14px`, // +16 iOS status-bar-blur delta, see ui.jsx TopBar
+        padding: `env(safe-area-inset-top, 0px) 22px 14px`,
         borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',
-        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
         <button onClick={() => go({ name: 'settings' })} style={{

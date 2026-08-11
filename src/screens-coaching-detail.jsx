@@ -917,7 +917,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   const renderToggle = (on, onToggle, label) => <Toggle on={on} onToggle={onToggle} label={label} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' };
-  const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 16px 14px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }; // +16 iOS status-bar-blur delta, see ui.jsx TopBar
+  const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'env(safe-area-inset-top, 0px) 16px 14px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 };
   const backBtn = (onClick) => (
     <button onClick={onClick} style={{ background: 'none', border: 'none', padding: '4px 8px 4px 0', cursor: 'pointer', color: UI.inkFaint, fontSize: 18, lineHeight: 1 }}>
       <i className="fa-solid fa-chevron-left" />
