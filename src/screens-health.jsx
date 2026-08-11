@@ -3357,7 +3357,7 @@ function AdaptiveTdeeChart({ history }) {
       const weightStart = displayWeight(p.weightStartKg);
       const weightEnd = displayWeight(p.weightEndKg);
       const rate = displayWeight(p.weightRateKgWeek);
-      const weightUnit = isLbs ? 'lbs' : 'kg';
+      const weightUnit = UI.unit();
       const rows = [
         { label: 'TDEE', value: String(p.tdee) + ' kcal', color: 'var(--accent)' },
         { label: 'Avg', value: String(p.avgCalories) + ' kcal', color: UI.inkSoft },
@@ -3378,7 +3378,7 @@ function AdaptiveTdeeChart({ history }) {
       }
       const sub = [
         statusLabel(p),
-        rate != null ? 'trend ' + signed(rate) + (isLbs ? 'lbs' : 'kg') + '/wk' : null,
+        rate != null ? 'trend ' + signed(rate) + UI.unit() + '/wk' : null,
       ].filter(Boolean).join(' · ');
       return { x: xOf(p.asOfDate), y: yOf(p.tdee), date: p.asOfDate, rows, sub };
     });
@@ -3472,14 +3472,14 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
             ? <AdaptiveTdeeChart history={history} />
             : weightSeries.length > 0
               ? <HealthLineChart series={weightSeries} from={weightSeries[0].date} to={weightSeries[weightSeries.length - 1].date}
-                format={v => String(v) + (isLbs ? 'lbs' : 'kg')} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
+                format={v => String(v) + UI.unit()} step={isLbs ? 5 : 2.5} color={UI.inkSoft} />
               : <HealthChartEmpty label="No weight signal in this history yet" />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
             {history.map(row => {
               const weightStart = displayWeight(row.weightStartKg);
               const weightEnd = displayWeight(row.weightEndKg);
               const rate = displayWeight(row.weightRateKgWeek);
-              const weightUnit = isLbs ? 'lbs' : 'kg';
+              const weightUnit = UI.unit();
               const target = Number(row.targetsSnapshot?.weeklyAverageCalories);
               const targetDelta = Number(row.targetsSnapshot?.deltaKcal);
               return (
@@ -3728,7 +3728,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
                 </div>
                 <div style={{ marginTop: 5, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
                   {previousWeight != null && currentWeight != null
-                    ? 'Weight signal: ' + String(previousWeight) + ' → ' + String(currentWeight) + ' ' + (isLbs ? 'lbs' : 'kg')
+                    ? 'Weight signal: ' + String(previousWeight) + ' → ' + String(currentWeight) + ' ' + UI.unit()
                     : 'Weight signal from the previous estimate is available in history.'}
                 </div>
               </div>
