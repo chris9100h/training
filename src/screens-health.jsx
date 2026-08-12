@@ -5205,7 +5205,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       reconciled.forEach(l => { LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap); });
       return { ...s, dailyLogs: nextLogs };
     });
-  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, coachingId, coachingMacrosLoaded]);
+  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, store.sessions, store.statusMode, store.statusPeriods, coachingId, coachingMacrosLoaded]);
 
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session

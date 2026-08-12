@@ -2729,10 +2729,10 @@ CREATE POLICY "coach can write client meal plans"  ON zane_food_meal_plans FOR I
 CREATE POLICY "coach can update client meal plans" ON zane_food_meal_plans FOR UPDATE USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can delete client meal plans" ON zane_food_meal_plans FOR DELETE USING (zane_is_coach_of(user_id));
 
--- Plan Mode auto-fill markers (migration 0198): one row per (user, date) the
--- meal template was already auto-materialized for, cross-device. id is
--- deterministic (`<user_id>_<date>`). Derived device/sync state, kept OUT of
--- the personal-data backup.
+-- Plan Mode auto-fill markers (migration 0198): one row per (user, active meal
+-- plan, date) the meal template was already auto-materialized for, cross-device.
+-- id is deterministic (`ft_<user_id>_<meal_plan_id>_<date>`). Derived
+-- device/sync state, kept OUT of the personal-data backup.
 CREATE TABLE zane_food_template_days (
   id         text        PRIMARY KEY,
   user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,

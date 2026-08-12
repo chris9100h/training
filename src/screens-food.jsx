@@ -1389,9 +1389,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (by day-type: any / training / rest) as a planned entry at its fixed
   // hour, for today AND the next FD_PLAN_LOOKAHEAD_DAYS - 1 days, unless a
   // given day already has one from that slot. Runs once per day, tracked
-  // CROSS-DEVICE by a synced marker row per date (store.foodTemplateDays, id
-  // `<userId>_<date>`), so deleting an auto-planned entry never makes it
-  // reappear on reopen, on any device, and a day already filled elsewhere
+  // CROSS-DEVICE by a synced marker row per active plan/date
+  // (store.foodTemplateDays, id `<userId>_<activePlanId>_<date>`), so deleting an auto-planned entry never
+  // makes it reappear on reopen, on any device, and a day already filled elsewhere
   // isn't redone here. Independent of curDate (which date is currently being
   // viewed): the whole point is that tomorrow's plan is already sitting in
   // the log before the user ever navigates to it, not materialized on
@@ -1411,13 +1411,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!existingByDate.has(l.date)) existingByDate.set(l.date, new Set());
       existingByDate.get(l.date).add(l.templateSlotId);
     });
-    // One entry per not-yet-marked date in the window, slots already resolved
-    // so the setStore updater below only has to re-check markers, not redo
-    // the filtering, on a double-run race.
+    // One pending record per not-yet-marked date in the window. The updater
+    // revalidates the current plan slots as well, so a double-run race or a
+    // slot edit landing between render and commit cannot append stale rows.
     const pending = [];
     for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
       const date = LB.shiftDate(today, i);
-      const markerId = `${userId}_${date}`;
+      // Scope the once-per-day marker to the active plan. A user can switch
+      // from Cut to Bulk while looking at the same date; a user/date-only
+      // marker from Cut would otherwise suppress Bulk's slots forever until
+      // they manually used "Apply to today's plan".
+      const markerId = LB.foodTemplateDayMarkerId(userId, activePlanId, date);
       if (markedDates.has(markerId)) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
       const entries = slots
@@ -1427,11 +1431,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     if (!pending.length) return;
     setStore(s => {
+      // The active plan can change between calculating `pending` and React
+      // applying this updater (for example while a settings sync is landing).
+      // Never materialize the old plan into the newly selected one.
+      if (s.activeMealTemplateId !== activePlanId) return s;
       const already = new Set((s.foodTemplateDays || []).map(d => d.id));
       const stillPending = pending.filter(p => !already.has(p.markerId));
       if (!stillPending.length) return s;
       const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
-      const newEntries = stillPending.flatMap(p => p.entries);
+      const slotsForPlan = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === activePlanId);
+      const existingSlotIdsByDate = new Map();
+      (s.foodLogs || []).forEach(log => {
+        if (!log.templateSlotId) return;
+        if (!existingSlotIdsByDate.has(log.date)) existingSlotIdsByDate.set(log.date, new Set());
+        existingSlotIdsByDate.get(log.date).add(log.templateSlotId);
+      });
+      const newEntries = stillPending.flatMap(p => {
+        const existingIds = existingSlotIdsByDate.get(p.date) || new Set();
+        return slotsForPlan.filter(slot => {
+          if (existingIds.has(slot.id)) return false;
+          if (!fdSlotMatchesDate(slot, s, p.date)) return false;
+          existingIds.add(slot.id);
+          return true;
+        }).map(slot => fdMaterializeSlotEntry(slot, p.date));
+      });
       return {
         ...s,
         foodTemplateDays: [...(s.foodTemplateDays || []), ...newMarkers],
@@ -2413,7 +2436,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     [dayTarget, projectedTotals]);
   // Deterministic id so two devices confirming the same meal collide into one
   // row instead of duplicating, the same reason foodTemplateDays' marker id is
-  // `${userId}_${today}` (this file, above). id is the PRIMARY KEY on
+  // `${userId}_${store.activeMealTemplateId}_${today}` (this file, above). id is the PRIMARY KEY on
   // zane_food_logs, a table shared by every user, so date alone is not
   // enough: two different users marking a meal of choice on the same
   // calendar day would otherwise both compute the exact same id and collide

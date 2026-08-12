@@ -8158,6 +8158,39 @@ function dsShiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return fmtISO(d);
 }
+
+// A food-template fill marker belongs to one ACTIVE meal plan and one date.
+// The old `${userId}_${date}` shape made a marker created by plan A suppress
+// plan B when the user switched plans on the same day. Keep the marker opaque
+// to callers; only equality matters, and the plan id is part of that identity.
+function foodTemplateDayMarkerId(userId, mealPlanId, dateISO) {
+  return `ft_${userId}_${mealPlanId}_${dateISO}`;
+}
+
+// Re-activating a scheduled medication after its planned row was removed must
+// revive that row instead of appending a second object with the same id. A
+// removed scheduled dose is kept as a skipped tombstone so auto-fill cannot
+// recreate it; manual logging the same dose is the explicit inverse of that
+// tombstone. Replacing all matching ids also repairs a duplicate produced by
+// older clients without leaving two rows for syncStore's id diff.
+function upsertMedicationLog(logs, entry) {
+  const list = Array.isArray(logs) ? logs : [];
+  let found = false;
+  const next = [];
+  for (const row of list) {
+    if (row?.id !== entry?.id) {
+      next.push(row);
+      continue;
+    }
+    if (!found) {
+      next.push({ ...row, ...entry, skipped: false });
+      found = true;
+    }
+  }
+  if (!found) next.push(entry);
+  return next;
+}
+
 function dsMedsDueTaken(store, dateISO) {
   const wd = isoWd(new Date(dateISO + 'T12:00:00'));
   const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
@@ -10842,7 +10875,7 @@ window.LB = {
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
-  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn, foodTemplateDayMarkerId, upsertMedicationLog,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,

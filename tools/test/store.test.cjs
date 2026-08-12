@@ -139,6 +139,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(queried.filter(table => table.startsWith('zane_medication')).length, 6);
   });
 
+  test('foodTemplateDayMarkerId scopes the fill marker to the active meal plan', () => {
+    const cut = LB.foodTemplateDayMarkerId('u1', 'cut', '2026-08-12');
+    const bulk = LB.foodTemplateDayMarkerId('u1', 'bulk', '2026-08-12');
+    assert.notStrictEqual(cut, bulk, 'switching plans must not reuse the old plan marker');
+    assert.strictEqual(cut, LB.foodTemplateDayMarkerId('u1', 'cut', '2026-08-12'));
+  });
+
+  test('upsertMedicationLog revives a skipped tombstone without duplicate ids', () => {
+    const tombstone = { id: 'md_2026-08-12_slot-1', skipped: true, planned: false, doseQty: 1 };
+    const entry = { id: tombstone.id, medicationId: 'm1', date: '2026-08-12', planned: false, doseQty: 2 };
+    const next = LB.upsertMedicationLog([tombstone, { id: 'other' }, { ...tombstone }], entry);
+    assert.strictEqual(next.filter(row => row.id === entry.id).length, 1);
+    assert.strictEqual(next[0].skipped, false);
+    assert.strictEqual(next[0].doseQty, 2);
+    assert.strictEqual(next[1].id, 'other');
+  });
+
   // ── validateBackup ───────────────────────────────────────────────────────
   test('validateBackup accepts a well-formed backup', () => {
     assert.strictEqual(LB.validateBackup({

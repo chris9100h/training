@@ -354,13 +354,9 @@ function mdMaterializeSlotEntry(med, slot, dateISO) {
 // Fills in today's due-but-missing doses from active schedule slots, same
 // idea as the Food Tracker's own auto-fill effect. Checks scheduleSlotId
 // against today's existing log rows (not just count) so a slot that already
-// materialized isn't duplicated; a deliberately-deleted entry can reappear
-// later the same day if some unrelated medications/scheduleSlots edit
-// re-triggers the calling effect (no zane_food_template_days-style
-// cross-device marker for this yet), an accepted v1 rough edge, not a
-// correctness bug: at worst you see a stray "still due" row you can mark
-// taken or ignore. See the effect below for why it can no longer happen
-// simply from the delete itself.
+// materialized isn't duplicated. A deliberately-deleted entry stays blocked
+// by its skipped tombstone; the functional updater below also re-checks the
+// latest store so a fast effect re-run cannot append the same slot twice.
 function mdAutoFillToday(store, setStore, todayISO) {
   // Every current nav path into this screen already gates on showMeds
   // (derived from this same flag), but that's a UI-entry-point guard, not a
@@ -370,7 +366,10 @@ function mdAutoFillToday(store, setStore, todayISO) {
   // disabled, same as the Food Tracker's own auto-fill effect gating on
   // planMode first.
   if (!store.settings?.medsEnabled) return;
-  const wd = LB.isoWd(new Date());
+  // Derive the weekday from the same explicit local date used for the fill,
+  // not from the wall clock a few milliseconds later. This keeps the helper
+  // deterministic at midnight and in tests that advance todayISO explicitly.
+  const wd = LB.isoWd(new Date(todayISO + 'T12:00:00'));
   const medsById = new Map((store.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
   const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
   const existingSlotIds = new Set(
@@ -384,7 +383,23 @@ function mdAutoFillToday(store, setStore, todayISO) {
     toAdd.push(mdMaterializeSlotEntry(med, slot, todayISO));
   });
   if (!toAdd.length) return;
-  setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), ...toAdd] }));
+  setStore(s => {
+    const logs = s.medicationLogs || [];
+    const existing = new Set(logs.filter(l => l.date === todayISO && l.scheduleSlotId).map(l => l.scheduleSlotId));
+    const slotsById = new Map((s.medicationScheduleSlots || []).map(slot => [slot.id, slot]));
+    const medsByIdNow = new Map((s.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
+    const activePlanIdsNow = new Set((s.medicationPlans || []).filter(p => p.active).map(p => p.id));
+    const wdNow = LB.isoWd(new Date(todayISO + 'T12:00:00'));
+    const fresh = [];
+    for (const entry of toAdd) {
+      const slot = slotsById.get(entry.scheduleSlotId);
+      if (!slot || existing.has(entry.scheduleSlotId) || !medsByIdNow.has(slot.medicationId)) continue;
+      if (!LB.dsSlotAppliesOn(slot, todayISO, wdNow, activePlanIdsNow)) continue;
+      existing.add(entry.scheduleSlotId);
+      fresh.push(entry);
+    }
+    return fresh.length ? { ...s, medicationLogs: [...logs, ...fresh] } : s;
+  });
 }
 // Removes today's still-pending (planned: true) materialized rows for
 // schedule slots that just stopped applying, because the plan they belong
@@ -746,7 +761,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     const entry = dueSlot
       ? { ...mdMaterializeSlotEntry(med, dueSlot, curDate), doseQty: qty, planned: false }
       : { id: LB.uid(), medicationId: med.id, medicationName: med.name, date: curDate, time, doseQty: qty, planned: false, scheduleSlotId: null };
-    setStore(s => ({ ...s, medicationLogs: [...(s.medicationLogs || []), entry] }));
+    // A previously removed scheduled dose is a skipped tombstone. Logging it
+    // manually is the explicit inverse of that delete, so revive/replace the
+    // tombstone instead of appending a second object with the same deterministic
+    // id (which made the timeline look fine but left syncStore with duplicate
+    // IDs and ambiguous upsert/delete diffs).
+    setStore(s => ({ ...s, medicationLogs: LB.upsertMedicationLog(s.medicationLogs, entry) }));
     setLogDraft(null);
   }
 
