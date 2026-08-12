@@ -203,7 +203,29 @@ async function persistAppliedSwVersion(fallback) {
   if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
 }
 
-function UpdateBanner({ onUpdate }) {
+const DEFERRED_UPDATE_STORAGE = 'logbook-update-deferred';
+
+function readDeferredUpdate() {
+  try { return localStorage.getItem(DEFERRED_UPDATE_STORAGE); } catch (_) { return null; }
+}
+
+function isDeferredUpdateKey(key) {
+  const deferred = readDeferredUpdate();
+  return deferred === key || deferred === 'waiting';
+}
+
+function writeDeferredUpdate(value) {
+  try {
+    if (value) localStorage.setItem(DEFERRED_UPDATE_STORAGE, value);
+    else localStorage.removeItem(DEFERRED_UPDATE_STORAGE);
+  } catch (_) {}
+}
+
+function isTextEntryElement(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
+function UpdateBanner({ onUpdate, onDefer, updating }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
@@ -240,15 +262,25 @@ function UpdateBanner({ onUpdate }) {
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
           A fresh update is ready to install. This only takes a second.
         </div>
-        <button onClick={onUpdate} style={{
+        <button onClick={onUpdate} disabled={updating} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', textShadow: 'none',
+          letterSpacing: '0.06em', textShadow: 'none', opacity: updating ? 0.65 : 1,
         }}>
-          UPDATE NOW
+          {updating ? 'UPDATING...' : 'UPDATE NOW'}
+        </button>
+        <button onClick={onDefer} disabled={updating} style={{
+          width: '100%', padding: '10px 0',
+          borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+          background: 'transparent', color: UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', cursor: updating ? 'default' : 'pointer',
+          opacity: updating ? 0.45 : 1, textShadow: 'none',
+        }}>
+          LATER
         </button>
       </div>
     </div>
@@ -443,7 +475,10 @@ function App() {
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
-  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings "Test update banner" bypasses the in-progress/onboarding hold-backs below
+  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings test queues the banner for the next safe Home view
+  const [updateApplying, setUpdateApplying] = useStateA(false);
+  const [openSheetCount, setOpenSheetCount] = useStateA(0);
+  const [textEntryFocused, setTextEntryFocused] = useStateA(false);
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
@@ -473,6 +508,8 @@ function App() {
   const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
+  const updateApplyInFlight       = useRefA(false);
+  const updateReloadStarted       = useRefA(false);
   const intentionalSignOut        = useRefA(null);  // ms timestamp, set right before a user-initiated LB.signOut() call
   const swReg                     = useRefA(null);
   const prevStore                 = useRefA(null);
@@ -486,6 +523,7 @@ function App() {
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
   const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
+  const previousRouteName         = useRefA(null);
   const foregroundRefresh         = useRefA(null); // one in-flight health refresh across all foreground events
   const lastForegroundRefreshAt   = useRefA(0);    // start time of the last accepted soft refresh
   const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
@@ -498,6 +536,28 @@ function App() {
   }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
+
+  // A route name alone cannot tell whether the Home screen is covered by a
+  // quick-action sheet or whether a native field still owns the keyboard.
+  // Sheet publishes its stack depth through this tiny app-wide signal so an
+  // update can wait for a genuinely safe surface before reloading.
+  useEffectA(() => {
+    const syncSheetAndFocus = () => {
+      const count = Number(window.__zaneOpenSheetCount || 0);
+      const typing = isTextEntryElement(document.activeElement);
+      setOpenSheetCount(n => n === count ? n : count);
+      setTextEntryFocused(v => v === typing ? v : typing);
+    };
+    syncSheetAndFocus();
+    window.addEventListener('zane-sheet-state', syncSheetAndFocus);
+    window.addEventListener('focusin', syncSheetAndFocus);
+    window.addEventListener('focusout', syncSheetAndFocus);
+    return () => {
+      window.removeEventListener('zane-sheet-state', syncSheetAndFocus);
+      window.removeEventListener('focusin', syncSheetAndFocus);
+      window.removeEventListener('focusout', syncSheetAndFocus);
+    };
+  }, []);
   useEffectA(() => {
     if (phase === 'ready') window.__startScreenWarmup?.();
   }, [phase]);
@@ -912,6 +972,32 @@ function App() {
     return () => document.removeEventListener('visibilitychange', clearDelivered);
   }, []);
 
+  const deferUpdate = useCallbackA(() => {
+    // The local test banner has no real pending version. It is only a preview
+    // of the UI, so closing it should not create a phantom update reminder.
+    if (forceShowUpdateBanner && !updateAvailable) {
+      setForceShowUpdateBanner(false);
+      return;
+    }
+    const key = pendingSwVersion.current
+      || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+    writeDeferredUpdate(key);
+    setUpdateAvailable(false);
+    setForceShowUpdateBanner(false);
+  }, [forceShowUpdateBanner, updateAvailable]);
+
+  // All successful handoffs, including the timeout recovery path, use this
+  // single gate. The old flow had one reload in controllerchange and another
+  // in applyUpdate's timeout branch, so a fast controllerchange could trigger
+  // two navigations for one tap.
+  const reloadAfterUpdate = useCallbackA(() => {
+    if (updateReloadStarted.current) return;
+    updateReloadStarted.current = true;
+    writeDeferredUpdate(null);
+    persistAppliedSwVersion(pendingSwVersion.current)
+      .finally(() => window.location.reload());
+  }, []);
+
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
@@ -923,7 +1009,9 @@ function App() {
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed') {
             waitingWorker.current = worker;
-            setUpdateAvailable(true);
+            const key = pendingSwVersion.current
+              || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+            if (!isDeferredUpdateKey(key)) setUpdateAvailable(true);
           }
         });
       };
@@ -940,7 +1028,9 @@ function App() {
           reg.waiting.postMessage({ type: 'SKIP_WAITING' });
         } else {
           waitingWorker.current = reg.waiting;
-          setUpdateAvailable(true);
+          const key = pendingSwVersion.current
+            || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+          if (!isDeferredUpdateKey(key)) setUpdateAvailable(true);
         }
       } else if (!reg.installing) {
         // Nothing pending: whatever controls this page right now IS the current
@@ -964,16 +1054,20 @@ function App() {
       // Only the RELOAD is gated on this tab having asked for it. Persisting
       // here rather than on the click is what keeps an update that never
       // activates (tab closed, SKIP_WAITING lost) being re-offered later.
-      const persisted = persistAppliedSwVersion(pendingSwVersion.current);
-      // .finally, so a failure or timeout while recording the version can never
-      // cost the user the reload they actually asked for.
-      if (intentionalUpdate.current) persisted.finally(() => window.location.reload());
+      if (intentionalUpdate.current) reloadAfterUpdate();
+      else persistAppliedSwVersion(pendingSwVersion.current);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
+    if (updateApplyInFlight.current || updateReloadStarted.current) return;
+    updateApplyInFlight.current = true;
+    setUpdateApplying(true);
+    setUpdateAvailable(false);
+    setForceShowUpdateBanner(false);
+
     // A force-update broadcast (admin_force_update) isn't tied to an actual
     // SW change, so there's no "wait for activation" step to persist it
     // after, clicking Update always leads to a fresh reload one way or
@@ -1016,17 +1110,11 @@ function App() {
       const controllerBefore = navigator.serviceWorker.controller;
       const waitingBefore = swReg.current?.waiting || null;
       intentionalUpdate.current = true;
-      worker.postMessage({ type: 'SKIP_WAITING' });
-      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
-      // this page almost immediately, but a backgrounded/suspended tab (iOS
-      // throttles a PWA the instant it loses foreground, which can happen
-      // right after this tap) can swallow that event entirely: intentionalUpdate
-      // stays true forever with nothing to reload it, and the version is never
-      // persisted, so the next foreground/route check (checkSwUpdate) sees the
-      // exact same "new" version again and re-shows the banner, forever
-      // (confirmed: this produced a repeating update-banner loop). Race a
-      // timeout against the real event so this path always resolves.
-      activatedViaWorker = await new Promise(resolve => {
+      // Register before posting. A fast worker can claim this page in the same
+      // turn; registering afterwards was the second half of the double-reload
+      // race because the global handler saw controllerchange while this local
+      // timeout path missed it.
+      const activation = new Promise(resolve => {
         const t = setTimeout(() => {
           navigator.serviceWorker.removeEventListener('controllerchange', h);
           resolve(false);
@@ -1038,6 +1126,17 @@ function App() {
         }
         navigator.serviceWorker.addEventListener('controllerchange', h);
       });
+      worker.postMessage({ type: 'SKIP_WAITING' });
+      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
+      // this page almost immediately, but a backgrounded/suspended tab (iOS
+      // throttles a PWA the instant it loses foreground, which can happen
+      // right after this tap) can swallow that event entirely: intentionalUpdate
+      // stays true forever with nothing to reload it, and the version is never
+      // persisted, so the next foreground/route check (checkSwUpdate) sees the
+      // exact same "new" version again and re-shows the banner, forever
+      // (confirmed: this produced a repeating update-banner loop). Race a
+      // timeout against the real event so this path always resolves.
+      activatedViaWorker = await activation;
       // A timeout is NOT proof the handoff failed. The suspended-page case this
       // exists for swallows the event while the worker activates normally with
       // a fully populated cache, and falling through to the wipe below would
@@ -1062,8 +1161,7 @@ function App() {
           && waitingBefore.state !== 'redundant'
           && waitingBefore.state !== 'installed';
         if (controllerMoved || waitingCleared) {
-          await persistAppliedSwVersion(pendingSwVersion.current);
-          window.location.reload();
+          reloadAfterUpdate();
           return;
         }
       }
@@ -1086,6 +1184,7 @@ function App() {
       if (pendingSwVersion.current) {
         try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
       }
+      writeDeferredUpdate(null);
       await LB.clearCachesAndReload();
     }
   }, []);
@@ -1995,7 +2094,7 @@ function App() {
           // (in-memory state wiped) stored would already equal v and the
           // update would never be re-offered.
           pendingSwVersion.current = v;
-          setUpdateAvailable(true);
+          if (!isDeferredUpdateKey(v)) setUpdateAvailable(true);
           swReg.current?.update().catch(() => {});
         }
       })
@@ -2026,12 +2125,24 @@ function App() {
       }
       if (data !== stored) {
         pendingForceNonce.current = data;
-        setUpdateAvailable(true);
+        if (!isDeferredUpdateKey(`force:${data}`)) setUpdateAvailable(true);
       }
     }).catch(() => {});
   }, []);
 
   useEffectA(() => { checkSwUpdate(); checkForceUpdate(); }, [route]);
+
+  // "Later" is deliberately a one-home-visit deferral. The banner stays out
+  // of an editor or another tab, then returns when the user actually enters
+  // Home again, where applying it cannot discard the flow they were in.
+  useEffectA(() => {
+    const previous = previousRouteName.current;
+    previousRouteName.current = route.name;
+    if (route.name !== 'home' || previous === 'home') return;
+    if (!readDeferredUpdate()) return;
+    writeDeferredUpdate(null);
+    setUpdateAvailable(true);
+  }, [route.name]);
 
   useEffectA(() => {
     const onVisible = () => { if (document.visibilityState === 'visible') { checkSwUpdate(); checkForceUpdate(); } };
@@ -2154,6 +2265,16 @@ function App() {
   window.__goHome = () => go({ name: 'home' });
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
+  // An update may be installed while the user is anywhere in the app, but a
+  // reload is only safe on a quiet Home surface. Route checks protect editors;
+  // the sheet and focus checks protect quick actions and unsaved text entry.
+  const safeToApplyUpdate = route?.name === 'home'
+    && !store?.inProgress
+    && !store?.statusMode
+    && !onboardingState
+    && openSheetCount === 0
+    && !textEntryFocused;
+
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
@@ -2271,18 +2392,12 @@ function App() {
   return (
     <>
       {layout}
-      {/* Hold the update banner back while a session is live (never interrupt a
-          workout), and also across the just-finished "Well done" summary, which
-          runs after inProgress has already cleared. Otherwise the banner pops the
-          moment a session ends and updating skips the summary (and its share
-          image). It shows once the user leaves that screen (justFinished clears).
-          route.name !== 'train' additionally covers the gap in between: finish()
-          clears inProgress synchronously but can stay on route 'train' for a
-          while longer (the meso gains sheet, mesocycle-complete confirms, etc.)
-          before it navigates to the justFinished session route, and neither of
-          the two checks above sees that in-between window on its own.
-          forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
-      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && route?.name !== 'train' && !(route?.name === 'session' && route?.justFinished) && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
+      {/* Keep the update installed but waiting while the user is in any flow.
+          The modal is offered only on a quiet Home surface, and Later returns
+          it on the next Home visit instead of interrupting an editor. */}
+      {safeToApplyUpdate && (forceShowUpdateBanner || updateAvailable) && (
+        <UpdateBanner onUpdate={applyUpdate} onDefer={deferUpdate} updating={updateApplying} />
+      )}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}

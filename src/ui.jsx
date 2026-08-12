@@ -874,6 +874,12 @@ function Toggle({ on, onToggle, disabled = false, label }) {
 // should constrain Tab, a background parent doing the same would fight it.
 const _openSheetStack = [];
 
+function notifySheetState() {
+  if (typeof window === 'undefined') return;
+  window.__zaneOpenSheetCount = _openSheetStack.length;
+  window.dispatchEvent(new Event('zane-sheet-state'));
+}
+
 // Standard interactive-element selector for a lightweight focus trap.
 // offsetParent === null filters out display:none descendants (a collapsed
 // accordion section, a hidden tab panel) without pulling in a full
@@ -969,6 +975,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     if (!open) return;
     const token = stackTokenRef.current;
     _openSheetStack.push(token);
+    notifySheetState();
     const isTopmost = () => _openSheetStack[_openSheetStack.length - 1] === token;
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -1004,6 +1011,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       document.removeEventListener('keydown', onKeyDown);
       const idx = _openSheetStack.indexOf(token);
       if (idx !== -1) _openSheetStack.splice(idx, 1);
+      notifySheetState();
     };
   }, [open]);
   React.useEffect(() => {
