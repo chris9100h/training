@@ -66,6 +66,7 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
         <span className="micro" style={{ color: archived ? UI.inkGhost : (statusColor[t.support_status] || UI.inkFaint) }}>{(t.support_status || (archived ? 'resolved' : 'open')).replace('_', ' ').toUpperCase()}</span>
         {t.support_category && <span className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{catLabel}</span>}
       </div>
+      {t.x_handle && <div className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{t.x_handle}</div>}
       {t.last_message_body ? (
         <div style={{ fontSize: archived ? 11 : 12, color: archived ? UI.inkGhost : UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
       ) : (
@@ -737,6 +738,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
     display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
   });
   const [accountSheet, setAccountSheet] = useStateSet(false);
+  const [xHandleDraft, setXHandleDraft] = useStateSet(() => store.user?.xHandle || '');
+  const [xHandlePublicDraft, setXHandlePublicDraft] = useStateSet(() => store.user?.xHandlePublic !== false);
+  const [xHandleMsg, setXHandleMsg] = useStateSet(null);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
   const [dataSheet, setDataSheet] = useStateSet(false);
@@ -925,6 +929,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // screen only reads it for display, so it stays fresh even if Settings is
   // never opened.
   const swVersion = store.settings?.swVersion || '';
+
+  useEffectSet(() => {
+    if (!accountSheet) return;
+    setXHandleDraft(store.user?.xHandle || '');
+    setXHandlePublicDraft(store.user?.xHandlePublic !== false);
+    setXHandleMsg(null);
+  }, [accountSheet]);
+
+  const saveXHandle = () => {
+    const raw = xHandleDraft.trim();
+    if (!raw) {
+      setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: false } } : s);
+      setXHandleDraft('');
+      setXHandleMsg({ ok: true, text: 'X handle removed. The optional prompt is enabled again.' });
+      return;
+    }
+    const normalized = LB.normalizeXHandle(raw);
+    if (!normalized) {
+      setXHandleMsg({ ok: false, text: 'Enter a valid X handle, for example @yourname.' });
+      return;
+    }
+    setStore(s => s ? { ...s, user: { ...s.user, xHandle: normalized, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: false } } : s);
+    setXHandleDraft(normalized);
+    setXHandleMsg({ ok: true, text: 'X handle saved.' });
+  };
+
+  const toggleXHandlePublic = () => {
+    const next = !xHandlePublicDraft;
+    setXHandlePublicDraft(next);
+    setStore(s => s ? { ...s, user: { ...s.user, xHandlePublic: next } } : s);
+  };
+
+  const optOutXHandle = () => {
+    setXHandleDraft('');
+    setXHandlePublicDraft(false);
+    setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: false, xHandlePromptOptedOut: true } } : s);
+    setXHandleMsg({ ok: true, text: 'Got it. We will not ask again.' });
+  };
 
   useEffectSet(() => {
     if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
@@ -2802,6 +2844,42 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Account Sheet ══ */}
       <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
+          <div style={{ padding: '4px 0 18px' }}>
+            <div className="micro" style={{ marginBottom: 7, color: UI.inkFaint }}>X HANDLE</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 9 }}>
+              Add your handle for future social features and public thanks when we share updates.
+            </div>
+            <input
+              value={xHandleDraft}
+              onChange={e => { setXHandleDraft(e.target.value); if (xHandleMsg) setXHandleMsg(null); }}
+              onKeyDown={e => { if (e.key === 'Enter') saveXHandle(); }}
+              placeholder="@yourhandle or x.com/yourhandle"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={SETTINGS_INPUT_STYLE}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <Btn onClick={saveXHandle} style={{ flex: 1, padding: '10px 14px', minHeight: 0, fontSize: 11 }}>
+                Save handle
+              </Btn>
+              <Toggle on={xHandlePublicDraft} onToggle={toggleXHandlePublic} label="Show handle in future public social features" />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginTop: 7 }}>
+              <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.45 }}>
+                {xHandlePublicDraft ? 'Public display is on for future social features.' : 'Public display is off. Admin support views can still see your handle.'}
+              </div>
+              <button onClick={optOutXHandle} style={{ flexShrink: 0, padding: '3px 0', border: 'none', background: 'none', color: UI.inkFaint, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, WebkitTapHighlightColor: 'transparent' }}>
+                I don&apos;t use X
+              </button>
+            </div>
+            {xHandleMsg && (
+              <div style={{ marginTop: 8, fontSize: 11, color: xHandleMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi }}>
+                {xHandleMsg.text}
+              </div>
+            )}
+          </div>
+          <div className="knurl" />
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
@@ -3797,6 +3875,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     ← Back
                   </button>
                   <span className="micro" style={{ color: UI.inkFaint }}>{supportTicket.clientEmail}</span>
+                  {supportTicket.xHandle && <a href={LB.xHandleUrl(supportTicket.xHandle)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{supportTicket.xHandle}</a>}
                   {supportTicket.category && <span className="micro" style={{ color: UI.inkFaint }}>· {CATS[supportTicket.category] || supportTicket.category}</span>}
                 </div>
                 {/* Status picker */}
@@ -3920,7 +3999,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               )}
               {filtered.map(t => (
                 <AdminTicketRow key={t.coaching_id} t={t} catLabel={CATS[t.support_category] || t.support_category}
-                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
+                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, xHandle: t.x_handle, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
@@ -3942,7 +4021,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic', padding: '8px 0' }}>No archived tickets.</div>
                     : archivedInbox.map(t => (
                       <AdminTicketRow key={t.coaching_id} t={t} archived catLabel={CATS[t.support_category] || t.support_category}
-                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
+                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, xHandle: t.x_handle, category: t.support_category, status: t.support_status })} />
                     ))
                 )}
               </div>
@@ -3965,10 +4044,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
             if (allUsersRecentOnly && !(u.last_workout && new Date(u.last_workout).getTime() >= recentCutoff)) return false;
             if (!q) return true;
-            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.x_handle || '').toLowerCase().includes(q);
           });
           const openUserDetail = (u) => {
-            setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
+            setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, xHandle: u.x_handle, xHandlePublic: u.x_handle_public, plans: null, exercises: null });
             setAdminUserDetailLoading(true);
             setAdminUserDetailSheet(true);
             setAdminEmailSubject('');
@@ -3977,7 +4056,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
               .then(({ data, error }) => {
                 if (error || !data) { setAdminUserDetailLoading(false); return; }
-                setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
+                setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, xHandle: data.x_handle ?? u.x_handle, xHandlePublic: data.x_handle_public ?? u.x_handle_public, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
                 setAdminUserDetailLoading(false);
               }).catch(() => setAdminUserDetailLoading(false));
           };
@@ -3986,7 +4065,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <input
                 value={allUsersSearch}
                 onChange={e => setAllUsersSearch(e.target.value)}
-                placeholder="Search by name or email…"
+                placeholder="Search by name, email or X handle…"
                 style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
               />
               <Frame style={{ padding: '0 14px' }}>
@@ -4037,6 +4116,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             )}
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
+                          {u.x_handle && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <a href={LB.xHandleUrl(u.x_handle)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{u.x_handle}</a>
+                            {u.x_handle_public === false && <span className="micro" style={{ color: UI.inkGhost }}>PRIVATE</span>}
+                          </div>}
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'} · joined {fmtAgo(u.created_at)} · last workout {u.last_workout ? fmtAgo(u.last_workout) : 'never'}
                           </div>
@@ -4065,6 +4148,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
           : adminUserDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {adminUserDetail.xHandle && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 0 16px' }}>
+                  <span className="micro" style={{ color: UI.inkGhost }}>X HANDLE</span>
+                  <a href={LB.xHandleUrl(adminUserDetail.xHandle)} target="_blank" rel="noreferrer" className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{adminUserDetail.xHandle}</a>
+                  {adminUserDetail.xHandlePublic === false && <span className="micro" style={{ color: UI.inkGhost }}>PRIVATE</span>}
+                </div>
+              )}
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>SEND EMAIL</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>To {adminUserDetail.email}</div>

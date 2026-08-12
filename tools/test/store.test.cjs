@@ -166,6 +166,22 @@ async function testAsync(name, fn) {
   });
 
   // ── validateBackup ───────────────────────────────────────────────────────
+  // X handle normalization
+  test('normalizeXHandle accepts common pasted forms and stores @name', () => {
+    assert.strictEqual(LB.normalizeXHandle('Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('@Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('https://x.com/Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('www.x.com/Chris_1/'), '@Chris_1');
+    assert.strictEqual(LB.xHandleUrl('Chris_1'), 'https://x.com/Chris_1');
+  });
+  test('normalizeXHandle rejects invalid handles and treats blank input as clear', () => {
+    assert.strictEqual(LB.normalizeXHandle(''), null);
+    assert.strictEqual(LB.normalizeXHandle('   '), null);
+    assert.strictEqual(LB.normalizeXHandle('name with spaces'), null);
+    assert.strictEqual(LB.normalizeXHandle('x.com/name/extra'), null);
+    assert.strictEqual(LB.normalizeXHandle('1234567890123456'), null);
+  });
+
   test('validateBackup accepts a well-formed backup', () => {
     assert.strictEqual(LB.validateBackup({
       sessions: [{ id: 's1', entries: [] }],
@@ -182,6 +198,11 @@ async function testAsync(name, fn) {
     assert.ok(LB.validateBackup({ sessions: [], exercises: [{ id: 'e1', tags: 'nope' }], schedules: [] })));
   test('validateBackup rejects a session with non-array entries', () =>
     assert.ok(LB.validateBackup({ sessions: [{ id: 's', entries: {} }], exercises: [], schedules: [] })));
+  test('validateBackup rejects malformed X profile fields', () => {
+    const base = { sessions: [], exercises: [], schedules: [] };
+    assert.ok(LB.validateBackup({ ...base, user: { xHandle: 'not valid' } }));
+    assert.ok(LB.validateBackup({ ...base, user: { xHandlePublic: 'yes' } }));
+  });
 
   // ── syncStore error propagation (THE core fix) ───────────────────────────
   const settings = {};

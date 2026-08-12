@@ -34,8 +34,18 @@ CREATE TABLE public.zane_profiles (
   name text NOT NULL,
   tier text NOT NULL DEFAULT 'free',
   tier_granted_at timestamptz,
+  x_handle text,
+  x_handle_public boolean NOT NULL DEFAULT true,
+  x_handle_prompt_opted_out boolean NOT NULL DEFAULT false,
   CONSTRAINT zane_profiles_tier_check CHECK (tier IN ('free', 'lifetime', 'premium'))
 );
+
+COMMENT ON COLUMN public.zane_profiles.x_handle IS
+  'Optional canonical X handle, stored as @name; accepted input is normalized client-side.';
+COMMENT ON COLUMN public.zane_profiles.x_handle_public IS
+  'Whether future public/social features may display the user X handle; admins can still see it.';
+COMMENT ON COLUMN public.zane_profiles.x_handle_prompt_opted_out IS
+  'Permanent opt-out from the optional X-handle prompt until the user adds a handle again.';
 
 -- Global app config (single row).
 -- force_update_nonce (Migration 0131): set by admin_force_update() to push
@@ -829,7 +839,7 @@ $function$;
 -- client-side on plan_count/created_at/sw_version instead of needing
 -- separate RPCs per filter.
 CREATE OR REPLACE FUNCTION public.get_all_users_admin()
- RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, tier text, plan_count int, last_workout timestamptz)
+ RETURNS TABLE(user_id uuid, name text, email text, x_handle text, x_handle_public boolean, x_handle_prompt_opted_out boolean, sw_version text, created_at timestamptz, tier text, plan_count int, last_workout timestamptz)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -839,7 +849,8 @@ BEGIN
     RETURN;
   END IF;
   RETURN QUERY
-    SELECT p.id, p.name, u.email::text, us.sw_version, u.created_at, p.tier,
+    SELECT p.id, p.name, u.email::text, p.x_handle, p.x_handle_public,
+           p.x_handle_prompt_opted_out, us.sw_version, u.created_at, p.tier,
            COALESCE(sc.plan_count, 0)::int AS plan_count, lw.last_workout
     FROM zane_profiles p
     JOIN auth.users u ON u.id = p.id
@@ -873,6 +884,9 @@ BEGIN
   END IF;
   RETURN (
     SELECT jsonb_build_object(
+      'x_handle', (SELECT p.x_handle FROM zane_profiles p WHERE p.id = p_user_id),
+      'x_handle_public', (SELECT p.x_handle_public FROM zane_profiles p WHERE p.id = p_user_id),
+      'x_handle_prompt_opted_out', (SELECT p.x_handle_prompt_opted_out FROM zane_profiles p WHERE p.id = p_user_id),
       'active_schedule_id', (
         SELECT us.active_schedule_id FROM zane_user_settings us WHERE us.user_id = p_user_id
       ),
@@ -2046,6 +2060,7 @@ RETURNS TABLE (
   client_id         uuid,
   client_name       text,
   client_email      text,
+  x_handle          text,
   support_status    text,
   support_category  text,
   last_message_at   timestamptz,
@@ -2063,6 +2078,7 @@ BEGIN
     c.client_id,
     COALESCE(p.name, u.email)::text,
     u.email::text,
+    p.x_handle,
     c.support_status,
     c.support_category,
     (SELECT MAX(n.created_at) FROM zane_coaching_notes n WHERE n.coaching_id = c.id),
@@ -3132,7 +3148,7 @@ REVOKE EXECUTE ON FUNCTION public.delete_support_ticket(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.delete_support_ticket(text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.get_archived_support_chats()
- RETURNS TABLE(coaching_id text, client_id uuid, client_name text, client_email text, support_status text, support_category text, last_message_at timestamp with time zone, last_message_body text, unread_count bigint)
+ RETURNS TABLE(coaching_id text, client_id uuid, client_name text, client_email text, x_handle text, support_status text, support_category text, last_message_at timestamp with time zone, last_message_body text, unread_count bigint)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -3147,6 +3163,7 @@ BEGIN
     c.client_id,
     COALESCE(p.name, u.email)::text,
     u.email::text,
+    p.x_handle,
     c.support_status,
     c.support_category,
     (SELECT MAX(n.created_at) FROM zane_coaching_notes n WHERE n.coaching_id = c.id),

@@ -452,6 +452,25 @@ function mergeStagedCollection(key, freshRows, curRows, baseRows) {
   return [...localOnly, ...LB.mergeCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds)];
 }
 
+// Profile identity edits can happen while the staged boot payload is still
+// hydrating. Merge only fields that changed locally; never let a stale local
+// email/tier or an old cache without the new fields replace the fresh profile.
+function mergeProfileIdentity(fresh, cur, base) {
+  const merged = { ...(fresh || {}) };
+  const keys = ['name', 'xHandle', 'xHandlePublic', 'xHandlePromptOptedOut'];
+  if (!cur?.user) return merged;
+  if (!base?.user) {
+    if (cur.user.name) merged.name = cur.user.name;
+    return merged;
+  }
+  for (const key of keys) {
+    if (cur.user[key] !== undefined && JSON.stringify(cur.user[key]) !== JSON.stringify(base.user?.[key])) {
+      merged[key] = cur.user[key];
+    }
+  }
+  return merged;
+}
+
 // A first-install boot renders its essential payload while secondary tables
 // hydrate. Any edit made during that short window must survive the full server
 // response exactly like an edit made against the normal persisted cache.
@@ -481,9 +500,7 @@ function mergeStagedBootStore(fresh, cur, base) {
   if (JSON.stringify(cur.nextReminderAt) !== JSON.stringify(base.nextReminderAt)) {
     merged.nextReminderAt = cur.nextReminderAt;
   }
-  if (JSON.stringify(cur.user?.name) !== JSON.stringify(base.user?.name)) {
-    merged.user = { ...fresh.user, name: cur.user?.name || fresh.user?.name || '' };
-  }
+  merged.user = mergeProfileIdentity(fresh.user, cur, base);
   merged.planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base.planDrafts);
   merged.adaptiveTdeeHistory = LB.mergeAdaptiveTdeeHistory(
     fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []
@@ -513,6 +530,9 @@ function App() {
   const [textEntryFocused, setTextEntryFocused] = useStateA(false);
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
+  const [whatsNewSettled, setWhatsNewSettled] = useStateA(false);
+  const [xHandlePromptPending, setXHandlePromptPending] = useStateA(false);
+  const [xHandlePromptOpen, setXHandlePromptOpen] = useStateA(false);
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
@@ -536,6 +556,7 @@ function App() {
     } catch (_) { return null; }
   });
   const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
+  const xHandlePromptCheckedUser  = useRefA(null); // once per user per boot, never re-prompt after onboarding completes in-place
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
@@ -1651,7 +1672,7 @@ function App() {
               settings: mergedSettings,
               ...bootScalars,
               statusPeriods,
-              user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
+              user: mergeProfileIdentity(fresh.user, cur, base),
               inProgress: activeExists ? inProgressId : null,
               sessions,
               exercises: [...localOnlyExercises, ...mergeById(fresh.exercises, cur.exercises, base?.exercises, delExIds)],
@@ -1860,10 +1881,18 @@ function App() {
   // same reasoning as before: this only ever needs to run once per
   // ready-transition, not on every store update.
   useEffectA(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready') {
+      setWhatsNewSettled(false);
+      return;
+    }
     const s = storeRefA.current;
-    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) return;
+    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) {
+      setWhatsNewSettled(true);
+      return;
+    }
+    setWhatsNewSettled(false);
     let live = true;
+    const settled = () => { if (live) setWhatsNewSettled(true); };
     window.__ensureWhatsNew().then(() => {
       if (!live) return;
       // Re-check after the await, not only before it: the onboarding effect
@@ -1872,10 +1901,11 @@ function App() {
       // its synchronous setWhatsNew(null) would otherwise be overwritten right
       // here, leaving a What's New card mounted behind the onboarding overlay
       // that surfaces the moment onboarding is dismissed.
-      if (onboardingOwnsBoot(storeRefA.current)) return;
+      if (onboardingOwnsBoot(storeRefA.current)) { settled(); return; }
       const unseen = unseenWhatsNew();
       if (unseen.length) setWhatsNew(unseen);
-    }).catch(() => {}); // best-effort: a failed lazy fetch just means no What's New this session
+      settled();
+    }, settled); // best-effort: a failed lazy fetch just means no What's New this session
     return () => { live = false; };
   }, [phase]);
 
@@ -1926,6 +1956,42 @@ function App() {
   useEffectA(() => {
     if (phase === 'ready' && store && store.settings?.unit == null) setUnitPromptOpen(true);
   }, [phase, store?.settings?.unit]);
+
+  // X handle prompt: evaluate only once per signed-in user per boot. A fresh
+  // account deliberately gets no prompt in this boot: the Unit Picker and
+  // onboarding own the first-run flow, and the handle prompt starts on the
+  // next normal app start instead. Returning users become pending here and
+  // wait for What's New and every higher-priority overlay to clear below.
+  useEffectA(() => {
+    if (phase !== 'ready' || !store || !userId) return;
+    if (xHandlePromptCheckedUser.current === userId) return;
+    xHandlePromptCheckedUser.current = userId;
+    if (store.settings?.unit == null || !store.settings?.onboardingCompleted || onboardingOwnsBoot(store)) return;
+    if (store.user?.xHandle || store.user?.xHandlePromptOptedOut) return;
+    setXHandlePromptPending(true);
+  }, [phase, userId, store?.settings?.unit, store?.settings?.onboardingCompleted, store?.user?.xHandle, store?.user?.xHandlePromptOptedOut]);
+
+  // Do not stack the prompt over What's New, an update, a share link, a sheet,
+  // a keyboard, or an in-progress session. The pending flag survives all of
+  // those surfaces and opens as soon as the user is back on a quiet Home tab.
+  useEffectA(() => {
+    if (!xHandlePromptPending || phase !== 'ready' || !store || route.name !== 'home') return;
+    if (!whatsNewSettled || whatsNew || onboardingState || unitPromptOpen || pendingShare ||
+        autoCloseNotify || forceShowUpdateBanner || updateAvailable || openSheetCount > 0 ||
+        textEntryFocused || store.inProgress) return;
+    setXHandlePromptPending(false);
+    setXHandlePromptOpen(true);
+  }, [xHandlePromptPending, phase, store, route.name, whatsNewSettled, whatsNew, onboardingState, unitPromptOpen, pendingShare, autoCloseNotify, forceShowUpdateBanner, updateAvailable, openSheetCount, textEntryFocused]);
+
+  // Sign-out/account switches must not carry a modal or a once-per-boot latch
+  // into the next identity.
+  useEffectA(() => {
+    if (phase !== 'ready') {
+      xHandlePromptCheckedUser.current = null;
+      setXHandlePromptPending(false);
+      setXHandlePromptOpen(false);
+    }
+  }, [phase]);
 
   // Detect an admin-side unit reset on a session that's already open. The
   // cache-first merge keeps the locally cached unit, so a server-side flip to
@@ -2456,6 +2522,29 @@ function App() {
             unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
             setUnitPromptOpen(false);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
+      {xHandlePromptOpen && window.Screens?.XHandlePrompt && (
+        <window.Screens.XHandlePrompt
+          onSave={(handle) => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              xHandle: handle,
+              xHandlePublic: s.user?.xHandlePublic !== false,
+              xHandlePromptOptedOut: false,
+            } } : s);
+          }}
+          onLater={() => setXHandlePromptOpen(false)}
+          onOptOut={() => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              xHandle: null,
+              xHandlePublic: false,
+              xHandlePromptOptedOut: true,
+            } } : s);
           }}
         />
       )}

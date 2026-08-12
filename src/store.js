@@ -131,6 +131,26 @@ async function fnFetch(url, body) {
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
+
+// Canonical X handle input for the profile field. The UI accepts the common
+// forms users paste (`name`, `@name`, and x.com/name), while the store keeps one
+// stable value so every device and future social surface can use the same
+// representation without re-parsing it.
+function normalizeXHandle(value) {
+  if (value == null) return null;
+  let raw = String(value).trim();
+  if (!raw) return null;
+  const url = raw.match(/^(?:https?:\/\/)?(?:www\.)?x\.com\/([^/?#]+)\/?$/i);
+  if (url) raw = url[1];
+  raw = raw.replace(/^@/, '');
+  return /^[A-Za-z0-9_]{1,15}$/.test(raw) ? `@${raw}` : null;
+}
+
+function xHandleUrl(value) {
+  const handle = normalizeXHandle(value);
+  return handle ? `https://x.com/${handle.slice(1)}` : null;
+}
+
 // Local calendar date as YYYY-MM-DD. Never use toISOString() here, that
 // returns the UTC date, which is yesterday between midnight and UTC-offset
 // o'clock (and tomorrow in negative-offset timezones from the evening on).
@@ -379,6 +399,13 @@ function validateBackup(b) {
     if (!Array.isArray(b[key])) return `Backup is missing or has an invalid "${key}" list.`;
   }
   if (b.settings != null && typeof b.settings !== 'object') return 'Backup "settings" is malformed.';
+  if (b.user != null && typeof b.user !== 'object') return 'Backup "user" is malformed.';
+  if (b.user?.xHandle != null && (typeof b.user.xHandle !== 'string' || !normalizeXHandle(b.user.xHandle))) {
+    return 'Backup contains an invalid X handle.';
+  }
+  for (const key of ['xHandlePublic', 'xHandlePromptOptedOut']) {
+    if (b.user?.[key] != null && typeof b.user[key] !== 'boolean') return `Backup user field "${key}" is malformed.`;
+  }
   for (const e of b.exercises) {
     if (!e || typeof e !== 'object' || typeof e.id !== 'string' || !e.id) return 'Backup contains an invalid exercise entry.';
     if (e.tags != null && !Array.isArray(e.tags)) return 'Backup contains an exercise with invalid tags.';
@@ -559,8 +586,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const totalSets = importSessions.reduce((n, s) => n + (s.entries || []).reduce((m, e) => m + (e.sets?.length || 0), 0), 0);
   const entryChunks = totalEntries ? Math.ceil(totalEntries / CHUNK) : 0;
   const setChunks = totalSets ? Math.ceil(totalSets / CHUNK) : 0;
+  const hasProfile = !!backup.user && (
+    backup.user.name != null || Object.prototype.hasOwnProperty.call(backup.user, 'xHandle') ||
+    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePublic') ||
+    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePromptOptedOut')
+  );
   const totalSteps = 1 // delete
-    + (backup.user?.name ? 1 : 0)
+    + (hasProfile ? 1 : 0)
     + exChunks
     + (backup.schedules?.length ? 1 : 0)
     + sessChunks
@@ -598,9 +630,15 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   try { await deleteAllData(userId, { keepPush: true }); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
   stepsDone++;
 
-  if (backup.user?.name) {
+  if (hasProfile) {
     prog('Restoring profile…');
-    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })));
+    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({
+      id: userId,
+      name: backup.user?.name || '',
+      x_handle: normalizeXHandle(backup.user?.xHandle),
+      x_handle_public: backup.user?.xHandlePublic ?? true,
+      x_handle_prompt_opted_out: backup.user?.xHandlePromptOptedOut ?? false,
+    })));
     stepsDone++;
   }
 
@@ -1339,6 +1377,9 @@ function buildEssentialLoadResult({
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      xHandle: profileRes.data?.x_handle ?? null,
+      xHandlePublic: profileRes.data?.x_handle_public ?? true,
+      xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
     },
     exercises: exRes.data || [],
     schedules: (schRes.data || []).map(s => healScheduleWeekdays({
@@ -1475,7 +1516,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, tier, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
@@ -1799,7 +1840,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // tier is server-authored (granted by the founding-member trigger) and never
     // written back by syncStore. Defaults to 'free' so a profile row that predates
     // the column, or a coach-side load, renders as an ordinary account.
-    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), tier: profileRes.data?.tier || 'free' },
+    user: {
+      name: profileRes.data?.name || '',
+      email: isCoachLoad ? '' : (authUser?.email || ''),
+      tier: profileRes.data?.tier || 'free',
+      xHandle: profileRes.data?.x_handle ?? null,
+      xHandlePublic: profileRes.data?.x_handle_public ?? true,
+      xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
+    },
     exercises: exRes.data || [],
     schedules: (schRes.data || []).map(s => healScheduleWeekdays({
       ...s,
@@ -2768,8 +2816,19 @@ async function syncStore(prev, next, userId) {
     }
   }
 
-  if (prev.user?.name !== next.user?.name && next.user?.name) {
-    ops.push(_supabase.from('zane_profiles').upsert({ id: userId, name: next.user.name }));
+  const profileChanged =
+    prev.user?.name !== next.user?.name ||
+    prev.user?.xHandle !== next.user?.xHandle ||
+    prev.user?.xHandlePublic !== next.user?.xHandlePublic ||
+    prev.user?.xHandlePromptOptedOut !== next.user?.xHandlePromptOptedOut;
+  if (profileChanged && (next.user?.name || prev.user?.name)) {
+    ops.push(_supabase.from('zane_profiles').upsert({
+      id: userId,
+      name: next.user?.name || prev.user?.name || '',
+      x_handle: normalizeXHandle(next.user?.xHandle),
+      x_handle_public: next.user?.xHandlePublic !== false,
+      x_handle_prompt_opted_out: !!next.user?.xHandlePromptOptedOut,
+    }));
   }
 
   const settingsChanged =
@@ -10856,7 +10915,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
-  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
