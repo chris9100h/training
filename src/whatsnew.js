@@ -22,6 +22,20 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.763',
+    date: '2026-08-12',
+    title: 'Meals worth tapping 🍽️',
+    items: [
+      '🍽️ Tap any meal card in the Food timeline to open the full meal: calories, a macro ring, every ingredient, and the exact times you logged each item.',
+      '📸 Share the meal as an image. The screenshot follows your expanded or collapsed recipe state and carries the same subtle Zane watermark as the other shareable views.',
+      '🗂️ Make meal categories yours. Rename Breakfast, Lunch or Snacks, add your own groups, remove the ones you never use, and set their start times. Your food logs keep their real timestamps.',
+      '💊 Medication schedules now have a By time view. Group medications that share a schedule, edit their time together, and tap any row to jump straight into its schedule.',
+      '⚖️ The staged food bar now shows what is still left in your daily calorie and macro budget, and staged items can be reopened for quick quantity changes.',
+      '⏱️ Intermittent fasting got a cleaner protocol picker, with the available rhythms and custom options easier to understand at a glance.',
+      '✨ Smaller fixes: recipe portions keep the correct labels and macros while editing, sheets handle keyboard focus more reliably, and the long-press Health shortcuts now always land on the route you picked.'
+    ],
+  },
+  {
     id: 'v2.743',
     date: '2026-08-10',
     title: 'Faster from the first tap ⚡',
