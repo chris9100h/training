@@ -225,7 +225,39 @@ function isTextEntryElement(el) {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 }
 
-function UpdateBanner({ onUpdate, onDefer, updating }) {
+function UpdateBanner({ onUpdate, onDefer, updating, compact = false }) {
+  if (compact) {
+    return (
+      <div style={{
+        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+        left: 14, right: 14, zIndex: 9999,
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 12px', borderRadius: 6,
+        background: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
+        border: `1px solid ${UI.goldSoft}`,
+        boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+        textShadow: 'var(--text-lift)',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em' }}>
+            UPDATE READY
+          </div>
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.35, marginTop: 2 }}>
+            We will offer it again on Home when you are done here.
+          </div>
+        </div>
+        <button onClick={onDefer} disabled={updating} style={{
+          flexShrink: 0, padding: '8px 10px', borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+          letterSpacing: '0.06em', cursor: updating ? 'default' : 'pointer',
+          opacity: updating ? 0.45 : 1, textShadow: 'none',
+        }}>
+          LATER
+        </button>
+      </div>
+    );
+  }
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
@@ -2391,11 +2423,15 @@ function App() {
   return (
     <>
       {layout}
-      {/* Keep the update installed but waiting while the user is in any flow.
-          The modal is offered only on a quiet Home surface, and Later returns
-          it on the next Home visit instead of interrupting an editor. */}
-      {safeToApplyUpdate && (forceShowUpdateBanner || updateAvailable) && (
-        <UpdateBanner onUpdate={applyUpdate} onDefer={deferUpdate} updating={updateApplying} />
+      {/* The compact notice can reach an active flow without blocking it. The
+          full modal only appears on Home, where Update Now is safe. */}
+      {(forceShowUpdateBanner || updateAvailable) && !onboardingState && (
+        <UpdateBanner
+          compact={!safeToApplyUpdate}
+          onUpdate={applyUpdate}
+          onDefer={deferUpdate}
+          updating={updateApplying}
+        />
       )}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
