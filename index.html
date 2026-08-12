@@ -183,7 +183,9 @@
   }
   #root {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: var(--app-viewport-top, 0px);
+    left: 0; right: 0; bottom: auto;
+    height: var(--app-viewport-height, 100dvh);
     margin: 0 auto;
     width: 100%; max-width: 440px;
     background: var(--bg);
@@ -1169,25 +1171,35 @@ window.applyGridPreference = function(enabled) {
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
 <script>
-// iOS standalone PWA viewport guard.
-// Focusing a native input (e.g. the email/password fields on login, or an input
-// inside a bottom sheet) shrinks the visualViewport. WebKit can then leave our
-// position:fixed #root inset/shifted below the safe area, black bands top and
-// bottom that persist after the keyboard closes (most visible after a
-// logout→login). When nothing is focused (keyboard closed) re-pin the page to
-// the top so #root snaps back to full-screen. Guarded so it never fights the
-// keyboard scrolling a focused field into view.
+// Keep the fixed app shell aligned with the mobile visual viewport.
+// iOS can change the visual viewport after keyboard, toolbar, rotation, or
+// background transitions without updating the fixed root's hit-test geometry.
+// That leaves buttons visibly in one place while touch targets drift away.
 (function () {
   var vv = window.visualViewport;
-  if (!vv) return;
-  var repin = function () {
-    var ae = document.activeElement;
-    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-    if (window.pageYOffset || window.pageXOffset || vv.offsetTop) window.scrollTo(0, 0);
+  var root = document.getElementById('root');
+  if (!vv || !root) return;
+  var raf = 0;
+  var sync = function () {
+    if (raf) return;
+    raf = requestAnimationFrame(function () {
+      raf = 0;
+      var top = Math.max(0, Math.round(vv.offsetTop || 0));
+      var height = Math.max(1, Math.round(vv.height || window.innerHeight));
+      document.documentElement.style.setProperty('--app-viewport-top', top + 'px');
+      document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
+
+      var ae = document.activeElement;
+      var typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      if (!typing && (window.pageYOffset || window.pageXOffset)) window.scrollTo(0, 0);
+    });
   };
-  vv.addEventListener('resize', repin);
-  vv.addEventListener('scroll', repin);
-  window.addEventListener('focusout', function () { setTimeout(repin, 50); });
+  sync();
+  vv.addEventListener('resize', sync);
+  vv.addEventListener('scroll', sync);
+  window.addEventListener('resize', sync);
+  window.addEventListener('orientationchange', sync);
+  window.addEventListener('focusout', function () { setTimeout(sync, 50); });
 })();
 </script>
 <!-- React 18, production builds: ~10x smaller and faster to parse than the
