@@ -12,6 +12,8 @@ const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
 // and must not be allowed to wipe the local pending diff.
 const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 
+const ADMIN_SUPPORT_EMAIL = 'office@btc-prime.biz';
+
 // Entries newer than the last-seen id. New users / first run after the feature
 // shipped (no stored id) get just the latest, not the whole back catalogue.
 function unseenWhatsNew() {
@@ -537,6 +539,12 @@ function mergeStagedBootStore(fresh, cur, base) {
   merged.adaptiveTdeeHistory = LB.mergeAdaptiveTdeeHistory(
     fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []
   );
+  // The admin support badge is an in-memory server-derived value, so it is not
+  // present in either boot payload. Keep it when staged hydration replaces the
+  // essential store after the app has already started rendering.
+  if (Object.prototype.hasOwnProperty.call(cur, 'adminSupportUnread')) {
+    merged.adminSupportUnread = cur.adminSupportUnread;
+  }
   for (const key of Object.keys(cur)) {
     if (!(key in fresh) && JSON.stringify(cur[key]) !== JSON.stringify(base[key])) merged[key] = cur[key];
   }
@@ -575,6 +583,11 @@ function App() {
   // exactly like before whatsnew.js became a lazy load.
   const storeRefA = useRefA(store);
   storeRefA.current = store;
+  // Support unread counts are UI state, not part of the persisted user store.
+  // Keep a synchronous copy so a boot merge cannot race a realtime callback
+  // that has not rendered yet.
+  const adminSupportUnreadRef = useRefA(null);
+  adminSupportUnreadRef.current = store?.adminSupportUnread ?? 0;
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
@@ -614,10 +627,15 @@ function App() {
   const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
   const stagedBootHydrating       = useRefA(false); // prevents feature-on effects duplicating stage two queries
   const previousMedsEnabled       = useRefA(null);
+  const adminSupportUnreadRevision = useRefA(0);
+  const adminSupportUnreadRequest  = useRefA(0);
 
   useEffectA(() => {
     userIdRef.current = userId;
     previousMedsEnabled.current = null;
+    adminSupportUnreadRevision.current += 1;
+    adminSupportUnreadRequest.current += 1;
+    adminSupportUnreadRef.current = null;
   }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
@@ -647,14 +665,40 @@ function App() {
     if (phase === 'ready') window.__startScreenWarmup?.();
   }, [phase]);
 
+  // Support unread counts are intentionally not persisted, because they are a
+  // server-derived inbox value. The revision guard prevents an RPC started
+  // before a realtime note from overwriting the newer local increment.
+  const refreshAdminSupportUnread = useCallbackA(() => {
+    if (storeRefA.current?.user?.email !== ADMIN_SUPPORT_EMAIL) return Promise.resolve();
+    const revision = adminSupportUnreadRevision.current;
+    const request = ++adminSupportUnreadRequest.current;
+    return LB.supabase.rpc('get_support_chats').then(({ data, error }) => {
+      if (error || request !== adminSupportUnreadRequest.current || revision !== adminSupportUnreadRevision.current) return;
+      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
+      adminSupportUnreadRef.current = unread;
+      setStore(s => {
+        if (!s || s.user?.email !== ADMIN_SUPPORT_EMAIL) return s;
+        return (s.adminSupportUnread || 0) === unread ? s : { ...s, adminSupportUnread: unread };
+      });
+    }).catch(() => {});
+  }, []);
+
   // Boot-time admin support unread count
   useEffectA(() => {
-    if (store?.user?.email !== 'office@btc-prime.biz') return;
-    LB.supabase.rpc('get_support_chats').then(({ data }) => {
-      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
-      setStore(s => s ? { ...s, adminSupportUnread: unread } : s);
-    }).catch(() => {});
-  }, [store?.user?.email]);
+    if (store?.user?.email !== ADMIN_SUPPORT_EMAIL) return;
+    refreshAdminSupportUnread();
+  }, [store?.user?.email, refreshAdminSupportUnread]);
+
+  // Reconcile once the admin returns to the foreground as a recovery path for
+  // a realtime channel that was suspended while the tab was hidden.
+  useEffectA(() => {
+    if (store?.user?.email !== ADMIN_SUPPORT_EMAIL) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshAdminSupportUnread();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [store?.user?.email, refreshAdminSupportUnread]);
 
   // Auto-seed the system CARDIO exercise once per user (if missing or deleted).
   useEffectA(() => {
@@ -1697,6 +1741,10 @@ function App() {
             if (!base && fresh.settings.unit == null) mergedSettings.unit = null;
             merged = {
               ...fresh,
+              // This admin-only counter is deliberately omitted from the
+              // server payload and local snapshots. Preserve the live value
+              // while replacing the rest of the boot state.
+              adminSupportUnread: adminSupportUnreadRef.current ?? cur?.adminSupportUnread ?? 0,
               // Local cache is authoritative for scalar settings (preserves
               // offline edits), except a server-side unit of null (admin reset
               // / not chosen) must win so the picker re-fires, since the cache
@@ -1747,6 +1795,7 @@ function App() {
           }
           prevStore.current = merged;
           setStore(merged);
+          refreshAdminSupportUnread();
         })
         .catch(err => { if (!isStale()) console.error(err); })
         .finally(() => {
@@ -1786,6 +1835,7 @@ function App() {
         pendingStore.current = hydrated;
         setStore(hydrated);
         setPhase('ready');
+        refreshAdminSupportUnread();
       } catch (e) {
         if (isStale()) { stagedBootHydrating.current = false; return; }
         stagedBootHydrating.current = false;
@@ -2091,7 +2141,7 @@ function App() {
       userId,
       (note) => {
         setStore(s => {
-          if (!s?.coaching) return s;
+          if (!s) return s;
           if (note.coachingId?.startsWith('support_')) {
             // Own support ticket reply → update badge and ticket list
             const myTicket = (s.supportTickets || []).some(t => t.coachingId === note.coachingId);
@@ -2107,8 +2157,12 @@ function App() {
               };
             }
             // Admin inbox: increment admin unread counter
-            return { ...s, adminSupportUnread: (s.adminSupportUnread || 0) + 1 };
+            adminSupportUnreadRevision.current += 1;
+            const nextUnread = (s.adminSupportUnread || 0) + 1;
+            adminSupportUnreadRef.current = nextUnread;
+            return { ...s, adminSupportUnread: nextUnread };
           }
+          if (!s.coaching) return s;
           if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
           return {
             ...s,
@@ -2117,6 +2171,14 @@ function App() {
         });
       },
       (eventType, coachingId, newRow) => {
+        if (coachingId?.startsWith('support_')) {
+          // A newly-created ticket can arrive before its first note, and a
+          // reconnect can miss the note event entirely. Reconcile the durable
+          // server count for all support-row changes; note events still win
+          // over an older in-flight RPC through the revision guard above.
+          adminSupportUnreadRevision.current += 1;
+          refreshAdminSupportUnread();
+        }
         if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
           setStore(s => s ? {
             ...s,
