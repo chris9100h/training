@@ -2270,7 +2270,6 @@ function App() {
   // the sheet and focus checks protect quick actions and unsaved text entry.
   const safeToApplyUpdate = route?.name === 'home'
     && !store?.inProgress
-    && !store?.statusMode
     && !onboardingState
     && openSheetCount === 0
     && !textEntryFocused;
@@ -2322,7 +2321,7 @@ function App() {
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setForceShowUpdateBanner(true)} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => { setForceShowUpdateBanner(true); go({ name: 'home' }); }} />; break;
     case 'featuremap':        screen = <window.Screens.FeatureMapScreen {...props} />; break;
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
