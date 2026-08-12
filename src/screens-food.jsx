@@ -11620,9 +11620,8 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
         </div>
       </div>
 
-      {/* Macro Burst is its own section, away from the calmer hero. */}
+      {/* Macro Burst stays in its own section, away from the calmer hero. */}
       <div>
-        <div className="micro-gold" style={{ textAlign: 'center', marginBottom: 7 }}>MACRO BURST</div>
         <div style={{ padding: '16px 12px 14px', background: 'rgba(var(--accent-rgb),0.05)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
           <FdMealMacroBurst calories={meal.totals.calories} protein={meal.totals.protein} carbs={meal.totals.carbs} fat={meal.totals.fat} />
         </div>
@@ -11638,7 +11637,7 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
             const entryCardStyle = entry.planned
               ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' }
               : screenshot
-                ? { ...fdEntryCard, background: 'var(--surface-tint-md)' }
+                ? { ...fdEntryCard, background: 'var(--surface-tint-lg)' }
                 : fdEntryCard;
             return (
               <div key={entry.id} style={entryCardStyle}>
@@ -11709,7 +11708,7 @@ function FdMealDetailPoster({ captureRef, meal, expandedRecipes, logo, logoStyle
   // Keep the same centered logo treatment as RecipePoster, but soften it a
   // little for this denser poster so the watermark supports the content.
   const sourceOpacity = Number(logoStyle?.opacity);
-  const visibleLogoStyle = { ...logoStyle, opacity: Math.min(Number.isFinite(sourceOpacity) ? sourceOpacity : 0.11, 0.12) };
+  const visibleLogoStyle = { ...logoStyle, opacity: Math.min(Number.isFinite(sourceOpacity) ? sourceOpacity : 0.08, 0.08) };
   return (
     <div ref={captureRef} style={{
       padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
