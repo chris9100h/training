@@ -11480,9 +11480,10 @@ function FdMealMacroBurst({ calories, protein, carbs, fat }) {
   const totalMacroKcal = values.reduce((sum, item) => sum + item.kcal, 0);
   const radius = 49;
   const circumference = 2 * Math.PI * radius;
-  // Keep visible air between the weighted macro segments so they read as
-  // separate pulled-apart pieces rather than one continuous ring.
-  const gap = 10;
+  // The arcs use round caps, so a small dash gap is visually consumed by the
+  // caps themselves. This deliberately leaves a real background break at
+  // every boundary instead of a ring that only looks separated mathematically.
+  const gap = 24;
   let cursor = 0;
   const arcs = values.map(item => {
     const span = totalMacroKcal > 0 ? circumference * item.kcal / totalMacroKcal : 0;
@@ -11494,7 +11495,7 @@ function FdMealMacroBurst({ calories, protein, carbs, fat }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '4px 0 2px' }}>
       <div style={{ position: 'relative', width: 184, height: 184 }} aria-label={`${Math.round(calories || 0)} calories, ${Math.round(protein || 0)} grams protein, ${Math.round(carbs || 0)} grams carbs, ${Math.round(fat || 0)} grams fat`}>
         <svg width="184" height="184" viewBox="0 0 140 140" aria-hidden="true">
-          <circle cx="70" cy="70" r={radius} fill="none" stroke={UI.hair} strokeWidth="11" opacity="0.7" />
+          <circle cx="70" cy="70" r={radius} fill="none" stroke={UI.hair} strokeWidth="11" opacity="0.28" />
           {arcs.map(item => (
             <circle key={item.key} cx="70" cy="70" r={radius} fill="none" stroke={item.color} strokeWidth="11" strokeLinecap="round"
               strokeDasharray={`${item.visible} ${circumference - item.visible}`} strokeDashoffset={-item.start}
