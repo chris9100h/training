@@ -169,6 +169,35 @@ function askControllerSwVersion(timeoutMs = 1500) {
   });
 }
 
+// App-shell versions are intentionally monotonic. A late response from an old
+// worker, or a briefly stale network read, must never move the durable marker
+// backwards and turn that old version into a fresh update forever.
+function compareSwVersions(a, b) {
+  const parse = (value) => {
+    const m = String(value || '').match(/^zane-v(\d+)\.(\d+)$/);
+    return m ? [Number(m[1]), Number(m[2])] : null;
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (!left || !right) return null;
+  return left[0] - right[0] || left[1] - right[1];
+}
+
+function isNewerSwVersion(candidate, current) {
+  const compared = compareSwVersions(candidate, current);
+  return compared == null ? candidate !== current : compared > 0;
+}
+
+function rememberAppliedSwVersion(version) {
+  if (!version) return;
+  try {
+    const stored = localStorage.getItem('logbook-sw-version');
+    if (!stored || isNewerSwVersion(version, stored)) {
+      localStorage.setItem('logbook-sw-version', version);
+    }
+  } catch (_) {}
+}
+
 // Records which app-shell version is now actually running, so the banner is not
 // re-offered for an update that has already been applied.
 //
@@ -190,7 +219,10 @@ function askControllerSwVersion(timeoutMs = 1500) {
 //     stores the raw `const CACHE = '...'` string, hence putting it back on.
 async function persistAppliedSwVersion(fallback) {
   let applied = await askControllerSwVersion();
-  if (!applied) applied = fallback || null;
+  // During controllerchange the message can still reach the old worker for a
+  // moment. The network version that triggered this update is the stronger
+  // signal when it is newer than that response.
+  if (fallback && (!applied || isNewerSwVersion(fallback, applied))) applied = fallback;
   if (!applied) {
     try {
       const version = await Promise.race([
@@ -200,7 +232,7 @@ async function persistAppliedSwVersion(fallback) {
       if (version) applied = 'zane-' + version;
     } catch (_) {}
   }
-  if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
+  rememberAppliedSwVersion(applied);
 }
 
 const DEFERRED_UPDATE_STORAGE = 'logbook-update-deferred';
@@ -1076,7 +1108,7 @@ function App() {
         // update moments ago, so take the worker silently. onControllerChange then
         // records the version without reloading, because intentionalUpdate is false.
         let coldBoot = false;
-        try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; } catch (_) {}
+        try { coldBoot = window.__ZANE_COLD_BOOT === true; } catch (_) {}
         if (coldBoot) {
           reg.waiting.postMessage({ type: 'SKIP_WAITING' });
         } else {
@@ -2186,7 +2218,7 @@ function App() {
           try { localStorage.setItem('logbook-sw-version', v); } catch (_) {}
           return;
         }
-        if (v !== stored) {
+        if (v !== stored && isNewerSwVersion(v, stored)) {
           // An update is available. Do NOT advance the stored version here,
           // only applyUpdate persists it. Otherwise after an iOS cold start
           // (in-memory state wiped) stored would already equal v and the

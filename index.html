@@ -745,6 +745,10 @@ window.onunhandledrejection = function(e) {
 // the longer grace period, not every subsequent load.
 var coldBoot = false;
 try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; sessionStorage.removeItem('zane-cold-boot'); } catch (e) {}
+// The watchdog consumes the session flag above before React loads. Pass the
+// same fact to app.jsx so a deliberate cache-wipe reload can silently hand off
+// its waiting worker instead of raising the same update banner again.
+window.__ZANE_COLD_BOOT = coldBoot;
 setTimeout(async function() {
   if (document.getElementById('root').children.length) return;
   // If a new SW is waiting, skip it immediately and reload, breaks the deadlock
