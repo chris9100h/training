@@ -11605,15 +11605,15 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* The hero stays focused on the meal identity, timing and calories. */}
+      {/* The hero stays focused on the meal identity and timing; calories live
+          in the Macro Burst directly below. */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, padding: '2px 0 14px', borderBottom: `var(--hair-width) solid ${UI.hairStrong}` }}>
         <div style={{ minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 4 }}>MEAL WINDOW</div>
           <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 - {String(meal.endHour % 24).padStart(2, '0')}:00</div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div><span className="num" style={{ fontSize: 26, fontWeight: 300, color: UI.gold }}>{Math.round(meal.totals.calories)}</span><span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}> kcal</span></div>
-          <div className="micro" style={{ marginTop: 3 }}>
+          <div className="micro">
             {meal.entries.length} {meal.entries.length === 1 ? 'item' : 'items'}
             {plannedCount > 0 && <><span style={{ color: UI.inkGhost }}> · </span><span className="micro-gold">{plannedCount} planned</span></>}
           </div>
