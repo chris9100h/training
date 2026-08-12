@@ -11527,7 +11527,7 @@ function FdMealDetailContentLegacy({ meal }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <div className="micro" style={{ marginBottom: 4 }}>MEAL WINDOW</div>
-          <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 — {String(meal.endHour % 24).padStart(2, '0')}:00</div>
+          <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 - {String(meal.endHour % 24).padStart(2, '0')}:00</div>
         </div>
         <div className="micro" style={{ textAlign: 'right' }}>
           {meal.entries.length} {meal.entries.length === 1 ? 'item' : 'items'}
@@ -11635,8 +11635,13 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
             const hasRecipe = entry.recipeItems?.length > 0;
             const recipeOpen = !!expandedRecipes[entry.id];
             const toggleRecipe = () => onToggleRecipe?.(entry.id);
+            const entryCardStyle = entry.planned
+              ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' }
+              : screenshot
+                ? { ...fdEntryCard, background: 'var(--surface-tint-md)' }
+                : fdEntryCard;
             return (
-              <div key={entry.id} style={entry.planned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
+              <div key={entry.id} style={entryCardStyle}>
                 <div style={mealMacroGrid}>
                   <div style={{ minWidth: 0 }}>
                     {hasRecipe && !screenshot ? (
@@ -11701,10 +11706,10 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
 // this outside the animated Sheet prevents html2canvas from inheriting the
 // sheet transform and makes the watermark part of the captured poster.
 function FdMealDetailPoster({ captureRef, meal, expandedRecipes, logo, logoStyle, grid }) {
-  // Keep the same centered logo treatment as RecipePoster, with a slightly
-  // firmer minimum opacity so the default ZANE mark remains visible beneath
-  // the denser ingredient cards too.
-  const visibleLogoStyle = { ...logoStyle, opacity: Math.max(Number(logoStyle?.opacity) || 0, 0.16) };
+  // Keep the same centered logo treatment as RecipePoster, but soften it a
+  // little for this denser poster so the watermark supports the content.
+  const sourceOpacity = Number(logoStyle?.opacity);
+  const visibleLogoStyle = { ...logoStyle, opacity: Math.min(Number.isFinite(sourceOpacity) ? sourceOpacity : 0.11, 0.12) };
   return (
     <div ref={captureRef} style={{
       padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
