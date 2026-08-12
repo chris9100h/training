@@ -301,12 +301,55 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const barRef = React.useRef(null);
   const pressTimerRef = React.useRef(null);
   const pressStartRef = React.useRef(null);
+  const pressButtonRef = React.useRef(null);
   const suppressClickRef = React.useRef(false);
   const activeListenersRef = React.useRef(null);
   const healthIdx = tabs.findIndex(t => t.id === 'health');
   const currentHealthSlot = tabs.find(t => t.id === 'health')?.healthSlot || 'health';
   const cancelPressTimer = () => { if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; } };
   const resolveHealthOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-health-option]')?.getAttribute('data-health-option') || null;
+  const openHealthReveal = (buttonEl) => {
+    if (activeListenersRef.current || !enabledSlots.length) return;
+    cancelPressTimer();
+    const r = barRef.current?.getBoundingClientRect();
+    if (!r) return;
+    suppressClickRef.current = true;
+    // Clamped so the popup cannot clip off a narrow phone's edge when the
+    // health slot sits in an outer tab position.
+    const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
+    const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
+    setReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+    const onMove = (ev) => {
+      ev.preventDefault();
+      setReveal(rv => rv && { ...rv, hoverId: resolveHealthOption(ev.clientX, ev.clientY) });
+    };
+    const onUp = (ev) => {
+      const cancelled = ev.type === 'pointercancel';
+      document.removeEventListener('pointermove', onMove, { passive: false });
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      activeListenersRef.current = null;
+      pressStartRef.current = null;
+      pressButtonRef.current = null;
+      setReveal(null);
+      const pick = resolveHealthOption(ev.clientX, ev.clientY);
+      if (cancelled) {
+        suppressClickRef.current = false;
+      } else if (pick) {
+        navigateTab(pick);
+        // The release landed on a popup option, so no native click follows
+        // on the original health button. Clear the suppression immediately.
+        suppressClickRef.current = false;
+      } else if (!buttonEl?.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+        // No trailing click is coming after a release outside the source.
+        suppressClickRef.current = false;
+      }
+    };
+    activeListenersRef.current = { onMove, onUp };
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  };
   React.useEffect(() => () => {
     cancelPressTimer();
     if (activeListenersRef.current) {
@@ -319,54 +362,34 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const healthOnPointerDown = (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (enabledSlots.length <= 1) return; // nothing else to reveal
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
     pressStartRef.current = { x: e.clientX, y: e.clientY };
+    pressButtonRef.current = e.currentTarget;
     const buttonEl = e.currentTarget;
     cancelPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
-      const r = barRef.current?.getBoundingClientRect();
-      if (!r) return;
-      suppressClickRef.current = true;
-      // Clamped so the two-or-three-chip popup (roughly 180-300px wide) can't clip off
-      // a narrow phone's edge when Health sits in an outer tab slot.
-      const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
-      const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
-      setReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
-      const onMove = (ev) => setReveal(rv => rv && { ...rv, hoverId: resolveHealthOption(ev.clientX, ev.clientY) });
-      const onUp = (ev) => {
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        document.removeEventListener('pointercancel', onUp);
-        activeListenersRef.current = null;
-        setReveal(null);
-        const pick = resolveHealthOption(ev.clientX, ev.clientY);
-        if (pick) {
-          navigateTab(pick);
-          // Release landed on a popup chip, a sibling of this button, so no
-          // native click will ever follow to consume suppressClickRef itself
-          // (a click only fires when press and release resolve to the same
-          // element): clear it now, or the next ordinary tap on this button
-          // would be silently swallowed by healthOnClick below.
-          suppressClickRef.current = false;
-        } else if (!buttonEl.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
-          // Released somewhere that is neither a popup chip nor the button
-          // itself (e.g. the backdrop): same reasoning, no trailing click is
-          // coming to reset the flag, so reset it here instead of leaving it
-          // stuck for whatever ordinary tap happens to land next.
-          suppressClickRef.current = false;
-        }
-      };
-      activeListenersRef.current = { onMove, onUp };
-      document.addEventListener('pointermove', onMove);
-      document.addEventListener('pointerup', onUp);
-      document.addEventListener('pointercancel', onUp);
+      openHealthReveal(buttonEl);
     }, 200);
   };
   const healthOnPointerMove = (e) => {
     if (!pressTimerRef.current || !pressStartRef.current) return;
-    if (Math.hypot(e.clientX - pressStartRef.current.x, e.clientY - pressStartRef.current.y) > 10) cancelPressTimer();
+    if (Math.hypot(e.clientX - pressStartRef.current.x, e.clientY - pressStartRef.current.y) > 10) {
+      // Moving toward a shortcut is itself an intentional gesture. Open the
+      // popup at the movement threshold instead of treating that movement as
+      // a cancelled long press.
+      e.preventDefault();
+      cancelPressTimer();
+      openHealthReveal(pressButtonRef.current);
+    }
   };
-  const healthOnPointerUp = cancelPressTimer;
+  const healthOnPointerUp = () => {
+    cancelPressTimer();
+    if (!activeListenersRef.current) {
+      pressStartRef.current = null;
+      pressButtonRef.current = null;
+    }
+  };
   const healthOnClick = (id) => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return; }
     handleTabClick(id);
@@ -541,7 +564,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
                 WebkitTapHighlightColor: 'transparent',
-                ...(isHealthTab ? { userSelect: 'none', touchAction: 'manipulation' } : null),
+                ...(isHealthTab ? { userSelect: 'none', touchAction: 'none' } : null),
               }}>
                 {/* Icon zone, matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
