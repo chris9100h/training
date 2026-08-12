@@ -11656,6 +11656,8 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
                       </div>
                     )}
                     <span style={fdEntryMeta}>
+                      <span className="num" style={{ color: UI.inkSoft }}>{entry.time}</span>
+                      <span style={fdMetaDivider} />
                       {fdDisplayG(entry) ? `${fdMassOf(entry)}${fdUnitCountLabel(entry) ? ` (${fdUnitCountLabel(entry)})` : ''} · ` : ''}
                       <span className="num" style={{ color: UI.warn }}>{Math.round(entry.calories || 0)} kcal</span>
                     </span>
