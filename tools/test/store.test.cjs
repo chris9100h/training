@@ -146,6 +146,15 @@ async function testAsync(name, fn) {
     assert.strictEqual(cut, LB.foodTemplateDayMarkerId('u1', 'cut', '2026-08-12'));
   });
 
+  test('foodTemplateDayLegacyMarkerId preserves the pre-plan marker shape', () => {
+    assert.strictEqual(LB.foodTemplateDayLegacyMarkerId('u1', '2026-08-12'), 'u1_2026-08-12');
+    assert.notStrictEqual(
+      LB.foodTemplateDayLegacyMarkerId('u1', '2026-08-12'),
+      LB.foodTemplateDayMarkerId('u1', 'mp_u1', '2026-08-12'),
+      'legacy and plan-scoped markers must stay distinguishable',
+    );
+  });
+
   test('upsertMedicationLog revives a skipped tombstone without duplicate ids', () => {
     const tombstone = { id: 'md_2026-08-12_slot-1', skipped: true, planned: false, doseQty: 1 };
     const entry = { id: tombstone.id, medicationId: 'm1', date: '2026-08-12', planned: false, doseQty: 2 };

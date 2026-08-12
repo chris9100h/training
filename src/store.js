@@ -8167,6 +8167,14 @@ function foodTemplateDayMarkerId(userId, mealPlanId, dateISO) {
   return `ft_${userId}_${mealPlanId}_${dateISO}`;
 }
 
+// Markers written before named meal plans used only the user/date pair. They
+// belong to the migration-created default plan (`mp_<userId>`); recognizing
+// them there preserves the old "deleted planned food stays deleted" behavior
+// without letting an old marker suppress a newly selected plan.
+function foodTemplateDayLegacyMarkerId(userId, dateISO) {
+  return `${userId}_${dateISO}`;
+}
+
 // Re-activating a scheduled medication after its planned row was removed must
 // revive that row instead of appending a second object with the same id. A
 // removed scheduled dose is kept as a skipped tombstone so auto-fill cannot
@@ -10875,7 +10883,7 @@ window.LB = {
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
-  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn, foodTemplateDayMarkerId, upsertMedicationLog,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn, foodTemplateDayMarkerId, foodTemplateDayLegacyMarkerId, upsertMedicationLog,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,

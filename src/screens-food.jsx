@@ -1422,7 +1422,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // marker from Cut would otherwise suppress Bulk's slots forever until
       // they manually used "Apply to today's plan".
       const markerId = LB.foodTemplateDayMarkerId(userId, activePlanId, date);
-      if (markedDates.has(markerId)) continue;
+      // Accounts upgraded from the pre-named-plan schema still have the old
+      // user/date marker. It represents the migration-created default plan,
+      // not an arbitrary plan the user may select later.
+      const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, date);
+      const hasLegacyDefaultMarker = activePlanId === `mp_${userId}` && markedDates.has(legacyMarkerId);
+      if (markedDates.has(markerId) || hasLegacyDefaultMarker) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
       const entries = slots
         .filter(s => fdSlotMatchesDate(s, store, date) && !existingSlotIds.has(s.id))
@@ -1436,7 +1441,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // Never materialize the old plan into the newly selected one.
       if (s.activeMealTemplateId !== activePlanId) return s;
       const already = new Set((s.foodTemplateDays || []).map(d => d.id));
-      const stillPending = pending.filter(p => !already.has(p.markerId));
+      const stillPending = pending.filter(p => {
+        if (already.has(p.markerId)) return false;
+        const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, p.date);
+        return !(activePlanId === `mp_${userId}` && already.has(legacyMarkerId));
+      });
       if (!stillPending.length) return s;
       const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
       const slotsForPlan = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === activePlanId);
