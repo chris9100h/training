@@ -660,23 +660,75 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
-  // Food tracker meal boundaries (migration 0206). Resolved rather than read
-  // raw, so an unset setting shows the built-in defaults and the editor always
-  // has six rows to work with.
+  // Food tracker meal categories. The resolved list keeps old six-number
+  // mealWindows users working while the richer config carries custom labels
+  // and category counts.
   const mealCats = LB.mealCategories(store.settings);
-  // Moves one meal's start hour, always writing the full six-value array so a
-  // partially-set setting can never exist. The buttons already refuse to cross
-  // a neighbour; this clamps again because the array is what gets persisted
-  // and mealCategories rejects a non-ascending one outright.
+  const [mealCategoryDraft, setMealCategoryDraft] = useStateSet(null);
+  useEffectSet(() => {
+    if (!mealTimesSheet) { setMealCategoryDraft(null); return; }
+    setMealCategoryDraft(LB.mealCategories(store.settings).map(c => ({ id: c.id, label: c.label, startHour: c.startHour })));
+  }, [mealTimesSheet]);
+
+  const draftMealCats = mealCategoryDraft || mealCats.map(c => ({ id: c.id, label: c.label, startHour: c.startHour }));
+  const persistMealCategories = (categories) => {
+    const next = categories.map((c, i) => ({
+      id: String(c.id || `meal-${i + 1}`),
+      label: String(c.label || '').trim().slice(0, 40) || `Meal ${i + 1}`,
+      startHour: Number.isInteger(c.startHour) ? c.startHour : 0,
+    })).sort((a, b) => a.startHour - b.startHour);
+    if (next.length) next[0].startHour = 0;
+    setMealCategoryDraft(next);
+    setStore(s => ({ ...s, settings: {
+      ...s.settings,
+      mealCategories: next,
+      // Keep the old time-only setting in sync for older clients that do not
+      // know about custom labels or category counts yet.
+      mealWindows: next.map(c => c.startHour),
+    } }));
+  };
+  const closeMealTimes = () => {
+    if (mealCategoryDraft?.length) persistMealCategories(mealCategoryDraft);
+    setMealTimesSheet(false);
+  };
+  const updateMealCategoryLabel = (idx, label) => {
+    setMealCategoryDraft(list => (list || draftMealCats).map((c, i) => i === idx ? { ...c, label } : c));
+  };
+  // Moves one meal's start hour without allowing empty/overlapping ranges.
   const shiftMealStart = (idx, delta) => {
-    if (idx === 0) return;
-    const starts = mealCats.map(c => c.startHour);
+    const starts = draftMealCats.map(c => c.startHour);
+    if (idx === 0 || starts[idx] == null) return;
     const lo = starts[idx - 1] + 1;
     const hi = idx === starts.length - 1 ? 23 : starts[idx + 1] - 1;
     const next = Math.min(hi, Math.max(lo, starts[idx] + delta));
     if (next === starts[idx]) return;
-    starts[idx] = next;
-    setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: starts } }));
+    const categories = draftMealCats.map((c, i) => i === idx ? { ...c, startHour: next } : c);
+    persistMealCategories(categories);
+  };
+  const addMealCategory = () => {
+    if (draftMealCats.length >= 24) return;
+    let bestStart = null;
+    let bestGap = 1;
+    draftMealCats.forEach((cat, i) => {
+      const end = i === draftMealCats.length - 1 ? 24 : draftMealCats[i + 1].startHour;
+      const gap = end - cat.startHour;
+      if (gap > bestGap) {
+        bestGap = gap;
+        bestStart = Math.floor((cat.startHour + end) / 2);
+      }
+    });
+    if (bestStart == null) return;
+    persistMealCategories([...draftMealCats, { id: LB.uid(), label: `Meal ${draftMealCats.length + 1}`, startHour: bestStart }]);
+  };
+  const removeMealCategory = (idx) => {
+    if (draftMealCats.length <= 1) return;
+    const next = draftMealCats.filter((_, i) => i !== idx);
+    if (next[0]) next[0] = { ...next[0], startHour: 0 };
+    persistMealCategories(next);
+  };
+  const resetMealCategories = () => {
+    setMealCategoryDraft(LB.mealCategories({}).map(c => ({ id: c.id, label: c.label, startHour: c.startHour })));
+    setStore(s => ({ ...s, settings: { ...s.settings, mealCategories: null, mealWindows: null } }));
   };
   const mealStepBtn = (disabled) => ({
     width: 28, height: 28, flexShrink: 0, borderRadius: 4,
@@ -2347,7 +2399,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {store.settings?.showFoodTab && (
             <>
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
-              <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+              <NavRow label="Meal Times" hint={(store.settings?.mealCategories || store.settings?.mealWindows) ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
               <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
               {/* Only meaningful for the imperial unit preference: on kg (or
                   mixed) the food tracker is already grams, there's nothing to
@@ -2407,7 +2459,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Health › Food › Meal Times: the display toggle and the time
           boundaries live together, "hide categories" is really "stop
           grouping by these very boundaries". ══ */}
-      <SettingsSheet open={mealTimesSheet} onClose={() => setMealTimesSheet(false)} title="Meal Times">
+      <SettingsSheet open={mealTimesSheet} onClose={closeMealTimes} title="Meal Times">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Hide meal categories" first>
             <Toggle on={!!store.settings?.hideFoodCategories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, hideFoodCategories: !s.settings?.hideFoodCategories } }))} />
@@ -2415,46 +2467,57 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Show the Food Tracker's daily timeline as one flat hour list instead of grouping it under Breakfast/Lunch/Dinner header cards. Every hour still has its own "+" to log or plan something.
           </div>
-          {/* Meal-time boundaries (migration 0206). These used to be fixed at
-              00:00-09:00 Breakfast and so on, which only fits a conventional
-              eating day: shift work, a late household or any fasting window
-              made the timeline group meals under headings nobody would use.
-              Editing START hours (each meal runs to the next one's start) is
-              what keeps a gap or an overlap unrepresentable. Breakfast is
-              pinned to 00:00 so the day is always covered end to end. */}
+          {/* User-defined meal categories. Editing START hours (each category
+              runs to the next one's start) keeps gaps and overlaps impossible.
+              The first category is pinned to 00:00 so the day is covered end
+              to end. */}
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.5 }}>
-              When each meal starts. Each one runs until the next begins.
+              Name your meal groups and choose when each one starts. Each runs until the next begins.
             </div>
-            {mealCats.map((cat, i) => (
-              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
-                <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</span>
+            {draftMealCats.map((cat, i) => (
+              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+                <input value={cat.label} onChange={e => updateMealCategoryLabel(i, e.target.value)}
+                  onBlur={() => persistMealCategories(draftMealCats)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  aria-label={`Name for meal category ${i + 1}`} style={{ ...SETTINGS_INPUT_STYLE, flex: 1, minWidth: 0, padding: '7px 9px', fontSize: 13 }} />
                 {i === 0 ? (
                   <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>00:00</span>
                 ) : (
                   <>
-                    <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= mealCats[i - 1].startHour + 1}
-                      aria-label={`${cat.label} earlier`} style={mealStepBtn(cat.startHour <= mealCats[i - 1].startHour + 1)}>
+                    <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= draftMealCats[i - 1].startHour + 1}
+                      aria-label={`${cat.label} earlier`} style={mealStepBtn(cat.startHour <= draftMealCats[i - 1].startHour + 1)}>
                       <i className="fa-solid fa-minus" style={{ fontSize: 10 }} />
                     </button>
                     <span className="num" style={{ width: 44, textAlign: 'center', fontSize: 13, color: UI.ink }}>{String(cat.startHour).padStart(2, '0')}:00</span>
-                    <button onClick={() => shiftMealStart(i, 1)} disabled={cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1)}
-                      aria-label={`${cat.label} later`} style={mealStepBtn(cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1))}>
+                    <button onClick={() => shiftMealStart(i, 1)} disabled={cat.startHour >= (i === draftMealCats.length - 1 ? 23 : draftMealCats[i + 1].startHour - 1)}
+                      aria-label={`${cat.label} later`} style={mealStepBtn(cat.startHour >= (i === draftMealCats.length - 1 ? 23 : draftMealCats[i + 1].startHour - 1))}>
                       <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
                     </button>
                   </>
                 )}
+                {draftMealCats.length > 1 && (
+                  <button onClick={() => removeMealCategory(i)} aria-label={`Remove ${cat.label}`} style={{ ...mealStepBtn(false), color: UI.inkFaint }}>
+                    <i className="fa-solid fa-xmark" style={{ fontSize: 11 }} />
+                  </button>
+                )}
               </div>
             ))}
-            {store.settings?.mealWindows && (
-              <button onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: null } }))} style={{
-                marginTop: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
-              }}>Reset to default times</button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+              <button onClick={addMealCategory} disabled={draftMealCats.length >= 24} style={{
+                background: 'none', border: 'none', padding: 0, cursor: draftMealCats.length >= 24 ? 'default' : 'pointer',
+                color: draftMealCats.length >= 24 ? UI.inkGhost : 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+              }}><i className="fa-solid fa-plus" style={{ marginRight: 6, fontSize: 10 }} />Add meal category</button>
+              {(store.settings?.mealCategories || store.settings?.mealWindows) && (
+                <button onClick={resetMealCategories} style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+                }}>Reset defaults</button>
+              )}
+            </div>
           </div>
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setMealTimesSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={closeMealTimes}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>

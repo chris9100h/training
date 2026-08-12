@@ -513,6 +513,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     macro_targets: sett.macroTargets ?? null,
     macro_calc: sett.macroCalc ?? null,
     meal_windows: sett.mealWindows ?? null,
+    meal_categories: sett.mealCategories ?? null,
     fasting_protocol: sett.fastingProtocol ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     show_water_tab: sett.showWaterTab ?? false,
@@ -1292,6 +1293,7 @@ function mapUserSettings(sett = {}) {
     macroTargets: sett.macro_targets ?? null,
     macroCalc: sett.macro_calc ?? null,
     mealWindows: sett.meal_windows ?? null,
+    mealCategories: Array.isArray(sett.meal_categories) ? sett.meal_categories : null,
     fastingProtocol: sett.fasting_protocol ?? null,
     showHealthTab: sett.show_health_tab ?? false,
     showWaterTab: sett.show_water_tab ?? false,
@@ -2815,6 +2817,7 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
+    JSON.stringify(prev.settings?.mealCategories) !== JSON.stringify(next.settings?.mealCategories) ||
     prev.settings?.fastingProtocol     !== next.settings?.fastingProtocol     ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
@@ -2892,6 +2895,7 @@ async function syncStore(prev, next, userId) {
       macro_targets: next.settings?.macroTargets ?? null,
       macro_calc: next.settings?.macroCalc ?? null,
       meal_windows: next.settings?.mealWindows ?? null,
+      meal_categories: next.settings?.mealCategories ?? null,
       fasting_protocol: next.settings?.fastingProtocol ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       show_water_tab: next.settings?.showWaterTab ?? false,
@@ -6694,6 +6698,31 @@ const MEAL_CATEGORY_DEFS = [
   { id: 'dinner', label: 'Dinner', defaultStart: 16 },
   { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
 ];
+// Newer clients store the complete category definition so users can rename
+// categories and add or remove them. The first category must still begin at
+// midnight and every category needs a distinct start hour, otherwise a food
+// entry could belong to two categories or to none. Invalid custom data falls
+// back as a whole rather than partially changing the timeline.
+function normalizeMealCategories(raw) {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 24) return null;
+  const ids = new Set();
+  let previousStart = -1;
+  const normalized = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const label = typeof item?.label === 'string' ? item.label.trim().slice(0, 40) : '';
+    const startHour = item?.startHour;
+    if (!id || ids.has(id) || !label || !Number.isInteger(startHour) || startHour < 0 || startHour > 23) return null;
+    if (i === 0 && startHour !== 0) return null;
+    if (startHour <= previousStart) return null;
+    ids.add(id);
+    previousStart = startHour;
+    normalized.push({ id, label, startHour });
+  }
+  return normalized;
+}
+
 // Intermittent fasting presets (migration 0249): the id is stored verbatim
 // in zane_user_settings.fasting_protocol, the hours are the timer math.
 // Lives here rather than in screens-food.jsx because two screens need it
@@ -6724,16 +6753,19 @@ function fastingCustomHours(setting) {
   }
   return 48;
 }
-// Resolves settings.mealWindows (six ascending start hours, first always 0)
-// into the [startHour, endHour) ranges the timeline groups by. Defensive about
-// the stored value: a short, non-ascending or non-numeric array falls back to
-// the defaults rather than rendering a day with holes or overlaps in it, since
-// this drives which entries appear under which heading.
+// Resolves the full custom category config first, then the legacy six-number
+// mealWindows setting, into the [startHour, endHour) ranges the timeline groups
+// by. The legacy path keeps existing users and older clients working while the
+// richer config carries labels and arbitrary category counts.
 function mealCategories(settings) {
+  const custom = normalizeMealCategories(settings?.mealCategories);
+  if (custom) {
+    return custom.map((c, i) => ({ ...c, endHour: i === custom.length - 1 ? 24 : custom[i + 1].startHour }));
+  }
   const raw = settings?.mealWindows;
-  const ok = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
+  const legacyOk = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
     && raw.every((h, i) => Number.isInteger(h) && h >= 0 && h <= 23 && (i === 0 ? h === 0 : h > raw[i - 1]));
-  const starts = ok ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
+  const starts = legacyOk ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
   return MEAL_CATEGORY_DEFS.map((c, i) => ({
     id: c.id, label: c.label,
     startHour: starts[i],

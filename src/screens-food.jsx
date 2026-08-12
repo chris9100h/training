@@ -590,8 +590,9 @@ const FD_QUICK_TABS = [
 ];
 // The Log tab's timeline groups its hourly rows under a read-only per-meal
 // summary card. The boundaries are a user setting since migration 0206
-// (settings.mealWindows, edited in Settings > Health > Food), resolved through
-// LB.mealCategories, which also owns the labels and the defaults.
+// (settings.mealCategories / legacy settings.mealWindows, edited in Settings
+// > Health > Food), resolved through LB.mealCategories, which also owns the
+// labels, validation and defaults.
 
 // Build the planned food-log entry a template slot materializes into on a
 // given date. Shared by the auto-fill effect (opening a day) and the immediate
@@ -2441,7 +2442,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Category summary cards reflect the logged truth only: a planned entry
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
-  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealCategories, store.settings?.mealWindows]);
   // Where the derived meal-of-choice row sits in the timeline. Defaults to the
   // dinner window (that is what a meal of choice usually is), changed in the
   // sheet. Must stay BELOW mealCats: these are const, so reading mealCats from

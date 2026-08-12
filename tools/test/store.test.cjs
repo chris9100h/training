@@ -1149,6 +1149,20 @@ async function testAsync(name, fn) {
     // Labels stay put whatever the boundaries are.
     assert.strictEqual(JSON.stringify(LB.mealCategories({ mealWindows: late }).map(c => c.id)),
       JSON.stringify(['breakfast', 'snack1', 'lunch', 'snack2', 'dinner', 'snack3']));
+    const custom = [
+      { id: 'first', label: 'First meal', startHour: 0 },
+      { id: 'training', label: 'Post training', startHour: 12 },
+      { id: 'late', label: 'Late meal', startHour: 19 },
+    ];
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: custom })), JSON.stringify([
+      { id: 'first', label: 'First meal', startHour: 0, endHour: 12 },
+      { id: 'training', label: 'Post training', startHour: 12, endHour: 19 },
+      { id: 'late', label: 'Late meal', startHour: 19, endHour: 24 },
+    ]));
+    // A broken richer config falls back to a valid legacy config, so a bad
+    // sync payload never makes an entry disappear from the timeline.
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: [{ id: 'bad', label: 'Bad', startHour: 1 }], mealWindows: late }).map(c => c.startHour)), JSON.stringify(late));
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: [{ id: 'same', label: 'A', startHour: 0 }, { id: 'same', label: 'B', startHour: 4 }] }).map(c => c.startHour)), DEFAULTS);
   });
 
   test('estimateTdee: Mifflin-St Jeor, both sex constants, activity multiplier', () => {
