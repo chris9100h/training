@@ -1490,6 +1490,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the category id here so the sheet always reflects live edits to the day's
   // entries while it is open.
   const [mealDetailCatId, setMealDetailCatId] = useStateFd(null);
+  const [mealDetailExpandedRecipes, setMealDetailExpandedRecipes] = useStateFd({});
   const [mealDetailCapturing, setMealDetailCapturing] = useStateFd(false);
   const mealDetailCaptureRef = useRefFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
@@ -2501,7 +2502,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return { ...cat, entries, totals };
   }, [mealDetailCatId, mealCats, byHour]);
   // A day switch should never leave a sheet showing the previous day's meal.
-  useEffectFd(() => { setMealDetailCatId(null); }, [curDate]);
+  useEffectFd(() => { setMealDetailCatId(null); setMealDetailExpandedRecipes({}); }, [curDate]);
 
   // Yesterday's entries grouped by meal category, so an empty category can
   // offer to repeat it in one tap. Reads the store only: nothing is fetched
@@ -5049,23 +5050,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           therefore already available when the button is tapped. */}
       {mealDetail && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: mealDetailCapturing ? 'block' : 'none' }}>
-          <div ref={mealDetailCaptureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative', background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none' }}>
-            {_shotGridOn && <SvgGrid />}
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-              <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
-            </div>
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: '26px' }}>{mealDetail.label}</div>
-                  <div className="micro" style={{ marginTop: 4 }}>MEAL DETAIL</div>
-                </div>
-                <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
-              </div>
-              <FdMealDetailContent meal={mealDetail} screenshot />
-            </div>
-          </div>
+          <FdMealDetailPoster captureRef={mealDetailCaptureRef} meal={mealDetail} expandedRecipes={mealDetailExpandedRecipes}
+            logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
         </div>,
         document.body
       )}
@@ -5192,10 +5178,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         role={cat.count > 0 ? 'button' : undefined}
                         tabIndex={cat.count > 0 ? 0 : undefined}
                         aria-label={cat.count > 0 ? `Open ${cat.label} details` : undefined}
-                        onClick={cat.count > 0 ? () => setMealDetailCatId(cat.id) : undefined}
+                        onClick={cat.count > 0 ? () => { setMealDetailExpandedRecipes({}); setMealDetailCatId(cat.id); } : undefined}
                         onKeyDown={cat.count > 0 ? e => {
                           if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault(); setMealDetailCatId(cat.id);
+                            e.preventDefault(); setMealDetailExpandedRecipes({}); setMealDetailCatId(cat.id);
                           }
                         } : undefined}
                         style={{ ...fdCategoryCard, ...(cat.count > 0 ? { cursor: 'pointer' } : null) }}
@@ -5680,7 +5666,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </button>
         )}
         renderContent={() => mealDetail ? (
-        <FdMealDetailContent meal={mealDetail} />
+        <FdMealDetailContent meal={mealDetail} expandedRecipes={mealDetailExpandedRecipes} onToggleRecipe={entryId => setMealDetailExpandedRecipes(open => ({ ...open, [entryId]: !open[entryId] }))} />
       ) : null} />
 
       {/* ── Quantity sheet ── */}
@@ -11601,10 +11587,9 @@ function FdMealDetailContentLegacy({ meal }) {
 }
 
 // Refined meal detail presentation. The live sheet folds recipe ingredients
-// away by default; the screenshot poster passes screenshot=true so the same
-// data is exported fully expanded without interactive controls.
-function FdMealDetailContent({ meal, screenshot = false }) {
-  const [expandedRecipes, setExpandedRecipes] = useStateFd({});
+// away by default; the screenshot poster reuses the same expandedRecipes map
+// so the exported image reflects exactly what was visible when captured.
+function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, onToggleRecipe }) {
   const plannedCount = meal.entries.filter(e => e.planned).length;
   const mealMacroGrid = {
     display: 'grid',
@@ -11612,9 +11597,9 @@ function FdMealDetailContent({ meal, screenshot = false }) {
     columnGap: 7,
     alignItems: 'center',
   };
-  const macroValue = (value, color) => (
+  const macroValue = (value, color, label) => (
     <span className="num" style={{ fontSize: 11, fontWeight: 700, color, textAlign: 'right', whiteSpace: 'nowrap' }}>
-      {Math.round(value || 0)}g
+      <span style={{ fontSize: 9, marginRight: 2 }}>{label}</span>{Math.round(value || 0)}g
     </span>
   );
   return (
@@ -11644,17 +11629,11 @@ function FdMealDetailContent({ meal, screenshot = false }) {
 
       <div>
         <div className="micro" style={{ marginBottom: 8 }}>INGREDIENTS</div>
-        <div style={{ ...mealMacroGrid, padding: '0 12px 4px' }}>
-          <span className="micro" style={{ fontSize: 8 }}>ITEM</span>
-          <span className="micro" style={{ color: FD_MACRO_COLORS.protein, textAlign: 'right', fontSize: 8 }}>P</span>
-          <span className="micro" style={{ color: FD_MACRO_COLORS.carbs, textAlign: 'right', fontSize: 8 }}>C</span>
-          <span className="micro" style={{ color: FD_MACRO_COLORS.fat, textAlign: 'right', fontSize: 8 }}>F</span>
-        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {meal.entries.map(entry => {
             const hasRecipe = entry.recipeItems?.length > 0;
-            const recipeOpen = screenshot || !!expandedRecipes[entry.id];
-            const toggleRecipe = () => setExpandedRecipes(open => ({ ...open, [entry.id]: !open[entry.id] }));
+            const recipeOpen = !!expandedRecipes[entry.id];
+            const toggleRecipe = () => onToggleRecipe?.(entry.id);
             return (
               <div key={entry.id} style={entry.planned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
                 <div style={mealMacroGrid}>
@@ -11676,19 +11655,14 @@ function FdMealDetailContent({ meal, screenshot = false }) {
                       <span className="num" style={{ color: UI.warn }}>{Math.round(entry.calories || 0)} kcal</span>
                     </span>
                   </div>
-                  {macroValue(entry.protein, FD_MACRO_COLORS.protein)}
-                  {macroValue(entry.carbs, FD_MACRO_COLORS.carbs)}
-                  {macroValue(entry.fat, FD_MACRO_COLORS.fat)}
+                  {macroValue(entry.protein, FD_MACRO_COLORS.protein, 'P')}
+                  {macroValue(entry.carbs, FD_MACRO_COLORS.carbs, 'C')}
+                  {macroValue(entry.fat, FD_MACRO_COLORS.fat, 'F')}
                 </div>
 
                 {hasRecipe && recipeOpen && (
                   <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${UI.hairStrong}` }}>
-                    <div style={{ ...mealMacroGrid, padding: '0 0 6px' }}>
-                      <span className="micro" style={{ fontSize: 8 }}>RECIPE INGREDIENTS</span>
-                      <span className="micro" style={{ color: FD_MACRO_COLORS.protein, textAlign: 'right', fontSize: 8 }}>P</span>
-                      <span className="micro" style={{ color: FD_MACRO_COLORS.carbs, textAlign: 'right', fontSize: 8 }}>C</span>
-                      <span className="micro" style={{ color: FD_MACRO_COLORS.fat, textAlign: 'right', fontSize: 8 }}>F</span>
-                    </div>
+                    <div className="micro" style={{ fontSize: 8, paddingBottom: 6 }}>RECIPE INGREDIENTS</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                       {fdSortIngredientsByQty(entry.recipeItems).map((item, index) => (
                         <div key={`${entry.id}-ingredient-${index}`} style={{ ...mealMacroGrid, paddingLeft: 8 }}>
@@ -11698,9 +11672,9 @@ function FdMealDetailContent({ meal, screenshot = false }) {
                               {fdMass(item.quantityG)}{fdUnitCountLabel(item) ? ` (${fdUnitCountLabel(item)})` : ''} · <span className="num" style={{ color: UI.warn }}>{Math.round(item.calories || 0)} kcal</span>
                             </span>
                           </div>
-                          {macroValue(item.protein, FD_MACRO_COLORS.protein)}
-                          {macroValue(item.carbs, FD_MACRO_COLORS.carbs)}
-                          {macroValue(item.fat, FD_MACRO_COLORS.fat)}
+                          {macroValue(item.protein, FD_MACRO_COLORS.protein, 'P')}
+                          {macroValue(item.carbs, FD_MACRO_COLORS.carbs, 'C')}
+                          {macroValue(item.fat, FD_MACRO_COLORS.fat, 'F')}
                         </div>
                       ))}
                     </div>
@@ -11717,6 +11691,40 @@ function FdMealDetailContent({ meal, screenshot = false }) {
           Dashed items are planned and are included in the meal total, but not yet counted as eaten.
         </div>
       )}
+    </div>
+  );
+}
+
+// Meal detail poster follows the RecipePoster geometry exactly: its own
+// stable root, explicit watermark layer and content layer above it. Keeping
+// this outside the animated Sheet prevents html2canvas from inheriting the
+// sheet transform and makes the watermark part of the captured poster.
+function FdMealDetailPoster({ captureRef, meal, expandedRecipes, logo, logoStyle, grid }) {
+  // Keep the same centered logo treatment as RecipePoster, with a slightly
+  // firmer minimum opacity so the default ZANE mark remains visible beneath
+  // the denser ingredient cards too.
+  const visibleLogoStyle = { ...logoStyle, opacity: Math.max(Number(logoStyle?.opacity) || 0, 0.16) };
+  return (
+    <div ref={captureRef} style={{
+      padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
+      background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none',
+    }}>
+      {grid && <SvgGrid />}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src={logo} data-shot-avatar="1" style={visibleLogoStyle} />
+      </div>
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', fontSize: 26, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {meal.label}
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <FdMealDetailContent meal={meal} screenshot expandedRecipes={expandedRecipes} />
+        </div>
+      </div>
     </div>
   );
 }
