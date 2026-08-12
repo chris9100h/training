@@ -11628,7 +11628,6 @@ function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, o
       </div>
 
       <div>
-        <div className="micro" style={{ marginBottom: 8 }}>INGREDIENTS</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {meal.entries.map(entry => {
             const hasRecipe = entry.recipeItems?.length > 0;
