@@ -250,14 +250,14 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     const moduleName = moduleForRoute[routeForTab(id)];
     if (moduleName) window.__prefetchScreen?.(moduleName);
   };
-  const navigateTab = id => {
-    const nextRoute = routeForTab(id);
-    setVisualActive(id);
+  const navigateRoute = (nextRoute, visualId) => {
+    setVisualActive(visualId);
     const result = onChange(nextRoute);
     if (result?.then) result.then(ok => {
-      if (ok === false) setVisualActive(current => current === id ? active : current);
+      if (ok === false) setVisualActive(current => current === visualId ? active : current);
     });
   };
+  const navigateTab = id => navigateRoute(routeForTab(id), id);
   const idx = tabs.findIndex(t => t.id === visualActive);
   // Health, its water tracker, food tracker and medications tracker share one
   // tab slot (routeName being any of the four still lights up 'health', see
@@ -336,7 +336,9 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       if (cancelled) {
         suppressClickRef.current = false;
       } else if (pick) {
-        navigateTab(pick);
+        // Popup entries are concrete routes. Passing the shared `health` slot
+        // through routeForTab would cycle once more from Food to Medications.
+        navigateRoute(pick, 'health');
         // The release landed on a popup option, so no native click follows
         // on the original health button. Clear the suppression immediately.
         suppressClickRef.current = false;
