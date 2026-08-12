@@ -1486,6 +1486,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [fastingState, fastingProtocol]);
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
+  // Category summary card currently open in the meal-detail sheet. Keep only
+  // the category id here so the sheet always reflects live edits to the day's
+  // entries while it is open.
+  const [mealDetailCatId, setMealDetailCatId] = useStateFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
   const [statsOpen, setStatsOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -2480,6 +2484,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => store.settings?.hideFoodCategories ? [{ id: 'all', label: null, startHour: 0, endHour: 24 }] : categoryTotals,
     [store.settings?.hideFoodCategories, categoryTotals]
   );
+  const mealDetail = useMemoFd(() => {
+    if (!mealDetailCatId) return null;
+    const cat = mealCats.find(c => c.id === mealDetailCatId);
+    if (!cat) return null;
+    const entries = [];
+    for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
+    const totals = entries.reduce((sum, e) => ({
+      calories: sum.calories + (e.calories || 0),
+      protein: sum.protein + (e.protein || 0),
+      carbs: sum.carbs + (e.carbs || 0),
+      fat: sum.fat + (e.fat || 0),
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    return { ...cat, entries, totals };
+  }, [mealDetailCatId, mealCats, byHour]);
+  // A day switch should never leave a sheet showing the previous day's meal.
+  useEffectFd(() => { setMealDetailCatId(null); }, [curDate]);
 
   // Yesterday's entries grouped by meal category, so an empty category can
   // offer to repeat it in one tap. Reads the store only: nothing is fetched
@@ -5101,9 +5121,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
                 read-only per-meal summary card (LB.mealCategories). Adding
-                still only ever happens through an hour's own "+", the
-                category card itself has no tap target. The category card
-                sits full-width; only its hour rows are indented, with a
+                still only ever happens through an hour's own "+". When a
+                category contains entries, tapping its card opens the full
+                meal detail sheet; an empty card may offer Repeat yesterday.
+                The category card sits full-width; only its hour rows are indented, with a
                 tree-style trunk line (FdHourTrunk, spanning the whole
                 indented block) and a short branch tick per row (FdHourTick)
                 connecting each one back to the trunk, so the card visually
@@ -5122,7 +5143,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 {timelineGroups.map(cat => (
                   <div key={cat.id}>
                     {cat.label && (
-                      <div style={fdCategoryCard}>
+                      <div
+                        role={cat.count > 0 ? 'button' : undefined}
+                        tabIndex={cat.count > 0 ? 0 : undefined}
+                        aria-label={cat.count > 0 ? `Open ${cat.label} details` : undefined}
+                        onClick={cat.count > 0 ? () => setMealDetailCatId(cat.id) : undefined}
+                        onKeyDown={cat.count > 0 ? e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault(); setMealDetailCatId(cat.id);
+                          }
+                        } : undefined}
+                        style={{ ...fdCategoryCard, ...(cat.count > 0 ? { cursor: 'pointer' } : null) }}
+                      >
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                           <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
@@ -5132,7 +5164,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                             anything is logged here the button is gone, so the
                             card goes back to being a pure read-only summary. */}
                         {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
-                          <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
+                          <button className="micro-gold" onClick={e => { e.stopPropagation(); openRepeatYesterday(cat); }} style={{
                             display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
                             padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                           }}>
@@ -5593,6 +5625,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </>
         )}
       </div>
+
+      {/* ── Meal detail sheet ── */}
+      <Sheet open={!!mealDetail} onClose={() => setMealDetailCatId(null)} title={mealDetail?.label || 'Meal'} titleColor="var(--accent)" renderContent={() => mealDetail ? (
+        <FdMealDetailContent meal={mealDetail} />
+      ) : null} />
 
       {/* ── Quantity sheet ── */}
       {/* zIndex bumped while editing one row of the "Describe a meal" review
@@ -11392,6 +11429,126 @@ function FdRing({ percent, size = 128, color = UI.gold, label }) {
 // the same color). Applies generally, not just for a red accent, hence a
 // fixed token instead of a per-accent special case.
 const FD_MACRO_COLORS = { protein: UI.info, carbs: UI.ok, fat: UI.danger };
+
+// Meal-level macro visual: the ring is weighted by macro calories (protein
+// and carbs 4 kcal/g, fat 9 kcal/g), while the labels show the familiar grams.
+// That keeps the burst visually honest without making the user do the math.
+function FdMealMacroBurst({ calories, protein, carbs, fat }) {
+  const values = [
+    { key: 'protein', short: 'P', label: 'Protein', grams: protein || 0, kcal: (protein || 0) * 4, color: FD_MACRO_COLORS.protein },
+    { key: 'carbs', short: 'C', label: 'Carbs', grams: carbs || 0, kcal: (carbs || 0) * 4, color: FD_MACRO_COLORS.carbs },
+    { key: 'fat', short: 'F', label: 'Fat', grams: fat || 0, kcal: (fat || 0) * 9, color: FD_MACRO_COLORS.fat },
+  ];
+  const totalMacroKcal = values.reduce((sum, item) => sum + item.kcal, 0);
+  const radius = 49;
+  const circumference = 2 * Math.PI * radius;
+  const gap = 3;
+  let cursor = 0;
+  const arcs = values.map(item => {
+    const span = totalMacroKcal > 0 ? circumference * item.kcal / totalMacroKcal : 0;
+    const start = cursor;
+    cursor += span;
+    return { ...item, start, visible: Math.max(0, span - gap), percent: totalMacroKcal > 0 ? Math.round(item.kcal / totalMacroKcal * 100) : 0 };
+  });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '4px 0 2px' }}>
+      <div style={{ position: 'relative', width: 184, height: 184 }} aria-label={`${Math.round(calories || 0)} calories, ${Math.round(protein || 0)} grams protein, ${Math.round(carbs || 0)} grams carbs, ${Math.round(fat || 0)} grams fat`}>
+        <svg width="184" height="184" viewBox="0 0 140 140" aria-hidden="true">
+          <circle cx="70" cy="70" r={radius} fill="none" stroke={UI.hair} strokeWidth="11" opacity="0.7" />
+          {arcs.map(item => (
+            <circle key={item.key} cx="70" cy="70" r={radius} fill="none" stroke={item.color} strokeWidth="11" strokeLinecap="round"
+              strokeDasharray={`${item.visible} ${circumference - item.visible}`} strokeDashoffset={-item.start}
+              style={{ transition: 'stroke-dasharray 0.65s cubic-bezier(0.22,1,0.36,1), stroke-dashoffset 0.65s cubic-bezier(0.22,1,0.36,1)' }} />
+          ))}
+          {Array.from({ length: 12 }, (_, i) => (
+            <line key={i} x1="70" y1="5" x2="70" y2="10" stroke={UI.hairStrong} strokeWidth="1.5" transform={`rotate(${i * 30} 70 70)`} />
+          ))}
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <span className="num" style={{ fontSize: 38, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+          <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3 }}>kcal</span>
+          <span className="micro-gold" style={{ fontSize: 8, marginTop: 8 }}>MACRO BURST</span>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', width: '100%', maxWidth: 330, gap: 8 }}>
+        {arcs.map(item => (
+          <div key={item.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: item.color, fontFamily: UI.fontUi }}>{item.short} · {item.label}</span>
+            <span className="num" style={{ fontSize: 16, fontWeight: 700, color: item.color }}>{Math.round(item.grams)}g</span>
+            <span className="micro" style={{ fontSize: 8 }}>{item.percent}% kcal</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FdMealDetailContent({ meal }) {
+  const plannedCount = meal.entries.filter(e => e.planned).length;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div className="micro" style={{ marginBottom: 4 }}>MEAL WINDOW</div>
+          <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 — {String(meal.endHour % 24).padStart(2, '0')}:00</div>
+        </div>
+        <div className="micro" style={{ textAlign: 'right' }}>
+          {meal.entries.length} {meal.entries.length === 1 ? 'item' : 'items'}
+          {plannedCount > 0 && <><br /><span className="micro-gold">{plannedCount} planned</span></>}
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 12px 14px', background: 'rgba(var(--accent-rgb),0.05)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+        <FdMealMacroBurst calories={meal.totals.calories} protein={meal.totals.protein} carbs={meal.totals.carbs} fat={meal.totals.fat} />
+      </div>
+
+      <div>
+        <div className="micro" style={{ marginBottom: 8 }}>INGREDIENTS</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {meal.entries.map(entry => (
+            <div key={entry.id} style={entry.planned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={fdEntryName}>{entry.foodName}</span>
+                    {entry.planned && <span className="micro-gold" style={{ flexShrink: 0, fontSize: 8 }}>PLANNED</span>}
+                  </div>
+                  <span style={fdEntryMeta}>
+                    {fdDisplayG(entry) ? `${fdMassOf(entry)}${fdUnitCountLabel(entry) ? ` (${fdUnitCountLabel(entry)})` : ''} · ` : ''}
+                    <span className="num" style={{ color: UI.warn }}>{Math.round(entry.calories || 0)} kcal</span>
+                  </span>
+                </div>
+                <FdMacroBits protein={entry.protein} carbs={entry.carbs} fat={entry.fat} strong />
+              </div>
+              {entry.recipeItems?.length > 0 && (
+                <div style={{ position: 'relative', marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div className="micro" style={{ fontSize: 8 }}>RECIPE INGREDIENTS</div>
+                  {fdSortIngredientsByQty(entry.recipeItems).map((item, index) => (
+                    <div key={`${entry.id}-ingredient-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FdIngredientTick />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{item.foodName}</div>
+                        <span style={fdEntryMeta}>
+                          {fdMass(item.quantityG)}{fdUnitCountLabel(item) ? ` (${fdUnitCountLabel(item)})` : ''} · <span className="num" style={{ color: UI.warn }}>{Math.round(item.calories || 0)} kcal</span>
+                        </span>
+                      </div>
+                      <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      {plannedCount > 0 && (
+        <div className="micro" style={{ lineHeight: '15px', paddingTop: 4, borderTop: `1px dashed ${UI.hairStrong}` }}>
+          Dashed items are planned and are included in the meal total, but not yet counted as eaten.
+        </div>
+      )}
+    </div>
+  );
+}
 
 // One metric row in the dense hero (KCAL/PROTEIN/CARBS/FAT): label, a thin
 // fill bar showing actual vs target, the actual/target pair, and the delta
