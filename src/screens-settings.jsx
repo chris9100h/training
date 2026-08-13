@@ -945,13 +945,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   useEffectSet(() => {
     if (!friendsSheet) return;
-    const profile = store.friends?.profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] };
-    setSocialProfileDraft(profile);
+    // Friends loads asynchronously when the feature is enabled. Do not turn
+    // that loading gap into an empty draft: saving one would overwrite the
+    // user's visible profile with blank defaults before the dashboard arrives.
+    const profile = store.friends?.profile;
+    if (!store.friends) {
+      setSocialProfileDraft(null);
+      setSocialProfileMsg(null);
+      return;
+    }
+    setSocialProfileDraft(profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] });
     setSocialProfileMsg(null);
   }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
 
+  useEffectSet(() => {
+    if (!friendsSheet || !store.settings?.showFriendsTab || store.friends || !userId) return;
+    let live = true;
+    LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
+      if (live) setStore(s => s ? { ...s, friends } : s);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends, userId]);
+
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
+    if (!store.friends) {
+      setSocialProfileMsg({ ok: false, text: 'Loading your social profile. Please try again in a moment.' });
+      return;
+    }
     setSocialProfileSaving(true);
     setSocialProfileMsg(null);
     try {
@@ -2347,6 +2368,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing and plan snapshots. You choose which metrics are visible.
           </div>
+          {!!store.settings?.showFriendsTab && !socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
+            Loading your social profile…
+          </div>}
           {!!store.settings?.showFriendsTab && socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>YOUR SOCIAL PROFILE</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
