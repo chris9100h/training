@@ -2646,6 +2646,7 @@ function App() {
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
+      {store && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
           onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}

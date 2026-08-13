@@ -32,9 +32,63 @@ function socialDate(iso) {
   return new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
+function socialWeight(value, fromUnit, toUnit) {
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return null;
+  const source = fromUnit === 'lbs' ? 'lbs' : 'kg';
+  const target = toUnit === 'lbs' ? 'lbs' : 'kg';
+  let amount = Number(value);
+  if (source !== target) amount = source === 'kg' ? amount * 2.20462 : amount / 2.20462;
+  amount = Math.round(amount * 10) / 10;
+  return `${amount} ${target}`;
+}
+
+function socialReps(set) {
+  if (set.repsL != null || set.repsR != null) {
+    const left = set.repsL ?? '—';
+    const right = set.repsR ?? '—';
+    return left === right ? String(left) : `${left}/${right}`;
+  }
+  if (set.reps != null) return String(set.reps);
+  if (set.timeSec != null) return `${set.timeSec}s`;
+  return '—';
+}
+
 function socialInitials(name) {
   const parts = String(name || 'Zane athlete').trim().split(/\s+/).filter(Boolean);
   return (parts.slice(0, 2).map(part => part[0]).join('') || 'Z').toUpperCase();
+}
+
+function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comment, setComment, sending, send }) {
+  return (
+    <div>
+      <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+        <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>{'\u00b7'} {detail?.comments?.length || 0}</span></span>
+        <i className={`fa-solid fa-chevron-${commentsOpen ? 'up' : 'down'}`} style={{ fontSize: 10 }} />
+      </button>
+      {commentsOpen && <div style={{ marginTop: 8 }}>
+        {live && <>
+          <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {['Let\u2019s go!', 'Strong set!', 'Finish it!'].map(text => <button key={text} onClick={() => send(text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{text}</button>)}
+          </div>
+        </>}
+        <div style={{ marginTop: live ? 10 : 0 }}>
+          <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COMMENTS</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 220, overflowY: 'auto', marginBottom: 8 }}>
+            {!detail?.comments?.length && <div className="micro" style={{ color: UI.inkFaint }}>Be the first to say something.</div>}
+            {(detail?.comments || []).map(item => <div key={item.id} style={{ padding: '8px 10px', borderRadius: 5, background: item.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${item.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
+              <div style={{ display: 'flex', gap: 7, alignItems: 'baseline' }}><strong style={{ color: item.kind === 'cheer' ? UI.gold : UI.ink }}>{item.authorName}</strong><span className="micro" style={{ color: UI.inkGhost }}>{socialTime(item.createdAt)}</span></div>
+              <div style={{ marginTop: 3 }}>{item.body}</div>
+            </div>)}
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <input value={comment} onChange={e => setComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send(comment); } }} maxLength={400} placeholder="Say something" style={{ ...SOCIAL_INPUT_STYLE, flex: 1, padding: '9px 10px' }} />
+            <Btn onClick={() => send(comment)} disabled={sending || !comment.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>{sending ? '...' : 'Send'}</Btn>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
 }
 
 function SocialWorkoutSheet({ workout, onClose }) {
@@ -43,7 +97,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
   const [error, setError] = useStateF('');
   const [comment, setComment] = useStateF('');
   const [sending, setSending] = useStateF(false);
-  const [commentsOpen, setCommentsOpen] = useStateF(false);
+  const [commentsOpen, setCommentsOpen] = useStateF(() => !!workout.live);
 
   const load = async () => {
     try {
@@ -86,12 +140,15 @@ function SocialWorkoutSheet({ workout, onClose }) {
   const totalSets = Number(session.setsTotal || 0);
   const progress = totalSets > 0 ? Math.min(1, doneSets / totalSets) : 0;
   const live = !session.ended;
+  const viewerUnit = UI.unit();
+  const ownerUnit = session.weightUnit || 'kg';
 
   return (
     <Sheet open onClose={onClose} title={session.ownerName || 'Workout'} titleRight={
       <span className="micro" style={{ color: live ? UI.gold : UI.inkFaint }}>{live ? 'LIVE' : 'FINISHED'}</span>
     }>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} />}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <div className="display" style={{ color: UI.ink, fontSize: 24 }}>{session.dayName || 'Workout'}</div>
           <div className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{socialDate(session.startedAt || session.date)}</div>
@@ -121,18 +178,33 @@ function SocialWorkoutSheet({ workout, onClose }) {
                   <span style={{ flex: 1, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>{entry.name}</span>
                   <span className="num" style={{ color: complete ? UI.gold : UI.inkFaint, fontSize: 11 }}>{done}/{sets.length || entry.plannedSets || '—'}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                <div style={{ display: 'none' }}>
                   {sets.map((set, setIndex) => <span key={setIndex} title={set.skipped ? 'Skipped' : set.done ? 'Done' : 'Planned'} style={{ width: 18, height: 18, borderRadius: 4, display: 'grid', placeItems: 'center', border: `var(--hair-width) solid ${set.done ? UI.gold : set.skipped ? UI.inkGhost : UI.hairStrong}`, background: set.done ? UI.goldFaint : 'transparent', color: set.done ? UI.gold : UI.inkGhost, fontFamily: UI.fontNum, fontSize: 9 }}>{set.skipped ? '—' : set.done ? '✓' : setIndex + 1}</span>)}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+                  {sets.map((set, setIndex) => {
+                    const reps = socialReps(set);
+                    const repsLabel = set.timeSec != null && set.reps == null && set.repsL == null && set.repsR == null
+                      ? reps
+                      : reps === '—' && entry.plannedReps != null ? `${entry.plannedReps} planned` : `${reps} reps`;
+                    const status = set.skipped ? 'SKIPPED' : set.done ? 'DONE' : 'PLANNED';
+                    return <div key={`detail-${setIndex}`} style={{ display: 'grid', gridTemplateColumns: '42px minmax(0, 1fr) minmax(0, 1fr) auto', gap: 7, alignItems: 'center', padding: '5px 0', borderTop: setIndex ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+                      <span className="micro" style={{ color: UI.inkFaint }}>SET {setIndex + 1}</span>
+                      <span className="num" style={{ color: set.kg != null ? UI.inkSoft : UI.inkGhost, fontSize: 11 }}>{socialWeight(set.kg, ownerUnit, viewerUnit) || '—'}</span>
+                      <span className="num" style={{ color: reps !== '—' ? UI.inkSoft : UI.inkGhost, fontSize: 11 }}>{repsLabel}</span>
+                      <span className="micro" style={{ color: set.done ? UI.gold : UI.inkGhost, fontSize: 9 }}>{status}</span>
+                    </div>;
+                  })}
                 </div>
               </Card>;
             })}
           </div>
         </div>}
-        <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+        <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'none', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
           <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>Â· {detail?.comments?.length || 0}</span></span>
           <i className={`fa-solid fa-chevron-${commentsOpen ? 'up' : 'down'}`} style={{ fontSize: 10 }} />
         </button>
-        {commentsOpen && <div>
+        {false && commentsOpen && <div>
           {live && <>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -153,6 +225,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
           </div>
         </div>
         </div>}
+        {!live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} />}
       </div>
     </Sheet>
   );
@@ -312,6 +385,12 @@ function FriendsScreen({ store, setStore, userId }) {
   const chatMessages = activeChat ? messages.filter(m => activeChat.type === 'group'
     ? m.groupId === activeChat.id
     : !m.groupId && ((m.senderId === userId && m.recipientId === activeChat.id) || (m.senderId === activeChat.id && m.recipientId === userId))) : [];
+  const unreadForConversation = (type, id) => messages.filter(m => {
+    if (m.senderId === userId || (data?.readMessageIds || []).includes(m.id)) return false;
+    return type === 'group'
+      ? m.groupId === id
+      : !m.groupId && ((m.senderId === id && m.recipientId === userId) || (m.senderId === userId && m.recipientId === id));
+  }).length;
 
   useEffectF(() => {
     if (activeTab !== 'chats' || !activeChat) return;
@@ -585,7 +664,7 @@ function FriendsScreen({ store, setStore, userId }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 12 }}>
         {['steps', 'workouts', 'adherence'].map(metric => (
           <div key={metric} style={{ padding: '8px 5px', background: UI.bgInset, borderRadius: 4, textAlign: 'center' }}>
-            <div className="micro" style={{ color: UI.inkFaint }}>{socialMetricLabel(metric)}</div>
+            <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{socialMetricLabel(metric)}</div>
             <div style={{ fontFamily: UI.fontNum, fontSize: 11, color: friend[metric] == null ? UI.inkGhost : UI.inkSoft, marginTop: 4 }}>{socialMetricValue(metric, friend[metric]) || 'Not shared'}</div>
           </div>
         ))}
@@ -623,7 +702,7 @@ function FriendsScreen({ store, setStore, userId }) {
       <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
         <div style={{ position: 'absolute', width: 190, height: 190, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -70, top: -84, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', width: 122, height: 122, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -28, top: -50, pointerEvents: 'none' }} />
-        <div className="micro" style={{ color: UI.gold, position: 'relative' }}>YOUR CIRCLE</div>
+        <div className="micro" style={{ color: UI.gold, fontWeight: 700, position: 'relative' }}>YOUR CIRCLE</div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 9 }}>
           <div>
             <div className="display" style={{ color: UI.ink, fontSize: 31, lineHeight: 1 }}>FRIENDS</div>
@@ -648,11 +727,11 @@ function FriendsScreen({ store, setStore, userId }) {
       </div>
       {renderRequests()}
       <div>{renderSearch()}</div>
-      <div className="micro" style={{ color: UI.gold, margin: '17px 0 8px' }}>PEOPLE IN YOUR CIRCLE <span style={{ color: UI.inkFaint }}>· {friends.length}</span></div>
+      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '17px 0 8px' }}>PEOPLE IN YOUR CIRCLE <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· {friends.length}</span></div>
       {friends.length === 0
         ? <Empty title="No friends yet" sub="Search by handle or friend code to start your circle." />
         : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{friends.map(renderFriend)}</div>}
-      <div className="micro" style={{ color: UI.gold, margin: '19px 0 8px' }}>SOCIAL SPACES</div>
+      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>SOCIAL SPACES</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
         <button onClick={() => setActiveTab('groups')} style={{ minWidth: 0, textAlign: 'left', padding: 13, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised, color: UI.ink, cursor: 'pointer' }}>
           <i className="fa-solid fa-users" style={{ color: UI.gold, fontSize: 16 }} />
@@ -671,7 +750,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const renderActivity = () => (
     <>
       <div style={{ padding: 17, borderRadius: 8, border: `var(--hair-width) solid ${liveWorkouts.length ? UI.goldSoft : UI.hairStrong}`, background: liveWorkouts.length ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(19,18,25,0.96) 72%)' : UI.bgRaised, marginBottom: 16 }}>
-        <div className="micro" style={{ color: UI.gold }}>CIRCLE ACTIVITY</div>
+        <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>CIRCLE ACTIVITY</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 9 }}>
           <div>
             <div className="display" style={{ color: UI.ink, fontSize: 27, lineHeight: 1 }}>IN MOTION</div>
@@ -680,26 +759,26 @@ function FriendsScreen({ store, setStore, userId }) {
           <div style={{ textAlign: 'right', flexShrink: 0 }}><div className="num" style={{ color: liveWorkouts.length ? UI.gold : UI.inkFaint, fontSize: 26, lineHeight: 1 }}>{liveWorkouts.length}</div><div className="micro" style={{ color: UI.inkFaint, marginTop: 5 }}>LIVE</div></div>
         </div>
       </div>
-      <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>LIVE NOW</div>
+      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '8px 0' }}>LIVE NOW</div>
       {liveWorkouts.length > 0
         ? <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{liveWorkouts.map(renderWorkoutCard)}</div>
         : <Card style={{ padding: 15 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13 }}>No one is training live right now.</div><div className="micro" style={{ marginTop: 5 }}>Finished workouts stay visible from the day you became friends.</div></Card>}
-      <div className="micro" style={{ color: UI.gold, margin: '19px 0 8px' }}>THIS WEEK</div>
+      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>THIS WEEK</div>
       <Card>
-        <div style={{ fontSize: 12, color: UI.inkFaint, lineHeight: 1.45, marginBottom: 12 }}>Only metrics explicitly shared by each person appear here. Missing values are never treated as zero.</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, lineHeight: 1.45, marginBottom: 12, textAlign: 'center' }}>Only metrics explicitly shared by each person appear here. Missing values are never treated as zero.</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 7 }}>
           {['steps', 'workouts', 'adherence'].map(metric => {
             const top = leaderboard(metric)[0];
-            return <div key={metric} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}` }}>
-              <div className="micro" style={{ color: UI.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
-              <div style={{ color: top ? UI.ink : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, marginTop: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'No data'}</div>
+            return <div key={metric} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, textAlign: 'center' }}>
+              <div className="micro" style={{ color: UI.gold, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
+              <div style={{ color: top ? UI.ink : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, marginTop: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'No data'}</div>
               <div className="num" style={{ color: top ? UI.inkSoft : UI.inkGhost, fontSize: 10, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top ? socialMetricValue(metric, top.value) : '-'}</div>
             </div>;
           })}
         </div>
       </Card>
       {workoutHistory.length > 0 && <>
-        <div className="micro" style={{ color: UI.gold, margin: '19px 0 8px' }}>RECENT WORKOUTS</div>
+        <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>RECENT WORKOUTS</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{workoutHistory.slice(0, 12).map(renderWorkoutCard)}</div>
       </>}
     </>
@@ -718,8 +797,8 @@ function FriendsScreen({ store, setStore, userId }) {
       <>
         <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>INBOX</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {friends.map(friend => conversationButton(friend.userId, 'friend', friend.name || friend.handle || 'Friend'))}
-          {groups.map(group => conversationButton(group.id, 'group', group.name))}
+          {friends.map(friend => conversationButton(friend.userId, 'friend', friend.name || friend.handle || 'Friend', unreadForConversation('friend', friend.userId)))}
+          {groups.map(group => conversationButton(group.id, 'group', group.name, unreadForConversation('group', group.id)))}
         </div>
         {!friends.length && !groups.length && <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>Add a friend or create a group to start a conversation.</div>}
       </>
@@ -803,7 +882,7 @@ function FriendsScreen({ store, setStore, userId }) {
         <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
         <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
           <div style={{ position: 'absolute', width: 150, height: 150, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -52, top: -62, pointerEvents: 'none' }} />
-          <div className="micro" style={{ color: UI.gold, position: 'relative' }}>GROUP TRAINING</div>
+          <div className="micro" style={{ color: UI.gold, fontWeight: 700, position: 'relative' }}>GROUP TRAINING</div>
           <div className="display" style={{ color: UI.ink, fontSize: 29, lineHeight: 1, marginTop: 9, position: 'relative' }}>YOUR CREW</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 11, position: 'relative' }}>
             <span className="num" style={{ color: UI.gold, fontSize: 20 }}>{groups.length}</span>
@@ -820,7 +899,7 @@ function FriendsScreen({ store, setStore, userId }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><input value={joinCode} onChange={e => setJoinCode(e.target.value)} placeholder="Paste group code" style={SOCIAL_INPUT_STYLE} /><Btn onClick={joinGroup} disabled={groupBusy || !joinCode.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>Join group</Btn></div>
           </Card>
         </div>
-        <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>YOUR GROUPS <span style={{ color: UI.inkFaint }}>· {groups.length}</span></div>
+        <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '8px 0' }}>YOUR GROUPS <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· {groups.length}</span></div>
         {groups.length === 0 ? <Empty title="No groups yet" sub="Create a private group or join one with a code." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{groups.map(group => {
           const members = groupMembers.filter(m => m.groupId === group.id);
           const selected = expandedGroupMetric?.groupId === group.id ? expandedGroupMetric.metric : null;
@@ -840,9 +919,9 @@ function FriendsScreen({ store, setStore, userId }) {
                 const rows = leaderboard(metric, group.id);
                 const top = rows[0];
                 const active = selected === metric;
-                return <button key={metric} onClick={() => setExpandedGroupMetric(active ? null : { groupId: group.id, metric })} disabled={!rows.length} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, border: `var(--hair-width) solid ${active ? UI.gold : UI.hairStrong}`, background: active ? UI.goldFaint : UI.bgInset, color: UI.ink, textAlign: 'left', cursor: rows.length ? 'pointer' : 'default', opacity: rows.length ? 1 : 0.62 }}>
-                  <div className="micro" style={{ color: active ? UI.gold : UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
-                  <div style={{ color: top ? UI.inkSoft : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'Private'}</div>
+                return <button key={metric} onClick={() => setExpandedGroupMetric(active ? null : { groupId: group.id, metric })} disabled={!rows.length} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, border: `var(--hair-width) solid ${active ? UI.gold : UI.hairStrong}`, background: active ? UI.goldFaint : UI.bgInset, color: UI.ink, textAlign: 'center', cursor: rows.length ? 'pointer' : 'default', opacity: rows.length ? 1 : 0.62 }}>
+                  <div className="micro" style={{ color: active ? UI.gold : UI.inkFaint, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
+                  <div style={{ color: top ? UI.inkSoft : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'Private'}</div>
                   <div className="num" style={{ color: top ? UI.gold : UI.inkGhost, fontSize: 10, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top ? socialMetricValue(metric, top.value) : 'No shared data'}</div>
                 </button>;
               })}
@@ -921,5 +1000,54 @@ function FriendsScreen({ store, setStore, userId }) {
   );
 }
 
+function FriendRequestBanner({ store, setStore, userId }) {
+  const pending = store?.settings?.showFriendsTab && !(
+    store.coaching?.asClient?.status === 'pending'
+  ) ? store.friends?.incoming?.[0] : null;
+  const [loading, setLoading] = useStateF(false);
+
+  if (!pending) return null;
+
+  const respond = async accept => {
+    setLoading(true);
+    try {
+      await LB.respondToSocialFriendRequest(pending.id, accept);
+      try {
+        const friends = await LB.loadFriendsState(userId, LB.socialWeekStartISO());
+        setStore(s => s ? { ...s, friends } : s);
+      } catch (_) {
+        // The relationship was answered server-side. Remove this request
+        // locally even if the refresh is temporarily unavailable; the next
+        // social refresh will reconcile the accepted friendship.
+        setStore(s => s?.friends ? {
+          ...s,
+          friends: { ...s.friends, incoming: (s.friends.incoming || []).filter(item => item.id !== pending.id) },
+        } : s);
+      }
+    } catch (e) {
+      UI.alert('Error: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: 28, maxWidth: 380, width: '100%' }}>
+        <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>FRIEND REQUEST</div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, color: UI.ink, marginBottom: 6 }}>{pending.name || 'Zane athlete'}</div>
+        {pending.handle && <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>@{pending.handle.replace(/^@/, '')}</div>}
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 24, lineHeight: 1.5 }}>
+          wants to add you as a friend. Accept to connect and see the data you each choose to share.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button disabled={loading} onClick={() => respond(true)} style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}>ACCEPT</button>
+          <button disabled={loading} onClick={() => respond(false)} style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}>DECLINE</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { FriendsScreen });
+Object.assign(window.Screens, { FriendsScreen, FriendRequestBanner });

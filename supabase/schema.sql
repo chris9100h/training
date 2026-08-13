@@ -4302,6 +4302,7 @@ BEGIN
       'ownerName', COALESCE((SELECT p.name FROM zane_profiles p WHERE p.id = v_session.user_id), 'Zane athlete'),
       'dayName', v_session.day_name, 'date', v_session.date,
       'startedAt', v_session.started_at, 'ended', v_session.ended,
+      'weightUnit', COALESCE((SELECT CASE WHEN us.unit = 'lbs' THEN 'lbs' ELSE 'kg' END FROM zane_user_settings us WHERE us.user_id = v_session.user_id), 'kg'),
       'durationMinutes', v_session.duration_minutes,
       'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = v_session.id AND st.done)::int,
       'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = v_session.id AND NOT st.skipped)::int,
@@ -4312,7 +4313,11 @@ BEGIN
         'name', e.name, 'plannedSets', e.planned_sets, 'plannedReps', e.planned_reps,
         'supersetGroup', e.superset_group,
         'sets', COALESCE((
-          SELECT jsonb_agg(jsonb_build_object('done', st.done, 'skipped', st.skipped, 'warmup', st.warmup) ORDER BY st.set_idx)
+          SELECT jsonb_agg(jsonb_build_object(
+            'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
+            'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
+            'timeSec', st.time_sec, 'addedKg', st.added_kg
+          ) ORDER BY st.set_idx)
           FROM zane_sets st WHERE st.entry_id = e.id
         ), '[]'::jsonb)
       ) ORDER BY e.entry_idx)

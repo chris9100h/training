@@ -5739,6 +5739,7 @@ function mapSocialWorkoutSummary(row) {
     date: row.date ?? null,
     startedAt: row.startedAt ?? row.started_at ?? null,
     ended: row.ended ?? null,
+    weightUnit: row.weightUnit ?? row.weight_unit ?? null,
     live: !!row.live,
     acceptedAt: row.acceptedAt ?? row.accepted_at ?? null,
     setsDone: Number(row.setsDone ?? row.sets_done ?? 0),
@@ -5770,6 +5771,12 @@ function mapSocialWorkoutDetail(payload) {
       plannedReps: entry.plannedReps ?? entry.planned_reps ?? null,
       supersetGroup: entry.supersetGroup ?? entry.superset_group ?? null,
       sets: (entry.sets || []).map(set => ({
+        kg: set.kg ?? null,
+        reps: set.reps ?? null,
+        repsL: set.repsL ?? set.reps_l ?? null,
+        repsR: set.repsR ?? set.reps_r ?? null,
+        timeSec: set.timeSec ?? set.time_sec ?? null,
+        addedKg: set.addedKg ?? set.added_kg ?? null,
         done: !!set.done, skipped: !!set.skipped, warmup: !!set.warmup,
       })),
     })),
@@ -5919,7 +5926,14 @@ async function updateSocialProfile(userId, patch = {}) {
     p_workouts_visible: !!patch.workoutsVisible,
     p_adherence_visible: !!patch.adherenceVisible,
   });
-  if (error) throw error;
+  if (error) {
+    const message = String(error.message || '');
+    if (error.code === '23505' || /duplicate key|unique constraint|zane_social_profiles_handle_key/i.test(message)) {
+      throw new Error('That handle is already taken. Please choose another.');
+    }
+    if (/^Handle must be /.test(message)) throw new Error(message);
+    throw new Error('Could not save your social profile. Please try again.');
+  }
   return mapSocialProfile(data);
 }
 
