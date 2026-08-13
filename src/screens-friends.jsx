@@ -990,10 +990,6 @@ function FriendsScreen({ store, setStore, userId }) {
       </div>
       {renderRequests()}
       <div>{renderSearch()}</div>
-      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '17px 0 8px' }}>PEOPLE IN YOUR CIRCLE <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· {friends.length}</span></div>
-      {friends.length === 0
-        ? <Empty title="No friends yet" sub="Search by handle or friend code to start your circle." />
-        : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{friends.map(renderFriend)}</div>}
       <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>SOCIAL SPACES</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
         <button onClick={() => setActiveTab('groups')} style={{ minWidth: 0, textAlign: 'left', padding: 13, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised, color: UI.ink, cursor: 'pointer' }}>
@@ -1007,6 +1003,10 @@ function FriendsScreen({ store, setStore, userId }) {
           <div className="micro" style={{ marginTop: 4 }}>{planShares.length} shared</div>
         </button>
       </div>
+      <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>PEOPLE IN YOUR CIRCLE <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· {friends.length}</span></div>
+      {friends.length === 0
+        ? <Empty title="No friends yet" sub="Search by handle or friend code to start your circle." />
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{friends.map(renderFriend)}</div>}
     </>
   );
 
