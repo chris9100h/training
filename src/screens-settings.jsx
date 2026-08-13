@@ -1921,7 +1921,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     finally { setSupportAdminSending(false); }
   };
 
-  const beginSupportEdit = note => {
+  const canModifySupportNote = note => {
+    const createdAt = Date.parse(note?.created_at || '');
+    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
+  };
+
+  const supportNoteWindowError = 'Messages can only be edited or deleted within 60 minutes of sending.';
+
+  const beginSupportEdit = async note => {
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      return;
+    }
     setSupportEditingNoteId(note.id);
     setSupportEditingBody(note.body || '');
   };
@@ -1933,6 +1944,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   const saveSupportEdit = async note => {
     if (supportNoteActionBusy || !supportEditingBody.trim()) return;
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      cancelSupportEdit();
+      return;
+    }
     setSupportNoteActionBusy(true);
     try {
       const updated = await LB.updateCoachingNote(note.id, userId, supportEditingBody);
@@ -1948,7 +1964,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   const removeSupportNote = async note => {
-    if (supportNoteActionBusy || !window.confirm('Delete this message?')) return;
+    if (supportNoteActionBusy) return;
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      return;
+    }
+    if (!await confirm('Delete this message?', { title: 'Delete message', ok: 'Delete', danger: true })) return;
     setSupportNoteActionBusy(true);
     try {
       await LB.deleteCoachingNote(note.id, userId);
@@ -3915,6 +3936,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     return supportActiveNotes.map(n => {
                       const isMe = n.author_id === userId;
                       const editing = supportEditingNoteId === n.id;
+                      const modifiable = isMe && canModifySupportNote(n);
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
@@ -3941,7 +3963,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
                             {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
-                          {isMe && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                          {modifiable && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                             {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
                             <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
                           </div>}
@@ -4088,6 +4110,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     return supportTicketNotes.map(n => {
                       const isAdminMsg = n.author_id === userId;
                       const editing = supportEditingNoteId === n.id;
+                      const modifiable = isAdminMsg && canModifySupportNote(n);
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
@@ -4119,7 +4142,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
                             {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
-                          {isAdminMsg && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                          {modifiable && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                             {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
                             <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
                           </div>}

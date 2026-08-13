@@ -4753,3 +4753,202 @@ end;
 $function$;
 REVOKE EXECUTE ON FUNCTION public.zane_coaching_notes_guard_update() FROM PUBLIC, anon, authenticated;
 GRANT UPDATE, DELETE ON public.zane_coaching_notes TO authenticated;
+
+-- Migration 0274: enforce a 60-minute edit/delete window for chat messages.
+DROP POLICY IF EXISTS "social messages edit own" ON public.zane_social_messages;
+CREATE POLICY "social messages edit own" ON public.zane_social_messages
+  FOR UPDATE TO authenticated
+  USING (sender_id = (select auth.uid()) AND created_at >= now() - interval '60 minutes')
+  WITH CHECK (sender_id = (select auth.uid()) AND created_at >= now() - interval '60 minutes');
+DROP POLICY IF EXISTS "social messages delete own" ON public.zane_social_messages;
+CREATE POLICY "social messages delete own" ON public.zane_social_messages
+  FOR DELETE TO authenticated
+  USING (sender_id = (select auth.uid()) AND created_at >= now() - interval '60 minutes');
+
+CREATE OR REPLACE FUNCTION public.zane_social_messages_guard_update()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF (select auth.uid()) = old.sender_id THEN
+    IF new.id IS DISTINCT FROM old.id
+       OR new.sender_id IS DISTINCT FROM old.sender_id
+       OR new.recipient_id IS DISTINCT FROM old.recipient_id
+       OR new.group_id IS DISTINCT FROM old.group_id
+       OR new.created_at IS DISTINCT FROM old.created_at
+    THEN
+      RAISE EXCEPTION 'senders may only update body and edited_at';
+    END IF;
+  END IF;
+  RETURN new;
+END;
+$function$;
+DROP TRIGGER IF EXISTS zane_social_messages_guard_update ON public.zane_social_messages;
+CREATE TRIGGER zane_social_messages_guard_update
+  BEFORE UPDATE ON public.zane_social_messages
+  FOR EACH ROW EXECUTE FUNCTION public.zane_social_messages_guard_update();
+REVOKE EXECUTE ON FUNCTION public.zane_social_messages_guard_update() FROM PUBLIC, anon, authenticated;
+
+DROP POLICY IF EXISTS "authors can edit notes" ON public.zane_coaching_notes;
+CREATE POLICY "authors can edit notes" ON public.zane_coaching_notes
+  FOR UPDATE TO public
+  USING (
+    author_id = (select auth.uid())
+    AND created_at >= now() - interval '60 minutes'
+    AND EXISTS (
+      SELECT 1 FROM zane_coaching c
+      WHERE c.id = zane_coaching_notes.coaching_id
+        AND (c.coach_id = (select auth.uid()) OR c.client_id = (select auth.uid()))
+    )
+  )
+  WITH CHECK (
+    author_id = (select auth.uid())
+    AND created_at >= now() - interval '60 minutes'
+    AND EXISTS (
+      SELECT 1 FROM zane_coaching c
+      WHERE c.id = zane_coaching_notes.coaching_id
+        AND (c.coach_id = (select auth.uid()) OR c.client_id = (select auth.uid()))
+    )
+  );
+
+DROP POLICY IF EXISTS "participants can delete notes" ON public.zane_coaching_notes;
+DROP POLICY IF EXISTS "authors can delete notes" ON public.zane_coaching_notes;
+CREATE POLICY "authors can delete notes" ON public.zane_coaching_notes
+  FOR DELETE TO public
+  USING (
+    author_id = (select auth.uid())
+    AND created_at >= now() - interval '60 minutes'
+    AND EXISTS (
+      SELECT 1 FROM zane_coaching c
+      WHERE c.id = zane_coaching_notes.coaching_id
+        AND (c.coach_id = (select auth.uid()) OR c.client_id = (select auth.uid()))
+    )
+  );
+
+CREATE OR REPLACE FUNCTION public.delete_coaching_thread(p_thread_id text)
+  RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_coach_id uuid;
+  v_client_id uuid;
+BEGIN
+  SELECT c.coach_id, c.client_id INTO v_coach_id, v_client_id
+    FROM zane_coaching_threads t
+    JOIN zane_coaching c ON c.id = t.coaching_id
+   WHERE t.id = p_thread_id;
+  IF v_coach_id IS NULL OR (select auth.uid()) IS NULL
+     OR (select auth.uid()) NOT IN (v_coach_id, v_client_id) THEN
+    RAISE EXCEPTION 'Not allowed to delete this thread';
+  END IF;
+  DELETE FROM zane_coaching_notes WHERE thread_id = p_thread_id;
+  DELETE FROM zane_coaching_threads WHERE id = p_thread_id;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.delete_coaching_thread(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_coaching_thread(text) TO authenticated;
+
+-- Migration 0275: only show the current user's workouts in Friends activity
+-- after they have received workout feedback. Personal history remains separate.
+CREATE OR REPLACE FUNCTION public.social_get_workout_feed()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  RETURN jsonb_build_object(
+    'live', COALESCE((
+      SELECT jsonb_agg(row_data ORDER BY sort_at DESC)
+      FROM (
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', true, 'acceptedAt', f.accepted_at,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        s.started_at AS sort_at
+        FROM zane_social_friendships f
+        JOIN zane_social_profiles sp ON sp.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
+        JOIN zane_user_settings us ON us.user_id = sp.user_id
+        JOIN zane_sessions s ON s.id = us.in_progress_session_id AND s.user_id = sp.user_id
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL
+          AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
+          AND sp.workouts_visible AND s.ended IS NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND f.accepted_at <= COALESCE(s.started_at, s.date)
+        UNION ALL
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', true, 'acceptedAt', NULL,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        s.started_at AS sort_at
+        FROM zane_sessions s LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE s.user_id = v_uid AND s.ended IS NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND EXISTS (SELECT 1 FROM zane_social_workout_comments wc WHERE wc.session_id = s.id)
+      ) live_rows
+    ), '[]'::jsonb),
+    'history', COALESCE((
+      SELECT jsonb_agg(row_data ORDER BY sort_at DESC)
+      FROM (
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', false, 'acceptedAt', f.accepted_at,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        COALESCE(s.ended, s.date) AS sort_at
+        FROM zane_social_friendships f
+        JOIN zane_social_profiles sp ON sp.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
+        JOIN zane_sessions s ON s.user_id = sp.user_id
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL
+          AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
+          AND sp.workouts_visible AND s.ended IS NOT NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND f.accepted_at <= COALESCE(s.started_at, s.date)
+          AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
+        UNION ALL
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', false, 'acceptedAt', NULL,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        COALESCE(s.ended, s.date) AS sort_at
+        FROM zane_sessions s LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE s.user_id = v_uid AND s.ended IS NOT NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
+          AND EXISTS (SELECT 1 FROM zane_social_workout_comments wc WHERE wc.session_id = s.id)
+        ORDER BY sort_at DESC
+        LIMIT 100
+      ) history_rows
+    ), '[]'::jsonb)
+  );
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.social_get_workout_feed() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_get_workout_feed() TO authenticated;

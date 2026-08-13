@@ -11,6 +11,14 @@ const SOCIAL_INPUT_STYLE = {
   fontSize: 13, outline: 'none', userSelect: 'text', WebkitUserSelect: 'text',
 };
 
+const SOCIAL_CHEER_OPTIONS = [
+  { text: "Let's go!", emoji: '💥' },
+  { text: 'Strong set!', emoji: '💪' },
+  { text: 'Finish it!', emoji: '🙌' },
+  { text: 'You got this!', emoji: '🚀' },
+  { text: 'One more!', emoji: '🔥' },
+];
+
 function socialMetricDefinition(metric) {
   return (window.SocialMetricCatalog || []).find(item => item.key === metric) || { key: metric, label: metric };
 }
@@ -103,7 +111,7 @@ function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comm
         {live && <>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {['Let\u2019s go!', 'Strong set!', 'Finish it!'].map(text => <button key={text} onClick={() => send(text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{text}</button>)}
+            {SOCIAL_CHEER_OPTIONS.map(cheer => <button key={cheer.text} onClick={() => send(cheer.text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{cheer.text}</button>)}
           </div>
         </>}
         <div style={{ marginTop: live ? 10 : 0 }}>
@@ -235,14 +243,14 @@ function SocialWorkoutSheet({ workout, onClose }) {
           </div>
         </div>}
         <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'none', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-          <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>Â· {detail?.comments?.length || 0}</span></span>
+          <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>{'\u00b7'} {detail?.comments?.length || 0}</span></span>
           <i className={`fa-solid fa-chevron-${commentsOpen ? 'up' : 'down'}`} style={{ fontSize: 10 }} />
         </button>
         {false && commentsOpen && <div>
           {live && <>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {['Let’s go!', 'Strong set!', 'Finish it!'].map(text => <button key={text} onClick={() => send(text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{text}</button>)}
+            {SOCIAL_CHEER_OPTIONS.map(cheer => <button key={cheer.text} onClick={() => send(cheer.text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{cheer.text}</button>)}
           </div></>}
         <div>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COMMENTS</div>
@@ -266,6 +274,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
 }
 
 function FriendsScreen({ store, setStore, userId }) {
+  const [confirmEl, confirm] = useConfirm();
   const [activeTab, setActiveTab] = useStateF('circle');
   const [query, setQuery] = useStateF('');
   const [searchResult, setSearchResult] = useStateF(null);
@@ -478,6 +487,13 @@ function FriendsScreen({ store, setStore, userId }) {
       : !m.groupId && ((m.senderId === id && m.recipientId === userId) || (m.senderId === userId && m.recipientId === id));
   }).length;
 
+  const canModifyMessage = message => {
+    const createdAt = Date.parse(message?.createdAt || '');
+    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
+  };
+
+  const messageWindowError = 'Messages can only be edited or deleted within 60 minutes of sending.';
+
   useEffectF(() => {
     if (activeTab !== 'chats' || !activeChat) return;
     const unread = chatMessages.filter(m => m.senderId !== userId && !(data?.readMessageIds || []).includes(m.id));
@@ -527,6 +543,10 @@ function FriendsScreen({ store, setStore, userId }) {
   };
 
   const beginEditMessage = message => {
+    if (!canModifyMessage(message)) {
+      setError(messageWindowError);
+      return;
+    }
     setEditingMessageId(message.id);
     setEditingMessageBody(message.body === '[image]' ? '' : message.body || '');
   };
@@ -538,6 +558,11 @@ function FriendsScreen({ store, setStore, userId }) {
 
   const saveEditedMessage = async message => {
     if (messageActionBusy || !editingMessageBody.trim()) return;
+    if (!canModifyMessage(message)) {
+      setError(messageWindowError);
+      cancelEditMessage();
+      return;
+    }
     setMessageActionBusy(true);
     try {
       const updated = await LB.updateSocialMessage(message.id, userId, editingMessageBody);
@@ -554,7 +579,12 @@ function FriendsScreen({ store, setStore, userId }) {
   };
 
   const removeMessage = async message => {
-    if (messageActionBusy || !window.confirm('Delete this message?')) return;
+    if (messageActionBusy) return;
+    if (!canModifyMessage(message)) {
+      setError(messageWindowError);
+      return;
+    }
+    if (!await confirm('Delete this message?', { title: 'Delete message', ok: 'Delete', danger: true })) return;
     setMessageActionBusy(true);
     try {
       await LB.deleteSocialMessage(message.id, userId);
@@ -582,13 +612,13 @@ function FriendsScreen({ store, setStore, userId }) {
   };
 
   const leaveGroup = async group => {
-    if (!window.confirm(`Leave ${group.name}?`)) return;
+    if (!await confirm(`Leave ${group.name}?`, { title: 'Leave group', ok: 'Leave', danger: true })) return;
     await runAction(() => LB.leaveSocialGroup(group.id), 'groups');
     if (activeChat?.id === group.id) setSelectedChat(null);
   };
 
   const deleteGroup = async group => {
-    if (group.ownerId !== userId || !window.confirm(`Delete ${group.name}? This removes its members and messages.`)) return;
+    if (group.ownerId !== userId || !await confirm(`Delete ${group.name}? This removes its members and messages.`, { title: 'Delete group', ok: 'Delete', danger: true })) return;
     await runAction(() => LB.deleteSocialGroup(group.id), 'groups');
     if (activeChat?.id === group.id) setSelectedChat(null);
   };
@@ -705,7 +735,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const deletePlanShare = async share => {
     const sender = share.senderId === userId;
     const action = sender ? 'Take back' : 'Delete';
-    if (!window.confirm(`${action} this shared plan?`)) return;
+    if (!await confirm(`${action} this shared plan?`, { title: `${action} shared plan`, ok: action, danger: true })) return;
     await runAction(() => LB.deleteSocialPlanShare(share.id), 'plans');
   };
 
@@ -723,14 +753,14 @@ function FriendsScreen({ store, setStore, userId }) {
   };
 
   const blockFriend = async friend => {
-    if (!window.confirm(`Block ${friend.name || 'this user'}? This also removes the friendship.`)) return;
+    if (!await confirm(`Block ${friend.name || 'this user'}? This also removes the friendship.`, { title: 'Block friend', ok: 'Block', danger: true })) return;
     await runAction(() => LB.blockSocialUser(friend.userId));
     if (activeChat?.id === friend.userId) setSelectedChat(null);
     if (selectedFriend?.userId === friend.userId) setSelectedFriend(null);
   };
 
   const removeFriend = async friend => {
-    if (!window.confirm(`Remove ${friend.name || 'this user'} from your circle?`)) return;
+    if (!await confirm(`Remove ${friend.name || 'this user'} from your circle?`, { title: 'Remove friend', ok: 'Remove', danger: true })) return;
     await runAction(() => LB.removeSocialFriend(friend.userId));
     if (selectedFriend?.userId === friend.userId) setSelectedFriend(null);
   };
@@ -965,6 +995,7 @@ function FriendsScreen({ store, setStore, userId }) {
             {chatMessages.map(message => {
               const own = message.senderId === userId;
               const editing = editingMessageId === message.id;
+              const modifiable = own && canModifyMessage(message);
               return <div key={message.id} style={{ alignSelf: own ? 'flex-end' : 'flex-start', maxWidth: '88%', display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start' }}>
                 <div style={{ padding: '9px 11px', borderRadius: 7, background: own ? 'rgba(var(--accent-rgb),0.18)' : UI.bgRaised, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.45 }}>
                   {editing ? (
@@ -985,7 +1016,7 @@ function FriendsScreen({ store, setStore, userId }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
                   <span className="micro" style={{ color: UI.inkGhost }}>{socialTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</span>
-                  {own && !editing && <>
+                  {modifiable && !editing && <>
                     {message.body !== '[image]' && <button onClick={() => beginEditMessage(message)} disabled={messageActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
                     <button onClick={() => removeMessage(message)} disabled={messageActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
                   </>}
@@ -1129,6 +1160,7 @@ function FriendsScreen({ store, setStore, userId }) {
 
   return (
     <Screen scroll>
+      {confirmEl}
       <TopBar title="Friends" right={<span className="micro" style={{ color: UI.inkFaint }}>{friends.length} friend{friends.length === 1 ? '' : 's'}</span>} />
       <SubTabBar tabs={[{ id: 'circle', label: 'Circle', icon: 'fa-users' }, { id: 'activity', label: 'Activity', icon: 'fa-bolt' }, { id: 'chats', label: 'Chats', icon: 'fa-comment' }]} active={activeTab} onChange={setActiveTab} style={{ paddingBottom: 8 }} />
       <div style={{ padding: '0 18px 28px' }}>

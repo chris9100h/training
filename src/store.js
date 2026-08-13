@@ -6709,8 +6709,7 @@ async function getOrCreateCoachingThread(coachingId, name, userId) {
 }
 
 async function deleteCoachingThread(threadId) {
-  await _supabase.from('zane_coaching_notes').delete().eq('thread_id', threadId);
-  const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
+  const { error } = await _supabase.rpc('delete_coaching_thread', { p_thread_id: threadId });
   if (error) throw error;
 }
 

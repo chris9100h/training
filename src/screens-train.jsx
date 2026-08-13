@@ -726,6 +726,8 @@ function TrainingSocialFeedback({ sessionId, userId }) {
     if (text.includes('let') && text.includes('go')) return '💥';
     if (text.includes('strong')) return '💪';
     if (text.includes('finish')) return '🙌';
+    if (text.includes('you got')) return '🚀';
+    if (text.includes('one more')) return '🔥';
     return '🔥';
   };
 
@@ -799,7 +801,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
           )}
 
           <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.body}</div>
-          <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} Â· {toast.authorName || 'Friend'}</div>
+          <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} {'\u00b7'} {toast.authorName || 'Friend'}</div>
         </div>
       </button>,
       document.body

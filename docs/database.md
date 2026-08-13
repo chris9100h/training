@@ -254,7 +254,7 @@ Sonderfälle und RLS:
 
 - `id` (text), `coaching_id` (text), `author_id` (uuid), `thread_id` (text, nullable → references `zane_coaching_threads`), `type` (text: session|plan|general|change), `entity_id` (text, nullable), `entity_name` (text, nullable), `body` (text), `created_at` (timestamptz), `edited_at` (timestamptz, nullable), `read_at` (timestamptz, nullable)
 - `attachments` (jsonb, nullable): `[{ url, name, type }]` image attachments; uploaded to the public `chat-attachments` storage bucket; rendered as thumbnails in the ChatThread + support-ticket bubbles. Migration 0104.
-- Authors can edit or delete their own messages in coach and support threads. `edited_at` marks a changed message. Migration 0273 adds the author-only update policy while preserving the recipient's read-status update path.
+- Authors can edit or delete their own messages in coach and support threads for 60 minutes after sending. `edited_at` marks a changed message. Migration 0273 adds message editing, and migration 0274 enforces the time window. Whole-thread deletion remains a separate coach action through `delete_coaching_thread`.
 
 ### `zane_coaching_macros`
 
@@ -788,7 +788,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 - `body` (text, required, max 4000 characters)
 - `created_at` (timestamptz), `edited_at` (timestamptz, nullable)
 - Exactly one of `recipient_id` or `group_id` is set. RLS limits rows to the sender, direct recipient, or group member.
-- Senders can edit or delete their own messages. Edited rows carry `edited_at`; attachments remain participant-scoped. Migration 0273.
+- Senders can edit or delete their own messages for 60 minutes after sending. Edited rows carry `edited_at`; attachments remain participant-scoped. `zane_social_messages_guard_update` prevents protected fields, including `created_at`, from being changed. Migrations 0273 and 0274.
 
 ### `zane_social_message_attachments`
 
@@ -825,6 +825,6 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 ### Social RPCs
 
-`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; in the feed, the current user's own live or finished workouts appear only after at least one workout comment exists. Its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
 
 The social relationship, group, membership, message, attachment, plan-share and workout-comment tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.

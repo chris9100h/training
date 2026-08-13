@@ -262,6 +262,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
 // Single named thread, message bubbles + compose input.
 
 function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack, setStore }) {
+  const [confirmEl, confirm] = useConfirm();
   const [notes, setNotes] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
   const [loadErr, setLoadErr] = useStateC(false);
@@ -274,6 +275,13 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [editingNoteBody, setEditingNoteBody] = useStateC('');
   const [noteActionBusy, setNoteActionBusy] = useStateC(false);
   const bottomRef = useRefC(null);
+
+  const canModifyNote = note => {
+    const createdAt = Date.parse(note?.createdAt || '');
+    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
+  };
+
+  const noteWindowError = 'Messages can only be edited or deleted within 60 minutes of sending.';
 
   const attachImageFile = (file) => {
     if (!file) return;
@@ -383,6 +391,10 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   };
 
   const beginEditNote = note => {
+    if (!canModifyNote(note)) {
+      UI.alert(noteWindowError);
+      return;
+    }
     setEditingNoteId(note.id);
     setEditingNoteBody(note.body || '');
   };
@@ -394,6 +406,11 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 
   const saveEditedNote = async note => {
     if (noteActionBusy || !editingNoteBody.trim()) return;
+    if (!canModifyNote(note)) {
+      UI.alert(noteWindowError);
+      cancelEditNote();
+      return;
+    }
     setNoteActionBusy(true);
     try {
       const updated = await LB.updateCoachingNote(note.id, userId, editingNoteBody);
@@ -407,7 +424,12 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   };
 
   const removeNote = async note => {
-    if (noteActionBusy || !window.confirm('Delete this message?')) return;
+    if (noteActionBusy) return;
+    if (!canModifyNote(note)) {
+      UI.alert(noteWindowError);
+      return;
+    }
+    if (!await confirm('Delete this message?', { title: 'Delete message', ok: 'Delete', danger: true })) return;
     setNoteActionBusy(true);
     try {
       await LB.deleteCoachingNote(note.id, userId);
@@ -422,6 +444,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 
   return (
     <>
+      {confirmEl}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
         <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
@@ -436,6 +459,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         ) : notes.map(n => {
           const isMe = n.authorId === userId;
           const editing = editingNoteId === n.id;
+          const modifiable = isMe && canModifyNote(n);
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}`, textShadow: 'none' }}>
@@ -460,7 +484,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
               <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '3px 4px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}{n.editedAt ? ' · edited' : ''}
               </div>
-              {isMe && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+              {modifiable && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                 {n.body && <button onClick={() => beginEditNote(n)} disabled={noteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
                 <button onClick={() => removeNote(n)} disabled={noteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
               </div>}
