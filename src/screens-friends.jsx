@@ -19,6 +19,13 @@ const SOCIAL_CHEER_OPTIONS = [
   { text: 'One more!', emoji: '🔥' },
 ];
 
+const SOCIAL_METRIC_GROUP_TIMEFRAMES = {
+  Activity: 'WEEK TO DATE · ADHERENCE THROUGH YESTERDAY',
+  Nutrition: 'WEEKLY AVERAGE · THROUGH YESTERDAY',
+  Body: 'LATEST READING',
+  Vitals: 'LATEST READING',
+};
+
 function socialMetricDefinition(metric) {
   return (window.SocialMetricCatalog || []).find(item => item.key === metric) || { key: metric, label: metric };
 }
@@ -292,6 +299,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const [joinCode, setJoinCode] = useStateF('');
   const [groupBusy, setGroupBusy] = useStateF(false);
   const [copiedGroupId, setCopiedGroupId] = useStateF(null);
+  const [planRecipientType, setPlanRecipientType] = useStateF('friend');
   const [planRecipientId, setPlanRecipientId] = useStateF('');
   const [planId, setPlanId] = useStateF(store.activeScheduleId || store.schedules?.[0]?.id || '');
   const [planBusy, setPlanBusy] = useStateF(false);
@@ -663,7 +671,11 @@ function FriendsScreen({ store, setStore, userId }) {
       }));
       const exercises = (store.exercises || []).filter(ex => exerciseIds.has(ex.id));
       const snapshot = { type: 'zane-plan', version: 1, schedule, exercises };
-      await LB.createSocialPlanShare(planRecipientId, activeSchedule.name || 'Shared plan', snapshot);
+      if (planRecipientType === 'group') {
+        await LB.createSocialGroupPlanShare(planRecipientId, activeSchedule.name || 'Shared plan', snapshot);
+      } else {
+        await LB.createSocialPlanShare(planRecipientId, activeSchedule.name || 'Shared plan', snapshot);
+      }
       await reload();
       setPlanRecipientId('');
     } catch (e) {
@@ -1130,33 +1142,60 @@ function FriendsScreen({ store, setStore, userId }) {
     );
   };
 
-  const renderPlans = () => (
-    <>
-      <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
-      <Card style={{ marginBottom: 12 }}>
-        <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>SHARE A PLAN SNAPSHOT</div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, marginBottom: 10 }}>Sharing creates an immutable copy. Later edits to your plan do not change the version your friend receives.</div>
-        <select value={planId} onChange={e => setPlanId(e.target.value)} style={{ ...SOCIAL_INPUT_STYLE, marginBottom: 8 }}>
-          {(store.schedules || []).filter(s => !s.archived).map(schedule => <option key={schedule.id} value={schedule.id}>{schedule.name}</option>)}
-        </select>
-        <div style={{ display: 'flex', gap: 8 }}><select value={planRecipientId} onChange={e => setPlanRecipientId(e.target.value)} style={{ ...SOCIAL_INPUT_STYLE, flex: 1 }}><option value="">Choose a friend</option>{friends.map(friend => <option key={friend.userId} value={friend.userId}>{friend.name || friend.handle || friend.friendCode}</option>)}</select><Btn onClick={sendPlan} disabled={planBusy || !planRecipientId || !activeSchedule} style={{ padding: '10px 11px', minHeight: 0, fontSize: 10 }}>{planBusy ? '...' : 'Share'}</Btn></div>
-      </Card>
-      <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>RECEIVED SNAPSHOTS</div>
-      {planShares.filter(share => share.recipientId === userId).length === 0 ? <Empty title="No shared plans" sub="Plans your friends send will appear here." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{planShares.filter(share => share.recipientId === userId).map(share => {
-        const sender = friendById(share.senderId);
-        return <Card key={share.id} style={{ padding: 13 }}><div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><div style={{ flex: 1 }}><div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>{share.planName}</div><div className="micro" style={{ marginTop: 3 }}>From {sender?.name || 'Friend'} · {socialDate(share.createdAt)}</div></div>{share.importedAt ? <span className="micro" style={{ color: UI.gold }}>Imported</span> : <Btn onClick={() => importPlan(share)} style={{ padding: '8px 10px', minHeight: 0, fontSize: 10 }}>Import</Btn>}</div></Card>;
-      })}</div>}
-       {planShares.filter(share => share.senderId === userId).length > 0 && <div className="micro" style={{ color: UI.inkFaint, marginTop: 14 }}>Sent snapshots remain immutable and are shown here for your record.</div>}
-       {planShares.length > 0 && <>
-         <div className="micro" style={{ color: UI.gold, margin: '18px 0 8px' }}>MANAGE SHARES</div>
-         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>{planShares.map(share => {
-           const own = share.senderId === userId;
-           const person = friendById(own ? share.recipientId : share.senderId);
-           return <div key={`manage-${share.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{share.planName}</div><div className="micro" style={{ marginTop: 2 }}>{own ? 'To' : 'From'} {person?.name || 'Friend'} · {socialDate(share.createdAt)}</div></div><button onClick={() => deletePlanShare(share)} style={{ padding: '6px 8px', borderRadius: 4, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, background: own ? UI.goldFaint : 'transparent', color: own ? UI.gold : UI.danger, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>{own ? 'Take back' : 'Delete'}</button></div>;
-         })}</div>
-       </>}
-    </>
-  );
+  const renderPlans = () => {
+    const receivedShares = planShares.filter(share => share.senderId !== userId && (
+      share.recipientId === userId || (share.groupId && groupById(share.groupId))
+    ));
+    const sentShares = planShares.filter(share => share.senderId === userId);
+    const shareSenderName = share => {
+      const friend = friendById(share.senderId);
+      const member = share.groupId && groupMembers.find(item => item.groupId === share.groupId && item.userId === share.senderId);
+      return friend?.name || member?.name || (share.senderId === userId ? 'You' : 'Group member');
+    };
+    const shareTargetLabel = share => {
+      if (share.groupId) return `group ${groupById(share.groupId)?.name || 'group'}`;
+      const otherId = share.senderId === userId ? share.recipientId : share.senderId;
+      return otherId === userId ? 'You' : (friendById(otherId)?.name || 'Friend');
+    };
+    return (
+      <>
+        <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
+        <Card style={{ marginBottom: 12 }}>
+          <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>SHARE A PLAN SNAPSHOT</div>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, marginBottom: 10 }}>Sharing creates an immutable copy. Later edits to your plan do not change the version your friend or group receives.</div>
+          <select value={planId} onChange={e => setPlanId(e.target.value)} style={{ ...SOCIAL_INPUT_STYLE, marginBottom: 8 }}>
+            {(store.schedules || []).filter(s => !s.archived).map(schedule => <option key={schedule.id} value={schedule.id}>{schedule.name}</option>)}
+          </select>
+          <div style={{ display: 'flex', gap: 7, marginBottom: 8 }}>
+            {['friend', 'group'].map(type => <button key={type} type="button" onClick={() => { setPlanRecipientType(type); setPlanRecipientId(''); }} style={{ flex: 1, padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${planRecipientType === type ? UI.goldSoft : UI.hairStrong}`, background: planRecipientType === type ? UI.goldFaint : 'transparent', color: planRecipientType === type ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{type}</button>)}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select value={planRecipientId} onChange={e => setPlanRecipientId(e.target.value)} style={{ ...SOCIAL_INPUT_STYLE, flex: 1 }}>
+              <option value="">Choose a {planRecipientType}</option>
+              {planRecipientType === 'friend'
+                ? friends.map(friend => <option key={friend.userId} value={friend.userId}>{friend.name || friend.handle || friend.friendCode}</option>)
+                : groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+            <Btn onClick={sendPlan} disabled={planBusy || !planRecipientId || !activeSchedule} style={{ padding: '10px 11px', minHeight: 0, fontSize: 10 }}>{planBusy ? '...' : 'Share'}</Btn>
+          </div>
+        </Card>
+        <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>RECEIVED SNAPSHOTS</div>
+        {receivedShares.length === 0 ? <Empty title="No shared plans" sub="Plans your friends or groups send will appear here." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{receivedShares.map(share => {
+          const group = share.groupId && groupById(share.groupId);
+          return <Card key={share.id} style={{ padding: 13 }}><div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><div style={{ flex: 1 }}><div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>{share.planName}</div><div className="micro" style={{ marginTop: 3 }}>{group ? `From ${shareSenderName(share)} in ${group.name}` : `From ${shareSenderName(share)}`} · {socialDate(share.createdAt)}</div></div>{share.importedAt ? <span className="micro" style={{ color: UI.gold }}>Imported</span> : <Btn onClick={() => importPlan(share)} style={{ padding: '8px 10px', minHeight: 0, fontSize: 10 }}>Import</Btn>}</div></Card>;
+        })}</div>}
+        {sentShares.length > 0 && <div className="micro" style={{ color: UI.inkFaint, marginTop: 14 }}>Sent snapshots remain immutable and are shown here for your record.</div>}
+        {planShares.length > 0 && <>
+          <div className="micro" style={{ color: UI.gold, margin: '18px 0 8px' }}>MANAGE SHARES</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>{planShares.map(share => {
+            const own = share.senderId === userId;
+            const canDelete = own || !share.groupId;
+            return <div key={`manage-${share.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{share.planName}</div><div className="micro" style={{ marginTop: 2 }}>{own ? 'To' : 'From'} {shareTargetLabel(share)} · {socialDate(share.createdAt)}</div></div>{canDelete && <button onClick={() => deletePlanShare(share)} style={{ padding: '6px 8px', borderRadius: 4, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, background: own ? UI.goldFaint : 'transparent', color: own ? UI.gold : UI.danger, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>{own ? 'Take back' : 'Delete'}</button>}</div>;
+          })}</div>
+        </>}
+      </>
+    );
+  };
 
   return (
     <Screen scroll>
@@ -1198,7 +1237,10 @@ function FriendsScreen({ store, setStore, userId }) {
             {sharedMetrics.length === 0
               ? <div style={{ padding: 12, borderRadius: 5, background: UI.bgInset, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>This friend is not sharing health metrics yet.</div>
               : [...new Set(sharedMetrics.map(metric => metric.group))].map(group => <div key={group}>
-                <div className="micro" style={{ color: UI.gold, fontWeight: 700, marginBottom: 7 }}>{group.toUpperCase()}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 7 }}>
+                  <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{group.toUpperCase()}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{SOCIAL_METRIC_GROUP_TIMEFRAMES[group] || 'CURRENT'}</div>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7 }}>
                   {sharedMetrics.filter(metric => metric.group === group).map(metric => {
                     const value = socialFriendMetricValue(selectedFriend, metric.key);

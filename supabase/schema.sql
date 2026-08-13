@@ -3589,12 +3589,20 @@ CREATE TABLE public.zane_social_message_reads (
 CREATE TABLE public.zane_social_plan_shares (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sender_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  recipient_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  recipient_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  group_id uuid REFERENCES public.zane_social_groups(id) ON DELETE CASCADE,
   plan_name text NOT NULL CHECK (char_length(trim(plan_name)) BETWEEN 1 AND 120),
   snapshot jsonb NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
   created_at timestamptz NOT NULL DEFAULT now(),
   imported_at timestamptz,
-  CONSTRAINT zane_social_plan_shares_not_self CHECK (sender_id <> recipient_id)
+  CONSTRAINT zane_social_plan_shares_target_check CHECK ((recipient_id IS NOT NULL AND group_id IS NULL) OR (recipient_id IS NULL AND group_id IS NOT NULL))
+);
+
+CREATE TABLE public.zane_social_plan_share_imports (
+  share_id uuid NOT NULL REFERENCES public.zane_social_plan_shares(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  imported_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (share_id, user_id)
 );
 
 CREATE TABLE public.zane_social_reports (
@@ -3897,6 +3905,25 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.social_create_group_plan_share(p_group_id uuid, p_plan_name text, p_snapshot jsonb)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_id uuid;
+BEGIN
+  IF auth.uid() IS NULL OR p_group_id IS NULL THEN RAISE EXCEPTION 'Invalid group'; END IF;
+  IF char_length(trim(coalesce(p_plan_name, ''))) = 0 THEN RAISE EXCEPTION 'Plan name required'; END IF;
+  IF NOT public.social_is_group_member(p_group_id, auth.uid()) THEN RAISE EXCEPTION 'Group members only'; END IF;
+  IF p_snapshot IS NULL OR jsonb_typeof(p_snapshot) <> 'object' OR octet_length(p_snapshot::text) > 100000 THEN RAISE EXCEPTION 'Invalid plan snapshot'; END IF;
+  INSERT INTO zane_social_plan_shares (sender_id, group_id, plan_name, snapshot)
+  VALUES (auth.uid(), p_group_id, trim(p_plan_name), p_snapshot)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.social_update_profile(
   p_handle text,
   p_steps_visible boolean,
@@ -3940,11 +3967,16 @@ CREATE OR REPLACE FUNCTION public.social_mark_plan_imported(p_share_id uuid)
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE v_uid uuid := auth.uid();
 BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM zane_social_plan_shares s WHERE s.id = p_share_id AND (s.recipient_id = v_uid OR (s.group_id IS NOT NULL AND public.social_is_group_member(s.group_id, v_uid)))) THEN RAISE EXCEPTION 'Plan share not found'; END IF;
+  INSERT INTO zane_social_plan_share_imports (share_id, user_id)
+  VALUES (p_share_id, v_uid)
+  ON CONFLICT (share_id, user_id) DO NOTHING;
   UPDATE zane_social_plan_shares
   SET imported_at = coalesce(imported_at, now())
-  WHERE id = p_share_id AND recipient_id = auth.uid();
+  WHERE id = p_share_id AND recipient_id = v_uid;
 END;
 $function$;
 
@@ -3959,7 +3991,7 @@ DECLARE
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
   DELETE FROM zane_social_plan_shares
-  WHERE id = p_share_id AND (sender_id = v_uid OR recipient_id = v_uid);
+  WHERE id = p_share_id AND (sender_id = v_uid OR (group_id IS NULL AND recipient_id = v_uid));
   IF NOT FOUND THEN RAISE EXCEPTION 'Plan share not found'; END IF;
 END;
 $function$;
@@ -3989,6 +4021,7 @@ ALTER TABLE public.zane_social_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_message_attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_message_reads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_plan_shares ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_social_plan_share_imports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_reports ENABLE ROW LEVEL SECURITY;
 
 -- Profile and relationship changes flow through the guarded RPCs. Direct
@@ -4037,20 +4070,21 @@ CREATE POLICY "social attachment own insert" ON public.zane_social_message_attac
 CREATE POLICY "social attachment own delete" ON public.zane_social_message_attachments FOR DELETE TO authenticated USING (uploaded_by = (select auth.uid()));
 
 CREATE POLICY "social own message reads" ON public.zane_social_message_reads FOR ALL TO authenticated USING (user_id = (select auth.uid())) WITH CHECK (user_id = (select auth.uid()));
-CREATE POLICY "social plan share read" ON public.zane_social_plan_shares FOR SELECT TO authenticated USING (sender_id = (select auth.uid()) OR recipient_id = (select auth.uid()));
+CREATE POLICY "social plan share read" ON public.zane_social_plan_shares FOR SELECT TO authenticated USING (sender_id = (select auth.uid()) OR recipient_id = (select auth.uid()) OR (group_id IS NOT NULL AND public.social_is_group_member(group_id, (select auth.uid()))));
+CREATE POLICY "social plan share imports read" ON public.zane_social_plan_share_imports FOR SELECT TO authenticated USING (user_id = (select auth.uid()));
 CREATE POLICY "social reports own read" ON public.zane_social_reports FOR SELECT TO authenticated USING (reporter_id = (select auth.uid()));
 CREATE POLICY "social reports own insert" ON public.zane_social_reports FOR INSERT TO authenticated WITH CHECK (reporter_id = (select auth.uid()));
 CREATE POLICY "social reports admin read" ON public.zane_social_reports FOR SELECT TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz');
 
 -- Explicit Data API grants. The project may have automatic exposure disabled.
-GRANT SELECT ON public.zane_social_friendships, public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_reports, public.zane_social_blocks TO authenticated;
+GRANT SELECT ON public.zane_social_friendships, public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_plan_share_imports, public.zane_social_reports, public.zane_social_blocks TO authenticated;
 GRANT INSERT ON public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_reports TO authenticated;
 GRANT UPDATE, DELETE ON public.zane_social_messages TO authenticated;
 GRANT UPDATE ON public.zane_social_message_reads TO authenticated;
 GRANT DELETE ON public.zane_social_message_attachments, public.zane_social_message_reads TO authenticated;
 
 REVOKE ALL ON public.zane_social_profiles FROM anon, authenticated;
-REVOKE ALL ON public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_reports FROM anon;
+REVOKE ALL ON public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_plan_share_imports, public.zane_social_reports FROM anon;
 
 REVOKE EXECUTE ON FUNCTION public.social_lookup_profile(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_lookup_profile(text) TO authenticated;
@@ -4074,6 +4108,8 @@ REVOKE EXECUTE ON FUNCTION public.social_delete_group(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_delete_group(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean) FROM PUBLIC, anon;

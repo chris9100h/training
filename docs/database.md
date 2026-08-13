@@ -805,10 +805,16 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 ### `zane_social_plan_shares`
 
-- `id` (uuid, primary key), `sender_id`, `recipient_id` (uuid)
+- `id` (uuid, primary key), `sender_id`, `recipient_id` (uuid, nullable), `group_id` (uuid, nullable)
 - `plan_name` (text), `snapshot` (jsonb immutable plan copy)
 - `created_at`, `imported_at` (timestamptz, nullable)
-- Sharing is restricted to accepted friends. Import creates a new local schedule and carries the referenced exercise-library rows with it; the original snapshot is unchanged. Either participant can delete the share row: the sender sees this as taking the share back, while the receiver can remove it after import.
+- A share targets either one accepted friend or a group. Group membership controls visibility and each member has an independent import marker. Import creates a new local schedule and carries the referenced exercise-library rows with it; the original snapshot is unchanged. The sender can take a share back; direct recipients can remove direct shares after import.
+
+### `zane_social_plan_share_imports`
+
+- `share_id`, `user_id` (uuid, composite primary key)
+- `imported_at` (timestamptz)
+- Stores the import state separately for each member who receives a group plan share.
 
 ### `zane_social_reports`
 
@@ -825,6 +831,6 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 ### Social RPCs
 
-`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; in the feed, the current user's own live or finished workouts appear only after at least one workout comment exists. Its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_create_group_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; in the feed, the current user's own live or finished workouts appear only after at least one workout comment exists. Its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
 
 The social relationship, group, membership, message, attachment, plan-share and workout-comment tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.

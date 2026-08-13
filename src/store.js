@@ -5910,17 +5910,18 @@ async function loadFriendsStateUncached(userId, weekStart) {
     }),
   ]);
   if (dashboardRes.error) throw dashboardRes.error;
-  const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes] = await Promise.all([
+  const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await Promise.all([
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
     _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
     _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').order('created_at', { ascending: false }).limit(300),
     _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at'),
     _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
-    _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
+    _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
+    _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
   ]);
   // Attachments are optional decoration for messages. Keep the message rows
   // usable if signed-url metadata is briefly unavailable.
-  const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes].find(r => r?.error)?.error;
+  const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes, shareImportsRes].find(r => r?.error)?.error;
   if (firstError) throw firstError;
   if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
   const attachments = await Promise.all((attachmentsRes.data || []).map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
@@ -5938,9 +5939,11 @@ async function loadFriendsStateUncached(userId, weekStart) {
       steps: metrics.steps ?? null, workouts: metrics.workouts ?? null, adherence: metrics.adherence ?? null,
     };
   });
+  const importedShares = new Map((shareImportsRes.data || []).map(s => [s.share_id, s.imported_at]));
   const planShares = (sharesRes.data || []).map(s => ({
     id: s.id, senderId: s.sender_id, recipientId: s.recipient_id, planName: s.plan_name,
-    snapshot: s.snapshot, createdAt: s.created_at, importedAt: s.imported_at ?? null,
+    groupId: s.group_id ?? null, snapshot: s.snapshot, createdAt: s.created_at,
+    importedAt: importedShares.get(s.id) || (s.recipient_id === userId ? s.imported_at : null),
   }));
   const dashboard = dashboardRes.data || {};
   return {
@@ -6120,6 +6123,14 @@ async function uploadSocialAttachment(file, userId, messageId) {
 async function createSocialPlanShare(recipientId, planName, snapshot) {
   const { data, error } = await _supabase.rpc('social_create_plan_share', {
     p_recipient_id: recipientId, p_plan_name: planName, p_snapshot: snapshot,
+  });
+  if (error) throw error;
+  return data;
+}
+
+async function createSocialGroupPlanShare(groupId, planName, snapshot) {
+  const { data, error } = await _supabase.rpc('social_create_group_plan_share', {
+    p_group_id: groupId, p_plan_name: planName, p_snapshot: snapshot,
   });
   if (error) throw error;
   return data;
@@ -11439,7 +11450,7 @@ window.LB = {
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
-  uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
+  uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
