@@ -43,6 +43,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
   const [error, setError] = useStateF('');
   const [comment, setComment] = useStateF('');
   const [sending, setSending] = useStateF(false);
+  const [commentsOpen, setCommentsOpen] = useStateF(false);
 
   const load = async () => {
     try {
@@ -103,9 +104,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
           <div style={{ height: 6, borderRadius: 99, background: UI.bgInset, overflow: 'hidden', marginTop: 10 }}>
             <div style={{ height: '100%', width: `${Math.round(progress * 100)}%`, background: UI.gold, transition: 'width .25s ease' }} />
           </div>
-          <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>
-            {live ? 'Live progress refreshes automatically.' : 'Workout history starts from the day you became friends.'}
-          </div>
+          {live && <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>Live progress refreshes automatically.</div>}
         </Card>
         {loading && !detail && <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: 16 }}>LOADING WORKOUT…</div>}
         {error && <div style={{ padding: '9px 11px', borderRadius: 5, background: 'rgba(var(--danger-rgb),0.10)', border: `var(--hair-width) solid rgba(var(--danger-rgb),0.3)`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 12 }}>{error}</div>}
@@ -129,12 +128,16 @@ function SocialWorkoutSheet({ workout, onClose }) {
             })}
           </div>
         </div>}
-        <div>
+        <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+          <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>Â· {detail?.comments?.length || 0}</span></span>
+          <i className={`fa-solid fa-chevron-${commentsOpen ? 'up' : 'down'}`} style={{ fontSize: 10 }} />
+        </button>
+        {commentsOpen && <div>
+          {live && <>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {['Let’s go!', 'Strong set!', 'Finish it!'].map(text => <button key={text} onClick={() => send(text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{text}</button>)}
-          </div>
-        </div>
+          </div></>}
         <div>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COMMENTS</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 220, overflowY: 'auto', marginBottom: 8 }}>
@@ -149,6 +152,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
             <Btn onClick={() => send(comment)} disabled={sending || !comment.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>{sending ? '...' : 'Send'}</Btn>
           </div>
         </div>
+        </div>}
       </div>
     </Sheet>
   );

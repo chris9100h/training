@@ -721,6 +721,14 @@ function TrainingSocialFeedback({ sessionId, userId }) {
   const seenRef = useRefT(new Set());
   const toastTimerRef = useRefT(null);
 
+  const cheerEmoji = body => {
+    const text = String(body || '').toLowerCase();
+    if (text.includes('let') && text.includes('go')) return '💥';
+    if (text.includes('strong')) return '💪';
+    if (text.includes('finish')) return '🙌';
+    return '🔥';
+  };
+
   useEffectT(() => {
     let live = true;
     let seeded = false;
@@ -740,7 +748,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
             const latest = fresh[fresh.length - 1];
             setToast(latest);
             window.clearTimeout(toastTimerRef.current);
-            toastTimerRef.current = window.setTimeout(() => setToast(null), 5000);
+            toastTimerRef.current = window.setTimeout(() => setToast(null), 5500);
           }
         }
         setComments(next);
@@ -759,41 +767,50 @@ function TrainingSocialFeedback({ sessionId, userId }) {
     };
   }, [sessionId, userId]);
 
-  const openComments = () => {
+  const dismissToast = () => {
+    window.clearTimeout(toastTimerRef.current);
     setToast(null);
+  };
+
+  const openComments = () => {
+    dismissToast();
     setOpen(true);
   };
 
   return <>
     {toast && ReactDOM.createPortal(
-      <button onClick={openComments} style={{
-        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 58px)', left: 12, right: 12, zIndex: 140,
-        display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', borderRadius: 7,
-        border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
-        background: toast.kind === 'cheer' ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.28), rgba(24,22,29,0.96))' : UI.bgRaised,
-        color: UI.ink, textAlign: 'left', cursor: 'pointer', boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+      <button type="button" onClick={dismissToast} aria-label="Dismiss social feedback" style={{
+        position: 'fixed', inset: 0, zIndex: 180, padding: 16, border: 'none',
+        background: 'rgba(6,5,8,0.58)', color: UI.ink, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'improvedFade 5.5s ease forwards', WebkitTapHighlightColor: 'transparent',
       }}>
-        <span style={{ width: 30, height: 30, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '50%', background: toast.kind === 'cheer' ? UI.goldFaint : UI.bgInset, color: UI.gold }}>
-          <i className={`fa-solid ${toast.kind === 'cheer' ? 'fa-bullhorn' : 'fa-comment'}`} />
-        </span>
-        <span style={{ minWidth: 0, flex: 1 }}>
-          <span className="micro" style={{ display: 'block', color: UI.gold }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} · {toast.authorName || 'Friend'}</span>
-          <span style={{ display: 'block', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>{toast.body}</span>
-        </span>
+        <div className={toast.kind === 'cheer' ? 'intensity-glow-raw' : ''} style={{
+          width: 'min(100%, 320px)', boxSizing: 'border-box', padding: '28px 22px 25px',
+          borderRadius: 10, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
+          background: toast.kind === 'cheer' ? 'linear-gradient(145deg, rgba(var(--accent-rgb),0.26), rgba(24,22,29,0.98))' : UI.bgRaised,
+          boxShadow: toast.kind === 'cheer' ? undefined : '0 8px 32px rgba(0,0,0,0.45)',
+          textAlign: 'center', animation: 'fadeUp 0.7s ease both',
+        }}>
+          {toast.kind === 'cheer' ? (
+            <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 17 }}>{cheerEmoji(toast.body)}</div>
+          ) : (
+            <i className="fa-solid fa-comment" style={{ display: 'block', color: UI.inkSoft, fontSize: 36, marginBottom: 18 }} />
+          )}
+
+          <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.body}</div>
+          <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} Â· {toast.authorName || 'Friend'}</div>
+        </div>
       </button>,
       document.body
     )}
-    {!toast && comments.length > 0 && ReactDOM.createPortal(
-      <button onClick={openComments} style={{
-        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 58px)', right: 12, zIndex: 135,
-        display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', borderRadius: 999,
-        border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised, color: UI.inkSoft,
-        fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer', boxShadow: '0 5px 18px rgba(0,0,0,0.25)',
-      }}>
-        <i className="fa-solid fa-comment" style={{ color: UI.gold }} /> {comments.length}
-      </button>,
-      document.body
-    )}
+    {comments.length > 0 && <button type="button" onClick={openComments} aria-label={`View ${comments.length} training comments`} style={{
+      padding: '6px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap',
+      WebkitTapHighlightColor: 'transparent',
+    }}>
+      <i className="fa-solid fa-comment" style={{ color: UI.gold, marginRight: 5 }} /> {comments.length}
+    </button>}
     <Sheet open={open} onClose={() => setOpen(false)} title="Training feedback">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {!comments.length && <div className="micro" style={{ color: UI.inkFaint }}>No feedback yet.</div>}
@@ -6510,7 +6527,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   return (
     <Screen scroll={false}>
-      <TrainingSocialFeedback sessionId={sessionId} userId={userId} />
       {/* Gold screen flash overlay. NOTE: these full-screen flashes are portaled
           to <body> so they cover the WHOLE screen (incl. behind the status bar).
           Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
@@ -8024,6 +8040,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </button>
             )}
             <div style={{ flex: 1 }} />
+            <TrainingSocialFeedback sessionId={sessionId} userId={userId} />
             <button onClick={() => { if (entry.note) { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); } else { setNotePicker(true); } }} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,

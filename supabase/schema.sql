@@ -4211,6 +4211,22 @@ BEGIN
           AND s.ended IS NULL
           AND COALESCE(s.started_at, s.date) IS NOT NULL
           AND f.accepted_at <= COALESCE(s.started_at, s.date)
+        UNION ALL
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', true, 'acceptedAt', NULL,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        s.started_at AS sort_at
+        FROM zane_sessions s
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE s.user_id = v_uid
+          AND s.ended IS NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
       ) live_rows
     ), '[]'::jsonb),
     'history', COALESCE((
@@ -4238,6 +4254,23 @@ BEGIN
           AND s.ended IS NOT NULL
           AND COALESCE(s.started_at, s.date) IS NOT NULL
           AND f.accepted_at <= COALESCE(s.started_at, s.date)
+          AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
+        UNION ALL
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', false, 'acceptedAt', NULL,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        COALESCE(s.ended, s.date) AS sort_at
+        FROM zane_sessions s
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE s.user_id = v_uid
+          AND s.ended IS NOT NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
           AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
         ORDER BY COALESCE(s.ended, s.date) DESC
         LIMIT 100
