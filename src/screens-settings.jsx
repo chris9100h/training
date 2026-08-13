@@ -105,6 +105,72 @@ function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
 }
 
+function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, saving, onToggleMetric }) {
+  const groups = [...new Set(catalog.map(metric => metric.group))];
+  const [openGroups, setOpenGroups] = useStateSet({ Activity: true });
+
+  const toggleGroup = group => setOpenGroups(current => ({ ...current, [group]: !current[group] }));
+  const sharedCount = catalog.filter(metric => !!profile?.metricVisibility?.[metric.key]).length;
+
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="Metric sharing">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
+          Choose which health values your friends can see. Shared values are summaries or the latest reading, never notes or exact reading times.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+          <div className="micro" style={{ color: UI.gold }}>SHARED METRICS</div>
+          <div className="micro" style={{ color: UI.inkFaint }}>{sharedCount} of {catalog.length} enabled</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {groups.map(group => {
+            const metrics = catalog.filter(metric => metric.group === group);
+            const groupSharedCount = metrics.filter(metric => !!profile?.metricVisibility?.[metric.key]).length;
+            const expanded = !!openGroups[group];
+            return (
+              <div key={group} style={{ border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 7, background: UI.bgInset, overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group)}
+                  aria-expanded={expanded}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 14px', background: 'none', border: 'none', color: UI.ink, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{group.toUpperCase()}</span>
+                    <span style={{ display: 'block', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, marginTop: 3 }}>{groupSharedCount} of {metrics.length} enabled</span>
+                  </span>
+                  <i className={`fa-solid fa-chevron-${expanded ? 'up' : 'down'}`} aria-hidden="true" style={{ color: UI.inkFaint, fontSize: 11, flexShrink: 0 }} />
+                </button>
+                {expanded && (
+                  <div style={{ padding: '0 14px 8px' }}>
+                    <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }} />
+                    {metrics.map(metric => {
+                      const visible = !!profile?.metricVisibility?.[metric.key];
+                      return (
+                        <div key={metric.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
+                          <div style={{ minWidth: 0 }}>
+                            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{metric.label}</span>
+                            {metric.sensitive && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 6 }}>SENSITIVE</span>}
+                          </div>
+                          <Toggle on={visible} label={metric.label} disabled={saving} onToggle={() => onToggleMetric(metric)} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {message && <div style={{ marginTop: 12, color: message.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{message.text}</div>}
+        <div style={{ marginTop: 24 }}>
+          <Btn style={{ width: '100%' }} onClick={onClose}>Done</Btn>
+        </div>
+      </div>
+    </SettingsSheet>
+  );
+}
+
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
@@ -620,6 +686,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [friendsSheet, setFriendsSheet] = useStateSet(false);
+  const [friendsSharingSheet, setFriendsSharingSheet] = useStateSet(false);
   const [socialProfileDraft, setSocialProfileDraft] = useStateSet(null);
   const [socialProfileSaving, setSocialProfileSaving] = useStateSet(false);
   const [socialProfileMsg, setSocialProfileMsg] = useStateSet(null);
@@ -937,7 +1004,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // never opened.
   const swVersion = store.settings?.swVersion || '';
   const socialMetricCatalog = LB.socialMetricCatalog || [];
-  const socialMetricGroups = [...new Set(socialMetricCatalog.map(metric => metric.group))];
 
   useEffectSet(() => {
     if (!accountSheet) return;
@@ -988,6 +1054,26 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     } finally {
       setSocialProfileSaving(false);
     }
+  };
+
+  const toggleSocialMetric = metric => {
+    if (!socialProfileDraft) return;
+    const visible = !!socialProfileDraft.metricVisibility?.[metric.key];
+    const nextVisibility = { ...(socialProfileDraft.metricVisibility || {}), [metric.key]: !visible };
+    const next = {
+      ...socialProfileDraft,
+      metricVisibility: nextVisibility,
+      ...(metric.key === 'steps' ? { stepsVisible: !visible } : {}),
+      ...(metric.key === 'workouts' ? { workoutsVisible: !visible } : {}),
+      ...(metric.key === 'adherence' ? { adherenceVisible: !visible } : {}),
+    };
+    setSocialProfileDraft(next);
+    saveSocialProfile(next);
+  };
+
+  const closeFriendsSettings = () => {
+    setFriendsSharingSheet(false);
+    setFriendsSheet(false);
   };
 
   const saveXHandle = () => {
@@ -2425,7 +2511,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           toggleable sub-categories. Each has its OWN "Show tab" switch (see
           each sub-sheet below) instead of one bundled switch that used to
           turn Health, Water and Food on or off together. ══ */}
-      <SettingsSheet open={friendsSheet} onClose={() => setFriendsSheet(false)} title="Friends">
+      <SettingsSheet open={friendsSheet} onClose={closeFriendsSettings} title="Friends">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Friends tab" first>
             <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => patchSettings({ showFriendsTab: !store.settings?.showFriendsTab })} />
@@ -2458,44 +2544,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: 10 }}>
               Use your handle or friend code to connect. Metric sharing is opt-in and can be changed here any time.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 17, marginTop: 14 }}>
-              {socialMetricGroups.map(group => <div key={group}>
-                <div className="micro" style={{ color: UI.gold, fontWeight: 700, marginBottom: 8 }}>{group.toUpperCase()}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {socialMetricCatalog.filter(metric => metric.group === group).map(metric => {
-                    const visible = !!socialProfileDraft.metricVisibility?.[metric.key];
-                    return <div key={metric.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{metric.label}</span>
-                        {metric.sensitive && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 6 }}>SENSITIVE</span>}
-                      </div>
-                      <Toggle on={visible} label={metric.label} onToggle={() => {
-                        const nextVisibility = { ...(socialProfileDraft.metricVisibility || {}), [metric.key]: !visible };
-                        const next = {
-                          ...socialProfileDraft,
-                          metricVisibility: nextVisibility,
-                          ...(metric.key === 'steps' ? { stepsVisible: !visible } : {}),
-                          ...(metric.key === 'workouts' ? { workoutsVisible: !visible } : {}),
-                          ...(metric.key === 'adherence' ? { adherenceVisible: !visible } : {}),
-                        };
-                        setSocialProfileDraft(next);
-                        saveSocialProfile(next);
-                      }} />
-                    </div>;
-                  })}
-                </div>
-              </div>)}
+            {socialProfileMsg && !friendsSharingSheet && <div style={{ marginTop: 10, color: socialProfileMsg.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{socialProfileMsg.text}</div>}
+            <div style={{ marginTop: 16 }}>
+              <NavRow
+                label="Metric sharing"
+                hint={`${socialMetricCatalog.filter(metric => !!socialProfileDraft.metricVisibility?.[metric.key]).length} of ${socialMetricCatalog.length}`}
+                onTap={() => setFriendsSharingSheet(true)}
+                first
+              />
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 5 }}>
+                Choose which health values friends can see.
+              </div>
             </div>
-            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, marginTop: 13 }}>
-              Shared values are weekly summaries or the latest reading. Notes and exact reading times are never shared.
-            </div>
-            {socialProfileMsg && <div style={{ marginTop: 10, color: socialProfileMsg.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{socialProfileMsg.text}</div>}
           </div>}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setFriendsSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={closeFriendsSettings}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
+
+      <SocialMetricSharingSheet
+        open={friendsSharingSheet}
+        onClose={() => setFriendsSharingSheet(false)}
+        profile={socialProfileDraft}
+        catalog={socialMetricCatalog}
+        message={socialProfileMsg}
+        saving={socialProfileSaving}
+        onToggleMetric={toggleSocialMetric}
+      />
 
       <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health & Nutrition">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
