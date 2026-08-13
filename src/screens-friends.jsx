@@ -194,9 +194,10 @@ function FriendsScreen({ store, setStore, userId }) {
   const workoutHistory = data?.workoutHistory || [];
 
   useEffectF(() => {
-    if (!store.settings?.showFriendsTab || store.friends) return;
+    if (!store.settings?.showFriendsTab) return;
     let live = true;
     let retryTimer = null;
+    let refreshTimer = null;
     let attempt = 0;
     setLoading(true);
     const load = () => {
@@ -215,7 +216,12 @@ function FriendsScreen({ store, setStore, userId }) {
       }).finally(() => { if (live) setLoading(false); });
     };
     load();
-    return () => { live = false; if (retryTimer) clearTimeout(retryTimer); };
+    refreshTimer = setInterval(load, 8000);
+    return () => {
+      live = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (refreshTimer) clearInterval(refreshTimer);
+    };
   }, [userId, store.settings?.showFriendsTab]);
 
   const reload = async () => {
