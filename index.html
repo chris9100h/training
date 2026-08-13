@@ -1699,10 +1699,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   });
   makeLazyScreen('CoachingPendingBanner', 'coaching', { silent: true });
   makeLazyScreen('CoachingBannerGroup', 'coaching', { silent: true });
+  makeLazyScreen('FriendRequestBanner', 'friends', { silent: true });
   makeLazyScreen('TodayCardioWidget', 'cardio', { silent: true });
   makeLazyScreen('RecipeShareSheet', 'food', { kind: 'overlay' });
   makeLazyScreen('OnboardingPrompt', 'onboarding', { kind: 'overlay' });
   makeLazyScreen('OnboardingTour', 'onboarding', { kind: 'overlay' });
+  makeLazyScreen('XHandlePrompt', 'onboarding', { kind: 'overlay' });
 
   // DailyLogScreen is referenced as a classic global by HomeScreen rather
   // than through window.Screens. Keep a closed instance completely free, then

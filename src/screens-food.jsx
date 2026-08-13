@@ -1428,6 +1428,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, date);
       const hasLegacyDefaultMarker = activePlanId === `mp_${userId}` && markedDates.has(legacyMarkerId);
       if (markedDates.has(markerId) || hasLegacyDefaultMarker) continue;
+      // A completed current day is immutable to automation. The manual Apply
+      // action can explicitly reopen it first.
+      if (date === today && LB.foodDayIsClosed(store.dailyLogs, date)) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
       const entries = slots
         .filter(s => fdSlotMatchesDate(s, store, date) && !existingSlotIds.has(s.id))
@@ -1443,6 +1446,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const already = new Set((s.foodTemplateDays || []).map(d => d.id));
       const stillPending = pending.filter(p => {
         if (already.has(p.markerId)) return false;
+        if (p.date === today && LB.foodDayIsClosed(s.dailyLogs, p.date)) return false;
         const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, p.date);
         return !(activePlanId === `mp_${userId}` && already.has(legacyMarkerId));
       });
@@ -1471,7 +1475,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         foodLogs: newEntries.length ? [...newEntries, ...(s.foodLogs || [])] : (s.foodLogs || []),
       };
     });
-  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
+  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId, store.dailyLogs]);
 
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
@@ -2391,14 +2395,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const now = new Date().toISOString();
     setStore(s => {
       const existing = (s.dailyLogs || []).find(l => l.date === curDate);
+      const statusMode = LB.statusModeForDate(s, curDate);
+      const isTraining = LB.isTrainingDayForDate(s, curDate);
+      const frozen = closed && !LB.isNutritionUnscoredMode(statusMode)
+        ? LB.dailyLogAdherence({
+          ...(existing || {}),
+          calories: dayTotals.calories, protein: dayTotals.protein,
+          carbs: dayTotals.carbs, fat: dayTotals.fat,
+        }, macroTargets, isTraining)
+        : closed ? { adherence: null, targetsSnap: null } : {
+          adherence: existing?.adherence ?? null,
+          targetsSnap: existing?.targetsSnap ?? null,
+        };
       const log = existing
-        ? { ...existing, foodDayClosed: closed, updatedAt: now }
+        ? { ...existing, foodDayClosed: closed, adherence: frozen.adherence, targetsSnap: frozen.targetsSnap, updatedAt: now }
         : {
             id: LB.uid(), date: curDate, weight: null, steps: null,
             calories: null, protein: null, carbs: null, fat: null, fiber: null,
             waterMl: null, note: null, offPlanNote: null, coachFields: null,
             mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: closed,
-            adherence: null, targetsSnap: null, updatedAt: now, createdAt: now,
+            adherence: frozen.adherence, targetsSnap: frozen.targetsSnap, updatedAt: now, createdAt: now,
           };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
@@ -2439,7 +2455,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // day is still in progress, e.g. self-coached macros configured after
     // already logging food earlier today. Future days have no snap either,
     // so they fall through to the live target the same way.
-    const snap = curDate !== today ? dayLog?.targetsSnap : null;
+    const snap = (curDate !== today || dayLog?.foodDayClosed) ? dayLog?.targetsSnap : null;
     const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
     if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
@@ -2461,8 +2477,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // same day.
   const isMealOfChoice = !!dayLog?.mealOfChoice;
   const dayAdherence = useMemoFd(
-    () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
-    [dayTarget, dayTotals, isMealOfChoice],
+    () => dayLog?.foodDayClosed
+      ? (dayLog.adherence ?? null)
+      : (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
+    [dayTarget, dayTotals, isMealOfChoice, dayLog?.foodDayClosed, dayLog?.adherence],
   );
   // Same formula, but against the Plan+Logged projection instead of the
   // logged truth: "if you eat everything still planned today, where does
@@ -7474,6 +7492,13 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
   // it). Closes back to the log so the result is visible right away.
   async function applyToToday() {
     const todayISO = LB.todayISO();
+    if (LB.foodDayIsClosed(store.dailyLogs, todayISO)) {
+      const reopen = await confirm(
+        "Today is marked done. Reopen it and apply the active meal plan?",
+        { title: 'Reopen today?', ok: 'Reopen and apply', cancel: 'Cancel' }
+      );
+      if (!reopen) return;
+    }
     // Applies the ACTIVE plan (that's what auto-fills the log), regardless of
     // which plan is being viewed.
     const inActive = slot => slot.mealPlanId === activeId;
@@ -7486,7 +7511,8 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
     setStore(s => {
       const present2 = new Set((s.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
       const entries = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
-      return entries.length ? { ...s, foodLogs: [...entries, ...(s.foodLogs || [])] } : s;
+      if (!entries.length) return s;
+      return { ...s, foodLogs: [...entries, ...(s.foodLogs || [])], dailyLogs: reopenFoodDay(s, todayISO, s.dailyLogs) };
     });
     onClose();
   }
@@ -7584,7 +7610,7 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
       // effect from adding a second copy.
       let foodLogs = s.foodLogs || [];
       const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
-      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
+      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday && !LB.foodDayIsClosed(s.dailyLogs, todayISO)) {
         foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
       }
       return { ...s, foodTemplateSlots: [...list, slot], foodLogs };

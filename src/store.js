@@ -5698,7 +5698,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
 
 const SOCIAL_METRIC_CATALOG = [
   { key: 'steps', label: 'Weekly steps', group: 'Activity' },
-  { key: 'workouts', label: 'Workouts', group: 'Activity' },
+  { key: 'workouts', label: 'Workouts + set progress', group: 'Activity' },
   { key: 'adherence', label: 'Weekly adherence', group: 'Activity' },
   { key: 'calories', label: 'Average calories', group: 'Nutrition' },
   { key: 'protein', label: 'Average protein', group: 'Nutrition' },
@@ -5888,13 +5888,28 @@ let _friendsLoadInFlight = null;
 async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
   if (!userId) return null;
   const key = `${userId}:${weekStart}`;
-  if (_friendsLoadInFlight?.key === key) return _friendsLoadInFlight.promise;
-  const promise = loadFriendsStateUncached(userId, weekStart);
-  _friendsLoadInFlight = { key, promise };
+  if (_friendsLoadInFlight?.key === key) {
+    // Realtime and the fallback poll can both invalidate the same snapshot
+    // while its request is in flight. Let the current caller share the work,
+    // but make the in-flight promise perform one final refresh before it
+    // resolves so an event cannot be lost between the two requests.
+    _friendsLoadInFlight.dirty = true;
+    return _friendsLoadInFlight.promise;
+  }
+  const entry = { key, dirty: false, promise: null };
+  entry.promise = (async () => {
+    let result = await loadFriendsStateUncached(userId, weekStart);
+    while (entry.dirty) {
+      entry.dirty = false;
+      result = await loadFriendsStateUncached(userId, weekStart);
+    }
+    return result;
+  })();
+  _friendsLoadInFlight = entry;
   try {
-    return await promise;
+    return await entry.promise;
   } finally {
-    if (_friendsLoadInFlight?.promise === promise) _friendsLoadInFlight = null;
+    if (_friendsLoadInFlight?.promise === entry.promise) _friendsLoadInFlight = null;
   }
 }
 
@@ -6082,11 +6097,22 @@ async function updateSocialMessage(messageId, userId, body) {
 
 async function deleteSocialMessage(messageId, userId) {
   if (!messageId || !userId) throw new Error('Message is incomplete');
+  const { data: attachmentRows, error: attachmentError } = await _supabase
+    .from('zane_social_message_attachments')
+    .select('storage_path')
+    .eq('message_id', messageId)
+    .eq('uploaded_by', userId);
+  if (attachmentError) throw attachmentError;
   const { error } = await _supabase.from('zane_social_messages')
     .delete()
     .eq('id', messageId)
     .eq('sender_id', userId);
   if (error) throw error;
+  const paths = (attachmentRows || []).map(row => row.storage_path).filter(Boolean);
+  if (paths.length) {
+    const { error: storageError } = await _supabase.storage.from('social-chat-attachments').remove(paths);
+    if (storageError) console.warn('social attachment cleanup failed:', storageError);
+  }
 }
 
 async function markSocialMessagesRead(userId, messageIds = []) {
@@ -6160,7 +6186,7 @@ function subscribeToFriends(userId, onChange) {
   if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
   const channel = _supabase.channel(`social-${userId}-${Date.now()}`);
   const refresh = () => onChange?.();
-  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_plan_shares', 'zane_social_workout_comments'].forEach(table => {
+  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_plan_shares', 'zane_social_workout_comments'].forEach(table => {
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh);
   });
   _friendsRealtimeChannel = channel.subscribe();

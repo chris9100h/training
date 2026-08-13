@@ -285,6 +285,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const [activeTab, setActiveTab] = useStateF('circle');
   const [query, setQuery] = useStateF('');
   const [searchResult, setSearchResult] = useStateF(null);
+  const [searchComplete, setSearchComplete] = useStateF(false);
   const [searching, setSearching] = useStateF(false);
   const [loading, setLoading] = useStateF(true);
   const [error, setError] = useStateF('');
@@ -299,6 +300,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const [joinCode, setJoinCode] = useStateF('');
   const [groupBusy, setGroupBusy] = useStateF(false);
   const [copiedGroupId, setCopiedGroupId] = useStateF(null);
+  const [copiedOwnCode, setCopiedOwnCode] = useStateF(false);
   const [planRecipientType, setPlanRecipientType] = useStateF('friend');
   const [planRecipientId, setPlanRecipientId] = useStateF('');
   const [planId, setPlanId] = useStateF(store.activeScheduleId || store.schedules?.[0]?.id || '');
@@ -436,12 +438,14 @@ function FriendsScreen({ store, setStore, userId }) {
     if (!value || searching) return;
     setSearching(true);
     setSearchResult(null);
+    setSearchComplete(false);
     setError('');
     try {
       setSearchResult(await LB.lookupSocialProfile(value));
     } catch (e) {
       setError(e.message || 'Search failed');
     } finally {
+      setSearchComplete(true);
       setSearching(false);
     }
   };
@@ -576,7 +580,13 @@ function FriendsScreen({ store, setStore, userId }) {
       const updated = await LB.updateSocialMessage(message.id, userId, editingMessageBody);
       patchSocial(s => ({
         ...s,
-        messages: (s.messages || []).map(m => m.id === message.id ? { ...m, ...updated } : m),
+        messages: (s.messages || []).map(m => m.id === message.id ? {
+          ...m,
+          ...updated,
+          // The update response intentionally contains no attachment rows.
+          // Preserve previews already loaded into the local social slice.
+          attachments: updated.attachments?.length ? updated.attachments : m.attachments,
+        } : m),
       }));
       cancelEditMessage();
     } catch (e) {
@@ -653,6 +663,29 @@ function FriendsScreen({ store, setStore, userId }) {
     }
   };
 
+  const copyOwnFriendCode = async () => {
+    const code = data?.profile?.friendCode;
+    if (!code) return;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
+      else {
+        const input = document.createElement('textarea');
+        input.value = code;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        if (!document.execCommand('copy')) throw new Error('Copy unavailable');
+        input.remove();
+      }
+      setCopiedOwnCode(true);
+      window.setTimeout(() => setCopiedOwnCode(false), 1600);
+    } catch (_) {
+      setError('Could not copy your friend code.');
+    }
+  };
+
   const sendPlan = async () => {
     if (!planRecipientId || !activeSchedule || planBusy) return;
     setPlanBusy(true);
@@ -703,12 +736,13 @@ function FriendsScreen({ store, setStore, userId }) {
       const id = LB.uid();
       idMap[ex.id] = id;
       newExercises.push({
-        id, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null,
-        unilateral: ex.unilateral || false, equipment: ex.equipment || null,
-        progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null,
-        log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false,
-        pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null,
-        youtube_url: ex.youtube_url || null,
+        id, name: ex.name, tags: ex.tags ?? [], note: ex.note ?? '', category: ex.category ?? null,
+        unilateral: !!ex.unilateral, equipment: ex.equipment ?? null,
+        progression_reps: ex.progression_reps ?? null, movement_type: ex.movement_type ?? null,
+        log_mode: ex.log_mode ?? null, no_weight_reps: !!ex.no_weight_reps,
+        pull_bodyweight: !!ex.pull_bodyweight, bodyweight_mode: ex.bodyweight_mode ?? null,
+        youtube_url: ex.youtube_url ?? null, note_pinned: !!ex.note_pinned,
+        progression_increment: ex.progression_increment ?? null, horn_labels: ex.horn_labels ?? null,
       });
     });
     const imported = {
@@ -721,10 +755,12 @@ function FriendsScreen({ store, setStore, userId }) {
     imported.days = (sourceSchedule.days || []).map(day => ({
       ...day,
       id: LB.uid(),
-      items: (day.items || []).map(item => ({ ...item, exId: idMap[item.exId] || item.exId })),
+      // Do not keep plan items whose source exercise was not in the snapshot.
+      // Their old id cannot be resolved in the receiving account.
+      items: (day.items || []).filter(item => idMap[item.exId]).map(item => ({ ...item, exId: idMap[item.exId] })),
     }));
     if (imported.program_data && typeof imported.program_data === 'object') {
-      const remapKeys = object => Object.fromEntries(Object.entries(object || {}).map(([key, value]) => [idMap[key] || key, value]));
+      const remapKeys = object => Object.fromEntries(Object.entries(object || {}).filter(([key]) => idMap[key]).map(([key, value]) => [idMap[key], value]));
       if (imported.program_data.mainLifts) imported.program_data.mainLifts = remapKeys(imported.program_data.mainLifts);
       if (imported.program_data.tmHistory) imported.program_data.tmHistory = remapKeys(imported.program_data.tmHistory);
     }
@@ -794,7 +830,7 @@ function FriendsScreen({ store, setStore, userId }) {
     <Card style={{ marginBottom: 12 }}>
       <div className="micro" style={{ color: UI.gold, marginBottom: 10 }}>ADD A FRIEND</div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <input id="friends-add-input" value={query} onChange={e => { setQuery(e.target.value); setSearchResult(null); }} onKeyDown={e => e.key === 'Enter' && search()} placeholder="Handle or friend code" style={{ ...SOCIAL_INPUT_STYLE, flex: 1 }} />
+        <input id="friends-add-input" value={query} onChange={e => { setQuery(e.target.value); setSearchResult(null); setSearchComplete(false); setError(''); }} onKeyDown={e => e.key === 'Enter' && search()} placeholder="Handle or friend code" style={{ ...SOCIAL_INPUT_STYLE, flex: 1 }} />
         <Btn onClick={search} disabled={searching || !query.trim()} style={{ padding: '10px 12px', minHeight: 0, fontSize: 10 }}>{searching ? '...' : 'Find'}</Btn>
       </div>
       {searchResult && (
@@ -807,6 +843,9 @@ function FriendsScreen({ store, setStore, userId }) {
             ? <Btn onClick={() => runAction(() => LB.sendSocialFriendRequest(searchResult.userId))} style={{ padding: '9px 12px', minHeight: 0, fontSize: 10 }}>Add</Btn>
             : <span className="micro" style={{ color: UI.gold }}>{searchResult.relationship}</span>}
         </div>
+      )}
+      {searchComplete && !searching && !searchResult && !error && (
+        <div className="micro" style={{ color: UI.inkFaint, marginTop: 12, paddingTop: 12, borderTop: `var(--hair-width) solid ${UI.hair}` }}>No person found for that handle or code.</div>
       )}
     </Card>
   );
@@ -896,6 +935,11 @@ function FriendsScreen({ store, setStore, userId }) {
           </div>
           {liveWorkouts.length > 0 && <span className="micro" style={{ marginLeft: 'auto', color: UI.gold }}>{liveWorkouts.length} LIVE NOW</span>}
         </div>
+        {data?.profile && <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 11, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>YOUR FRIEND CODE</span>
+          <span className="num" style={{ color: UI.inkSoft, fontSize: 11, letterSpacing: '0.08em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.profile.friendCode || 'Not available'}</span>
+          {data.profile.friendCode && <button onClick={copyOwnFriendCode} style={{ marginLeft: 'auto', padding: '4px 7px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer', flexShrink: 0 }}>{copiedOwnCode ? 'Copied' : 'Copy'}</button>}
+        </div>}
         <div style={{ position: 'relative', display: 'flex', gap: 7, marginTop: 17, flexWrap: 'wrap' }}>
           <Btn onClick={() => document.getElementById('friends-add-input')?.focus()} style={{ padding: '9px 12px', minHeight: 0, fontSize: 10 }}>Find people</Btn>
           <button onClick={() => setActiveTab('activity')} style={{ padding: '8px 11px', borderRadius: 5, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>See activity</button>
@@ -938,7 +982,7 @@ function FriendsScreen({ store, setStore, userId }) {
       <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '8px 0' }}>LIVE NOW</div>
       {liveWorkouts.length > 0
         ? <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{liveWorkouts.map(renderWorkoutCard)}</div>
-        : <Card style={{ padding: 15 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13 }}>No one is training live right now.</div><div className="micro" style={{ marginTop: 5 }}>Finished workouts stay visible from the day you became friends.</div></Card>}
+        : <Card style={{ padding: 15 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13 }}>No one is training live right now.</div><div className="micro" style={{ marginTop: 5 }}>Shared finished workouts appear here from the day the friendship was accepted.</div></Card>}
       <div className="micro" style={{ color: UI.gold, fontWeight: 700, margin: '19px 0 8px' }}>THIS WEEK</div>
       <Card>
         <div style={{ fontSize: 12, color: UI.inkFaint, lineHeight: 1.45, marginBottom: 12, textAlign: 'center' }}>Only metrics explicitly shared by each person appear here. Missing values are never treated as zero.</div>
@@ -1274,10 +1318,11 @@ function FriendsScreen({ store, setStore, userId }) {
 }
 
 function FriendRequestBanner({ store, setStore, userId }) {
+  const [dismissedId, setDismissedId] = useStateF(null);
+  const [loading, setLoading] = useStateF(false);
   const pending = store?.settings?.showFriendsTab && !(
     store.coaching?.asClient?.status === 'pending'
-  ) ? store.friends?.incoming?.[0] : null;
-  const [loading, setLoading] = useStateF(false);
+  ) ? (store.friends?.incoming || []).find(item => item.id !== dismissedId) : null;
 
   if (!pending) return null;
 
@@ -1305,8 +1350,8 @@ function FriendRequestBanner({ store, setStore, userId }) {
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: 28, maxWidth: 380, width: '100%' }}>
+    <div onClick={() => !loading && setDismissedId(pending.id)} style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: 28, maxWidth: 380, width: '100%' }}>
         <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>FRIEND REQUEST</div>
         <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, color: UI.ink, marginBottom: 6 }}>{pending.name || 'Zane athlete'}</div>
         {pending.handle && <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>@{pending.handle.replace(/^@/, '')}</div>}
@@ -1316,6 +1361,7 @@ function FriendRequestBanner({ store, setStore, userId }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button disabled={loading} onClick={() => respond(true)} style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}>ACCEPT</button>
           <button disabled={loading} onClick={() => respond(false)} style={{ width: '100%', padding: '14px 0', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}>DECLINE</button>
+          <button disabled={loading} onClick={() => setDismissedId(pending.id)} style={{ width: '100%', padding: '7px 0', border: 'none', background: 'transparent', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: loading ? 'default' : 'pointer' }}>LATER</button>
         </div>
       </div>
     </div>

@@ -789,8 +789,8 @@ function TrainingSocialFeedback({ sessionId, userId }) {
       }}>
         <div className={toast.kind === 'cheer' ? 'intensity-glow-raw' : ''} style={{
           width: 'min(100%, 320px)', boxSizing: 'border-box', padding: '28px 22px 25px',
-          borderRadius: 10, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
-          background: toast.kind === 'cheer' ? 'linear-gradient(145deg, rgba(var(--accent-rgb),0.26), rgba(24,22,29,0.98))' : UI.bgRaised,
+          borderRadius: 8, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
+          background: toast.kind === 'cheer' ? `linear-gradient(145deg, rgba(var(--accent-rgb),0.26), ${UI.bgRaised})` : UI.bgRaised,
           boxShadow: toast.kind === 'cheer' ? undefined : '0 8px 32px rgba(0,0,0,0.45)',
           textAlign: 'center', animation: 'fadeUp 0.7s ease both',
         }}>
@@ -816,7 +816,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
     <Sheet open={open} onClose={() => setOpen(false)} title="Training feedback">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {!comments.length && <div className="micro" style={{ color: UI.inkFaint }}>No feedback yet.</div>}
-        {[...comments].reverse().map(comment => <div key={comment.id} style={{ padding: '9px 10px', borderRadius: 5, background: comment.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${comment.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
+        {[...comments].reverse().map(comment => <div key={comment.id} style={{ padding: '9px 10px', borderRadius: 4, background: comment.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${comment.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}><strong style={{ color: comment.kind === 'cheer' ? UI.gold : UI.ink }}>{comment.authorName || 'Friend'}</strong><span className="micro" style={{ color: UI.inkGhost }}>{comment.kind === 'cheer' ? 'CHEER' : 'COMMENT'}</span></div>
           <div style={{ marginTop: 4 }}>{comment.body}</div>
         </div>)}
@@ -8042,7 +8042,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </button>
             )}
             <div style={{ flex: 1 }} />
-            <TrainingSocialFeedback sessionId={sessionId} userId={userId} />
+            {store.settings?.showFriendsTab && <TrainingSocialFeedback sessionId={sessionId} userId={userId} />}
             <button onClick={() => { if (entry.note) { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); } else { setNotePicker(true); } }} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,

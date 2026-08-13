@@ -116,7 +116,7 @@ function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, sa
     <SettingsSheet open={open} onClose={onClose} title="Metric sharing">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
-          Choose which health values your friends can see. Shared values are summaries or the latest reading, never notes or exact reading times.
+          Choose which health values your friends can see. Shared values are summaries or the latest reading, never notes or exact reading times. Workouts also share live and finished set progress, including weight and reps.
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
           <div className="micro" style={{ color: UI.gold }}>SHARED METRICS</div>
@@ -2514,10 +2514,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={friendsSheet} onClose={closeFriendsSettings} title="Friends">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Friends tab" first>
-            <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => patchSettings({ showFriendsTab: !store.settings?.showFriendsTab })} />
+            <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => {
+              const enabling = !store.settings?.showFriendsTab;
+              patchSettings({ showFriendsTab: enabling });
+              if (enabling) go({ name: 'friends' });
+            }} />
           </Row>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing and plan snapshots. You choose which metrics are visible.
+            Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing, live workout feedback and plan snapshots. Friends and Coaching share one navigation slot; use the social tab's long press to choose between them. You choose which metrics and workout details are visible.
           </div>
           {!!store.settings?.showFriendsTab && !socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
             Loading your social profile…

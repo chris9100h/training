@@ -5186,7 +5186,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // day, effectiveTargets changing again later just no-ops here since
         // dayTargetOverride always wins once a snap exists, screens-food.jsx's
         // own dayTarget memo makes the exact same assumption for today.
-        const snap = log.date !== today ? log.targetsSnap : null;
+        // Closing today explicitly turns the live target into history. An
+        // open current day must continue tracking later macro changes.
+        const snap = (log.date !== today || log.foodDayClosed) ? log.targetsSnap : null;
         const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
         // Only sick and vacation blank the day, not every status: see
         // LB.isNutritionUnscoredMode. A deload or cleanup week eats to the

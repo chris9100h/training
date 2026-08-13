@@ -766,7 +766,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `blocker_id`, `blocked_id` (uuid auth users, composite primary key)
 - `created_at` (timestamptz)
-- Blocking removes the friendship and prevents new requests or direct messages. The message INSERT policy can inspect only block rows involving the current user; the table remains otherwise hidden behind the guarded block RPC.
+- Blocking removes the friendship, prevents new requests or direct messages, and hides common group membership, group messages and plan shares from the blocked pair. Workout access is also denied in both directions.
 
 ### `zane_social_groups`
 
@@ -788,14 +788,14 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 - `body` (text, required, max 4000 characters)
 - `created_at` (timestamptz), `edited_at` (timestamptz, nullable)
 - Exactly one of `recipient_id` or `group_id` is set. RLS limits rows to the sender, direct recipient, or group member.
-- Senders can edit or delete their own messages for 60 minutes after sending. Edited rows carry `edited_at`; attachments remain participant-scoped. `zane_social_messages_guard_update` prevents protected fields, including `created_at`, from being changed. Migrations 0273 and 0274.
+- Senders can edit or delete their own messages for 60 minutes after sending. `zane_social_messages_guard_insert` overwrites any client-supplied `created_at` on insert, edited rows carry `edited_at`, and attachments remain participant-scoped. `zane_social_messages_guard_update` prevents protected fields, including `created_at`, from being changed. Migrations 0273, 0274 and 0279.
 
 ### `zane_social_message_attachments`
 
 - `id` (uuid, primary key), `message_id`, `uploaded_by` (uuid)
 - `storage_path`, `file_name`, `mime_type` (text)
 - `created_at` (timestamptz)
-- Images are stored in the private `social-chat-attachments` bucket and signed only for message participants.
+- Images are stored in the private `social-chat-attachments` bucket, uploads must use the authenticated user's UUID as the first path segment, and signed URLs are issued only for message participants. Deleting a message also asks Storage to remove its attachment objects.
 
 ### `zane_social_message_reads`
 
@@ -827,10 +827,12 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `id` (uuid, primary key), `session_id` (text, the referenced workout), `author_id` (uuid auth user)
 - `kind` (text, `comment` or `cheer`), `body` (text, 1-400 characters), `created_at` (timestamptz)
-- Comments are visible only to the workout owner and accepted friends whose friendship predates the workout. The detail RPC redacts loads, reps, notes and other private set data.
+- Comments are visible only to the workout owner and accepted friends whose friendship predates the workout. The detail RPC includes exercise names plus completed/skipped state, weight, reps, unilateral reps, duration and added load so the viewer can follow the requested live set progress. It never includes private notes.
 
 ### Social RPCs
 
-`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_create_group_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; in the feed, the current user's own live or finished workouts appear only after at least one workout comment exists. Its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_create_group_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard ignores client-supplied week dates and calculates each owner's current week from `zane_user_settings.time_zone`, falling back to `tz_offset_minutes`; adherence and nutrition averages stop before that owner's current local day. It returns weekly aggregates or latest readings for enabled metrics only, with no notes or exact reading timestamps. The workout feed/detail path honors `accepted_at`, blocks and the owner's workout-sharing toggle; in the feed, the current user's own live or finished workouts appear only after at least one workout comment exists. Its detail payload contains exercise names and full shared set progress, including weight, reps, unilateral reps, duration and added load. `subscribeToFriends` listens for relationship, message-read and workout-comment changes; profile edits touch accepted friendships so the existing channel refreshes, and live set progress itself is refreshed by polling.
 
 The social relationship, group, membership, message, attachment, plan-share and workout-comment tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.
+
+Migration 0279 also adds `zane_coaching_notes_guard_insert`, which forces coaching-note `created_at` to server time, and `social_profile_touch_friendships`, which touches accepted friendship rows after profile changes so subscribed clients refresh shared metric data. Both are SECURITY DEFINER triggers with no direct client EXECUTE grant.

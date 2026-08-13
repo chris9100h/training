@@ -2246,6 +2246,7 @@ function App() {
       }).catch(() => {});
     };
     const workoutTimer = setInterval(refreshWorkoutFeed, 5000);
+    const socialTimer = setInterval(refreshFriends, 30000);
     const unsubscribe = LB.subscribeToFriends(userId, () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refreshFriends, 250);
@@ -2254,6 +2255,7 @@ function App() {
       live = false;
       clearTimeout(refreshTimer);
       clearInterval(workoutTimer);
+      clearInterval(socialTimer);
       unsubscribe?.();
     };
   }, [userId, friendsTabEnabled]);
@@ -2537,7 +2539,7 @@ function App() {
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
-  const friendsBadge = showFriends ? { count: store?.friends?.unreadCount || 0 } : null;
+  const friendsBadge = showFriends ? { count: (store?.friends?.unreadCount || 0) + (store?.friends?.incoming?.length || 0) } : null;
 
   let screen;
   switch (route.name) {
@@ -2646,7 +2648,7 @@ function App() {
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
-      {store && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
+      {store && friendsTabEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
           onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}

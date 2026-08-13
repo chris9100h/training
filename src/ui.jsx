@@ -663,7 +663,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           )}
           {tabs.map(t => {
             const on = t.id === visualActive;
-            const badge = t.id === 'social' ? (t.socialSlot === 'friends' ? friendsBadge : coachingBadge) : null;
+            const badge = t.id === 'social' ? {
+              count: (friendsBadge?.count || 0) + (coachingBadge?.count || 0),
+              live: !!(friendsBadge?.live || coachingBadge?.live),
+            } : null;
             const { healthSlot, socialSlot, iconKey, label } = t;
             const isHealthTab = t.id === 'health';
             const isSocialTab = t.id === 'social';
