@@ -310,6 +310,9 @@ function FriendsScreen({ store, setStore, userId }) {
   const [reportDetails, setReportDetails] = useStateF('');
   const [reportBusy, setReportBusy] = useStateF(false);
   const [selectedFriend, setSelectedFriend] = useStateF(null);
+  const [selectedFriendMetrics, setSelectedFriendMetrics] = useStateF(null);
+  const [selectedFriendMetricsLoading, setSelectedFriendMetricsLoading] = useStateF(false);
+  const [selectedFriendMetricsError, setSelectedFriendMetricsError] = useStateF('');
   const [selectedWorkout, setSelectedWorkout] = useStateF(null);
   const [expandedGroupMetric, setExpandedGroupMetric] = useStateF(null);
   const [metricPickerOpen, setMetricPickerOpen] = useStateF(false);
@@ -329,10 +332,40 @@ function FriendsScreen({ store, setStore, userId }) {
   const socialMetricCatalog = LB.socialMetricCatalog || window.SocialMetricCatalog || [];
   const defaultMetricSlots = LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'];
   const metricSlots = data?.profile?.metricSlots?.length === 3 ? data.profile.metricSlots : defaultMetricSlots;
+  const selectedFriendId = selectedFriend?.userId || '';
 
   useEffectF(() => {
     setMetricSlotsDraft([...metricSlots]);
   }, [JSON.stringify(metricSlots)]);
+
+  useEffectF(() => {
+    let live = true;
+    if (!selectedFriendId) {
+      setSelectedFriendMetrics(null);
+      setSelectedFriendMetricsLoading(false);
+      setSelectedFriendMetricsError('');
+      return () => { live = false; };
+    }
+    setSelectedFriendMetrics(null);
+    setSelectedFriendMetricsLoading(true);
+    setSelectedFriendMetricsError('');
+    LB.loadSocialFriendMetrics(selectedFriendId).then(detail => {
+      if (!live) return;
+      setSelectedFriendMetrics(detail);
+    }).catch(error => {
+      if (!live) return;
+      setSelectedFriendMetricsError(error.message || 'Could not load shared metrics');
+    }).finally(() => {
+      if (live) setSelectedFriendMetricsLoading(false);
+    });
+    return () => { live = false; };
+  }, [selectedFriendId]);
+
+  const closeFriendDetail = () => {
+    setSelectedFriend(null);
+    setSelectedFriendMetrics(null);
+    setSelectedFriendMetricsError('');
+  };
 
   useEffectF(() => {
     const friendsEnabled = !!store.settings?.showFriendsTab;
@@ -349,7 +382,6 @@ function FriendsScreen({ store, setStore, userId }) {
     }
     let live = true;
     let retryTimer = null;
-    let refreshTimer = null;
     let attempt = 0;
     setLoading(true);
     const load = () => {
@@ -368,11 +400,9 @@ function FriendsScreen({ store, setStore, userId }) {
       }).finally(() => { if (live) setLoading(false); });
     };
     load();
-    refreshTimer = setInterval(load, 8000);
     return () => {
       live = false;
       if (retryTimer) clearTimeout(retryTimer);
-      if (refreshTimer) clearInterval(refreshTimer);
     };
   }, [userId, store.settings?.showFriendsTab, !data]);
 
@@ -382,6 +412,11 @@ function FriendsScreen({ store, setStore, userId }) {
     try {
       const next = await LB.loadFriendsState(userId, LB.socialWeekStartISO());
       setStore(s => s ? { ...s, friends: next } : s);
+      // The core slice is enough to render Circle and Groups. Refresh the
+      // activity summaries separately so a slow feed never delays that view.
+      LB.loadSocialWorkoutFeed().then(feed => {
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
+      }).catch(() => {});
     } catch (e) {
       setError(e.message || 'Could not load Friends');
     } finally {
@@ -1278,14 +1313,17 @@ function FriendsScreen({ store, setStore, userId }) {
           <Btn onClick={saveMetricSlots} disabled={metricSlotsSaving}>{metricSlotsSaving ? 'Saving...' : 'Save metric layout'}</Btn>
         </div>
       </Sheet>
-      <Sheet open={!!selectedFriend} onClose={() => setSelectedFriend(null)} title={selectedFriend?.name || 'Friend'}>
+      <Sheet open={!!selectedFriend} onClose={closeFriendDetail} title={selectedFriend?.name || 'Friend'}>
         {selectedFriend && (() => {
-          const sharedMetrics = socialMetricCatalog.filter(metric => socialFriendShares(selectedFriend, metric.key));
+          const detailFriend = selectedFriendMetrics ? { ...selectedFriend, ...selectedFriendMetrics } : selectedFriend;
+          const sharedMetrics = socialMetricCatalog.filter(metric => socialFriendShares(detailFriend, metric.key));
           return <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <div className="micro" style={{ color: UI.inkFaint }}>{selectedFriend.handle ? `@${selectedFriend.handle.replace(/^@/, '')}` : selectedFriend.friendCode}</div>
               <div style={{ marginTop: 7, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.45 }}>Everything {selectedFriend.name || 'this friend'} has chosen to share with you.</div>
             </div>
+            {selectedFriendMetricsLoading && <div className="micro" style={{ color: UI.inkFaint }}>LOADING SHARED METRICS...</div>}
+            {selectedFriendMetricsError && <div style={{ padding: '9px 11px', borderRadius: 5, background: 'rgba(var(--danger-rgb),0.10)', border: `var(--hair-width) solid rgba(var(--danger-rgb),0.3)`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 12 }}>{selectedFriendMetricsError}</div>}
             {sharedMetrics.length === 0
               ? <div style={{ padding: 12, borderRadius: 5, background: UI.bgInset, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>This friend is not sharing health metrics yet.</div>
               : [...new Set(sharedMetrics.map(metric => metric.group))].map(group => <div key={group}>
@@ -1295,7 +1333,7 @@ function FriendsScreen({ store, setStore, userId }) {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7 }}>
                   {sharedMetrics.filter(metric => metric.group === group).map(metric => {
-                    const value = socialFriendMetricValue(selectedFriend, metric.key);
+                    const value = socialFriendMetricValue(detailFriend, metric.key);
                     return <div key={metric.key} style={{ minWidth: 0, padding: '9px 10px', borderRadius: 5, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}` }}>
                       <div className="micro" style={{ color: UI.gold, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric.key)}</div>
                       <div className="num" style={{ color: value == null ? UI.inkGhost : UI.inkSoft, fontSize: 12, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricValue(metric.key, value, { settings: store.settings, weightUnit: selectedFriend.weightUnit }) || 'No data'}</div>
@@ -1304,8 +1342,8 @@ function FriendsScreen({ store, setStore, userId }) {
                 </div>
               </div>)}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>
-              <button onClick={() => { setSelectedChat({ type: 'friend', id: selectedFriend.userId }); setSelectedFriend(null); setActiveTab('chats'); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Message</button>
-              <button onClick={() => { setReportTarget(selectedFriend); setSelectedFriend(null); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Report</button>
+              <button onClick={() => { setSelectedChat({ type: 'friend', id: selectedFriend.userId }); closeFriendDetail(); setActiveTab('chats'); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Message</button>
+              <button onClick={() => { setReportTarget(selectedFriend); closeFriendDetail(); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Report</button>
               <button onClick={() => blockFriend(selectedFriend)} style={{ background: 'none', border: 'none', padding: 0, color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Block</button>
               <button onClick={() => removeFriend(selectedFriend)} style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Remove</button>
             </div>

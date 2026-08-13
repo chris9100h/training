@@ -2228,23 +2228,45 @@ function App() {
     }
     let live = true;
     let refreshTimer = null;
+    let socialRefreshInFlight = null;
+    let socialRefreshQueued = false;
+    let feedRefreshInFlight = null;
+    const refreshWorkoutFeed = (force = false) => {
+      if (!live || (!force && !storeRefA.current?.friends)) return Promise.resolve();
+      if (feedRefreshInFlight) return feedRefreshInFlight;
+      feedRefreshInFlight = LB.loadSocialWorkoutFeed().then(feed => {
+        if (!live) return;
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
+      }).catch(() => {}).finally(() => { feedRefreshInFlight = null; });
+      return feedRefreshInFlight;
+    };
     const refreshFriends = () => {
-      LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
+      if (!live) return Promise.resolve();
+      if (socialRefreshInFlight) {
+        socialRefreshQueued = true;
+        return socialRefreshInFlight;
+      }
+      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
         if (!live) return;
         setStore(s => s ? { ...s, friends } : s);
-      }).catch(() => {});
+        // Feed summaries are intentionally staged after Circle and Groups
+        // have their core data, so the first render is not feed-bound.
+        refreshWorkoutFeed(true);
+      }).catch(() => {}).finally(() => {
+        socialRefreshInFlight = null;
+        if (socialRefreshQueued && live) {
+          socialRefreshQueued = false;
+          clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(refreshFriends, 250);
+        }
+      });
+      return socialRefreshInFlight;
     };
     refreshFriends();
     // Workout set progress is intentionally polling-only: the local workout
     // store remains the source of truth and the Friends feed must not expose a
     // broad session Realtime stream. Refresh only the small summary payload;
     // the open viewer polls its redacted detail more frequently.
-    const refreshWorkoutFeed = () => {
-      LB.loadSocialWorkoutFeed().then(feed => {
-        if (!live) return;
-        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
-      }).catch(() => {});
-    };
     const workoutTimer = setInterval(refreshWorkoutFeed, 5000);
     const socialTimer = setInterval(refreshFriends, 30000);
     const unsubscribe = LB.subscribeToFriends(userId, () => {
