@@ -1031,7 +1031,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!friendsSheet || !store.settings?.showFriendsTab || store.friends || !userId) return;
     let live = true;
     LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
-      if (live) setStore(s => s ? { ...s, friends } : s);
+      if (live) setStore(s => s ? {
+        ...s,
+        friends: {
+          ...friends,
+          liveWorkouts: s.friends?.liveWorkouts || [],
+          workoutHistory: s.friends?.workoutHistory || [],
+        },
+      } : s);
     }).catch(() => {});
     return () => { live = false; };
   }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends, userId]);

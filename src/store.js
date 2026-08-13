@@ -5976,8 +5976,6 @@ async function loadFriendsStateUncached(userId, weekStart) {
     groupMembers,
     messages,
     planShares,
-    liveWorkouts: [],
-    workoutHistory: [],
     unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
     readMessageIds: [...reads],
     weekStart,

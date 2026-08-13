@@ -2248,7 +2248,14 @@ function App() {
       }
       socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
         if (!live) return;
-        setStore(s => s ? { ...s, friends } : s);
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...friends,
+            liveWorkouts: s.friends?.liveWorkouts || [],
+            workoutHistory: s.friends?.workoutHistory || [],
+          },
+        } : s);
         // Feed summaries are intentionally staged after Circle and Groups
         // have their core data, so the first render is not feed-bound.
         refreshWorkoutFeed(true);

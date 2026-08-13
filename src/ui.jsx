@@ -248,6 +248,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       || t.label;
     return { ...t, healthSlot, socialSlot, iconKey: healthSlot || socialSlot || t.id, label: slotLabel };
   });
+  const socialBadge = {
+    count: (friendsBadge?.count || 0) + (coachingBadge?.count || 0),
+    live: !!(friendsBadge?.live || coachingBadge?.live),
+  };
   const [visualActive, setVisualActive] = React.useState(active);
   React.useEffect(() => setVisualActive(active), [active]);
   const routeForTab = id => {
@@ -536,7 +540,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
               const on = t.id === visualActive;
-              const badge = t.id === 'social' ? (t.socialSlot === 'friends' ? friendsBadge : coachingBadge) : null;
+              const badge = t.id === 'social' ? socialBadge : null;
               const { healthSlot, socialSlot, iconKey, label } = t;
               return (
                 <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} onPointerDown={() => prefetchTab(t.id)} onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }} aria-current={on ? 'page' : undefined} style={{
@@ -663,10 +667,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           )}
           {tabs.map(t => {
             const on = t.id === visualActive;
-            const badge = t.id === 'social' ? {
-              count: (friendsBadge?.count || 0) + (coachingBadge?.count || 0),
-              live: !!(friendsBadge?.live || coachingBadge?.live),
-            } : null;
+            const badge = t.id === 'social' ? socialBadge : null;
             const { healthSlot, socialSlot, iconKey, label } = t;
             const isHealthTab = t.id === 'health';
             const isSocialTab = t.id === 'social';

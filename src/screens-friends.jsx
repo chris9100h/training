@@ -45,7 +45,7 @@ function socialMetricValue(metric, value, context = {}) {
   if (['protein', 'carbs', 'fat', 'fiber'].includes(metric)) return `${Math.round(number)}g`;
   if (metric === 'water') return `${Math.round(UI.waterToEntry(number)).toLocaleString()} ${UI.waterEntryUnit()}`;
   if (metric === 'cardioMinutes') return `${Math.round(number)} min`;
-  if (metric === 'cardioDistance') return `${(number / 1000).toFixed(1)} km`;
+  if (metric === 'cardioDistance') return LB.fmtDistance(number, context.distanceUnit || LB.cardioDistUnit(), 1);
   if (metric === 'weight') return socialWeight(value, context.weightUnit, UI.unit());
   if (metric === 'bodyFatPct') return `${number.toFixed(1)}%`;
   if (['waistCm', 'hipsCm', 'chestCm', 'armCm', 'thighCm', 'calfCm'].includes(metric)) return `${number.toFixed(1)} cm`;
@@ -249,31 +249,6 @@ function SocialWorkoutSheet({ workout, onClose }) {
             })}
           </div>
         </div>}
-        <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'none', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-          <span><i className="fa-solid fa-comment" style={{ marginRight: 7 }} /> COMMENTS <span style={{ color: commentsOpen ? UI.goldSoft : UI.inkFaint }}>{'\u00b7'} {detail?.comments?.length || 0}</span></span>
-          <i className={`fa-solid fa-chevron-${commentsOpen ? 'up' : 'down'}`} style={{ fontSize: 10 }} />
-        </button>
-        {false && commentsOpen && <div>
-          {live && <>
-          <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {SOCIAL_CHEER_OPTIONS.map(cheer => <button key={cheer.text} onClick={() => send(cheer.text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{cheer.text}</button>)}
-          </div></>}
-        <div>
-          <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COMMENTS</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 220, overflowY: 'auto', marginBottom: 8 }}>
-            {!detail?.comments?.length && <div className="micro" style={{ color: UI.inkFaint }}>Be the first to say something.</div>}
-            {(detail?.comments || []).map(item => <div key={item.id} style={{ padding: '8px 10px', borderRadius: 5, background: item.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${item.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
-              <div style={{ display: 'flex', gap: 7, alignItems: 'baseline' }}><strong style={{ color: item.kind === 'cheer' ? UI.gold : UI.ink }}>{item.authorName}</strong><span className="micro" style={{ color: UI.inkGhost }}>{socialTime(item.createdAt)}</span></div>
-              <div style={{ marginTop: 3 }}>{item.body}</div>
-            </div>)}
-          </div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <input value={comment} onChange={e => setComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send(comment); } }} maxLength={400} placeholder="Say something" style={{ ...SOCIAL_INPUT_STYLE, flex: 1, padding: '9px 10px' }} />
-            <Btn onClick={() => send(comment)} disabled={sending || !comment.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>{sending ? '...' : 'Send'}</Btn>
-          </div>
-        </div>
-        </div>}
         {!live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} />}
       </div>
     </Sheet>
@@ -389,7 +364,14 @@ function FriendsScreen({ store, setStore, userId }) {
       LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(next => {
         if (!live) return;
         setError('');
-        setStore(s => s ? { ...s, friends: next } : s);
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...next,
+            liveWorkouts: s.friends?.liveWorkouts || [],
+            workoutHistory: s.friends?.workoutHistory || [],
+          },
+        } : s);
       }).catch(e => {
         if (!live) return;
         setError(e.message || 'Could not load Friends');
@@ -411,7 +393,14 @@ function FriendsScreen({ store, setStore, userId }) {
     setError('');
     try {
       const next = await LB.loadFriendsState(userId, LB.socialWeekStartISO());
-      setStore(s => s ? { ...s, friends: next } : s);
+      setStore(s => s ? {
+        ...s,
+        friends: {
+          ...next,
+          liveWorkouts: s.friends?.liveWorkouts || [],
+          workoutHistory: s.friends?.workoutHistory || [],
+        },
+      } : s);
       // The core slice is enough to render Circle and Groups. Refresh the
       // activity summaries separately so a slow feed never delays that view.
       LB.loadSocialWorkoutFeed().then(feed => {
@@ -946,7 +935,7 @@ function FriendsScreen({ store, setStore, userId }) {
 
   const renderCircle = () => (
     <>
-      <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
+      <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.18), ${UI.bgRaised} 72%)`, marginBottom: 16 }}>
         <div style={{ position: 'absolute', width: 190, height: 190, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -70, top: -84, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', width: 122, height: 122, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -28, top: -50, pointerEvents: 'none' }} />
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -1012,7 +1001,7 @@ function FriendsScreen({ store, setStore, userId }) {
 
   const renderActivity = () => (
     <>
-      <div style={{ padding: 17, borderRadius: 8, border: `var(--hair-width) solid ${liveWorkouts.length ? UI.goldSoft : UI.hairStrong}`, background: liveWorkouts.length ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(19,18,25,0.96) 72%)' : UI.bgRaised, marginBottom: 16 }}>
+      <div style={{ padding: 17, borderRadius: 8, border: `var(--hair-width) solid ${liveWorkouts.length ? UI.goldSoft : UI.hairStrong}`, background: liveWorkouts.length ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.16), ${UI.bgRaised} 72%)` : UI.bgRaised, marginBottom: 16 }}>
         <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>CIRCLE ACTIVITY</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 9 }}>
           <div>
@@ -1163,7 +1152,7 @@ function FriendsScreen({ store, setStore, userId }) {
     return (
       <>
         <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
-        <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
+        <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.18), ${UI.bgRaised} 72%)`, marginBottom: 16 }}>
           <div style={{ position: 'absolute', width: 150, height: 150, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -52, top: -62, pointerEvents: 'none' }} />
           <div className="micro" style={{ color: UI.gold, fontWeight: 700, position: 'relative' }}>GROUP TRAINING</div>
           <div className="display" style={{ color: UI.ink, fontSize: 29, lineHeight: 1, marginTop: 9, position: 'relative' }}>YOUR CREW</div>
@@ -1378,7 +1367,14 @@ function FriendRequestBanner({ store, setStore, userId }) {
       await LB.respondToSocialFriendRequest(pending.id, accept);
       try {
         const friends = await LB.loadFriendsState(userId, LB.socialWeekStartISO());
-        setStore(s => s ? { ...s, friends } : s);
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...friends,
+            liveWorkouts: s.friends?.liveWorkouts || [],
+            workoutHistory: s.friends?.workoutHistory || [],
+          },
+        } : s);
       } catch (_) {
         // The relationship was answered server-side. Remove this request
         // locally even if the refresh is temporarily unavailable; the next

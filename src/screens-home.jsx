@@ -2975,7 +2975,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     <button onClick={() => go({ name: 'friends' })} style={{
       flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, width: '100%',
       padding: '10px 14px', border: `var(--hair-width) solid ${UI.goldSoft}`,
-      borderRadius: 6, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(19,18,25,0.88))',
+      borderRadius: 6, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.16), ${UI.bgRaised})`,
       color: UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
     }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
