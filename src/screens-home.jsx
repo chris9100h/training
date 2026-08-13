@@ -2970,6 +2970,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     () => (mesoBadgeState ? LB.mesoCurrentWeek(mesoBadgeState, store) : null),
     [mesoBadgeState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods]);
 
+  const liveFriendCount = new Set((store.friends?.liveWorkouts || []).map(workout => workout.ownerId).filter(Boolean)).size;
+  const friendsLiveBanner = liveFriendCount > 0 ? (
+    <button onClick={() => go({ name: 'friends' })} style={{
+      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      padding: '10px 14px', border: `var(--hair-width) solid ${UI.goldSoft}`,
+      borderRadius: 6, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(19,18,25,0.88))',
+      color: UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    }}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="micro" style={{ display: 'block', color: UI.gold }}>FRIENDS · LIVE</span>
+        <span style={{ display: 'block', marginTop: 3, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {liveFriendCount} friend{liveFriendCount === 1 ? '' : 's'} working out right now
+        </span>
+      </span>
+      <i className="fa-solid fa-chevron-right" style={{ color: UI.gold, fontSize: 11 }} />
+    </button>
+  ) : null;
+
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -2999,6 +3018,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>}
           />
           <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
+          {friendsLiveBanner}
           <div style={{ padding: 22 }}>
             {hasPlans
               ? <Empty title="No active plan" sub="You have plans ready, just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
@@ -3074,6 +3094,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       {/* Pull-down indicator, right below plan header */}
       <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
+      {friendsLiveBanner}
 
       {/* In-progress banner */}
       {store.inProgress && (() => {

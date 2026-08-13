@@ -11,21 +11,6 @@ const SOCIAL_INPUT_STYLE = {
   fontSize: 13, outline: 'none', userSelect: 'text', WebkitUserSelect: 'text',
 };
 
-function SocialToggle({ on, onToggle, label }) {
-  return (
-    <button onClick={onToggle} aria-label={label} style={{
-      width: 42, height: 24, padding: 2, borderRadius: 999,
-      border: `var(--hair-width) solid ${on ? 'var(--accent)' : UI.hairStrong}`,
-      background: on ? 'var(--accent)' : UI.bgInset, cursor: 'pointer',
-      display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start',
-      transition: 'background 0.15s, border-color 0.15s', flexShrink: 0,
-      WebkitTapHighlightColor: 'transparent',
-    }}>
-      <span style={{ width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint }} />
-    </button>
-  );
-}
-
 function socialMetricLabel(metric) {
   return metric === 'steps' ? 'Steps' : metric === 'workouts' ? 'Workouts' : 'Adherence';
 }
@@ -174,8 +159,6 @@ function FriendsScreen({ store, setStore, userId }) {
   const [query, setQuery] = useStateF('');
   const [searchResult, setSearchResult] = useStateF(null);
   const [searching, setSearching] = useStateF(false);
-  const [profileDraft, setProfileDraft] = useStateF(null);
-  const [profileSaving, setProfileSaving] = useStateF(false);
   const [loading, setLoading] = useStateF(false);
   const [error, setError] = useStateF('');
   const [selectedChat, setSelectedChat] = useStateF(null);
@@ -194,6 +177,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const [reportDetails, setReportDetails] = useStateF('');
   const [reportBusy, setReportBusy] = useStateF(false);
   const [selectedWorkout, setSelectedWorkout] = useStateF(null);
+  const [expandedGroupMetric, setExpandedGroupMetric] = useStateF(null);
 
   const data = store.friends;
   const friends = data?.friends || [];
@@ -204,12 +188,6 @@ function FriendsScreen({ store, setStore, userId }) {
   const planShares = data?.planShares || [];
   const liveWorkouts = data?.liveWorkouts || [];
   const workoutHistory = data?.workoutHistory || [];
-
-  useEffectF(() => {
-    const profile = data?.profile;
-    if (!profile) return;
-    setProfileDraft(profile);
-  }, [data?.profile?.handle, data?.profile?.friendCode, data?.profile?.stepsVisible, data?.profile?.workoutsVisible, data?.profile?.adherenceVisible]);
 
   useEffectF(() => {
     if (!store.settings?.showFriendsTab || store.friends) return;
@@ -282,38 +260,24 @@ function FriendsScreen({ store, setStore, userId }) {
     }
   };
 
-  const saveProfile = async (next) => {
-    if (profileSaving) return;
-    setProfileSaving(true);
-    setError('');
-    try {
-      const profile = await LB.updateSocialProfile(userId, next);
-      patchSocial(s => ({ ...s, profile }));
-      setProfileDraft(profile);
-    } catch (e) {
-      setError(e.message || 'Profile could not be saved');
-    } finally {
-      setProfileSaving(false);
-    }
-  };
-
   const ownMetrics = useMemoF(() => {
     const start = data?.weekStart || LB.socialWeekStartISO();
     const end = new Date(`${start}T12:00:00`);
     end.setDate(end.getDate() + 7);
-    const endISO = LB.fmtISO(end);
-    const logs = (store.dailyLogs || []).filter(l => l.date >= start && l.date < endISO);
+    const fullEndISO = LB.fmtISO(end);
+    const todayISO = LB.todayISO();
+    const logs = (store.dailyLogs || []).filter(l => l.date >= start && l.date < fullEndISO);
     const sessions = (store.sessions || []).filter(s => {
       const date = String(s.date || '').slice(0, 10);
-      return date >= start && date < endISO && s.ended;
+      return date >= start && date < fullEndISO && s.ended;
     });
-    const adherenceValues = logs.map(l => Number(l.adherence)).filter(Number.isFinite);
+    const adherenceValues = logs.filter(l => l.date < todayISO).map(l => Number(l.adherence)).filter(Number.isFinite);
     return {
       steps: logs.some(l => l.steps != null) ? logs.reduce((sum, l) => sum + (Number(l.steps) || 0), 0) : null,
       workouts: sessions.length ? sessions.length : null,
       adherence: adherenceValues.length ? Math.round((adherenceValues.reduce((a, b) => a + b, 0) / adherenceValues.length) * 10) / 10 : null,
     };
-  }, [store.dailyLogs, store.sessions, data?.weekStart]);
+  }, [store.dailyLogs, store.sessions, data?.weekStart, LB.todayISO()]);
 
   const leaderboard = (metric, groupId = null) => {
     const rows = (groupId
@@ -561,51 +525,6 @@ function FriendsScreen({ store, setStore, userId }) {
     );
   }
 
-  const profile = profileDraft || data.profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false };
-  const profileNext = patch => ({ ...profile, ...patch });
-
-  const renderProfile = () => (
-    <Card style={{ marginBottom: 12 }}>
-      <div className="micro" style={{ color: UI.gold, marginBottom: 10 }}>YOUR SOCIAL PROFILE</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input
-          value={profile.handle || ''}
-          onChange={e => setProfileDraft(p => ({ ...(p || profile), handle: e.target.value }))}
-          placeholder="@zane_handle"
-          autoCapitalize="none" autoCorrect="off" spellCheck={false}
-          style={{ ...SOCIAL_INPUT_STYLE, flex: 1 }}
-        />
-        <Btn onClick={() => saveProfile(profile)} disabled={profileSaving} style={{ padding: '10px 12px', minHeight: 0, fontSize: 10 }}>
-          {profileSaving ? 'Saving' : 'Save'}
-        </Btn>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-        <span className="micro" style={{ color: UI.inkFaint }}>FRIEND CODE</span>
-        <span className="num" style={{ color: UI.ink, letterSpacing: '0.12em' }}>{profile.friendCode || '...'}</span>
-        <button onClick={() => navigator.clipboard?.writeText(profile.friendCode || '')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: UI.gold, cursor: 'pointer', fontSize: 11 }}>Copy</button>
-      </div>
-      <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: 10 }}>
-        Use your handle or code to add friends. Metric sharing is opt-in per category.
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
-        {[
-          ['stepsVisible', 'Share weekly steps'],
-          ['workoutsVisible', 'Share workouts and live training'],
-          ['adherenceVisible', 'Share weekly adherence'],
-        ].map(([key, label]) => (
-          <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{label}</span>
-            <SocialToggle on={!!profile[key]} label={label} onToggle={() => {
-              const next = profileNext({ [key]: !profile[key] });
-              setProfileDraft(next);
-              saveProfile(next);
-            }} />
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-
   const renderSearch = () => (
     <Card style={{ marginBottom: 12 }}>
       <div className="micro" style={{ color: UI.gold, marginBottom: 10 }}>ADD A FRIEND</div>
@@ -736,8 +655,6 @@ function FriendsScreen({ store, setStore, userId }) {
           <div className="micro" style={{ marginTop: 4 }}>{planShares.length} shared</div>
         </button>
       </div>
-      <div className="micro" style={{ color: UI.gold, margin: '19px 0 8px' }}>YOUR PROFILE</div>
-      {renderProfile()}
     </>
   );
 
@@ -847,7 +764,7 @@ function FriendsScreen({ store, setStore, userId }) {
     );
   };
 
-  const renderGroups = () => (
+  const renderGroupsLegacy = () => (
     <>
       <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
       <Card style={{ marginBottom: 12 }}>
@@ -868,6 +785,77 @@ function FriendsScreen({ store, setStore, userId }) {
       })}</div>}
     </>
   );
+
+  const renderGroups = () => {
+    const metrics = ['steps', 'workouts', 'adherence'];
+    return (
+      <>
+        <button onClick={() => setActiveTab('circle')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 0, margin: '0 0 10px', border: 'none', background: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}><i className="fa-solid fa-arrow-left" /> Circle</button>
+        <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
+          <div style={{ position: 'absolute', width: 150, height: 150, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -52, top: -62, pointerEvents: 'none' }} />
+          <div className="micro" style={{ color: UI.gold, position: 'relative' }}>GROUP TRAINING</div>
+          <div className="display" style={{ color: UI.ink, fontSize: 29, lineHeight: 1, marginTop: 9, position: 'relative' }}>YOUR CREW</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 11, position: 'relative' }}>
+            <span className="num" style={{ color: UI.gold, fontSize: 20 }}>{groups.length}</span>
+            <span style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>{groups.length === 1 ? 'private space' : 'private spaces'} for your people</span>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9, marginBottom: 18 }}>
+          <Card style={{ padding: 13, marginBottom: 0 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>CREATE GROUP</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Group name" style={SOCIAL_INPUT_STYLE} /><Btn onClick={createGroup} disabled={groupBusy || !groupName.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>Create group</Btn></div>
+          </Card>
+          <Card style={{ padding: 13, marginBottom: 0 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>JOIN A GROUP</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><input value={joinCode} onChange={e => setJoinCode(e.target.value)} placeholder="Paste group code" style={SOCIAL_INPUT_STYLE} /><Btn onClick={joinGroup} disabled={groupBusy || !joinCode.trim()} style={{ padding: '9px 11px', minHeight: 0, fontSize: 10 }}>Join group</Btn></div>
+          </Card>
+        </div>
+        <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>YOUR GROUPS <span style={{ color: UI.inkFaint }}>· {groups.length}</span></div>
+        {groups.length === 0 ? <Empty title="No groups yet" sub="Create a private group or join one with a code." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{groups.map(group => {
+          const members = groupMembers.filter(m => m.groupId === group.id);
+          const selected = expandedGroupMetric?.groupId === group.id ? expandedGroupMetric.metric : null;
+          const selectedRows = selected ? leaderboard(selected, group.id) : [];
+          return <Card key={group.id} style={{ padding: 15, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.09), rgba(0,0,0,0.10))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 7, display: 'grid', placeItems: 'center', background: UI.goldFaint, border: `var(--hair-width) solid ${UI.goldSoft}`, color: UI.gold, fontSize: 16 }}><i className="fa-solid fa-users" /></div>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</div><div className="micro" style={{ marginTop: 4 }}>{members.length} {members.length === 1 ? 'member' : 'members'}</div></div>
+              <button onClick={() => { setSelectedChat({ type: 'group', id: group.id }); setActiveTab('chats'); }} aria-label={`Open ${group.name} chat`} style={{ width: 36, height: 36, borderRadius: 6, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, cursor: 'pointer', flexShrink: 0 }}><i className="fa-solid fa-comment" /></button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 13, padding: '8px 9px', borderRadius: 5, background: 'rgba(0,0,0,0.13)', border: `var(--hair-width) solid ${UI.hair}` }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>GROUP CODE</span><span className="num" style={{ flex: 1, minWidth: 0, color: UI.inkSoft, fontSize: 11, letterSpacing: '0.08em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.joinCode}</span><button onClick={() => copyGroupCode(group)} aria-label={`Copy code for ${group.name}`} style={{ padding: '5px 8px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer', flexShrink: 0 }}>{copiedGroupId === group.id ? 'Copied' : 'Copy'}</button>
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '15px 0 7px' }}>COMPARE THIS WEEK <span style={{ color: UI.inkGhost }}>· TAP A CATEGORY</span></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 7 }}>
+              {metrics.map(metric => {
+                const rows = leaderboard(metric, group.id);
+                const top = rows[0];
+                const active = selected === metric;
+                return <button key={metric} onClick={() => setExpandedGroupMetric(active ? null : { groupId: group.id, metric })} disabled={!rows.length} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, border: `var(--hair-width) solid ${active ? UI.gold : UI.hairStrong}`, background: active ? UI.goldFaint : UI.bgInset, color: UI.ink, textAlign: 'left', cursor: rows.length ? 'pointer' : 'default', opacity: rows.length ? 1 : 0.62 }}>
+                  <div className="micro" style={{ color: active ? UI.gold : UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
+                  <div style={{ color: top ? UI.inkSoft : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'Private'}</div>
+                  <div className="num" style={{ color: top ? UI.gold : UI.inkGhost, fontSize: 10, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top ? socialMetricValue(metric, top.value) : 'No shared data'}</div>
+                </button>;
+              })}
+            </div>
+            {selected && <div style={{ marginTop: 10, padding: '10px 11px', borderRadius: 5, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'rgba(var(--accent-rgb),0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}><div className="micro" style={{ color: UI.gold }}>{socialMetricLabel(selected)} LEADERBOARD</div><button onClick={() => setExpandedGroupMetric(null)} aria-label="Close leaderboard" style={{ border: 'none', background: 'none', color: UI.inkFaint, cursor: 'pointer' }}><i className="fa-solid fa-xmark" /></button></div>
+              {!selectedRows.length && <div className="micro" style={{ color: UI.inkFaint, padding: '8px 0' }}>No members have shared this category.</div>}
+              {selectedRows.map((row, index) => <div key={row.userId} style={{ display: 'grid', gridTemplateColumns: '22px 28px minmax(0, 1fr) max-content', gap: 8, alignItems: 'center', padding: '7px 0', borderTop: index ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+                <span className="num" style={{ color: index === 0 ? UI.gold : UI.inkFaint, fontSize: 11 }}>{index + 1}</span>
+                <span style={{ width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center', background: row.own ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${row.own ? UI.goldSoft : UI.hairStrong}`, color: row.own ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700 }}>{socialInitials(row.name)}</span>
+                <span style={{ minWidth: 0, color: row.own ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}{row.own ? ' · You' : ''}</span>
+                <span className="num" style={{ color: index === 0 ? UI.gold : UI.inkSoft, fontSize: 11, whiteSpace: 'nowrap' }}>{socialMetricValue(selected, row.value)}</span>
+              </div>)}
+            </div>}
+            <div style={{ display: 'flex', alignItems: 'center', marginTop: 13, paddingTop: 10, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+              {group.ownerId === userId ? <button onClick={() => deleteGroup(group)} style={{ background: 'none', border: 'none', padding: 0, color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete group</button> : <button onClick={() => leaveGroup(group)} style={{ background: 'none', border: 'none', padding: 0, color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Leave group</button>}
+              <button onClick={() => { setSelectedChat({ type: 'group', id: group.id }); setActiveTab('chats'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Open chat <i className="fa-solid fa-arrow-right" /></button>
+            </div>
+          </Card>;
+        })}</div>}
+      </>
+    );
+  };
 
   const renderPlans = () => (
     <>

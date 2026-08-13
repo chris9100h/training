@@ -5831,7 +5831,7 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
 
 async function loadFriendsStateUncached(userId, weekStart) {
   const [dashboardRes, workoutFeed] = await Promise.all([
-    _supabase.rpc('social_get_dashboard', { p_week_start: weekStart }),
+    _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
     // The workout feed is an enhancement to Friends, not a prerequisite for
     // opening chats/groups. A transient feed/RPC failure must not blank the
     // whole social screen.

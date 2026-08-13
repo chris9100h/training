@@ -714,6 +714,98 @@ function TrainingScreen(props) {
   return <TrainingScreenInner {...props} session={session} />;
 }
 
+function TrainingSocialFeedback({ sessionId, userId }) {
+  const [comments, setComments] = useStateT([]);
+  const [toast, setToast] = useStateT(null);
+  const [open, setOpen] = useStateT(false);
+  const seenRef = useRefT(new Set());
+  const toastTimerRef = useRefT(null);
+
+  useEffectT(() => {
+    let live = true;
+    let seeded = false;
+
+    const refresh = async () => {
+      try {
+        const detail = await LB.loadSocialWorkoutDetail(userId, sessionId);
+        if (!live) return;
+        const next = detail?.comments || [];
+        if (!seeded) {
+          next.forEach(comment => seenRef.current.add(comment.id));
+          seeded = true;
+        } else {
+          const fresh = next.filter(comment => comment.id && !seenRef.current.has(comment.id));
+          fresh.forEach(comment => seenRef.current.add(comment.id));
+          if (fresh.length) {
+            const latest = fresh[fresh.length - 1];
+            setToast(latest);
+            window.clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = window.setTimeout(() => setToast(null), 5000);
+          }
+        }
+        setComments(next);
+      } catch {
+        // Social feedback is an enhancement to the workout flow. A transient
+        // social/RPC failure must never interrupt logging the session.
+      }
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      window.clearTimeout(toastTimerRef.current);
+    };
+  }, [sessionId, userId]);
+
+  const openComments = () => {
+    setToast(null);
+    setOpen(true);
+  };
+
+  return <>
+    {toast && ReactDOM.createPortal(
+      <button onClick={openComments} style={{
+        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 58px)', left: 12, right: 12, zIndex: 140,
+        display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', borderRadius: 7,
+        border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
+        background: toast.kind === 'cheer' ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.28), rgba(24,22,29,0.96))' : UI.bgRaised,
+        color: UI.ink, textAlign: 'left', cursor: 'pointer', boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+      }}>
+        <span style={{ width: 30, height: 30, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '50%', background: toast.kind === 'cheer' ? UI.goldFaint : UI.bgInset, color: UI.gold }}>
+          <i className={`fa-solid ${toast.kind === 'cheer' ? 'fa-bullhorn' : 'fa-comment'}`} />
+        </span>
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span className="micro" style={{ display: 'block', color: UI.gold }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} · {toast.authorName || 'Friend'}</span>
+          <span style={{ display: 'block', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>{toast.body}</span>
+        </span>
+      </button>,
+      document.body
+    )}
+    {!toast && comments.length > 0 && ReactDOM.createPortal(
+      <button onClick={openComments} style={{
+        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 58px)', right: 12, zIndex: 135,
+        display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', borderRadius: 999,
+        border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised, color: UI.inkSoft,
+        fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer', boxShadow: '0 5px 18px rgba(0,0,0,0.25)',
+      }}>
+        <i className="fa-solid fa-comment" style={{ color: UI.gold }} /> {comments.length}
+      </button>,
+      document.body
+    )}
+    <Sheet open={open} onClose={() => setOpen(false)} title="Training feedback">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {!comments.length && <div className="micro" style={{ color: UI.inkFaint }}>No feedback yet.</div>}
+        {[...comments].reverse().map(comment => <div key={comment.id} style={{ padding: '9px 10px', borderRadius: 5, background: comment.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${comment.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}><strong style={{ color: comment.kind === 'cheer' ? UI.gold : UI.ink }}>{comment.authorName || 'Friend'}</strong><span className="micro" style={{ color: UI.inkGhost }}>{comment.kind === 'cheer' ? 'CHEER' : 'COMMENT'}</span></div>
+          <div style={{ marginTop: 4 }}>{comment.body}</div>
+        </div>)}
+      </div>
+    </Sheet>
+  </>;
+}
+
 function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncStatus, storageFull, onRetrySync }) {
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
@@ -6418,6 +6510,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   return (
     <Screen scroll={false}>
+      <TrainingSocialFeedback sessionId={sessionId} userId={userId} />
       {/* Gold screen flash overlay. NOTE: these full-screen flashes are portaled
           to <body> so they cover the WHOLE screen (incl. behind the status bar).
           Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed

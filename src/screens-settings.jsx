@@ -620,6 +620,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [friendsSheet, setFriendsSheet] = useStateSet(false);
+  const [socialProfileDraft, setSocialProfileDraft] = useStateSet(null);
+  const [socialProfileSaving, setSocialProfileSaving] = useStateSet(false);
+  const [socialProfileMsg, setSocialProfileMsg] = useStateSet(null);
   const [healthSheet, setHealthSheet] = useStateSet(false);
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
@@ -937,6 +940,29 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setXHandlePublicDraft(store.user?.xHandlePublic !== false);
     setXHandleMsg(null);
   }, [accountSheet]);
+
+  useEffectSet(() => {
+    if (!friendsSheet) return;
+    const profile = store.friends?.profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false };
+    setSocialProfileDraft(profile);
+    setSocialProfileMsg(null);
+  }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible]);
+
+  const saveSocialProfile = async next => {
+    if (!next || socialProfileSaving) return;
+    setSocialProfileSaving(true);
+    setSocialProfileMsg(null);
+    try {
+      const profile = await LB.updateSocialProfile(userId, next);
+      setSocialProfileDraft(profile);
+      setStore(s => s?.friends ? { ...s, friends: { ...s.friends, profile } } : s);
+      setSocialProfileMsg({ ok: true, text: 'Social profile saved.' });
+    } catch (e) {
+      setSocialProfileMsg({ ok: false, text: e.message || 'Could not save social profile.' });
+    } finally {
+      setSocialProfileSaving(false);
+    }
+  };
 
   const saveXHandle = () => {
     const raw = xHandleDraft.trim();
@@ -2319,6 +2345,46 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing and plan snapshots. You choose which metrics are visible.
           </div>
+          {!!store.settings?.showFriendsTab && socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>YOUR SOCIAL PROFILE</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={socialProfileDraft.handle || ''}
+                onChange={e => setSocialProfileDraft(p => ({ ...(p || {}), handle: e.target.value }))}
+                placeholder="@zane_handle"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                style={{ ...SETTINGS_INPUT_STYLE, flex: 1 }}
+              />
+              <Btn onClick={() => saveSocialProfile(socialProfileDraft)} disabled={socialProfileSaving} style={{ padding: '10px 12px', minHeight: 0, fontSize: 10 }}>
+                {socialProfileSaving ? 'Saving' : 'Save'}
+              </Btn>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>FRIEND CODE</span>
+              <span className="num" style={{ color: UI.ink, letterSpacing: '0.12em' }}>{socialProfileDraft.friendCode || '...'}</span>
+              <button onClick={() => navigator.clipboard?.writeText(socialProfileDraft.friendCode || '')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: UI.gold, cursor: 'pointer', fontSize: 11 }}>Copy</button>
+            </div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: 10 }}>
+              Use your handle or friend code to connect. Metric sharing is opt-in and can be changed here any time.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+              {[
+                ['stepsVisible', 'Share weekly steps'],
+                ['workoutsVisible', 'Share workouts and live training'],
+                ['adherenceVisible', 'Share weekly adherence'],
+              ].map(([key, label]) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{label}</span>
+                  <Toggle on={!!socialProfileDraft[key]} label={label} onToggle={() => {
+                    const next = { ...socialProfileDraft, [key]: !socialProfileDraft[key] };
+                    setSocialProfileDraft(next);
+                    saveSocialProfile(next);
+                  }} />
+                </div>
+              ))}
+            </div>
+            {socialProfileMsg && <div style={{ marginTop: 10, color: socialProfileMsg.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{socialProfileMsg.text}</div>}
+          </div>}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setFriendsSheet(false)}>Done</Btn>
           </div>

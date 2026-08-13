@@ -3678,7 +3678,9 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.social_get_dashboard(p_week_start date)
+DROP FUNCTION IF EXISTS public.social_get_dashboard(date);
+
+CREATE OR REPLACE FUNCTION public.social_get_dashboard(p_week_start date, p_today date)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3686,9 +3688,10 @@ CREATE OR REPLACE FUNCTION public.social_get_dashboard(p_week_start date)
 AS $function$
 DECLARE
   v_uid uuid := auth.uid();
+  v_adherence_end date := LEAST(p_week_start + 7, p_today);
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
-  IF p_week_start IS NULL THEN RAISE EXCEPTION 'Week start required'; END IF;
+  IF p_week_start IS NULL OR p_today IS NULL THEN RAISE EXCEPTION 'Week dates required'; END IF;
   RETURN jsonb_build_object(
     'profile', (
       SELECT jsonb_build_object(
@@ -3709,7 +3712,7 @@ BEGIN
           SELECT CASE WHEN count(*) = 0 THEN NULL ELSE count(*)::int END
           FROM zane_sessions s WHERE s.user_id = other.user_id AND s.ended IS NOT NULL AND s.date::date >= p_week_start AND s.date::date < p_week_start + 7
         ) END,
-        'adherence', CASE WHEN other.adherence_visible THEN (SELECT round(avg(dl.adherence)::numeric, 1) FROM zane_daily_logs dl WHERE dl.user_id = other.user_id AND dl.date::date >= p_week_start AND dl.date::date < p_week_start + 7 AND dl.adherence IS NOT NULL) END
+        'adherence', CASE WHEN other.adherence_visible THEN (SELECT round(avg(dl.adherence)::numeric, 1) FROM zane_daily_logs dl WHERE dl.user_id = other.user_id AND dl.date::date >= p_week_start AND dl.date::date < v_adherence_end AND dl.adherence IS NOT NULL) END
       ) ORDER BY f.updated_at DESC)
       FROM zane_social_friendships f
       JOIN zane_social_profiles other ON other.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
@@ -3740,7 +3743,7 @@ BEGIN
         ) END,
         'adherence', CASE WHEN sp.adherence_visible THEN (
           SELECT round(avg(dl.adherence)::numeric, 1) FROM zane_daily_logs dl
-          WHERE dl.user_id = gm.user_id AND dl.date::date >= p_week_start AND dl.date::date < p_week_start + 7 AND dl.adherence IS NOT NULL
+          WHERE dl.user_id = gm.user_id AND dl.date::date >= p_week_start AND dl.date::date < v_adherence_end AND dl.adherence IS NOT NULL
         ) END
       ) ORDER BY gm.joined_at)
       FROM zane_social_group_members gm
@@ -4044,8 +4047,8 @@ REVOKE ALL ON public.zane_social_groups, public.zane_social_group_members, publi
 
 REVOKE EXECUTE ON FUNCTION public.social_lookup_profile(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_lookup_profile(text) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date, date) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_send_friend_request(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_send_friend_request(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) FROM PUBLIC, anon;
