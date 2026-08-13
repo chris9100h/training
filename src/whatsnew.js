@@ -22,6 +22,22 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.776',
+    date: '2026-08-13',
+    title: 'Train together, on your terms 🤝',
+    items: [
+      '⚙️ Friends is an opt-in preview. Enable it in Settings → Friends to get started.',
+      '🤝 Add friends by handle or code, accept requests and build your Circle. Choose which Health metrics friends may see and which three metrics appear for each person.',
+      '🏋️ See friends training live with exercises, reps, weights and progress in your preferred units. Cheer them on with themed emoji reactions and comments, which they see live during the workout for an extra motivation boost.',
+      '💬 Private and group chats preserve line breaks. Messages can be edited or deleted for up to 60 minutes.',
+      '👥 Create groups, compare weekly metrics, inspect category details and share training plans with friends or groups.',
+      '🗂️ Commented workouts remain visible in Activity and session history. Friend requests, unread messages and social activity are easier to spot with native prompts and badges.',
+      '📊 Weekly adherence and nutrition averages now respect completed days. Mark today as done when you are finished.',
+      '⬆️ Updates wait for a safe moment on Home and no longer interrupt active plans or workouts.',
+      '✨ Plus a wide round of Health, Food, Medications and navigation fixes.'
+    ],
+  },
+  {
     id: 'v2.763',
     date: '2026-08-12',
     title: 'Meals worth tapping 🍽️',

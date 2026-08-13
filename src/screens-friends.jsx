@@ -935,10 +935,18 @@ function FriendsScreen({ store, setStore, userId }) {
           </div>
           {liveWorkouts.length > 0 && <span className="micro" style={{ marginLeft: 'auto', color: UI.gold }}>{liveWorkouts.length} LIVE NOW</span>}
         </div>
-        {data?.profile && <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 11, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
-          <span className="micro" style={{ color: UI.inkFaint }}>YOUR FRIEND CODE</span>
-          <span className="num" style={{ color: UI.inkSoft, fontSize: 11, letterSpacing: '0.08em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.profile.friendCode || 'Not available'}</span>
-          {data.profile.friendCode && <button onClick={copyOwnFriendCode} style={{ marginLeft: 'auto', padding: '4px 7px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer', flexShrink: 0 }}>{copiedOwnCode ? 'Copied' : 'Copy'}</button>}
+        {data?.profile && <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 11, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="micro" style={{ color: UI.inkFaint }}>YOUR FRIEND HANDLE</div>
+            <div className="num" style={{ color: data.profile.handle ? UI.inkSoft : UI.inkFaint, fontSize: 11, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.profile.handle ? `@${String(data.profile.handle).replace(/^@/, '')}` : 'Not set'}</div>
+          </div>
+          <div style={{ minWidth: 0, textAlign: 'right' }}>
+            <div className="micro" style={{ color: UI.inkFaint }}>YOUR FRIEND CODE</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginTop: 3 }}>
+              <span className="num" style={{ color: data.profile.friendCode ? UI.inkSoft : UI.inkFaint, fontSize: 11, letterSpacing: '0.08em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.profile.friendCode || 'Not available'}</span>
+              {data.profile.friendCode && <button onClick={copyOwnFriendCode} style={{ padding: '4px 7px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer', flexShrink: 0 }}>{copiedOwnCode ? 'Copied' : 'Copy'}</button>}
+            </div>
+          </div>
         </div>}
         <div style={{ position: 'relative', display: 'flex', gap: 7, marginTop: 17, flexWrap: 'wrap' }}>
           <Btn onClick={() => document.getElementById('friends-add-input')?.focus()} style={{ padding: '9px 12px', minHeight: 0, fontSize: 10 }}>Find people</Btn>
