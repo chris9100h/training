@@ -748,7 +748,9 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 - `user_id` (uuid, primary key, auth user)
 - `handle` (text, nullable, unique, 3-20 lowercase letters, numbers or underscores)
 - `friend_code` (text, unique, stable generated lookup code)
-- `steps_visible`, `workouts_visible`, `adherence_visible` (boolean, per-metric privacy opt-in)
+- `steps_visible`, `workouts_visible`, `adherence_visible` (boolean, legacy columns kept in sync with the metric map)
+- `metric_visibility` (jsonb, explicit opt-in map for weekly activity/nutrition/cardio/body/vitals metrics; new metrics default to false)
+- `metric_slots` (jsonb array of exactly three unique metric keys, the viewer's preferred Circle-card layout; defaults to `steps`, `workouts`, `adherence`)
 - `created_at`, `updated_at` (timestamptz)
 
 ### `zane_social_friendships`
@@ -821,6 +823,6 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 ### Social RPCs
 
-`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. `social_health_metric_value` is an internal SECURITY DEFINER helper and is not executable by clients. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The dashboard returns weekly aggregates or the latest reading for enabled metrics only; notes and exact reading timestamps are never included. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
 
 The social relationship, group, membership, message, attachment, plan-share and workout-comment tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.

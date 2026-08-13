@@ -11,15 +11,49 @@ const SOCIAL_INPUT_STYLE = {
   fontSize: 13, outline: 'none', userSelect: 'text', WebkitUserSelect: 'text',
 };
 
-function socialMetricLabel(metric) {
-  return metric === 'steps' ? 'Steps' : metric === 'workouts' ? 'Workouts' : 'Adherence';
+function socialMetricDefinition(metric) {
+  return (window.SocialMetricCatalog || []).find(item => item.key === metric) || { key: metric, label: metric };
 }
 
-function socialMetricValue(metric, value) {
+function socialMetricLabel(metric) {
+  const label = socialMetricDefinition(metric).label || metric;
+  return label.replace(/^Weekly /, '').replace(/^Average /, '').replace(/^Latest /, '');
+}
+
+function socialMetricValue(metric, value, context = {}) {
   if (value == null) return null;
-  if (metric === 'steps') return `${Number(value).toLocaleString()} steps`;
-  if (metric === 'workouts') return `${value} workouts`;
-  return `${value}% adherence`;
+  const number = Number(value);
+  if (metric === 'steps') return `${number.toLocaleString()} steps`;
+  if (metric === 'workouts') return `${number} workouts`;
+  if (metric === 'adherence') return `${number}% adherence`;
+  if (metric === 'calories') return `${Math.round(number).toLocaleString()} kcal`;
+  if (['protein', 'carbs', 'fat', 'fiber'].includes(metric)) return `${Math.round(number)}g`;
+  if (metric === 'water') return `${Math.round(UI.waterToEntry(number)).toLocaleString()} ${UI.waterEntryUnit()}`;
+  if (metric === 'cardioMinutes') return `${Math.round(number)} min`;
+  if (metric === 'cardioDistance') return `${(number / 1000).toFixed(1)} km`;
+  if (metric === 'weight') return socialWeight(value, context.weightUnit, UI.unit());
+  if (metric === 'bodyFatPct') return `${number.toFixed(1)}%`;
+  if (['waistCm', 'hipsCm', 'chestCm', 'armCm', 'thighCm', 'calfCm'].includes(metric)) return `${number.toFixed(1)} cm`;
+  if (metric === 'glucose') {
+    const unit = context.settings?.glucoseUnit || 'mmol';
+    return unit === 'mgdl' ? `${Math.round(number * 18.0182)} mg/dL` : `${number.toFixed(1)} mmol/L`;
+  }
+  if (metric === 'bloodPressure' && typeof value === 'object') return `${value.systolic}/${value.diastolic} mmHg`;
+  if (metric === 'bodyTemp') {
+    const unit = context.settings?.tempUnit === 'f' ? 'f' : 'c';
+    return unit === 'f' ? `${(number * 9 / 5 + 32).toFixed(1)}°F` : `${number.toFixed(1)}°C`;
+  }
+  return String(value);
+}
+
+function socialFriendShares(friend, metric) {
+  if (friend?.metricVisibility && Object.prototype.hasOwnProperty.call(friend.metricVisibility, metric)) return !!friend.metricVisibility[metric];
+  return ['steps', 'workouts', 'adherence'].includes(metric) && friend?.[metric] != null;
+}
+
+function socialFriendMetricValue(friend, metric) {
+  if (friend?.metrics && Object.prototype.hasOwnProperty.call(friend.metrics, metric)) return friend.metrics[metric];
+  return friend?.[metric] ?? null;
 }
 
 function socialTime(iso) {
@@ -255,6 +289,9 @@ function FriendsScreen({ store, setStore, userId }) {
   const [reportBusy, setReportBusy] = useStateF(false);
   const [selectedWorkout, setSelectedWorkout] = useStateF(null);
   const [expandedGroupMetric, setExpandedGroupMetric] = useStateF(null);
+  const [metricPickerOpen, setMetricPickerOpen] = useStateF(false);
+  const [metricSlotsDraft, setMetricSlotsDraft] = useStateF(() => [...(LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'])]);
+  const [metricSlotsSaving, setMetricSlotsSaving] = useStateF(false);
 
   const data = store.friends;
   const friends = data?.friends || [];
@@ -265,6 +302,14 @@ function FriendsScreen({ store, setStore, userId }) {
   const planShares = data?.planShares || [];
   const liveWorkouts = data?.liveWorkouts || [];
   const workoutHistory = data?.workoutHistory || [];
+
+  const socialMetricCatalog = LB.socialMetricCatalog || window.SocialMetricCatalog || [];
+  const defaultMetricSlots = LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'];
+  const metricSlots = data?.profile?.metricSlots?.length === 3 ? data.profile.metricSlots : defaultMetricSlots;
+
+  useEffectF(() => {
+    setMetricSlotsDraft([...metricSlots]);
+  }, [JSON.stringify(metricSlots)]);
 
   useEffectF(() => {
     if (!store.settings?.showFriendsTab) return;
@@ -316,6 +361,32 @@ function FriendsScreen({ store, setStore, userId }) {
     const next = typeof patch === 'function' ? patch(current) : { ...current, ...patch };
     return { ...s, friends: next };
   });
+
+  const openMetricPicker = () => {
+    setMetricSlotsDraft([...metricSlots]);
+    setMetricPickerOpen(true);
+  };
+
+  const saveMetricSlots = async () => {
+    const slots = [...new Set(metricSlotsDraft)].filter(key => socialMetricCatalog.some(metric => metric.key === key));
+    if (slots.length !== 3 || metricSlotsSaving) return;
+    setMetricSlotsSaving(true);
+    try {
+      const profile = await LB.updateSocialProfile(userId, { ...(data?.profile || {}), metricSlots: slots });
+      patchSocial(s => ({ ...s, profile }));
+      setMetricPickerOpen(false);
+    } catch (e) {
+      setError(e.message || 'Could not save metric layout');
+    } finally {
+      setMetricSlotsSaving(false);
+    }
+  };
+
+  const displayedFriendMetric = (friend, slotIndex) => {
+    const requested = metricSlots[slotIndex] || defaultMetricSlots[slotIndex];
+    const fallback = defaultMetricSlots[slotIndex];
+    return socialFriendShares(friend, requested) ? requested : fallback;
+  };
 
   const runAction = async (action, successTab = null) => {
     setError('');
@@ -662,12 +733,14 @@ function FriendsScreen({ store, setStore, userId }) {
         <button onClick={() => { setSelectedChat({ type: 'friend', id: friend.userId }); setActiveTab('chats'); }} style={{ width: 32, height: 32, borderRadius: 5, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, cursor: 'pointer' }} aria-label="Message friend"><i className="fa-solid fa-comment" /></button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 12 }}>
-        {['steps', 'workouts', 'adherence'].map(metric => (
-          <div key={metric} style={{ padding: '8px 5px', background: UI.bgInset, borderRadius: 4, textAlign: 'center' }}>
+        {metricSlots.map((_, slotIndex) => {
+          const metric = displayedFriendMetric(friend, slotIndex);
+          const value = socialFriendMetricValue(friend, metric);
+          return <div key={`${metric}-${slotIndex}`} style={{ padding: '8px 5px', background: UI.bgInset, borderRadius: 4, textAlign: 'center' }}>
             <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{socialMetricLabel(metric)}</div>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 11, color: friend[metric] == null ? UI.inkGhost : UI.inkSoft, marginTop: 4 }}>{socialMetricValue(metric, friend[metric]) || 'Not shared'}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 11, color: value == null ? UI.inkGhost : UI.inkSoft, marginTop: 4 }}>{socialMetricValue(metric, value, { settings: store.settings, weightUnit: friend.weightUnit }) || 'No data'}</div>
           </div>
-        ))}
+        })}
       </div>
       <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
         <button onClick={() => setReportTarget(friend)} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Report</button>
@@ -702,7 +775,10 @@ function FriendsScreen({ store, setStore, userId }) {
       <div style={{ position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 8, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(19,18,25,0.96) 72%)', marginBottom: 16 }}>
         <div style={{ position: 'absolute', width: 190, height: 190, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -70, top: -84, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', width: 122, height: 122, borderRadius: '50%', border: `var(--hair-width) solid rgba(var(--accent-rgb),0.18)`, right: -28, top: -50, pointerEvents: 'none' }} />
-        <div className="micro" style={{ color: UI.gold, fontWeight: 700, position: 'relative' }}>YOUR CIRCLE</div>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>YOUR CIRCLE</div>
+          <button onClick={openMetricPicker} style={{ padding: '5px 8px', borderRadius: 4, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.06em', cursor: 'pointer' }}>EDIT METRICS</button>
+        </div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 9 }}>
           <div>
             <div className="display" style={{ color: UI.ink, fontSize: 31, lineHeight: 1 }}>FRIENDS</div>
@@ -920,7 +996,7 @@ function FriendsScreen({ store, setStore, userId }) {
                 const top = rows[0];
                 const active = selected === metric;
                 return <button key={metric} onClick={() => setExpandedGroupMetric(active ? null : { groupId: group.id, metric })} disabled={!rows.length} style={{ minWidth: 0, padding: '10px 7px', borderRadius: 5, border: `var(--hair-width) solid ${active ? UI.gold : UI.hairStrong}`, background: active ? UI.goldFaint : UI.bgInset, color: UI.ink, textAlign: 'center', cursor: rows.length ? 'pointer' : 'default', opacity: rows.length ? 1 : 0.62 }}>
-                  <div className="micro" style={{ color: active ? UI.gold : UI.inkFaint, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
+                  <div className="micro" style={{ color: UI.gold, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
                   <div style={{ color: top ? UI.inkSoft : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top?.name || 'Private'}</div>
                   <div className="num" style={{ color: top ? UI.gold : UI.inkGhost, fontSize: 10, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{top ? socialMetricValue(metric, top.value) : 'No shared data'}</div>
                 </button>;
@@ -987,6 +1063,21 @@ function FriendsScreen({ store, setStore, userId }) {
         {activeTab === 'plans' && renderPlans()}
         <button onClick={reload} disabled={loading} style={{ display: 'block', margin: '20px auto 0', background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: loading ? 'default' : 'pointer' }}>{loading ? 'Refreshing...' : 'Refresh social data'}</button>
       </div>
+      <Sheet open={metricPickerOpen} onClose={() => setMetricPickerOpen(false)} title="Circle metrics">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5 }}>
+            Choose the three metrics shown on every friend card. If a friend has not shared your choice, that slot falls back to its standard metric.
+          </div>
+          {metricSlotsDraft.map((selected, slotIndex) => <label key={`slot-${slotIndex}`} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="micro" style={{ color: UI.gold }}>SLOT {slotIndex + 1} · FALLBACK {socialMetricLabel(defaultMetricSlots[slotIndex])}</span>
+            <select value={selected} onChange={e => setMetricSlotsDraft(current => current.map((item, index) => index === slotIndex ? e.target.value : item))} style={SOCIAL_INPUT_STYLE}>
+              {socialMetricCatalog.map(metric => <option key={metric.key} value={metric.key} disabled={metricSlotsDraft.some((item, index) => index !== slotIndex && item === metric.key)}>{metric.label}</option>)}
+            </select>
+          </label>)}
+          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.45 }}>Your selection is synced to your social profile and applies to all friends.</div>
+          <Btn onClick={saveMetricSlots} disabled={metricSlotsSaving}>{metricSlotsSaving ? 'Saving...' : 'Save metric layout'}</Btn>
+        </div>
+      </Sheet>
       <Sheet open={!!reportTarget} onClose={() => setReportTarget(null)} title="Report user">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5 }}>Report {reportTarget?.name || 'this user'} to the Zane team. Blocking is separate and takes effect immediately.</div>

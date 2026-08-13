@@ -5694,6 +5694,48 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
 // FRIENDS / SOCIAL
 // ---------------------------------------------------------------------------
 
+const SOCIAL_METRIC_CATALOG = [
+  { key: 'steps', label: 'Weekly steps', group: 'Activity' },
+  { key: 'workouts', label: 'Workouts', group: 'Activity' },
+  { key: 'adherence', label: 'Weekly adherence', group: 'Activity' },
+  { key: 'calories', label: 'Average calories', group: 'Nutrition' },
+  { key: 'protein', label: 'Average protein', group: 'Nutrition' },
+  { key: 'carbs', label: 'Average carbs', group: 'Nutrition' },
+  { key: 'fat', label: 'Average fat', group: 'Nutrition' },
+  { key: 'fiber', label: 'Average fiber', group: 'Nutrition' },
+  { key: 'water', label: 'Average water', group: 'Nutrition' },
+  { key: 'cardioMinutes', label: 'Cardio minutes', group: 'Activity' },
+  { key: 'cardioDistance', label: 'Cardio distance', group: 'Activity' },
+  { key: 'weight', label: 'Latest weight', group: 'Body' },
+  { key: 'bodyFatPct', label: 'Latest body fat', group: 'Body' },
+  { key: 'waistCm', label: 'Latest waist', group: 'Body' },
+  { key: 'hipsCm', label: 'Latest hips', group: 'Body' },
+  { key: 'chestCm', label: 'Latest chest', group: 'Body' },
+  { key: 'armCm', label: 'Latest arm', group: 'Body' },
+  { key: 'thighCm', label: 'Latest thigh', group: 'Body' },
+  { key: 'calfCm', label: 'Latest calf', group: 'Body' },
+  { key: 'glucose', label: 'Latest glucose', group: 'Vitals', sensitive: true },
+  { key: 'bloodPressure', label: 'Latest blood pressure', group: 'Vitals', sensitive: true },
+  { key: 'bodyTemp', label: 'Latest body temperature', group: 'Vitals', sensitive: true },
+];
+const SOCIAL_METRIC_KEYS = SOCIAL_METRIC_CATALOG.map(metric => metric.key);
+const SOCIAL_DEFAULT_METRIC_SLOTS = ['steps', 'workouts', 'adherence'];
+
+function normalizeSocialMetricVisibility(raw, legacy = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  return Object.fromEntries(SOCIAL_METRIC_KEYS.map(key => [
+    key, source[key] != null ? !!source[key] : !!legacy[key],
+  ]));
+}
+
+function normalizeSocialMetricSlots(raw) {
+  const slots = Array.isArray(raw) ? raw.filter(key => SOCIAL_METRIC_KEYS.includes(key)) : [];
+  const unique = [...new Set(slots)];
+  return unique.length === 3 ? unique : [...SOCIAL_DEFAULT_METRIC_SLOTS];
+}
+
+window.SocialMetricCatalog = SOCIAL_METRIC_CATALOG;
+
 function socialWeekStartISO(date = new Date()) {
   const d = new Date(date);
   d.setHours(12, 0, 0, 0);
@@ -5704,18 +5746,32 @@ function socialWeekStartISO(date = new Date()) {
 
 function mapSocialProfile(p) {
   if (!p) return null;
+  const legacy = {
+    steps: p.stepsVisible ?? p.steps_visible,
+    workouts: p.workoutsVisible ?? p.workouts_visible,
+    adherence: p.adherenceVisible ?? p.adherence_visible,
+  };
   return {
     userId: p.userId ?? p.user_id ?? null,
     handle: p.handle ?? null,
     friendCode: p.friendCode ?? p.friend_code ?? null,
-    stepsVisible: !!(p.stepsVisible ?? p.steps_visible),
-    workoutsVisible: !!(p.workoutsVisible ?? p.workouts_visible),
-    adherenceVisible: !!(p.adherenceVisible ?? p.adherence_visible),
+    weightUnit: p.weightUnit ?? p.weight_unit ?? null,
+    stepsVisible: !!legacy.steps,
+    workoutsVisible: !!legacy.workouts,
+    adherenceVisible: !!legacy.adherence,
+    metricVisibility: normalizeSocialMetricVisibility(p.metricVisibility ?? p.metric_visibility, legacy),
+    metricSlots: normalizeSocialMetricSlots(p.metricSlots ?? p.metric_slots),
   };
 }
 
 function mapSocialFriend(f) {
   if (!f) return null;
+  const legacy = {
+    steps: f.stepsVisible ?? f.steps_visible ?? f.steps != null,
+    workouts: f.workoutsVisible ?? f.workouts_visible ?? f.workouts != null,
+    adherence: f.adherenceVisible ?? f.adherence_visible ?? f.adherence != null,
+  };
+  const metrics = f.metrics && typeof f.metrics === 'object' ? f.metrics : {};
   return {
     friendshipId: f.friendshipId ?? f.id ?? null,
     userId: f.userId ?? f.user_id ?? null,
@@ -5723,9 +5779,12 @@ function mapSocialFriend(f) {
     handle: f.handle ?? null,
     friendCode: f.friendCode ?? f.friend_code ?? null,
     acceptedAt: f.acceptedAt ?? f.accepted_at ?? null,
-    steps: f.steps ?? null,
-    workouts: f.workouts ?? null,
-    adherence: f.adherence ?? null,
+    weightUnit: f.weightUnit ?? f.weight_unit ?? null,
+    metricVisibility: normalizeSocialMetricVisibility(f.metricVisibility ?? f.metric_visibility, legacy),
+    metrics,
+    steps: metrics.steps ?? f.steps ?? null,
+    workouts: metrics.workouts ?? f.workouts ?? null,
+    adherence: metrics.adherence ?? f.adherence ?? null,
   };
 }
 
@@ -5925,6 +5984,8 @@ async function updateSocialProfile(userId, patch = {}) {
     p_steps_visible: !!patch.stepsVisible,
     p_workouts_visible: !!patch.workoutsVisible,
     p_adherence_visible: !!patch.adherenceVisible,
+    p_metric_visibility: patch.metricVisibility ?? {},
+    p_metric_slots: patch.metricSlots ?? SOCIAL_DEFAULT_METRIC_SLOTS,
   });
   if (error) {
     const message = String(error.message || '');
@@ -11321,7 +11382,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,

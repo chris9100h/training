@@ -933,6 +933,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // screen only reads it for display, so it stays fresh even if Settings is
   // never opened.
   const swVersion = store.settings?.swVersion || '';
+  const socialMetricCatalog = LB.socialMetricCatalog || [];
+  const socialMetricGroups = [...new Set(socialMetricCatalog.map(metric => metric.group))];
 
   useEffectSet(() => {
     if (!accountSheet) return;
@@ -943,10 +945,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   useEffectSet(() => {
     if (!friendsSheet) return;
-    const profile = store.friends?.profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false };
+    const profile = store.friends?.profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] };
     setSocialProfileDraft(profile);
     setSocialProfileMsg(null);
-  }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible]);
+  }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
 
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
@@ -2367,21 +2369,36 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: 10 }}>
               Use your handle or friend code to connect. Metric sharing is opt-in and can be changed here any time.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
-              {[
-                ['stepsVisible', 'Share weekly steps'],
-                ['workoutsVisible', 'Share workouts and live training'],
-                ['adherenceVisible', 'Share weekly adherence'],
-              ].map(([key, label]) => (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{label}</span>
-                  <Toggle on={!!socialProfileDraft[key]} label={label} onToggle={() => {
-                    const next = { ...socialProfileDraft, [key]: !socialProfileDraft[key] };
-                    setSocialProfileDraft(next);
-                    saveSocialProfile(next);
-                  }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 17, marginTop: 14 }}>
+              {socialMetricGroups.map(group => <div key={group}>
+                <div className="micro" style={{ color: UI.gold, fontWeight: 700, marginBottom: 8 }}>{group.toUpperCase()}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {socialMetricCatalog.filter(metric => metric.group === group).map(metric => {
+                    const visible = !!socialProfileDraft.metricVisibility?.[metric.key];
+                    return <div key={metric.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{metric.label}</span>
+                        {metric.sensitive && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 6 }}>SENSITIVE</span>}
+                      </div>
+                      <Toggle on={visible} label={metric.label} onToggle={() => {
+                        const nextVisibility = { ...(socialProfileDraft.metricVisibility || {}), [metric.key]: !visible };
+                        const next = {
+                          ...socialProfileDraft,
+                          metricVisibility: nextVisibility,
+                          ...(metric.key === 'steps' ? { stepsVisible: !visible } : {}),
+                          ...(metric.key === 'workouts' ? { workoutsVisible: !visible } : {}),
+                          ...(metric.key === 'adherence' ? { adherenceVisible: !visible } : {}),
+                        };
+                        setSocialProfileDraft(next);
+                        saveSocialProfile(next);
+                      }} />
+                    </div>;
+                  })}
                 </div>
-              ))}
+              </div>)}
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, marginTop: 13 }}>
+              Shared values are weekly summaries or the latest reading. Notes and exact reading times are never shared.
             </div>
             {socialProfileMsg && <div style={{ marginTop: 10, color: socialProfileMsg.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{socialProfileMsg.text}</div>}
           </div>}
