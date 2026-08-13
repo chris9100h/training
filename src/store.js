@@ -5698,7 +5698,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
 
 const SOCIAL_METRIC_CATALOG = [
   { key: 'steps', label: 'Weekly steps', group: 'Activity' },
-  { key: 'workouts', label: 'Workouts + set progress', group: 'Activity' },
+  { key: 'workouts', label: 'Workouts', group: 'Activity' },
   { key: 'adherence', label: 'Weekly adherence', group: 'Activity' },
   { key: 'calories', label: 'Average calories', group: 'Nutrition' },
   { key: 'protein', label: 'Average protein', group: 'Nutrition' },
