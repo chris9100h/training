@@ -2382,6 +2382,44 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const dayLog = useMemoFd(
     () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
     [store.dailyLogs, curDate]);
+
+  // A day can be closed explicitly even when the user has no entries in one
+  // or more configured meal categories. Keep the flag on the daily log so it
+  // follows the same sync, refresh, and backup path as the rest of the day.
+  function setFoodDayClosed(closed) {
+    if (curDate !== today) return;
+    const now = new Date().toISOString();
+    setStore(s => {
+      const existing = (s.dailyLogs || []).find(l => l.date === curDate);
+      const log = existing
+        ? { ...existing, foodDayClosed: closed, updatedAt: now }
+        : {
+            id: LB.uid(), date: curDate, weight: null, steps: null,
+            calories: null, protein: null, carbs: null, fat: null, fiber: null,
+            waterMl: null, note: null, offPlanNote: null, coachFields: null,
+            mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: closed,
+            adherence: null, targetsSnap: null, updatedAt: now, createdAt: now,
+          };
+      return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
+    });
+  }
+
+  async function toggleFoodDayClosed() {
+    if (curDate !== today) return;
+    if (dayLog?.foodDayClosed) {
+      setFoodDayClosed(false);
+      return;
+    }
+    if (plannedEntries.length) {
+      const ok = await confirm(
+        `${plannedEntries.length} planned ${plannedEntries.length === 1 ? 'meal is' : 'meals are'} still open. Finish the day anyway?`,
+        { title: 'Finish today?', ok: 'Finish day', cancel: 'Keep planned' }
+      );
+      if (!ok) return;
+    }
+    setFoodDayClosed(true);
+  }
+
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
   // personal ones, and training/rest day pick different targets. null when
@@ -2600,7 +2638,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // silently wipe manually-entered Health-tab macros, the exact case the
       // guard above skips the warning for because planning is supposed to
       // leave the day untouched.
-      const dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      let dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      dailyLogs = reopenFoodDay(s, curDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setRepeat(null);
@@ -2740,10 +2779,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // tab's own save() and its food reconciler both preserve exactly this.
     const keptDayType = existing?.targetsSnap?.dayType;
     const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
+    const reopened = dateStr === today ? { foodDayClosed: false } : {};
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
-      : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
+      : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: false, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
+  }
+
+  // Any deliberate Food change on today's timeline starts the day again. A
+  // planned-only change does not go through patchDaily, so those paths call
+  // this small companion to clear the explicit completion without inventing a
+  // daily-log row for a day that had no health data yet.
+  function reopenFoodDay(s, dateStr, dailyLogs = s.dailyLogs) {
+    if (dateStr !== today) return dailyLogs;
+    const existing = (dailyLogs || []).find(l => l.date === dateStr);
+    if (!existing?.foodDayClosed) return dailyLogs;
+    const log = { ...existing, foodDayClosed: false, updatedAt: new Date().toISOString() };
+    return [log, ...(dailyLogs || []).filter(l => l.date !== dateStr)];
   }
 
   // If this would be the FIRST food-tracker entry for the date and the day
@@ -2798,6 +2850,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // entries) null the day's macros and silently wipe manually-entered Health
       // macros. loggedDates already excludes planned-only dates.
       for (const d of loggedDates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      for (const d of dates) dailyLogs = reopenFoodDay(s, d, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setPendingHour(null);
@@ -2841,7 +2894,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // and calling patchDaily anyway rewrites the day from its logged entries.
       // On a day with none, that means writing nulls over macros the user typed
       // into the Health tab by hand.
-      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      let dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      dailyLogs = reopenFoodDay(s, entry.date, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
@@ -2861,7 +2915,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (planned && entry.id === mocEntryId) {
       setStore(s => {
         const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+        const dailyLogs = reopenFoodDay(s, entry.date, patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)));
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       return;
     }
@@ -2930,10 +2985,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
         : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining, dayTargetOverride);
       const log = existing
-        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
+        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, foodDayClosed: curDate === today ? false : !!existing.foodDayClosed, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
             fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
             mealOfChoice: on, mealOfChoiceHour: on ? hour : null,
+            foodDayClosed: false,
             adherence, targetsSnap, updatedAt: now, createdAt: now };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
@@ -2969,10 +3025,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // different hour bucket), so no patchDaily call is needed here.
   function moveEntryToHour(entry, hour) {
     const hh = String(hour).padStart(2, '0');
-    setStore(s => ({
-      ...s,
-      foodLogs: (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l),
-    }));
+    setStore(s => {
+      const foodLogs = (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l);
+      return { ...s, foodLogs, dailyLogs: reopenFoodDay(s, entry.date, s.dailyLogs) };
+    });
   }
   // fixedSlots: true (see UI.useDragReorder in ui.jsx) hands back the raw
   // drop-line index as `to`, not one adjusted for a conventional array
@@ -3176,9 +3232,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
       if (anyLandsLogged) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      dailyLogs = reopenFoodDay(s, targetDate, dailyLogs);
       if (anyLeavesLogged) {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
+      dailyLogs = reopenFoodDay(s, sourceDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
@@ -3199,7 +3257,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // selection of nothing but planned entries leaves the day's totals exactly
       // as they were, so recomputing them can only do damage.
       const anyLoggedDeleted = (s.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
-      const dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      let dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      dailyLogs = reopenFoodDay(s, curDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
@@ -3796,7 +3855,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // anyway rewrites the row from the logged entries: on a day with none,
         // that nulls macros the user typed into the Health tab.
         const touchesDaily = !editingEntry.planned || !savePlanned;
-        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        let dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
         return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       closeQtySheet();
@@ -4366,7 +4426,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // planned is carried through unchanged here, so a planned entry stays out
       // of the daily log and recomputing it would only risk overwriting manual
       // Health-tab macros, see deleteEntry.
-      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      let dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     closeIngredientEditor();
@@ -4507,7 +4568,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // anyway rewrites the row from the logged entries: on a day with none,
         // that nulls macros the user typed into the Health tab.
         const touchesDaily = !editingEntry.planned || !savePlanned;
-        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        let dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
         return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       setEditingEntry(null);
@@ -5135,6 +5197,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
                 projectedAdherence={projectedAdherence}
                 unscored={isMealOfChoice ? 'Meal of choice' : null}
+                dayClosed={!!dayLog?.foodDayClosed}
+                onToggleDayComplete={curDate === today ? toggleFoodDayClosed : null}
                 // Health is an independently-toggleable tab now: only route into
                 // it if it's actually enabled, else Home is the safe fallback.
                 onSetTargets={() => go(store.settings?.showHealthTab ? { name: 'health', openMacroTargets: true } : { name: 'home' })} />
@@ -11809,7 +11873,25 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // resolvable the hero can only show a bare total, which is also the exact
 // moment the question "what should this number be?" comes up. Omitted by the
 // poster, so the button never renders into an exported image.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored }) {
+function FdDayCloseAction({ closed, onToggle }) {
+  if (!onToggle) return null;
+  return (
+    <button onClick={onToggle} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+      width: '100%', marginTop: 14, padding: '8px 10px', borderRadius: 4,
+      border: `var(--hair-width) solid ${closed ? UI.ok : UI.hairStrong}`,
+      background: closed ? 'rgba(var(--ok-rgb),0.08)' : 'transparent',
+      color: closed ? UI.ok : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11,
+      letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
+      WebkitTapHighlightColor: 'transparent',
+    }}>
+      <i className={`fa-solid fa-${closed ? 'rotate-left' : 'check'}`} style={{ fontSize: 10 }} />
+      {closed ? 'Reopen today' : 'Done for today'}
+    </button>
+  );
+}
+
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored, dayClosed, onToggleDayComplete }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
       calories: { delta: projected.calories - dayTotals.calories, total: projected.calories },
@@ -11818,6 +11900,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
       fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
     }} goalCalories={goalCalories} adherence={projectedAdherence} />
   ) : null;
+  const dayCloseAction = <FdDayCloseAction closed={dayClosed} onToggle={onToggleDayComplete} />;
   return dayTarget ? (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -11844,6 +11927,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         </div>
       </div>
       {projectionLine}
+      {dayCloseAction}
     </>
   ) : (
     <div>
@@ -11862,6 +11946,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         </button>
       )}
       {projectionLine}
+      {dayCloseAction}
     </div>
   );
 }

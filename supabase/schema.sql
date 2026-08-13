@@ -258,6 +258,7 @@ CREATE TABLE public.zane_daily_logs (
   off_plan_note      text,
   meal_of_choice     boolean     DEFAULT false,
   meal_of_choice_hour smallint,
+  food_day_closed    boolean              DEFAULT false,
   daily_coach_fields jsonb,
   ai_summary              text,
   ai_summary_generated_at timestamp with time zone,
@@ -1216,7 +1217,7 @@ AS $function$
     id, user_id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm,
     calf_cm, body_fat_pct, steps,
     calories, protein, carbs, fat, fiber,
-    water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour,
+    water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed,
     adherence, targets_snap, daily_coach_fields, updated_at
   )
   SELECT
@@ -1242,6 +1243,7 @@ AS $function$
     l->>'off_plan_note',
     (l->>'meal_of_choice')::boolean,
     (l->>'meal_of_choice_hour')::smallint,
+    (l->>'food_day_closed')::boolean,
     (l->>'adherence')::numeric,
     CASE WHEN l->'targets_snap' IS NULL OR l->'targets_snap' = 'null'::jsonb THEN NULL ELSE l->'targets_snap' END,
     CASE WHEN l->'daily_coach_fields' IS NULL OR l->'daily_coach_fields' = 'null'::jsonb THEN NULL ELSE l->'daily_coach_fields' END,
@@ -1267,6 +1269,7 @@ AS $function$
     off_plan_note      = EXCLUDED.off_plan_note,
     meal_of_choice     = COALESCE(EXCLUDED.meal_of_choice, zane_daily_logs.meal_of_choice),
     meal_of_choice_hour = EXCLUDED.meal_of_choice_hour,
+    food_day_closed    = COALESCE(EXCLUDED.food_day_closed, zane_daily_logs.food_day_closed),
     adherence          = EXCLUDED.adherence,
     targets_snap       = EXCLUDED.targets_snap,
     daily_coach_fields = EXCLUDED.daily_coach_fields,

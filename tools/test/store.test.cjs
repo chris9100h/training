@@ -1212,22 +1212,11 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: [{ id: 'same', label: 'A', startHour: 0 }, { id: 'same', label: 'B', startHour: 4 }] }).map(c => c.startHour)), DEFAULTS);
   });
 
-  test('foodDayHasAllMeals: requires one eaten entry in every configured category', () => {
-    const settings = { mealCategories: [
-      { id: 'first', label: 'First', startHour: 0 },
-      { id: 'second', label: 'Second', startHour: 12 },
-    ] };
-    const planned = { date: '2026-08-13', time: '13:00', planned: true };
-    assert.strictEqual(LB.foodDayHasAllMeals([{ date: '2026-08-13', time: '08:30' }], settings, '2026-08-13'), false);
-    assert.strictEqual(LB.foodDayHasAllMeals([{ date: '2026-08-13', time: '08:30' }, planned], settings, '2026-08-13'), false);
-    assert.strictEqual(LB.foodDayHasAllMeals([
-      { date: '2026-08-13', time: '08:30' },
-      { date: '2026-08-13', time: '13:00' },
-    ], settings, '2026-08-13'), true);
-    assert.strictEqual(LB.foodDayHasAllMeals([
-      { date: '2026-08-13', time: '08:30' },
-      { date: '2026-08-12', time: '13:00' },
-    ], settings, '2026-08-13'), false);
+  test('foodDayIsClosed: explicit completion is independent of meal categories', () => {
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: false }], '2026-08-13'), false);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: true }], '2026-08-13'), true);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-12', foodDayClosed: true }], '2026-08-13'), false);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: true }], '2026-08-13'), true);
   });
 
   test('estimateTdee: Mifflin-St Jeor, both sex constants, activity multiplier', () => {

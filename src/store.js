@@ -769,6 +769,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         off_plan_note: l.offPlanNote ?? null,
         meal_of_choice: !!l.mealOfChoice,
         meal_of_choice_hour: l.mealOfChoiceHour ?? null,
+        food_day_closed: !!l.foodDayClosed,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
         ai_summary: l.aiSummary ?? null, ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
@@ -1448,6 +1449,7 @@ function buildEssentialLoadResult({
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -1556,7 +1558,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1921,6 +1923,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -2798,6 +2801,7 @@ async function syncStore(prev, next, userId) {
       off_plan_note: l.offPlanNote ?? null,
       meal_of_choice: !!l.mealOfChoice,
       meal_of_choice_hour: l.mealOfChoiceHour ?? null,
+      food_day_closed: !!l.foodDayClosed,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
       updated_at: l.updatedAt ?? new Date().toISOString(),
@@ -6832,24 +6836,13 @@ function mealCategories(settings) {
   }));
 }
 
-// A food day is complete only when every configured meal category contains at
-// least one eaten entry. Planned entries deliberately do not count: they are
-// intent, not proof that the meal was logged. Category membership follows the
-// current time windows, just like the Food Tracker timeline does.
-function foodDayHasAllMeals(foodLogs, settings, date) {
+// A food day is complete only after the user explicitly says they are done.
+// This is deliberately separate from the food entries: users may have no meal
+// in one or more configured categories, and planned entries are not proof that
+// a meal was eaten.
+function foodDayIsClosed(dailyLogs, date) {
   if (!date) return false;
-  const loggedHours = new Set();
-  for (const log of foodLogs || []) {
-    if (!log || log.date !== date || log.planned) continue;
-    const hour = parseInt(String(log.time || '').split(':')[0], 10);
-    if (Number.isInteger(hour) && hour >= 0 && hour < 24) loggedHours.add(hour);
-  }
-  return mealCategories(settings).every(category => {
-    for (let hour = category.startHour; hour < category.endHour; hour++) {
-      if (loggedHours.has(hour)) return true;
-    }
-    return false;
-  });
+  return !!(dailyLogs || []).find(log => log?.date === date)?.foodDayClosed;
 }
 
 // ── Macro target estimation (migration 0205) ────────────────────────────────
@@ -8118,7 +8111,7 @@ async function refreshHealthLogs(userId, _opts = {}) {
   ] : Array.from({ length: 6 }, () => Promise.resolve({ data: [], error: null }));
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
          medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -8143,6 +8136,7 @@ async function refreshHealthLogs(userId, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -10958,7 +10952,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayHasAllMeals, FD_FASTING_PRESETS, fastingCustomHours,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,

@@ -116,17 +116,17 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   return { from, to, data };
 }
 
-// Today's adherence is provisional until every configured meal category has an
-// eaten entry. Older dates keep their persisted adherence values unchanged.
-function healthAdherenceLogs(logs, foodLogs, settings, today) {
-  if (LB.foodDayHasAllMeals(foodLogs, settings, today)) return logs;
+// Today's adherence is provisional until the user explicitly closes the food
+// day. Older dates keep their persisted adherence values unchanged.
+function healthAdherenceLogs(logs, today) {
+  if (LB.foodDayIsClosed(logs, today)) return logs;
   return (logs || []).filter(log => log.date !== today);
 }
 
 // Period overview (Mon-anchored week or rolling 1M/3M window), pure, shared
 // by HealthScreen and HealthClientLogs. planningState is whatever
 // LB.plannedTrainingDay needs (store, or clientStore || {}).
-function computeHealthWeekStats({ logs, sessions, cardioLogs, foodLogs, mealSettings, planningState, tf, today, selectedDate }) {
+function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf, today, selectedDate }) {
   const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
   let from, to, periodDays;
   if (tf === '1W') {
@@ -140,7 +140,7 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, foodLogs, mealSett
   }
   const allDays = Array.from({ length: periodDays }, (_, i) => LB.shiftDate(from, i));
   const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
-  const adherenceLogs = healthAdherenceLogs(inPeriod, foodLogs, mealSettings, today);
+  const adherenceLogs = healthAdherenceLogs(inPeriod, today);
   const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const avgAdherence = () => { const vs = adherenceLogs.map(l => l.adherence).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
@@ -1508,6 +1508,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       // reset the food module's timeline slot for the day back to default.
       mealOfChoice: !!existing?.mealOfChoice,
       mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
+      foodDayClosed: !!existing?.foodDayClosed,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -5293,10 +5294,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps }), weekWindow), [dailyLogs, tf, selectedDate]);
   const waterSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.waterMl }), weekWindow), [dailyLogs, tf, selectedDate]);
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
-  const adherenceLogs = useMemoH(
-    () => healthAdherenceLogs(dailyLogs, store.foodLogs, store.settings, today),
-    [dailyLogs, store.foodLogs, store.settings?.mealCategories, store.settings?.mealWindows, today]
-  );
+  const adherenceLogs = useMemoH(() => healthAdherenceLogs(dailyLogs, today), [dailyLogs, today]);
   const adhSeries = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate]);
 
   // Cardio chart series, minutes summed per day from store.cardioLogs.
@@ -5363,8 +5361,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // Period overview, adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
   const weekStats = useMemoH(() => computeHealthWeekStats({
     logs: dailyLogs, sessions: store.sessions, cardioLogs: store.cardioLogs,
-    foodLogs: store.foodLogs, mealSettings: store.settings, planningState: store, tf, today, selectedDate,
-  }), [dailyLogs, store.sessions, store.cardioLogs, store.foodLogs, store.settings?.mealCategories, store.settings?.mealWindows, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
+    planningState: store, tf, today, selectedDate,
+  }), [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
 
   const targetDayRow = (label, suffix) => {
     const t = effectiveTargets || {};
@@ -5780,10 +5778,7 @@ function HealthClientLogs({ clientStore }) {
   const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps }), weekWindow), [logs, tf, selectedDate]);
   const waterSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.waterMl }), weekWindow), [logs, tf, selectedDate]);
   const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [logs, tf, selectedDate]);
-  const adherenceLogs = useMemoH(
-    () => healthAdherenceLogs(logs, clientStore?.foodLogs, clientStore?.settings, today),
-    [logs, clientStore?.foodLogs, clientStore?.settings?.mealCategories, clientStore?.settings?.mealWindows, today]
-  );
+  const adherenceLogs = useMemoH(() => healthAdherenceLogs(logs, today), [logs, today]);
   const adhSeries    = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate]);
   const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
 
@@ -5822,8 +5817,8 @@ function HealthClientLogs({ clientStore }) {
 
   const weekStats = useMemoH(() => computeHealthWeekStats({
     logs, sessions: clientStore?.sessions, cardioLogs: clientStore?.cardioLogs,
-    foodLogs: clientStore?.foodLogs, mealSettings: clientStore?.settings, planningState: clientStore || {}, tf, today, selectedDate,
-  }), [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.foodLogs, clientStore?.settings?.mealCategories, clientStore?.settings?.mealWindows, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
+    planningState: clientStore || {}, tf, today, selectedDate,
+  }), [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
   if (!logs.length && !cardioLogs.length && !glucoseLogs.length && !bloodPressureLogs.length && !bodyTempLogs.length) {
     return (
