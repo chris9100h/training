@@ -2972,8 +2972,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const liveFriendCount = new Set((store.friends?.liveWorkouts || []).map(workout => workout.ownerId).filter(Boolean)).size;
   const friendsLiveBanner = liveFriendCount > 0 ? (
-    <button onClick={() => go({ name: 'friends' })} style={{
-      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+    <button onClick={() => go({ name: 'friends', initialTab: 'activity' })} style={{
+      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10,
+      width: 'calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))',
+      marginLeft: 'env(safe-area-inset-left, 0px)', boxSizing: 'border-box',
       padding: '10px 14px', border: `var(--hair-width) solid ${UI.goldSoft}`,
       borderRadius: 6, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.16), ${UI.bgRaised})`,
       color: UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',

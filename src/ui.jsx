@@ -228,7 +228,7 @@ const TAB_ICONS = {
 // slot. Each of the four is independently toggleable in Settings, so the
 // set of enabled ones can be any subset of this order, never a fixed count.
 const HEALTH_SLOT_ORDER = ['health', 'water', 'food', 'medications'];
-const SOCIAL_SLOT_ORDER = ['coaching', 'friends'];
+const SOCIAL_SLOT_ORDER = ['friends', 'coaching'];
 function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showFriends = false, friendsBadge = null, showHealth = false, showWater = false, showFood = false, showMeds = false }) {
   const slotOn = { health: showHealth, water: showWater, food: showFood, medications: showMeds };
   const enabledSlots = HEALTH_SLOT_ORDER.filter(id => slotOn[id]);

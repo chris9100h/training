@@ -386,6 +386,11 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   if (!keepPush) {
     ops.push(unwrap(_supabase.from('zane_push_subscriptions').delete().eq('user_id', userId)));
   }
+  // Social data is intentionally outside personal backups. An explicit
+  // delete-all must still remove the user's profile, relationships,
+  // conversations, shares and attachment objects. Restore keeps this data,
+  // so the social wipe is only part of the explicit delete flow.
+  if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_my_social_data')));
   await Promise.all(ops);
 }
 
@@ -1125,7 +1130,7 @@ async function exportBackup(store, userId) {
     bySession[e.session_id].push(e);
   }
 
-  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, ...rest } = store;
+  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, friends, ...rest } = store;
   return {
     _version: 2,
     _exportedAt: new Date().toISOString(),
@@ -5885,7 +5890,8 @@ function mapSocialAttachment(row, url = null) {
 }
 
 async function signedSocialAttachment(row) {
-  const { data } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 3600);
+  const { data, error } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 3600);
+  if (error) throw error;
   return mapSocialAttachment(row, data?.signedUrl || null);
 }
 
@@ -5907,20 +5913,41 @@ async function loadSocialFriendMetrics(friendId) {
 }
 
 let _friendsLoadInFlight = null;
-async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
+const _friendsLoadVersions = new Map();
+async function loadFriendsState(userId, weekStart = socialWeekStartISO(), { force = false } = {}) {
   if (!userId) return null;
   const key = `${userId}:${weekStart}`;
-  if (_friendsLoadInFlight?.key === key) {
+  const version = (_friendsLoadVersions.get(key) || 0) + (force ? 1 : 0);
+  _friendsLoadVersions.set(key, version);
+  if (!force && _friendsLoadInFlight?.key === key && _friendsLoadInFlight.version === version) {
     // App bootstrap and the Friends screen can request the same snapshot at
     // the same time. Share the promise without starting a second full load.
     return _friendsLoadInFlight.promise;
   }
-  const entry = { key, promise: loadFriendsStateUncached(userId, weekStart) };
+  const entry = { key, version, promise: loadFriendsStateUncached(userId, weekStart) };
   _friendsLoadInFlight = entry;
   try {
-    return await entry.promise;
+    const result = await entry.promise;
+    // A write can invalidate a request that was already in flight. Let that
+    // caller consume the newest request instead of applying the stale result
+    // after the forced refresh has completed.
+    if (entry.version !== _friendsLoadVersions.get(key)) return loadFriendsState(userId, weekStart);
+    return result;
   } finally {
     if (_friendsLoadInFlight?.promise === entry.promise) _friendsLoadInFlight = null;
+  }
+}
+
+async function fetchSocialMessageRows(pageSize = 250) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const response = await _supabase.from('zane_social_messages')
+      .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (response.error) return response;
+    rows.push(...(response.data || []));
+    if (!response.data || response.data.length < pageSize) return { data: rows, error: null };
   }
 }
 
@@ -5933,7 +5960,7 @@ async function loadFriendsStateUncached(userId, weekStart) {
     _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
     _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
-    _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').order('created_at', { ascending: false }).limit(300),
+    fetchSocialMessageRows(),
     _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at'),
     _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
     _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
@@ -6020,6 +6047,16 @@ async function updateSocialProfile(userId, patch = {}) {
     if (/^Handle must be /.test(message)) throw new Error(message);
     throw new Error('Could not save your social profile. Please try again.');
   }
+  return mapSocialProfile(data);
+}
+
+async function updateSocialMetricPreferences(userId, patch = {}) {
+  if (!userId) throw new Error('Authentication required');
+  const { data, error } = await _supabase.rpc('social_update_metric_preferences', {
+    p_metric_visibility: patch.metricVisibility ?? {},
+    p_metric_slots: patch.metricSlots ?? null,
+  });
+  if (error) throw error;
   return mapSocialProfile(data);
 }
 
@@ -6190,7 +6227,7 @@ function subscribeToFriends(userId, onChange) {
   if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
   const channel = _supabase.channel(`social-${userId}-${Date.now()}`);
   const refresh = () => onChange?.();
-  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_plan_shares', 'zane_social_workout_comments'].forEach(table => {
+  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_plan_shares', 'zane_social_plan_share_imports', 'zane_social_workout_comments'].forEach(table => {
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh);
   });
   _friendsRealtimeChannel = channel.subscribe();
@@ -11477,7 +11514,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,

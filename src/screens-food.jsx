@@ -20,6 +20,18 @@
    (source: 'recipe'), not N separate ones. */
 
 const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef: useRefFd } = React;
+
+// Any deliberate Food change on today's timeline reopens a day that the user
+// previously marked complete. This helper must stay module-scoped because the
+// template screen can trigger it without mounting the main Food screen.
+function reopenFoodDay(s, dateStr, dailyLogs = s.dailyLogs) {
+  if (dateStr !== LB.todayISO()) return dailyLogs;
+  const existing = (dailyLogs || []).find(l => l.date === dateStr);
+  if (!existing?.foodDayClosed) return dailyLogs;
+  const log = { ...existing, foodDayClosed: false, updatedAt: new Date().toISOString() };
+  return [log, ...(dailyLogs || []).filter(l => l.date !== dateStr)];
+}
+
 // Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
 // Used by the Stats sheet to build a chart series with a bar (or gap) for
 // every day in the period, not just days that happen to have a log.
@@ -2802,18 +2814,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
       : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: false, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
-  }
-
-  // Any deliberate Food change on today's timeline starts the day again. A
-  // planned-only change does not go through patchDaily, so those paths call
-  // this small companion to clear the explicit completion without inventing a
-  // daily-log row for a day that had no health data yet.
-  function reopenFoodDay(s, dateStr, dailyLogs = s.dailyLogs) {
-    if (dateStr !== today) return dailyLogs;
-    const existing = (dailyLogs || []).find(l => l.date === dateStr);
-    if (!existing?.foodDayClosed) return dailyLogs;
-    const log = { ...existing, foodDayClosed: false, updatedAt: new Date().toISOString() };
-    return [log, ...(dailyLogs || []).filter(l => l.date !== dateStr)];
   }
 
   // If this would be the FIRST food-tracker entry for the date and the day

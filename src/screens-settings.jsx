@@ -128,7 +128,7 @@ function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, sa
             const groupSharedCount = metrics.filter(metric => !!profile?.metricVisibility?.[metric.key]).length;
             const expanded = !!openGroups[group];
             return (
-              <div key={group} style={{ border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 7, background: UI.bgInset, overflow: 'hidden' }}>
+              <div key={group} style={{ border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, background: UI.bgInset, overflow: 'hidden' }}>
                 <button
                   type="button"
                   onClick={() => toggleGroup(group)}
@@ -690,6 +690,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [socialProfileDraft, setSocialProfileDraft] = useStateSet(null);
   const [socialProfileSaving, setSocialProfileSaving] = useStateSet(false);
   const [socialProfileMsg, setSocialProfileMsg] = useStateSet(null);
+  const [socialProfileLoadError, setSocialProfileLoadError] = useStateSet(null);
+  const [socialProfileLoading, setSocialProfileLoading] = useStateSet(false);
+  const [socialProfileRetry, setSocialProfileRetry] = useStateSet(0);
   const [healthSheet, setHealthSheet] = useStateSet(false);
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
@@ -1023,6 +1026,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setSocialProfileMsg(null);
       return;
     }
+    setSocialProfileLoadError(null);
+    setSocialProfileLoading(false);
     setSocialProfileDraft(profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] });
     setSocialProfileMsg(null);
   }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
@@ -1030,7 +1035,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   useEffectSet(() => {
     if (!friendsSheet || !store.settings?.showFriendsTab || store.friends || !userId) return;
     let live = true;
-    LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
+    setSocialProfileLoading(true);
+    setSocialProfileLoadError(null);
+    LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force: socialProfileRetry > 0 }).then(friends => {
       if (live) setStore(s => s ? {
         ...s,
         friends: {
@@ -1039,9 +1046,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           workoutHistory: s.friends?.workoutHistory || [],
         },
       } : s);
-    }).catch(() => {});
+    }).catch(e => {
+      if (live) setSocialProfileLoadError(e.message || 'Could not load your social profile.');
+    }).finally(() => {
+      if (live) setSocialProfileLoading(false);
+    });
     return () => { live = false; };
-  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends, userId]);
+  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends, userId, socialProfileRetry]);
 
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
@@ -1063,8 +1074,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     }
   };
 
-  const toggleSocialMetric = metric => {
-    if (!socialProfileDraft) return;
+  const toggleSocialMetric = async metric => {
+    if (!socialProfileDraft || socialProfileSaving) return;
     const visible = !!socialProfileDraft.metricVisibility?.[metric.key];
     const nextVisibility = { ...(socialProfileDraft.metricVisibility || {}), [metric.key]: !visible };
     const next = {
@@ -1075,7 +1086,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       ...(metric.key === 'adherence' ? { adherenceVisible: !visible } : {}),
     };
     setSocialProfileDraft(next);
-    saveSocialProfile(next);
+    setSocialProfileSaving(true);
+    setSocialProfileMsg(null);
+    try {
+      const profile = await LB.updateSocialMetricPreferences(userId, {
+        metricVisibility: nextVisibility,
+        metricSlots: next.metricSlots || LB.socialDefaultMetricSlots,
+      });
+      setSocialProfileDraft(profile);
+      setStore(s => s?.friends ? { ...s, friends: { ...s.friends, profile } } : s);
+      setSocialProfileMsg({ ok: true, text: 'Metric sharing saved.' });
+    } catch (e) {
+      setSocialProfileMsg({ ok: false, text: e.message || 'Could not save metric sharing.' });
+    } finally {
+      setSocialProfileSaving(false);
+    }
   };
 
   const closeFriendsSettings = () => {
@@ -2524,14 +2549,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => {
               const enabling = !store.settings?.showFriendsTab;
               patchSettings({ showFriendsTab: enabling });
-              if (enabling) go({ name: 'friends' });
             }} />
           </Row>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing, live workout feedback and plan snapshots. Friends and Coaching share one navigation slot; use the social tab's long press to choose between them. You choose which metrics and workout details are visible.
           </div>
-          {!!store.settings?.showFriendsTab && !socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
-            Loading your social profile…
+          {!!store.settings?.showFriendsTab && !socialProfileDraft && socialProfileLoadError && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>
+            <div>{socialProfileLoadError}</div>
+            <button type="button" onClick={() => setSocialProfileRetry(value => value + 1)} style={{ marginTop: 9, padding: '7px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Retry</button>
+          </div>}
+          {!!store.settings?.showFriendsTab && !socialProfileDraft && !socialProfileLoadError && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
+            {socialProfileLoading ? 'Loading your social profile...' : 'Social profile is not available yet.'}
           </div>}
           {!!store.settings?.showFriendsTab && socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>YOUR SOCIAL PROFILE</div>

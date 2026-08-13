@@ -781,18 +781,19 @@ function TrainingSocialFeedback({ sessionId, userId }) {
 
   return <>
     {toast && ReactDOM.createPortal(
-      <button type="button" onClick={dismissToast} aria-label="Dismiss social feedback" style={{
-        position: 'fixed', inset: 0, zIndex: 180, padding: 16, border: 'none',
-        background: 'rgba(6,5,8,0.58)', color: UI.ink, cursor: 'pointer',
+      <div role="status" aria-live="polite" style={{
+        position: 'fixed', inset: 0, zIndex: 180, padding: 16,
+        pointerEvents: 'none', color: UI.ink,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         animation: 'improvedFade 5.5s ease forwards', WebkitTapHighlightColor: 'transparent',
       }}>
-        <div className={toast.kind === 'cheer' ? 'intensity-glow-raw' : ''} style={{
+        <button type="button" onClick={dismissToast} aria-label="Dismiss social feedback" className={toast.kind === 'cheer' ? 'intensity-glow-raw' : ''} style={{
           width: 'min(100%, 320px)', boxSizing: 'border-box', padding: '28px 22px 25px',
           borderRadius: 8, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
           background: toast.kind === 'cheer' ? `linear-gradient(145deg, rgba(var(--accent-rgb),0.26), ${UI.bgRaised})` : UI.bgRaised,
           boxShadow: toast.kind === 'cheer' ? undefined : '0 8px 32px rgba(0,0,0,0.45)',
-          textAlign: 'center', animation: 'fadeUp 0.7s ease both',
+          color: UI.ink, cursor: 'pointer', pointerEvents: 'auto',
+          textAlign: 'center', animation: 'fadeUp 0.7s ease both', WebkitTapHighlightColor: 'transparent',
         }}>
           {toast.kind === 'cheer' ? (
             <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 17 }}>{cheerEmoji(toast.body)}</div>
@@ -802,8 +803,8 @@ function TrainingSocialFeedback({ sessionId, userId }) {
 
           <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.body}</div>
           <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} {'\u00b7'} {toast.authorName || 'Friend'}</div>
-        </div>
-      </button>,
+        </button>
+      </div>,
       document.body
     )}
     {comments.length > 0 && <button type="button" onClick={openComments} aria-label={`View ${comments.length} training comments`} style={{

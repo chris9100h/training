@@ -3838,7 +3838,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit, foodDayClosed = true, onOpenFood }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -3906,6 +3906,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
           <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
             {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh) }} />}
           </div>
+        </div>
+      )}
+      {isToday && !foodDayClosed && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -5, marginBottom: 12, padding: '8px 10px', borderRadius: 4, background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.hair}` }}>
+          <span style={{ flex: 1, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, lineHeight: 1.4 }}>Today is provisional until the food day is marked done.</span>
+          {onOpenFood && <button type="button" onClick={onOpenFood} style={{ flexShrink: 0, padding: '5px 7px', borderRadius: 4, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>Open Food</button>}
         </div>
       )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
@@ -5520,7 +5526,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
-      mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
+      mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
+      foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
+      onOpenFood={go && store.settings?.showFoodTab ? () => go({ name: 'food', date: today }) : null} />,
     aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
@@ -5863,6 +5871,7 @@ function HealthClientLogs({ clientStore }) {
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
+        foodDayClosed={LB.foodDayIsClosed(logs, today)}
         mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(logs, selectedDate).ordinal} />
     ),
     // Read-only: no Generate button here at all, a coach's own tap would

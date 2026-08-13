@@ -2240,13 +2240,13 @@ function App() {
       }).catch(() => {}).finally(() => { feedRefreshInFlight = null; });
       return feedRefreshInFlight;
     };
-    const refreshFriends = () => {
+    const refreshFriends = (force = false) => {
       if (!live) return Promise.resolve();
       if (socialRefreshInFlight) {
-        socialRefreshQueued = true;
+        socialRefreshQueued = socialRefreshQueued || force;
         return socialRefreshInFlight;
       }
-      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
+      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force }).then(friends => {
         if (!live) return;
         setStore(s => s ? {
           ...s,
@@ -2264,7 +2264,7 @@ function App() {
         if (socialRefreshQueued && live) {
           socialRefreshQueued = false;
           clearTimeout(refreshTimer);
-          refreshTimer = setTimeout(refreshFriends, 250);
+          refreshTimer = setTimeout(() => refreshFriends(true), 250);
         }
       });
       return socialRefreshInFlight;
@@ -2278,7 +2278,7 @@ function App() {
     const socialTimer = setInterval(refreshFriends, 30000);
     const unsubscribe = LB.subscribeToFriends(userId, () => {
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshFriends, 250);
+      refreshTimer = setTimeout(() => refreshFriends(true), 250);
     });
     return () => {
       live = false;
@@ -2598,7 +2598,7 @@ function App() {
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
-    case 'friends':             screen = <window.Screens.FriendsScreen {...props} />; break;
+    case 'friends':             screen = <window.Screens.FriendsScreen {...props} initialTab={route.initialTab} />; break;
     case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
