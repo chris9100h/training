@@ -1197,28 +1197,83 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 (function () {
   var vv = window.visualViewport;
   var root = document.getElementById('root');
-  if (!vv || !root) return;
+  if (!root) return;
   var raf = 0;
+  var isStandalone = !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  var viewportMeta = document.querySelector('meta[name="viewport"]');
+  var healthyWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+  var isTyping = function () {
+    var ae = document.activeElement;
+    return ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+  };
+  var layoutHeight = function () {
+    return Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 1);
+  };
   var sync = function () {
     if (raf) return;
     raf = requestAnimationFrame(function () {
       raf = 0;
-      var top = Math.max(0, Math.round(vv.offsetTop || 0));
-      var height = Math.max(1, Math.round(vv.height || window.innerHeight));
+      var typing = isTyping();
+      var visualHeight = vv ? Math.round(vv.height || 0) : 0;
+      var layout = layoutHeight();
+      // iOS standalone PWAs can retain a stale, keyboard-sized
+      // visualViewport.height after a background/resume or rotation. A short
+      // value shrinks #root and exposes the black body below the TabBar. Only
+      // trust the visual viewport as the shell height while a text field is
+      // actively using the keyboard; otherwise keep the shell at least as
+      // large as the layout viewport.
+      var height = typing
+        ? Math.max(1, visualHeight || layout)
+        : Math.max(1, isStandalone ? Math.max(visualHeight, layout) : (visualHeight || layout));
+      var top = typing && vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
       document.documentElement.style.setProperty('--app-viewport-top', top + 'px');
       document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
 
-      var ae = document.activeElement;
-      var typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
       if (!typing && (window.pageYOffset || window.pageXOffset)) window.scrollTo(0, 0);
     });
   };
+  var repairScale = function () {
+    if (!isStandalone || !viewportMeta || !healthyWidth) return;
+    var currentWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+    var deviceMaxWidth = Math.max(window.screen?.width || 0, window.screen?.height || 0);
+    // A real orientation change can legitimately make the viewport wider
+    // than the first portrait measurement. Treat that as healthy and refresh
+    // the baseline; only repair a width that exceeds the physical device span.
+    if (deviceMaxWidth && currentWidth <= deviceMaxWidth + 24) {
+      healthyWidth = currentWidth;
+      return;
+    }
+    if (!currentWidth || currentWidth <= healthyWidth + 24) return;
+    var original = viewportMeta.getAttribute('content');
+    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1');
+    setTimeout(function () {
+      viewportMeta.setAttribute('content', original || 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content');
+      var recoveredWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+      if (recoveredWidth && recoveredWidth <= healthyWidth + 24) healthyWidth = recoveredWidth;
+      sync();
+    }, 50);
+  };
+  var resume = function () {
+    repairScale();
+    sync();
+    // WebKit sometimes reports the old viewport for the first resize tick
+    // after a PWA resumes. Re-read it after its compositor has settled.
+    setTimeout(sync, 80);
+    setTimeout(sync, 300);
+  };
   sync();
-  vv.addEventListener('resize', sync);
-  vv.addEventListener('scroll', sync);
+  if (vv) {
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+  }
   window.addEventListener('resize', sync);
   window.addEventListener('orientationchange', sync);
-  window.addEventListener('focusout', function () { setTimeout(sync, 50); });
+  window.addEventListener('focusout', resume);
+  window.addEventListener('pageshow', resume);
+  window.addEventListener('focus', resume);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') resume();
+  });
 })();
 </script>
 <!-- React 18, production builds: ~10x smaller and faster to parse than the
