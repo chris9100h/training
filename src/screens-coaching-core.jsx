@@ -270,6 +270,9 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [imageFile, setImageFile] = useStateC(null);
   const [imagePreview, setImagePreview] = useStateC(null);
   const [lightboxSrc, setLightboxSrc] = useStateC(null);
+  const [editingNoteId, setEditingNoteId] = useStateC(null);
+  const [editingNoteBody, setEditingNoteBody] = useStateC('');
+  const [noteActionBusy, setNoteActionBusy] = useStateC(false);
   const bottomRef = useRefC(null);
 
   const attachImageFile = (file) => {
@@ -334,6 +337,14 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   }, [coachingId, thread.id, threadUnreadKey]);
 
   useEffectC(() => {
+    const refresh = () => LB.loadCoachingNotes(coachingId, thread.id)
+      .then(data => { setNotes([...data].reverse()); setLoadErr(false); })
+      .catch(e => { console.error('coaching notes refresh failed:', e); setLoadErr(true); });
+    const timer = setInterval(refresh, 8000);
+    return () => clearInterval(timer);
+  }, [coachingId, thread.id]);
+
+  useEffectC(() => {
     if (notes.length && bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'auto' });
   }, [notes]);
 
@@ -371,6 +382,44 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     } catch (e) { UI.alert(e.message); } finally { setSending(false); }
   };
 
+  const beginEditNote = note => {
+    setEditingNoteId(note.id);
+    setEditingNoteBody(note.body || '');
+  };
+
+  const cancelEditNote = () => {
+    setEditingNoteId(null);
+    setEditingNoteBody('');
+  };
+
+  const saveEditedNote = async note => {
+    if (noteActionBusy || !editingNoteBody.trim()) return;
+    setNoteActionBusy(true);
+    try {
+      const updated = await LB.updateCoachingNote(note.id, userId, editingNoteBody);
+      setNotes(prev => prev.map(item => item.id === note.id ? { ...item, ...updated } : item));
+      cancelEditNote();
+    } catch (e) {
+      UI.alert(e.message || 'Could not edit message');
+    } finally {
+      setNoteActionBusy(false);
+    }
+  };
+
+  const removeNote = async note => {
+    if (noteActionBusy || !window.confirm('Delete this message?')) return;
+    setNoteActionBusy(true);
+    try {
+      await LB.deleteCoachingNote(note.id, userId);
+      setNotes(prev => prev.filter(item => item.id !== note.id));
+      if (editingNoteId === note.id) cancelEditNote();
+    } catch (e) {
+      UI.alert(e.message || 'Could not delete message');
+    } finally {
+      setNoteActionBusy(false);
+    }
+  };
+
   return (
     <>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
@@ -386,18 +435,35 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
         ) : notes.map(n => {
           const isMe = n.authorId === userId;
+          const editing = editingNoteId === n.id;
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}`, textShadow: 'none' }}>
-                {(n.attachments || []).map((a, ai) => (
-                  <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
-                    style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
-                ))}
-                {n.body && <div style={{ fontSize: 13, color: isMe ? 'var(--accent-ink)' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
+                {editing ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                    <textarea value={editingNoteBody} onChange={e => setEditingNoteBody(e.target.value)} rows={3} autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEditedNote(n); } }}
+                      style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                      <button onClick={cancelEditNote} disabled={noteActionBusy} style={{ background: 'transparent', border: 'none', color: isMe ? 'rgba(0,0,0,0.65)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={() => saveEditedNote(n)} disabled={noteActionBusy || !editingNoteBody.trim()} style={{ background: isMe ? 'rgba(0,0,0,0.18)' : 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 8px', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>{noteActionBusy ? '...' : 'Save'}</button>
+                    </div>
+                  </div>
+                ) : <>
+                  {(n.attachments || []).map((a, ai) => (
+                    <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
+                      style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
+                  ))}
+                  {n.body && <div style={{ fontSize: 13, color: isMe ? 'var(--accent-ink)' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{n.body}</div>}
+                </>}
               </div>
-              <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
-                {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
+              <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '3px 4px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}{n.editedAt ? ' · edited' : ''}
               </div>
+              {isMe && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                {n.body && <button onClick={() => beginEditNote(n)} disabled={noteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                <button onClick={() => removeNote(n)} disabled={noteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+              </div>}
             </div>
           );
         })}
@@ -423,13 +489,14 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
             <input type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
           </label>
-          <input
+          <textarea
             value={body}
             onChange={e => setBody(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            rows={2}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
             onPaste={onPasteMessage}
             placeholder="Message…"
-            style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
+            style={{ flex: 1, minHeight: 40, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
           <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, textShadow: 'none', cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}

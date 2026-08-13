@@ -270,12 +270,15 @@ function FriendsScreen({ store, setStore, userId }) {
   const [query, setQuery] = useStateF('');
   const [searchResult, setSearchResult] = useStateF(null);
   const [searching, setSearching] = useStateF(false);
-  const [loading, setLoading] = useStateF(false);
+  const [loading, setLoading] = useStateF(true);
   const [error, setError] = useStateF('');
   const [selectedChat, setSelectedChat] = useStateF(null);
   const [messageBody, setMessageBody] = useStateF('');
   const [messageFile, setMessageFile] = useStateF(null);
   const [sending, setSending] = useStateF(false);
+  const [editingMessageId, setEditingMessageId] = useStateF(null);
+  const [editingMessageBody, setEditingMessageBody] = useStateF('');
+  const [messageActionBusy, setMessageActionBusy] = useStateF(false);
   const [groupName, setGroupName] = useStateF('');
   const [joinCode, setJoinCode] = useStateF('');
   const [groupBusy, setGroupBusy] = useStateF(false);
@@ -287,6 +290,7 @@ function FriendsScreen({ store, setStore, userId }) {
   const [reportReason, setReportReason] = useStateF('other');
   const [reportDetails, setReportDetails] = useStateF('');
   const [reportBusy, setReportBusy] = useStateF(false);
+  const [selectedFriend, setSelectedFriend] = useStateF(null);
   const [selectedWorkout, setSelectedWorkout] = useStateF(null);
   const [expandedGroupMetric, setExpandedGroupMetric] = useStateF(null);
   const [metricPickerOpen, setMetricPickerOpen] = useStateF(false);
@@ -312,7 +316,18 @@ function FriendsScreen({ store, setStore, userId }) {
   }, [JSON.stringify(metricSlots)]);
 
   useEffectF(() => {
-    if (!store.settings?.showFriendsTab) return;
+    const friendsEnabled = !!store.settings?.showFriendsTab;
+    if (!friendsEnabled || !userId) {
+      setLoading(!userId);
+      return;
+    }
+    // The app-level social loader normally owns refreshes. If another boot
+    // path clears the slice while this screen stays mounted, restart the
+    // screen-level recovery load instead of leaving a stale empty fallback.
+    if (data) {
+      setLoading(false);
+      return;
+    }
     let live = true;
     let retryTimer = null;
     let refreshTimer = null;
@@ -340,7 +355,7 @@ function FriendsScreen({ store, setStore, userId }) {
       if (retryTimer) clearTimeout(retryTimer);
       if (refreshTimer) clearInterval(refreshTimer);
     };
-  }, [userId, store.settings?.showFriendsTab]);
+  }, [userId, store.settings?.showFriendsTab, !data]);
 
   const reload = async () => {
     setLoading(true);
@@ -511,6 +526,47 @@ function FriendsScreen({ store, setStore, userId }) {
     }
   };
 
+  const beginEditMessage = message => {
+    setEditingMessageId(message.id);
+    setEditingMessageBody(message.body === '[image]' ? '' : message.body || '');
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingMessageBody('');
+  };
+
+  const saveEditedMessage = async message => {
+    if (messageActionBusy || !editingMessageBody.trim()) return;
+    setMessageActionBusy(true);
+    try {
+      const updated = await LB.updateSocialMessage(message.id, userId, editingMessageBody);
+      patchSocial(s => ({
+        ...s,
+        messages: (s.messages || []).map(m => m.id === message.id ? { ...m, ...updated } : m),
+      }));
+      cancelEditMessage();
+    } catch (e) {
+      setError(e.message || 'Could not edit message');
+    } finally {
+      setMessageActionBusy(false);
+    }
+  };
+
+  const removeMessage = async message => {
+    if (messageActionBusy || !window.confirm('Delete this message?')) return;
+    setMessageActionBusy(true);
+    try {
+      await LB.deleteSocialMessage(message.id, userId);
+      patchSocial(s => ({ ...s, messages: (s.messages || []).filter(m => m.id !== message.id) }));
+      if (editingMessageId === message.id) cancelEditMessage();
+    } catch (e) {
+      setError(e.message || 'Could not delete message');
+    } finally {
+      setMessageActionBusy(false);
+    }
+  };
+
   const createGroup = async () => {
     if (!groupName.trim() || groupBusy) return;
     setGroupBusy(true);
@@ -670,6 +726,13 @@ function FriendsScreen({ store, setStore, userId }) {
     if (!window.confirm(`Block ${friend.name || 'this user'}? This also removes the friendship.`)) return;
     await runAction(() => LB.blockSocialUser(friend.userId));
     if (activeChat?.id === friend.userId) setSelectedChat(null);
+    if (selectedFriend?.userId === friend.userId) setSelectedFriend(null);
+  };
+
+  const removeFriend = async friend => {
+    if (!window.confirm(`Remove ${friend.name || 'this user'} from your circle?`)) return;
+    await runAction(() => LB.removeSocialFriend(friend.userId));
+    if (selectedFriend?.userId === friend.userId) setSelectedFriend(null);
   };
 
   if (!data) {
@@ -677,7 +740,7 @@ function FriendsScreen({ store, setStore, userId }) {
       <Screen scroll={false}>
         <TopBar title="Friends" />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28 }}>
-          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>{loading ? 'Loading Friends...' : error ? 'Friends could not be loaded.' : 'Friends is not ready yet.'}</div>
+          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>{error ? 'Friends could not be loaded.' : 'Loading Friends...'}</div>
           {error && <div style={{ maxWidth: 300, color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.4, textAlign: 'center' }}>{error}</div>}
           {!loading && <Btn kind="ghost" onClick={reload}>Retry</Btn>}
         </div>
@@ -723,29 +786,24 @@ function FriendsScreen({ store, setStore, userId }) {
   );
 
   const renderFriend = friend => (
-    <Card key={friend.userId} style={{ padding: 13 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 34, height: 34, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid ${UI.hairStrong}`, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 700 }}>{(friend.name || 'Z')[0].toUpperCase()}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>{friend.name || 'Zane athlete'}</div>
-          <div className="micro" style={{ marginTop: 2 }}>{friend.handle ? `@${friend.handle.replace(/^@/, '')}` : friend.friendCode}</div>
-        </div>
-        <button onClick={() => { setSelectedChat({ type: 'friend', id: friend.userId }); setActiveTab('chats'); }} style={{ width: 32, height: 32, borderRadius: 5, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, cursor: 'pointer' }} aria-label="Message friend"><i className="fa-solid fa-comment" /></button>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 12 }}>
+    <Card key={friend.userId} style={{ padding: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(92px, 1.25fr) repeat(3, minmax(48px, 1fr)) 30px', gap: 5, alignItems: 'center' }}>
+        <button type="button" onClick={() => setSelectedFriend(friend)} style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: 3, border: 'none', background: 'transparent', color: UI.ink, textAlign: 'left', cursor: 'pointer' }} aria-label={`View shared metrics for ${friend.name || 'friend'}`}>
+          <div style={{ width: 30, height: 30, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(var(--accent-rgb),0.15)', border: `var(--hair-width) solid ${UI.hairStrong}`, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 700 }}>{(friend.name || 'Z')[0].toUpperCase()}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{friend.name || 'Zane athlete'}</div>
+            <div className="micro" style={{ marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{friend.handle ? `@${friend.handle.replace(/^@/, '')}` : friend.friendCode}</div>
+          </div>
+        </button>
         {metricSlots.map((_, slotIndex) => {
           const metric = displayedFriendMetric(friend, slotIndex);
           const value = socialFriendMetricValue(friend, metric);
-          return <div key={`${metric}-${slotIndex}`} style={{ padding: '8px 5px', background: UI.bgInset, borderRadius: 4, textAlign: 'center' }}>
-            <div className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{socialMetricLabel(metric)}</div>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 11, color: value == null ? UI.inkGhost : UI.inkSoft, marginTop: 4 }}>{socialMetricValue(metric, value, { settings: store.settings, weightUnit: friend.weightUnit }) || 'No data'}</div>
-          </div>
+          return <div key={`${metric}-${slotIndex}`} style={{ minWidth: 0, padding: '6px 3px', background: UI.bgInset, borderRadius: 4, textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.gold, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric)}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 10, color: value == null ? UI.inkGhost : UI.inkSoft, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricValue(metric, value, { settings: store.settings, weightUnit: friend.weightUnit }) || 'No data'}</div>
+          </div>;
         })}
-      </div>
-      <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
-        <button onClick={() => setReportTarget(friend)} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Report</button>
-        <button onClick={() => blockFriend(friend)} style={{ background: 'none', border: 'none', padding: 0, color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Block</button>
-        <button onClick={() => runAction(() => LB.removeSocialFriend(friend.userId))} style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Remove</button>
+        <button onClick={() => { setSelectedChat({ type: 'friend', id: friend.userId }); setActiveTab('chats'); }} style={{ width: 30, height: 30, borderRadius: 5, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, cursor: 'pointer' }} aria-label="Message friend"><i className="fa-solid fa-comment" /></button>
       </div>
     </Card>
   );
@@ -906,20 +964,39 @@ function FriendsScreen({ store, setStore, userId }) {
             {!chatMessages.length && <div className="micro" style={{ margin: 'auto', color: UI.inkFaint }}>Start the conversation.</div>}
             {chatMessages.map(message => {
               const own = message.senderId === userId;
+              const editing = editingMessageId === message.id;
               return <div key={message.id} style={{ alignSelf: own ? 'flex-end' : 'flex-start', maxWidth: '88%', display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start' }}>
                 <div style={{ padding: '9px 11px', borderRadius: 7, background: own ? 'rgba(var(--accent-rgb),0.18)' : UI.bgRaised, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.45 }}>
-                  {message.body !== '[image]' && message.body}
-                  {message.attachments?.map(attachment => attachment.url ? <img key={attachment.id} src={attachment.url} alt={attachment.fileName || 'Attachment'} style={{ display: 'block', maxWidth: 190, maxHeight: 190, borderRadius: 5, marginTop: message.body !== '[image]' ? 6 : 0, objectFit: 'cover' }} /> : <span key={attachment.id}>Image</span>)}
-                  {message.body === '[image]' && !message.attachments?.length && <span>Image</span>}
+                  {editing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                      <textarea value={editingMessageBody} onChange={e => setEditingMessageBody(e.target.value)} rows={3} autoFocus
+                        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEditedMessage(message); } }}
+                        style={{ ...SOCIAL_INPUT_STYLE, width: '100%', minHeight: 68, resize: 'vertical', padding: '7px 8px', fontSize: 12 }} />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                        <button onClick={cancelEditMessage} disabled={messageActionBusy} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                        <Btn onClick={() => saveEditedMessage(message)} disabled={messageActionBusy || !editingMessageBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{messageActionBusy ? '...' : 'Save'}</Btn>
+                      </div>
+                    </div>
+                  ) : <>
+                    {message.body !== '[image]' && <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.body}</div>}
+                    {message.attachments?.map(attachment => attachment.url ? <img key={attachment.id} src={attachment.url} alt={attachment.fileName || 'Attachment'} style={{ display: 'block', maxWidth: 190, maxHeight: 190, borderRadius: 5, marginTop: message.body !== '[image]' ? 6 : 0, objectFit: 'cover' }} /> : <span key={attachment.id}>Image</span>)}
+                    {message.body === '[image]' && !message.attachments?.length && <span>Image</span>}
+                  </>}
                 </div>
-                <span className="micro" style={{ color: UI.inkGhost, marginTop: 3 }}>{socialTime(message.createdAt)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                  <span className="micro" style={{ color: UI.inkGhost }}>{socialTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</span>
+                  {own && !editing && <>
+                    {message.body !== '[image]' && <button onClick={() => beginEditMessage(message)} disabled={messageActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                    <button onClick={() => removeMessage(message)} disabled={messageActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+                  </>}
+                </div>
               </div>;
             })}
           </div>
           <div style={{ padding: 9, borderTop: `var(--hair-width) solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {messageFile && <div className="micro" style={{ color: UI.gold }}>Attached: {messageFile.name}</div>}
             <div style={{ display: 'flex', gap: 6 }}>
-              <input value={messageBody} onChange={e => setMessageBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message" style={{ ...SOCIAL_INPUT_STYLE, flex: 1, padding: '9px 10px' }} />
+              <textarea value={messageBody} onChange={e => setMessageBody(e.target.value)} rows={2} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message" style={{ ...SOCIAL_INPUT_STYLE, flex: 1, minHeight: 34, resize: 'vertical', padding: '8px 10px' }} />
               <label style={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 5, border: `var(--hair-width) solid ${UI.hairStrong}`, color: UI.inkFaint, cursor: 'pointer', flexShrink: 0 }} aria-label="Attach image"><i className="fa-solid fa-image" /><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={e => { setMessageFile(e.target.files?.[0] || null); e.target.value = ''; }} style={{ display: 'none' }} /></label>
               <Btn onClick={sendMessage} disabled={sending || (!messageBody.trim() && !messageFile)} style={{ padding: '8px 10px', minHeight: 34, fontSize: 10 }}>{sending ? '...' : 'Send'}</Btn>
             </div>
@@ -1077,6 +1154,37 @@ function FriendsScreen({ store, setStore, userId }) {
           <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.45 }}>Your selection is synced to your social profile and applies to all friends.</div>
           <Btn onClick={saveMetricSlots} disabled={metricSlotsSaving}>{metricSlotsSaving ? 'Saving...' : 'Save metric layout'}</Btn>
         </div>
+      </Sheet>
+      <Sheet open={!!selectedFriend} onClose={() => setSelectedFriend(null)} title={selectedFriend?.name || 'Friend'}>
+        {selectedFriend && (() => {
+          const sharedMetrics = socialMetricCatalog.filter(metric => socialFriendShares(selectedFriend, metric.key));
+          return <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint }}>{selectedFriend.handle ? `@${selectedFriend.handle.replace(/^@/, '')}` : selectedFriend.friendCode}</div>
+              <div style={{ marginTop: 7, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, lineHeight: 1.45 }}>Everything {selectedFriend.name || 'this friend'} has chosen to share with you.</div>
+            </div>
+            {sharedMetrics.length === 0
+              ? <div style={{ padding: 12, borderRadius: 5, background: UI.bgInset, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>This friend is not sharing health metrics yet.</div>
+              : [...new Set(sharedMetrics.map(metric => metric.group))].map(group => <div key={group}>
+                <div className="micro" style={{ color: UI.gold, fontWeight: 700, marginBottom: 7 }}>{group.toUpperCase()}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7 }}>
+                  {sharedMetrics.filter(metric => metric.group === group).map(metric => {
+                    const value = socialFriendMetricValue(selectedFriend, metric.key);
+                    return <div key={metric.key} style={{ minWidth: 0, padding: '9px 10px', borderRadius: 5, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}` }}>
+                      <div className="micro" style={{ color: UI.gold, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricLabel(metric.key)}</div>
+                      <div className="num" style={{ color: value == null ? UI.inkGhost : UI.inkSoft, fontSize: 12, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialMetricValue(metric.key, value, { settings: store.settings, weightUnit: selectedFriend.weightUnit }) || 'No data'}</div>
+                    </div>;
+                  })}
+                </div>
+              </div>)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>
+              <button onClick={() => { setSelectedChat({ type: 'friend', id: selectedFriend.userId }); setSelectedFriend(null); setActiveTab('chats'); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Message</button>
+              <button onClick={() => { setReportTarget(selectedFriend); setSelectedFriend(null); }} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Report</button>
+              <button onClick={() => blockFriend(selectedFriend)} style={{ background: 'none', border: 'none', padding: 0, color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Block</button>
+              <button onClick={() => removeFriend(selectedFriend)} style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Remove</button>
+            </div>
+          </div>;
+        })()}
       </Sheet>
       <Sheet open={!!reportTarget} onClose={() => setReportTarget(null)} title="Report user">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

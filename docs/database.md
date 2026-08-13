@@ -252,8 +252,9 @@ Sonderfälle und RLS:
 
 ### `zane_coaching_notes`
 
-- `id` (text), `coaching_id` (text), `author_id` (uuid), `thread_id` (text, nullable → references `zane_coaching_threads`), `type` (text: session|plan|general|change), `entity_id` (text, nullable), `entity_name` (text, nullable), `body` (text), `created_at` (timestamptz), `read_at` (timestamptz, nullable)
+- `id` (text), `coaching_id` (text), `author_id` (uuid), `thread_id` (text, nullable → references `zane_coaching_threads`), `type` (text: session|plan|general|change), `entity_id` (text, nullable), `entity_name` (text, nullable), `body` (text), `created_at` (timestamptz), `edited_at` (timestamptz, nullable), `read_at` (timestamptz, nullable)
 - `attachments` (jsonb, nullable): `[{ url, name, type }]` image attachments; uploaded to the public `chat-attachments` storage bucket; rendered as thumbnails in the ChatThread + support-ticket bubbles. Migration 0104.
+- Authors can edit or delete their own messages in coach and support threads. `edited_at` marks a changed message. Migration 0273 adds the author-only update policy while preserving the recipient's read-status update path.
 
 ### `zane_coaching_macros`
 
@@ -785,8 +786,9 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `id` (uuid, primary key), `sender_id`, `recipient_id`, `group_id` (uuid)
 - `body` (text, required, max 4000 characters)
-- `created_at` (timestamptz)
+- `created_at` (timestamptz), `edited_at` (timestamptz, nullable)
 - Exactly one of `recipient_id` or `group_id` is set. RLS limits rows to the sender, direct recipient, or group member.
+- Senders can edit or delete their own messages. Edited rows carry `edited_at`; attachments remain participant-scoped. Migration 0273.
 
 ### `zane_social_message_attachments`
 

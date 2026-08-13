@@ -862,6 +862,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
+  const [supportEditingNoteId, setSupportEditingNoteId] = useStateSet(null);
+  const [supportEditingBody, setSupportEditingBody] = useStateSet('');
+  const [supportNoteActionBusy, setSupportNoteActionBusy] = useStateSet(false);
   const [adminImageFile, setAdminImageFile] = useStateSet(null);
   const [adminImagePreview, setAdminImagePreview] = useStateSet(null);
   const [archivedInbox, setArchivedInbox] = useStateSet([]);
@@ -1088,7 +1091,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const load = () => {
       if (first) setSupportActiveLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, attachments')
+        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
         .eq('coaching_id', supportActiveTicketId)
         .order('created_at', { ascending: true })
         .then(({ data }) => {
@@ -1136,7 +1139,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const load = () => {
       if (first) setSupportTicketLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, attachments')
+        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
         .eq('coaching_id', supportTicket.coachingId)
         .order('created_at', { ascending: true })
         .then(({ data }) => {
@@ -1830,7 +1833,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (error || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       setSupportActiveNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
@@ -1868,7 +1871,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (noteErr || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       {
         const preview = attachments ? (body || '📷 Image') : body;
@@ -1909,13 +1912,54 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (error || !note) { restore(); UI.alert('Reply failed to send. Please try again.'); return; }
       setSupportTicketNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
       LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
     } catch (e) { restore(); UI.alert(e.message || 'Reply failed to send. Please try again.'); }
     finally { setSupportAdminSending(false); }
+  };
+
+  const beginSupportEdit = note => {
+    setSupportEditingNoteId(note.id);
+    setSupportEditingBody(note.body || '');
+  };
+
+  const cancelSupportEdit = () => {
+    setSupportEditingNoteId(null);
+    setSupportEditingBody('');
+  };
+
+  const saveSupportEdit = async note => {
+    if (supportNoteActionBusy || !supportEditingBody.trim()) return;
+    setSupportNoteActionBusy(true);
+    try {
+      const updated = await LB.updateCoachingNote(note.id, userId, supportEditingBody);
+      const patchNote = { body: updated.body, edited_at: updated.editedAt };
+      setSupportActiveNotes(prev => prev.map(item => item.id === note.id ? { ...item, ...patchNote } : item));
+      setSupportTicketNotes(prev => prev.map(item => item.id === note.id ? { ...item, ...patchNote } : item));
+      cancelSupportEdit();
+    } catch (e) {
+      UI.alert(e.message || 'Could not edit message');
+    } finally {
+      setSupportNoteActionBusy(false);
+    }
+  };
+
+  const removeSupportNote = async note => {
+    if (supportNoteActionBusy || !window.confirm('Delete this message?')) return;
+    setSupportNoteActionBusy(true);
+    try {
+      await LB.deleteCoachingNote(note.id, userId);
+      setSupportActiveNotes(prev => prev.filter(item => item.id !== note.id));
+      setSupportTicketNotes(prev => prev.filter(item => item.id !== note.id));
+      if (supportEditingNoteId === note.id) cancelSupportEdit();
+    } catch (e) {
+      UI.alert(e.message || 'Could not delete message');
+    } finally {
+      setSupportNoteActionBusy(false);
+    }
   };
 
   const sendBroadcast = async () => {
@@ -3870,19 +3914,37 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
                     return supportActiveNotes.map(n => {
                       const isMe = n.author_id === userId;
+                      const editing = supportEditingNoteId === n.id;
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                           <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `var(--hair-width) solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
-                            {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
-                            ))}
-                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            {editing ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                                <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
+                                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                                  <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                                  <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>
+                                </div>
+                              </div>
+                            ) : <>
+                              {hasImg && n.attachments.map((a, i) => (
+                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              ))}
+                              {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            </>}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                            {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
+                          {isMe && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                            <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+                          </div>}
                         </div>
                       );
                     });
@@ -4025,6 +4087,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
                     return supportTicketNotes.map(n => {
                       const isAdminMsg = n.author_id === userId;
+                      const editing = supportEditingNoteId === n.id;
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
@@ -4034,15 +4097,32 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             border: `var(--hair-width) solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
                             overflow: 'hidden',
                           }}>
-                            {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
-                            ))}
-                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            {editing ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                                <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
+                                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                                  <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                                  <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>
+                                </div>
+                              </div>
+                            ) : <>
+                              {hasImg && n.attachments.map((a, i) => (
+                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              ))}
+                              {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            </>}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                            {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
+                          {isAdminMsg && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                            <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+                          </div>}
                         </div>
                       );
                     });

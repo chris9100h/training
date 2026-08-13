@@ -1546,7 +1546,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
       .is('read_at', null)
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
@@ -2104,6 +2104,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         threadId: n.thread_id,
         body: n.body,
         createdAt: n.created_at,
+        editedAt: n.edited_at,
         attachments: n.attachments || null,
       })),
     },
@@ -5634,6 +5635,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+    editedAt: n.edited_at,
     attachments: n.attachments || null,
   });
   const clientIds = [...new Set((coachClients || []).map(c => c.clientId).filter(Boolean))];
@@ -5851,6 +5853,7 @@ function mapSocialMessage(row, attachments = []) {
     groupId: row.group_id ?? row.groupId ?? null,
     body: row.body || '',
     createdAt: row.created_at ?? row.createdAt,
+    editedAt: row.edited_at ?? row.editedAt ?? null,
     attachments: attachments.filter(a => a.messageId === row.id),
   };
 }
@@ -5910,7 +5913,7 @@ async function loadFriendsStateUncached(userId, weekStart) {
   const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes] = await Promise.all([
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
     _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
-    _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at').order('created_at', { ascending: false }).limit(300),
+    _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').order('created_at', { ascending: false }).limit(300),
     _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at'),
     _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
     _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
@@ -6056,9 +6059,31 @@ async function sendSocialMessage({ senderId, recipientId = null, groupId = null,
   if (!text) throw new Error('Message cannot be empty');
   const { data, error } = await _supabase.from('zane_social_messages').insert({
     sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
-  }).select('id, sender_id, recipient_id, group_id, body, created_at').single();
+  }).select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').single();
   if (error) throw error;
   return mapSocialMessage(data);
+}
+
+async function updateSocialMessage(messageId, userId, body) {
+  const text = String(body || '').trim();
+  if (!messageId || !userId || !text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_social_messages')
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', userId)
+    .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
+    .single();
+  if (error) throw error;
+  return mapSocialMessage(data);
+}
+
+async function deleteSocialMessage(messageId, userId) {
+  if (!messageId || !userId) throw new Error('Message is incomplete');
+  const { error } = await _supabase.from('zane_social_messages')
+    .delete()
+    .eq('id', messageId)
+    .eq('sender_id', userId);
+  if (error) throw error;
 }
 
 async function markSocialMessagesRead(userId, messageIds = []) {
@@ -6420,7 +6445,7 @@ async function reloadCoachingState(userId) {
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
       .is('read_at', null)
       .neq('author_id', userId),
     // not.like support_% on BOTH: a user with a real coach AND an open support
@@ -6468,6 +6493,7 @@ async function reloadCoachingState(userId) {
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+      editedAt: n.edited_at,
       attachments: n.attachments || null,
     })),
   };
@@ -6619,8 +6645,37 @@ async function loadCoachingNotes(coachingId, threadId = null) {
     threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     body: n.body, createdAt: n.created_at, readAt: n.read_at,
+    editedAt: n.edited_at,
     attachments: n.attachments || null,
   }));
+}
+
+async function updateCoachingNote(noteId, userId, body) {
+  const text = String(body || '').trim();
+  if (!noteId || !userId || !text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_coaching_notes')
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq('id', noteId)
+    .eq('author_id', userId)
+    .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, read_at, thread_id, attachments, edited_at')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id, coachingId: data.coaching_id, authorId: data.author_id,
+    threadId: data.thread_id, type: data.type, entityId: data.entity_id,
+    entityName: data.entity_name, body: data.body, createdAt: data.created_at,
+    readAt: data.read_at, editedAt: data.edited_at,
+    attachments: data.attachments || null,
+  };
+}
+
+async function deleteCoachingNote(noteId, userId) {
+  if (!noteId || !userId) throw new Error('Message is incomplete');
+  const { error } = await _supabase.from('zane_coaching_notes')
+    .delete()
+    .eq('id', noteId)
+    .eq('author_id', userId);
+  if (error) throw error;
 }
 
 async function loadCoachingThreads(coachingId) {
@@ -11384,14 +11439,14 @@ window.LB = {
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
-  createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, markSocialMessagesRead,
+  createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
