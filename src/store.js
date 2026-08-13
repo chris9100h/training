@@ -5790,6 +5790,21 @@ function mapSocialFriend(f) {
   };
 }
 
+function mapSocialFriendMetrics(row, fallbackUserId = null) {
+  if (!row) return null;
+  const legacy = {
+    steps: row.stepsVisible ?? row.steps_visible,
+    workouts: row.workoutsVisible ?? row.workouts_visible,
+    adherence: row.adherenceVisible ?? row.adherence_visible,
+  };
+  return {
+    userId: row.userId ?? row.user_id ?? fallbackUserId,
+    weightUnit: row.weightUnit ?? row.weight_unit ?? null,
+    metricVisibility: normalizeSocialMetricVisibility(row.metricVisibility ?? row.metric_visibility, legacy),
+    metrics: row.metrics && typeof row.metrics === 'object' ? row.metrics : {},
+  };
+}
+
 function mapSocialWorkoutSummary(row) {
   if (!row) return null;
   return {
@@ -5884,27 +5899,23 @@ async function loadSocialWorkoutFeed() {
   };
 }
 
+async function loadSocialFriendMetrics(friendId) {
+  if (!friendId) throw new Error('Friend is incomplete');
+  const { data, error } = await _supabase.rpc('social_get_friend_metrics', { p_friend_id: friendId });
+  if (error) throw error;
+  return mapSocialFriendMetrics(data, friendId);
+}
+
 let _friendsLoadInFlight = null;
 async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
   if (!userId) return null;
   const key = `${userId}:${weekStart}`;
   if (_friendsLoadInFlight?.key === key) {
-    // Realtime and the fallback poll can both invalidate the same snapshot
-    // while its request is in flight. Let the current caller share the work,
-    // but make the in-flight promise perform one final refresh before it
-    // resolves so an event cannot be lost between the two requests.
-    _friendsLoadInFlight.dirty = true;
+    // App bootstrap and the Friends screen can request the same snapshot at
+    // the same time. Share the promise without starting a second full load.
     return _friendsLoadInFlight.promise;
   }
-  const entry = { key, dirty: false, promise: null };
-  entry.promise = (async () => {
-    let result = await loadFriendsStateUncached(userId, weekStart);
-    while (entry.dirty) {
-      entry.dirty = false;
-      result = await loadFriendsStateUncached(userId, weekStart);
-    }
-    return result;
-  })();
+  const entry = { key, promise: loadFriendsStateUncached(userId, weekStart) };
   _friendsLoadInFlight = entry;
   try {
     return await entry.promise;
@@ -5914,18 +5925,12 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
 }
 
 async function loadFriendsStateUncached(userId, weekStart) {
-  const [dashboardRes, workoutFeed] = await Promise.all([
+  // The core dashboard and supporting social rows are independent. Starting
+  // them together removes the old dashboard/feed -> table-query waterfall.
+  // Workout feed summaries are loaded separately after this core snapshot so
+  // Circle and Groups can render without waiting for live activity data.
+  const [dashboardRes, groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await Promise.all([
     _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
-    // The workout feed is an enhancement to Friends, not a prerequisite for
-    // opening chats/groups. A transient feed/RPC failure must not blank the
-    // whole social screen.
-    loadSocialWorkoutFeed().catch(error => {
-      console.warn('social workout feed load failed:', error);
-      return { liveWorkouts: [], workoutHistory: [] };
-    }),
-  ]);
-  if (dashboardRes.error) throw dashboardRes.error;
-  const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await Promise.all([
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
     _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
     _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').order('created_at', { ascending: false }).limit(300),
@@ -5934,6 +5939,7 @@ async function loadFriendsStateUncached(userId, weekStart) {
     _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
     _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
   ]);
+  if (dashboardRes.error) throw dashboardRes.error;
   // Attachments are optional decoration for messages. Keep the message rows
   // usable if signed-url metadata is briefly unavailable.
   const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes, shareImportsRes].find(r => r?.error)?.error;
@@ -5970,8 +5976,8 @@ async function loadFriendsStateUncached(userId, weekStart) {
     groupMembers,
     messages,
     planShares,
-    liveWorkouts: workoutFeed.liveWorkouts,
-    workoutHistory: workoutFeed.workoutHistory,
+    liveWorkouts: [],
+    workoutHistory: [],
     unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
     readMessageIds: [...reads],
     weekStart,
@@ -11473,7 +11479,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,

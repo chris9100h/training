@@ -4496,9 +4496,30 @@ SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
   v_uid uuid := auth.uid();
-  v_metric_keys text[] := ARRAY['steps','workouts','adherence','calories','protein','carbs','fat','fiber','water','cardioMinutes','cardioDistance','weight','bodyFatPct','waistCm','hipsCm','chestCm','armCm','thighCm','calfCm','glucose','bloodPressure','bodyTemp'];
+  v_all_metric_keys text[] := ARRAY[
+    'steps','workouts','adherence','calories','protein','carbs','fat','fiber',
+    'water','cardioMinutes','cardioDistance','weight','bodyFatPct','waistCm',
+    'hipsCm','chestCm','armCm','thighCm','calfCm','glucose','bloodPressure','bodyTemp'
+  ];
+  v_metric_keys text[] := ARRAY['steps','workouts','adherence'];
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+
+  SELECT ARRAY(
+    SELECT DISTINCT candidate
+    FROM unnest(
+      ARRAY['steps','workouts','adherence']::text[] ||
+      ARRAY(SELECT jsonb_array_elements_text(COALESCE(sp.metric_slots, '[]'::jsonb)))
+    ) AS candidate
+    WHERE candidate = ANY(v_all_metric_keys)
+  )
+  INTO v_metric_keys
+  FROM zane_social_profiles sp
+  WHERE sp.user_id = v_uid;
+
+  IF COALESCE(cardinality(v_metric_keys), 0) < 3 THEN
+    v_metric_keys := ARRAY['steps','workouts','adherence'];
+  END IF;
   RETURN jsonb_build_object(
     'profile', (
       SELECT jsonb_build_object(
@@ -4515,16 +4536,22 @@ BEGIN
       SELECT jsonb_agg(jsonb_build_object(
         'friendshipId', f.id, 'userId', other.user_id, 'name', coalesce(p.name, 'Zane athlete'),
         'handle', other.handle, 'friendCode', other.friend_code, 'weightUnit', ous.unit,
-        'metricVisibility', other.metric_visibility,
-        'metrics', (SELECT jsonb_object_agg(metric_key, CASE WHEN lower(coalesce(other.metric_visibility->>metric_key, 'false')) = 'true' THEN public.social_health_metric_value(other.user_id, metric_key, NULL, NULL) ELSE NULL END) FROM unnest(v_metric_keys) AS metric_key),
-        'steps', CASE WHEN other.steps_visible THEN public.social_health_metric_value(other.user_id, 'steps', NULL, NULL) END,
-        'workouts', CASE WHEN other.workouts_visible THEN public.social_health_metric_value(other.user_id, 'workouts', NULL, NULL) END,
-        'adherence', CASE WHEN other.adherence_visible THEN public.social_health_metric_value(other.user_id, 'adherence', NULL, NULL) END
+        'stepsVisible', other.steps_visible, 'workoutsVisible', other.workouts_visible,
+        'adherenceVisible', other.adherence_visible,
+        'metricVisibility', visibility.metric_visibility,
+        'metrics', (SELECT jsonb_object_agg(metric_key, CASE WHEN lower(coalesce(visibility.metric_visibility->>metric_key, 'false')) = 'true' THEN public.social_health_metric_value(other.user_id, metric_key, NULL, NULL) ELSE NULL END) FROM unnest(v_metric_keys) AS metric_key)
       ) ORDER BY f.updated_at DESC)
       FROM zane_social_friendships f
       JOIN zane_social_profiles other ON other.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
       LEFT JOIN zane_profiles p ON p.id = other.user_id
       LEFT JOIN zane_user_settings ous ON ous.user_id = other.user_id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(other.metric_visibility, '{}'::jsonb) || jsonb_build_object(
+          'steps', COALESCE(other.metric_visibility->'steps', to_jsonb(other.steps_visible)),
+          'workouts', COALESCE(other.metric_visibility->'workouts', to_jsonb(other.workouts_visible)),
+          'adherence', COALESCE(other.metric_visibility->'adherence', to_jsonb(other.adherence_visible))
+        ) AS metric_visibility
+      ) visibility ON true
       WHERE f.status = 'accepted' AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
         AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = v_uid AND b.blocked_id = other.user_id) OR (b.blocker_id = other.user_id AND b.blocked_id = v_uid))
     ), '[]'::jsonb),
@@ -4565,6 +4592,73 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date, date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date, date) TO authenticated;
+
+
+CREATE OR REPLACE FUNCTION public.social_get_friend_metrics(p_friend_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_metric_keys text[] := ARRAY[
+    'steps','workouts','adherence','calories','protein','carbs','fat','fiber',
+    'water','cardioMinutes','cardioDistance','weight','bodyFatPct','waistCm',
+    'hipsCm','chestCm','armCm','thighCm','calfCm','glucose','bloodPressure','bodyTemp'
+  ];
+  v_metric_visibility jsonb;
+  v_weight_unit text;
+  v_steps_visible boolean;
+  v_workouts_visible boolean;
+  v_adherence_visible boolean;
+BEGIN
+  IF v_uid IS NULL OR p_friend_id IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM zane_social_friendships f
+    WHERE f.status = 'accepted'
+      AND ((f.requester_id = v_uid AND f.addressee_id = p_friend_id) OR (f.requester_id = p_friend_id AND f.addressee_id = v_uid))
+      AND NOT EXISTS (
+        SELECT 1 FROM zane_social_blocks b
+        WHERE (b.blocker_id = v_uid AND b.blocked_id = p_friend_id)
+           OR (b.blocker_id = p_friend_id AND b.blocked_id = v_uid)
+      )
+  ) THEN RAISE EXCEPTION 'Friend not found'; END IF;
+
+  SELECT COALESCE(sp.metric_visibility, '{}'::jsonb), us.unit,
+         sp.steps_visible, sp.workouts_visible, sp.adherence_visible
+    INTO v_metric_visibility, v_weight_unit,
+         v_steps_visible, v_workouts_visible, v_adherence_visible
+    FROM zane_social_profiles sp
+    LEFT JOIN zane_user_settings us ON us.user_id = sp.user_id
+   WHERE sp.user_id = p_friend_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Friend not found'; END IF;
+
+  v_metric_visibility := v_metric_visibility || jsonb_build_object(
+    'steps', COALESCE(v_metric_visibility->'steps', to_jsonb(v_steps_visible)),
+    'workouts', COALESCE(v_metric_visibility->'workouts', to_jsonb(v_workouts_visible)),
+    'adherence', COALESCE(v_metric_visibility->'adherence', to_jsonb(v_adherence_visible))
+  );
+
+  RETURN jsonb_build_object(
+    'userId', p_friend_id,
+    'weightUnit', v_weight_unit,
+    'stepsVisible', v_steps_visible,
+    'workoutsVisible', v_workouts_visible,
+    'adherenceVisible', v_adherence_visible,
+    'metricVisibility', v_metric_visibility,
+    'metrics', COALESCE((
+      SELECT jsonb_object_agg(metric_key, public.social_health_metric_value(p_friend_id, metric_key, NULL, NULL))
+      FROM unnest(v_metric_keys) AS metric_key
+      WHERE lower(coalesce(v_metric_visibility->>metric_key, 'false')) = 'true'
+    ), '{}'::jsonb)
+  );
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.social_get_friend_metrics(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_get_friend_metrics(uuid) TO authenticated;
 
 
 CREATE OR REPLACE FUNCTION public.social_join_group(p_join_code text)
