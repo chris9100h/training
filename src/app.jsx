@@ -2702,10 +2702,20 @@ function App() {
               ...s.user,
               xHandle: handle,
               xHandlePublic: s.user?.xHandlePublic !== false,
-              xHandlePromptOptedOut: false,
+              // The prompt is a one-time request. Saving a handle completes it
+              // permanently, even if the profile write is briefly delayed.
+              xHandlePromptOptedOut: true,
             } } : s);
           }}
-          onLater={() => setXHandlePromptOpen(false)}
+          onLater={() => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              // "Later" means this one-time prompt has been handled; do not
+              // bring it back on the next boot.
+              xHandlePromptOptedOut: true,
+            } } : s);
+          }}
           onOptOut={() => {
             setXHandlePromptOpen(false);
             setStore(s => s ? { ...s, user: {

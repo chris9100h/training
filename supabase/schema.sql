@@ -45,7 +45,7 @@ COMMENT ON COLUMN public.zane_profiles.x_handle IS
 COMMENT ON COLUMN public.zane_profiles.x_handle_public IS
   'Whether future public/social features may display the user X handle; admins can still see it.';
 COMMENT ON COLUMN public.zane_profiles.x_handle_prompt_opted_out IS
-  'Permanent opt-out from the optional X-handle prompt until the user adds a handle again.';
+  'Whether the one-time optional X-handle prompt has been handled; true means it will not automatically appear again.';
 
 -- Global app config (single row).
 -- force_update_nonce (Migration 0131): set by admin_force_update() to push

@@ -1079,9 +1079,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const saveXHandle = () => {
     const raw = xHandleDraft.trim();
     if (!raw) {
-      setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: false } } : s);
+      setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: true } } : s);
       setXHandleDraft('');
-      setXHandleMsg({ ok: true, text: 'X handle removed. The optional prompt is enabled again.' });
+      setXHandleMsg({ ok: true, text: 'X handle removed. We will not ask again automatically.' });
       return;
     }
     const normalized = LB.normalizeXHandle(raw);
@@ -1089,7 +1089,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setXHandleMsg({ ok: false, text: 'Enter a valid X handle, for example @yourname.' });
       return;
     }
-    setStore(s => s ? { ...s, user: { ...s.user, xHandle: normalized, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: false } } : s);
+    setStore(s => s ? { ...s, user: { ...s.user, xHandle: normalized, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: true } } : s);
     setXHandleDraft(normalized);
     setXHandleMsg({ ok: true, text: 'X handle saved.' });
   };

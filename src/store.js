@@ -2828,7 +2828,7 @@ async function syncStore(prev, next, userId) {
     prev.user?.xHandle !== next.user?.xHandle ||
     prev.user?.xHandlePublic !== next.user?.xHandlePublic ||
     prev.user?.xHandlePromptOptedOut !== next.user?.xHandlePromptOptedOut;
-  if (profileChanged && (next.user?.name || prev.user?.name)) {
+  if (profileChanged) {
     ops.push(_supabase.from('zane_profiles').upsert({
       id: userId,
       name: next.user?.name || prev.user?.name || '',
