@@ -4272,7 +4272,7 @@ BEGIN
           AND s.ended IS NOT NULL
           AND COALESCE(s.started_at, s.date) IS NOT NULL
           AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
-        ORDER BY COALESCE(s.ended, s.date) DESC
+        ORDER BY sort_at DESC
         LIMIT 100
       ) history_rows
     ), '[]'::jsonb)
