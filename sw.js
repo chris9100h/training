@@ -31,6 +31,7 @@ const ASSETS = [
   BASE + '/src/screens-coaching-client.jsx',
   BASE + '/src/screens-coaching-detail.jsx',
   BASE + '/src/screens-coaching-tabs.jsx',
+  BASE + '/src/screens-friends.jsx',
   BASE + '/src/screens-health.jsx',
   BASE + '/src/screens-water.jsx',
   BASE + '/src/screens-food.jsx',

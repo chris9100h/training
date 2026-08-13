@@ -2216,6 +2216,40 @@ function App() {
     return () => { clearTimeout(debounceTimer); unsubscribe(); };
   }, [userId, coachClientsKey]);
 
+  // Social data is deliberately feature-gated. A user who has not enabled the
+  // Friends tab should not trigger any social RPC, table query, realtime
+  // channel, or local-store hydration. Toggling it on while the app is alive
+  // starts the same load path without requiring a remount.
+  const friendsTabEnabled = phase === 'ready' && !!store?.settings?.showFriendsTab;
+  useEffectA(() => {
+    if (!friendsTabEnabled || !userId) {
+      if (storeRefA.current?.friends) setStore(s => s ? { ...s, friends: null } : s);
+      return;
+    }
+    let live = true;
+    let refreshTimer = null;
+    const refreshFriends = () => {
+      LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(friends => {
+        if (!live) return;
+        setStore(s => s ? { ...s, friends } : s);
+      }).catch(() => {});
+    };
+    refreshFriends();
+    const unsubscribe = LB.subscribeToFriends(userId, () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshFriends, 250);
+    });
+    return () => {
+      live = false;
+      clearTimeout(refreshTimer);
+      unsubscribe?.();
+    };
+  }, [userId, friendsTabEnabled]);
+
+  useEffectA(() => {
+    if (phase === 'ready' && route.name === 'friends' && !friendsTabEnabled) go({ name: 'home' });
+  }, [phase, route.name, friendsTabEnabled]);
+
   // Sync to Supabase + save to localStorage on every store change.
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
@@ -2467,13 +2501,14 @@ function App() {
     && !textEntryFocused;
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water,
   // food and (opt-in) medications trackers live under the Health tab: keep
   // the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
     : (route.name === 'water' || route.name === 'food' || route.name === 'medications') ? 'health'
+    : (route.name === 'coaching' || route.name === 'friends') ? 'social'
     : route.name;
   const showMeds = !!store?.settings?.medsEnabled;
 
@@ -2486,9 +2521,11 @@ function App() {
   const showHealth = !!store?.settings?.showHealthTab;
   const showWater = !!store?.settings?.showWaterTab;
   const showFood = !!store?.settings?.showFoodTab;
+  const showFriends = !!store?.settings?.showFriendsTab;
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
+  const friendsBadge = showFriends ? { count: store?.friends?.unreadCount || 0 } : null;
 
   let screen;
   switch (route.name) {
@@ -2518,6 +2555,7 @@ function App() {
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
+    case 'friends':             screen = <window.Screens.FriendsScreen {...props} />; break;
     case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
@@ -2559,7 +2597,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showFriends={showFriends} friendsBadge={friendsBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
@@ -2571,7 +2609,7 @@ function App() {
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
-      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />}
+      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showFriends={showFriends} friendsBadge={friendsBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />}
     </>
   );
 

@@ -627,6 +627,7 @@ Weitere Spalten:
 - `show_health_tab` (boolean, default false): eigener „Show tab"-Schalter für den Health-Slot (Settings → Health & Nutrition → Health). Store field `showHealthTab`.
 - `show_water_tab` (boolean, NOT NULL, default false, Store `showWaterTab`, Migration 0222): eigener „Show tab"-Schalter für den Water-Slot (Settings → Health & Nutrition → Water). Bis Migration 0222 gab es nur `show_health_tab`, das Health/Water/Food gebündelt ein-/ausblendete; seither ist jeder der vier Slots (Health/Water/Food via diese drei Spalten, Medications via `meds_enabled`) unabhängig schaltbar, jede Kombination erlaubt. Die Migration backfillt bestehende Nutzer mit `show_health_tab = true` auf `true`, damit niemandem sichtbare Tabs beim Deploy verschwinden; neue Accounts starten wie `show_health_tab` auf `false` (Opt-in).
 - `show_food_tab` (boolean, NOT NULL, default false, Store `showFoodTab`, Migration 0222): eigener „Show tab"-Schalter für den Food-Slot (Settings → Health & Nutrition → Food), gleiche Backfill-Logik wie `show_water_tab`.
+- `show_friends_tab` (boolean, NOT NULL, default false, Store `showFriendsTab`, Migration 0264): opt-in-Schalter für den Friends-Preview-Tab. Friends und Coaching teilen sich einen Navigations-Slot; solange dieser Schalter aus ist, lädt der Client keine Social-Daten oder Realtime-Kanäle.
 - `onboarding_completed` (boolean, default false): gesetzt nach Welcome-Tour oder erster Session. Store field `onboardingCompleted`.
 - `net_carbs` (boolean, default false): Health-Tab-Carb-Modus, Net-Carb-Tracking ergänzt ein Fiber-Feld. Store field `netCarbs`. Migration 0073.
 - `plan_mode` (boolean, NOT NULL, default true): Food-Tracker Plan Mode (Toggle in Settings → Health, **an by default seit Migration 0253**). An: geplante vs. geloggte Food-Einträge (`zane_food_logs.planned`), "Log it"/"Plan it" beim Hinzufügen, Projektions-Zeile im Hero. Aus: der Food-Tracker verhält sich exakt wie vor 0196 (kein Eintrag ist je planned). Store field `planMode`. Migration 0196 (opt-in, default false), Migration 0253 (Default auf true plus Backfill aller bestehenden Zeilen). Der Backfill war bewusst nicht per Nutzer zurücknehmbar: die Spalte ist seit jeher NOT NULL mit explizitem false, „bewusst ausgeschaltet" und „nie angefasst" waren darin nie unterscheidbar. Kein Push-Nebeneffekt, weil `meal_reminder_enabled` ein eigener Opt-in mit Default false bleibt (der Cron gated auf beide plus `push_enabled`).
@@ -737,3 +738,82 @@ Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, option
 `zane_coaching`, `zane_coaching_notes`, `zane_user_settings` und `zane_checkins` sind in der `supabase_realtime`-Publikation: ermöglicht Live-Coaching-Einladungen und -Nachrichten sowie (Migration 0177) gepushte Coach-Status-Badges ("Client trainiert gerade" / "Check-in fällig") statt reinem Polling. (Die Publikation enthält daneben `door_events` und `motion_events`: app-fremde Tabellen eines anderen Projekts im selben Supabase-Projekt, nirgends im Repo referenziert; ignorieren und nicht anfassen.) **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). Die `zane_user_settings`-Realtime-Zeile liefert nur das grobe `in_progress_session_id`/`status_mode`-Feld (dasselbe, was `get_coach_clients_status` schon immer gepollt hat), keine Live-Session-Inhalte, das bleibt unverändert Polling-only. RLS-Policies scopen beide neuen Tabellen bereits korrekt auf die eigenen aktiven Clients eines Coaches (`zane_user_settings`: "coach can read client settings"; `zane_checkins`: "checkins_coach_read"), keine neue Policy nötig. `zane_checkins` hört nur auf `INSERT`/`UPDATE`, nie `DELETE`: Realtime kann `DELETE` bei `postgres_changes` weder filtern noch per RLS scopen, ein ungefilterter `DELETE`-Listener würde also für jeden Coach bei jedem gelöschten Check-in irgendeines anderen Coaches feuern.
 
 `subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClients, onCoachStatusChange)` hängt die beiden neuen Coach-Status-Listener an denselben Kanal wie die Coaching-Tabellen (kein zweiter `_supabase.channel(...)`); `coachClients` (aktive Client-Ids, ohne `support_`-Pseudo-Einträge) steuert per `in.(...)`-Filter, welche Zeilen relevant sind, oberhalb von 100 Ids fällt der Filter weg und die RLS-Policies scopen allein (nur für `INSERT`/`UPDATE`). app.jsx's `isCoachActive`-Poll (`get_coach_clients_status`/`get_coach_checkin_status`) ist seitdem nur noch der 60s-Fallback für einen getrennten/rekonnektierenden Kanal, primär treiben die Realtime-Listener das Badge.
+
+### Friends and social preview
+
+The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Friends and Coaching share one navigation slot. The client loads this slice and subscribes to social Realtime changes only after the setting is enabled. Friends are not included in the personal workout backup because they reference other users and server-side conversations.
+
+### `zane_social_profiles`
+
+- `user_id` (uuid, primary key, auth user)
+- `handle` (text, nullable, unique, 3-20 lowercase letters, numbers or underscores)
+- `friend_code` (text, unique, stable generated lookup code)
+- `steps_visible`, `workouts_visible`, `adherence_visible` (boolean, per-metric privacy opt-in)
+- `created_at`, `updated_at` (timestamptz)
+
+### `zane_social_friendships`
+
+- `id` (uuid, primary key), `requester_id`, `addressee_id` (uuid auth users)
+- `status` (text, `pending` or `accepted`)
+- `created_at`, `updated_at` (timestamptz)
+- The pair is unique in either direction; blocks and accepted status are checked before messaging.
+
+### `zane_social_blocks`
+
+- `blocker_id`, `blocked_id` (uuid auth users, composite primary key)
+- `created_at` (timestamptz)
+- Blocking removes the friendship and prevents new requests or direct messages.
+
+### `zane_social_groups`
+
+- `id` (uuid, primary key), `owner_id` (uuid auth user)
+- `name` (text), `join_code` (text, unique)
+- `created_at` (timestamptz)
+- Groups are private and joined by code.
+
+### `zane_social_group_members`
+
+- `group_id`, `user_id` (uuid, composite primary key)
+- `role` (text, `owner` or `member`)
+- `joined_at` (timestamptz)
+- Membership is visible only to members of the same group. The authenticated dashboard RPC adds each member's display identity and only the weekly metrics that member has explicitly shared.
+
+### `zane_social_messages`
+
+- `id` (uuid, primary key), `sender_id`, `recipient_id`, `group_id` (uuid)
+- `body` (text, required, max 4000 characters)
+- `created_at` (timestamptz)
+- Exactly one of `recipient_id` or `group_id` is set. RLS limits rows to the sender, direct recipient, or group member.
+
+### `zane_social_message_attachments`
+
+- `id` (uuid, primary key), `message_id`, `uploaded_by` (uuid)
+- `storage_path`, `file_name`, `mime_type` (text)
+- `created_at` (timestamptz)
+- Images are stored in the private `social-chat-attachments` bucket and signed only for message participants.
+
+### `zane_social_message_reads`
+
+- `message_id`, `user_id` (uuid, composite primary key)
+- `read_at` (timestamptz)
+- A row marks a message as read for that recipient.
+
+### `zane_social_plan_shares`
+
+- `id` (uuid, primary key), `sender_id`, `recipient_id` (uuid)
+- `plan_name` (text), `snapshot` (jsonb immutable plan copy)
+- `created_at`, `imported_at` (timestamptz, nullable)
+- Sharing is restricted to accepted friends. Import creates a new local schedule; the original snapshot is unchanged.
+
+### `zane_social_reports`
+
+- `id` (uuid, primary key), `reporter_id`, `target_user_id`, `message_id`, `group_id` (uuid, nullable targets)
+- `reason` (text: `spam`, `harassment`, `unsafe`, `other`), `details` (text)
+- `status` (text: `open`, `reviewed`, `closed`), `created_at` (timestamptz)
+- Reports are write-once for users and readable only by the reporter or the admin review path.
+
+### Social RPCs
+
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_report` and the RLS helper `social_is_group_member` are authenticated-only. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. `subscribeToFriends` listens for membership, relationship, message, attachment and plan-share changes and triggers a fresh dashboard load.
+
+The social relationship, group, membership, message, attachment and plan-share tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.

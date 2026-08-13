@@ -171,6 +171,12 @@ const TAB_ICONS = {
       <path d="M17 11l1.5 1.5L21 10"/>
     </svg>
   ),
+  friends: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.2 2.7-5.5 6-5.5s6 2.3 6 5.5"/>
+      <path d="M16 5.5a3 3 0 0 1 0 5.8M18 14.5c1.9.8 3 2.6 3 5"/>
+    </svg>
+  ),
   home: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 9v6M7 7v10M17 7v10M20 9v6M7 12h10"/>
@@ -222,19 +228,25 @@ const TAB_ICONS = {
 // slot. Each of the four is independently toggleable in Settings, so the
 // set of enabled ones can be any subset of this order, never a fixed count.
 const HEALTH_SLOT_ORDER = ['health', 'water', 'food', 'medications'];
-function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false, showWater = false, showFood = false, showMeds = false }) {
+const SOCIAL_SLOT_ORDER = ['coaching', 'friends'];
+function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showFriends = false, friendsBadge = null, showHealth = false, showWater = false, showFood = false, showMeds = false }) {
   const slotOn = { health: showHealth, water: showWater, food: showFood, medications: showMeds };
   const enabledSlots = HEALTH_SLOT_ORDER.filter(id => slotOn[id]);
+  const socialOn = { coaching: showCoaching, friends: showFriends };
+  const enabledSocialSlots = SOCIAL_SLOT_ORDER.filter(id => socialOn[id]);
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
     { id: 'hist', label: 'History' },
     ...(enabledSlots.length ? [{ id: 'health', label: 'Health' }] : []),
-    ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
+    ...(enabledSocialSlots.length ? [{ id: 'social', label: 'Social' }] : []),
   ].map(t => {
     const healthSlot = t.id === 'health' ? (enabledSlots.includes(routeName) ? routeName : enabledSlots[0]) : null;
-    const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot] || t.label;
-    return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
+    const socialSlot = t.id === 'social' ? (enabledSocialSlots.includes(routeName) ? routeName : enabledSocialSlots[0]) : null;
+    const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot]
+      || { coaching: 'Coaching', friends: 'Friends' }[socialSlot]
+      || t.label;
+    return { ...t, healthSlot, socialSlot, iconKey: healthSlot || socialSlot || t.id, label: slotLabel };
   });
   const [visualActive, setVisualActive] = React.useState(active);
   React.useEffect(() => setVisualActive(active), [active]);
@@ -243,9 +255,13 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       const curIdx = enabledSlots.indexOf(routeName);
       return enabledSlots[(curIdx + 1) % enabledSlots.length];
     }
+    if (id === 'social' && enabledSocialSlots.length) {
+      const curIdx = enabledSocialSlots.indexOf(routeName);
+      return enabledSocialSlots[(curIdx + 1) % enabledSocialSlots.length];
+    }
     return id;
   };
-  const moduleForRoute = { plan: 'schedule', hist: 'lib', health: 'health', water: 'water', food: 'food', medications: 'medications', coaching: 'coaching' };
+  const moduleForRoute = { plan: 'schedule', hist: 'lib', health: 'health', water: 'water', food: 'food', medications: 'medications', coaching: 'coaching', friends: 'friends' };
   const prefetchTab = id => {
     const moduleName = moduleForRoute[routeForTab(id)];
     if (moduleName) window.__prefetchScreen?.(moduleName);
@@ -287,6 +303,17 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     return (
       <div style={{ display: 'flex', gap: 3 }}>
         {slots.map(id => <span key={id} style={dotStyle(healthSlot === id)} />)}
+      </div>
+    );
+  };
+  const socialDots = (on, socialSlot, slots) => {
+    const lit = on ? UI.gold : UI.inkFaint;
+    const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
+    const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
+    const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}`, boxShadow: filled ? glow : 'none' });
+    return (
+      <div style={{ display: 'flex', gap: 3 }}>
+        {slots.map(id => <span key={id} style={dotStyle(socialSlot === id)} />)}
       </div>
     );
   };
@@ -397,6 +424,97 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     handleTabClick(id);
   };
 
+  // The Coaching/Friends slot uses the same long-press drag affordance as the
+  // Health slot. Keeping a separate reveal state avoids a route change in one
+  // shared slot accidentally resolving against the other popup's options.
+  const [socialReveal, setSocialReveal] = React.useState(null);
+  const socialPressStartRef = React.useRef(null);
+  const socialPressButtonRef = React.useRef(null);
+  const socialPressTimerRef = React.useRef(null);
+  const socialListenersRef = React.useRef(null);
+  const socialIdx = tabs.findIndex(t => t.id === 'social');
+  const currentSocialSlot = tabs.find(t => t.id === 'social')?.socialSlot || 'coaching';
+  const cancelSocialPressTimer = () => { if (socialPressTimerRef.current) { clearTimeout(socialPressTimerRef.current); socialPressTimerRef.current = null; } };
+  const resolveSocialOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-social-option]')?.getAttribute('data-social-option') || null;
+  const openSocialReveal = (buttonEl) => {
+    if (socialListenersRef.current || enabledSocialSlots.length <= 1) return;
+    cancelSocialPressTimer();
+    const r = barRef.current?.getBoundingClientRect();
+    if (!r) return;
+    suppressClickRef.current = true;
+    const rawX = r.left + (socialIdx + 0.5) * r.width / tabs.length;
+    const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
+    setSocialReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+    const onMove = ev => {
+      ev.preventDefault();
+      setSocialReveal(rv => rv && { ...rv, hoverId: resolveSocialOption(ev.clientX, ev.clientY) });
+    };
+    const onUp = ev => {
+      const cancelled = ev.type === 'pointercancel';
+      document.removeEventListener('pointermove', onMove, { passive: false });
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      socialListenersRef.current = null;
+      socialPressStartRef.current = null;
+      socialPressButtonRef.current = null;
+      setSocialReveal(null);
+      const pick = resolveSocialOption(ev.clientX, ev.clientY);
+      if (cancelled) {
+        suppressClickRef.current = false;
+      } else if (pick) {
+        navigateRoute(pick, 'social');
+        suppressClickRef.current = false;
+      } else if (!buttonEl?.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+        suppressClickRef.current = false;
+      }
+    };
+    socialListenersRef.current = { onMove, onUp };
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  };
+  const socialOnPointerDown = e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (enabledSocialSlots.length <= 1) return;
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
+    socialPressStartRef.current = { x: e.clientX, y: e.clientY };
+    socialPressButtonRef.current = e.currentTarget;
+    const buttonEl = e.currentTarget;
+    cancelSocialPressTimer();
+    socialPressTimerRef.current = setTimeout(() => {
+      socialPressTimerRef.current = null;
+      openSocialReveal(buttonEl);
+    }, 200);
+  };
+  const socialOnPointerMove = e => {
+    if (!socialPressTimerRef.current || !socialPressStartRef.current) return;
+    if (Math.hypot(e.clientX - socialPressStartRef.current.x, e.clientY - socialPressStartRef.current.y) > 10) {
+      e.preventDefault();
+      cancelSocialPressTimer();
+      openSocialReveal(socialPressButtonRef.current);
+    }
+  };
+  const socialOnPointerUp = () => {
+    cancelSocialPressTimer();
+    if (!socialListenersRef.current) {
+      socialPressStartRef.current = null;
+      socialPressButtonRef.current = null;
+    }
+  };
+  const socialOnClick = id => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    handleTabClick(id);
+  };
+  React.useEffect(() => () => {
+    cancelSocialPressTimer();
+    if (socialListenersRef.current) {
+      document.removeEventListener('pointermove', socialListenersRef.current.onMove);
+      document.removeEventListener('pointerup', socialListenersRef.current.onUp);
+      document.removeEventListener('pointercancel', socialListenersRef.current.onUp);
+      socialListenersRef.current = null;
+    }
+  }, []);
+
   if (sidebar) {
     return (
       <div style={{
@@ -418,8 +536,8 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
               const on = t.id === visualActive;
-              const badge = t.id === 'coaching' ? coachingBadge : null;
-              const { healthSlot, iconKey, label } = t;
+              const badge = t.id === 'social' ? (t.socialSlot === 'friends' ? friendsBadge : coachingBadge) : null;
+              const { healthSlot, socialSlot, iconKey, label } = t;
               return (
                 <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} onPointerDown={() => prefetchTab(t.id)} onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }} aria-current={on ? 'page' : undefined} style={{
                   display: 'flex',
@@ -460,7 +578,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                     )}
                   </div>
                   <span>{label}</span>
-                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, enabledSlots)}</div>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>
+                    {t.id === 'health' && healthDots(on, healthSlot, enabledSlots)}
+                    {t.id === 'social' && socialDots(on, socialSlot, enabledSocialSlots)}
+                  </div>
                 </button>
               );
             })}
@@ -542,19 +663,20 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           )}
           {tabs.map(t => {
             const on = t.id === visualActive;
-            const badge = t.id === 'coaching' ? coachingBadge : null;
-            const { healthSlot, iconKey, label } = t;
+            const badge = t.id === 'social' ? (t.socialSlot === 'friends' ? friendsBadge : coachingBadge) : null;
+            const { healthSlot, socialSlot, iconKey, label } = t;
             const isHealthTab = t.id === 'health';
+            const isSocialTab = t.id === 'social';
             return (
               <button key={t.id} data-tour={`tab-${t.id}`}
-                onClick={() => isHealthTab ? healthOnClick(t.id) : handleTabClick(t.id)}
+                onClick={() => isHealthTab ? healthOnClick(t.id) : isSocialTab ? socialOnClick(t.id) : handleTabClick(t.id)}
                 aria-current={on ? 'page' : undefined}
-                onPointerDown={e => { prefetchTab(t.id); if (isHealthTab) healthOnPointerDown(e); }}
+                onPointerDown={e => { prefetchTab(t.id); if (isHealthTab) healthOnPointerDown(e); if (isSocialTab) socialOnPointerDown(e); }}
                 onPointerEnter={e => { if (e.pointerType === 'mouse') prefetchTab(t.id); }}
-                onPointerMove={isHealthTab ? healthOnPointerMove : undefined}
-                onPointerUp={isHealthTab ? healthOnPointerUp : undefined}
-                onPointerCancel={isHealthTab ? healthOnPointerUp : undefined}
-                onContextMenu={isHealthTab ? (e) => e.preventDefault() : undefined}
+                onPointerUp={isHealthTab ? healthOnPointerUp : isSocialTab ? socialOnPointerUp : undefined}
+                onPointerCancel={isHealthTab ? healthOnPointerUp : isSocialTab ? socialOnPointerUp : undefined}
+                onPointerMove={isSocialTab ? socialOnPointerMove : isHealthTab ? healthOnPointerMove : undefined}
+                onContextMenu={(isHealthTab || isSocialTab) ? (e) => e.preventDefault() : undefined}
                 style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
@@ -566,7 +688,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
                 WebkitTapHighlightColor: 'transparent',
-                ...(isHealthTab ? { userSelect: 'none', touchAction: 'none' } : null),
+                ...((isHealthTab || isSocialTab) ? { userSelect: 'none', touchAction: 'none' } : null),
               }}>
                 {/* Icon zone, matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
@@ -596,7 +718,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
                 <span style={{ marginRight: '-0.14em' }}>{label}</span>
-                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot, enabledSlots)}</div>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>
+                  {isHealthTab && healthDots(on, healthSlot, enabledSlots)}
+                  {isSocialTab && socialDots(on, socialSlot, enabledSocialSlots)}
+                </div>
               </button>
             );
           })}
@@ -630,6 +755,33 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
               {React.cloneElement(TAB_ICONS[id], { width: 22, height: 22 })}
               <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
                 {{ health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[id]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    )}
+    {socialReveal && (
+      <div style={{
+        position: 'fixed', left: socialReveal.anchorX, bottom: socialReveal.bottom, transform: 'translateX(-50%)',
+        transformOrigin: 'bottom center', display: 'flex', gap: 8, padding: 8,
+        background: 'rgba(var(--bg-rgb),0.97)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        border: `1px solid ${UI.hairStrong}`, borderRadius: 8, boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
+        animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)', zIndex: 30,
+      }}>
+        {enabledSocialSlots.filter(id => id !== currentSocialSlot).map(id => {
+          const hovered = socialReveal.hoverId === id;
+          return (
+            <div key={id} data-social-option={id} style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              padding: '10px 18px', borderRadius: 6,
+              background: hovered ? 'rgba(var(--accent-rgb),0.22)' : 'transparent',
+              border: `1px solid ${hovered ? UI.gold : UI.hairStrong}`,
+              color: hovered ? UI.gold : UI.inkSoft,
+            }}>
+              {React.cloneElement(TAB_ICONS[id], { width: 22, height: 22 })}
+              <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {{ coaching: 'Coaching', friends: 'Friends' }[id]}
               </span>
             </div>
           );

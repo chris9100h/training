@@ -535,6 +535,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
+    show_friends_tab: sett.showFriendsTab ?? false,
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
@@ -1326,6 +1327,7 @@ function mapUserSettings(sett = {}) {
     showRegression: sett.show_regression ?? true,
     pinAllNotes: sett.pin_all_notes ?? false,
     showCoachingTab: sett.show_coaching_tab ?? false,
+    showFriendsTab: sett.show_friends_tab ?? false,
     beYourOwnCoach: sett.be_your_own_coach ?? false,
     sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
     defaultCheckinSchema: sett.default_checkin_schema ?? null,
@@ -2872,6 +2874,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showRegression       !== next.settings?.showRegression       ||
     prev.settings?.pinAllNotes          !== next.settings?.pinAllNotes          ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
+    prev.settings?.showFriendsTab       !== next.settings?.showFriendsTab       ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
@@ -2953,6 +2956,7 @@ async function syncStore(prev, next, userId) {
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
+      show_friends_tab: next.settings?.showFriendsTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
@@ -5684,6 +5688,260 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClien
 
   _realtimeChannel = channel.subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
+}
+
+// ---------------------------------------------------------------------------
+// FRIENDS / SOCIAL
+// ---------------------------------------------------------------------------
+
+function socialWeekStartISO(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(12, 0, 0, 0);
+  const mondayOffset = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - mondayOffset);
+  return fmtISO(d);
+}
+
+function mapSocialProfile(p) {
+  if (!p) return null;
+  return {
+    userId: p.userId ?? p.user_id ?? null,
+    handle: p.handle ?? null,
+    friendCode: p.friendCode ?? p.friend_code ?? null,
+    stepsVisible: !!(p.stepsVisible ?? p.steps_visible),
+    workoutsVisible: !!(p.workoutsVisible ?? p.workouts_visible),
+    adherenceVisible: !!(p.adherenceVisible ?? p.adherence_visible),
+  };
+}
+
+function mapSocialFriend(f) {
+  if (!f) return null;
+  return {
+    friendshipId: f.friendshipId ?? f.id ?? null,
+    userId: f.userId ?? f.user_id ?? null,
+    name: f.name || 'Zane athlete',
+    handle: f.handle ?? null,
+    friendCode: f.friendCode ?? f.friend_code ?? null,
+    steps: f.steps ?? null,
+    workouts: f.workouts ?? null,
+    adherence: f.adherence ?? null,
+  };
+}
+
+function mapSocialMessage(row, attachments = []) {
+  return {
+    id: row.id,
+    senderId: row.sender_id ?? row.senderId,
+    recipientId: row.recipient_id ?? row.recipientId ?? null,
+    groupId: row.group_id ?? row.groupId ?? null,
+    body: row.body || '',
+    createdAt: row.created_at ?? row.createdAt,
+    attachments: attachments.filter(a => a.messageId === row.id),
+  };
+}
+
+function mapSocialAttachment(row, url = null) {
+  return {
+    id: row.id,
+    messageId: row.message_id ?? row.messageId,
+    storagePath: row.storage_path ?? row.storagePath,
+    fileName: row.file_name ?? row.fileName,
+    mimeType: row.mime_type ?? row.mimeType,
+    url,
+  };
+}
+
+async function signedSocialAttachment(row) {
+  const { data } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 3600);
+  return mapSocialAttachment(row, data?.signedUrl || null);
+}
+
+async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
+  if (!userId) return null;
+  const dashboardRes = await _supabase.rpc('social_get_dashboard', { p_week_start: weekStart });
+  if (dashboardRes.error) throw dashboardRes.error;
+  const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes] = await Promise.all([
+    _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
+    _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
+    _supabase.from('zane_social_messages').select('id, sender_id, recipient_id, group_id, body, created_at').order('created_at', { ascending: false }).limit(300),
+    _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at'),
+    _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
+    _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
+  ]);
+  const firstError = [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes].find(r => r?.error)?.error;
+  if (firstError) throw firstError;
+  const attachments = await Promise.all((attachmentsRes.data || []).map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
+  const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
+  const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
+  const groups = (groupsRes.data || []).map(g => ({
+    id: g.id, ownerId: g.owner_id, name: g.name, joinCode: g.join_code, createdAt: g.created_at,
+  }));
+  const groupMemberMetrics = new Map((dashboardRes.data?.groupMembers || []).map(m => [`${m.groupId}:${m.userId}`, m]));
+  const groupMembers = (membersRes.data || []).map(m => {
+    const metrics = groupMemberMetrics.get(`${m.group_id}:${m.user_id}`) || {};
+    return {
+      groupId: m.group_id, userId: m.user_id, role: m.role, joinedAt: m.joined_at,
+      name: metrics.name || 'Zane athlete', handle: metrics.handle ?? null,
+      steps: metrics.steps ?? null, workouts: metrics.workouts ?? null, adherence: metrics.adherence ?? null,
+    };
+  });
+  const planShares = (sharesRes.data || []).map(s => ({
+    id: s.id, senderId: s.sender_id, recipientId: s.recipient_id, planName: s.plan_name,
+    snapshot: s.snapshot, createdAt: s.created_at, importedAt: s.imported_at ?? null,
+  }));
+  const dashboard = dashboardRes.data || {};
+  return {
+    profile: mapSocialProfile(dashboard.profile),
+    friends: (dashboard.friends || []).map(mapSocialFriend).filter(Boolean),
+    incoming: dashboard.incoming || [],
+    outgoing: dashboard.outgoing || [],
+    groups,
+    groupMembers,
+    messages,
+    planShares,
+    unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
+    readMessageIds: [...reads],
+    weekStart,
+    loadedAt: Date.now(),
+  };
+}
+
+async function updateSocialProfile(userId, patch = {}) {
+  if (!userId) throw new Error('Authentication required');
+  const { data, error } = await _supabase.rpc('social_update_profile', {
+    p_handle: patch.handle ?? null,
+    p_steps_visible: !!patch.stepsVisible,
+    p_workouts_visible: !!patch.workoutsVisible,
+    p_adherence_visible: !!patch.adherenceVisible,
+  });
+  if (error) throw error;
+  return mapSocialProfile(data);
+}
+
+async function lookupSocialProfile(query) {
+  const { data, error } = await _supabase.rpc('social_lookup_profile', { p_query: String(query || '').trim() });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? {
+    userId: row.user_id, handle: row.handle, name: row.display_name || 'Zane athlete',
+    friendCode: row.friend_code, relationship: row.relationship || 'none',
+  } : null;
+}
+
+async function sendSocialFriendRequest(targetUserId) {
+  const { data, error } = await _supabase.rpc('social_send_friend_request', { p_target_id: targetUserId });
+  if (error) throw error;
+  return data;
+}
+
+async function respondToSocialFriendRequest(friendshipId, accept) {
+  const { error } = await _supabase.rpc('social_respond_friend_request', { p_friendship_id: friendshipId, p_accept: !!accept });
+  if (error) throw error;
+}
+
+async function removeSocialFriend(targetUserId) {
+  const { error } = await _supabase.rpc('social_remove_friend', { p_target_id: targetUserId });
+  if (error) throw error;
+}
+
+async function blockSocialUser(targetUserId) {
+  const { error } = await _supabase.rpc('social_block_user', { p_target_id: targetUserId });
+  if (error) throw error;
+}
+
+async function createSocialGroup(name) {
+  const { data, error } = await _supabase.rpc('social_create_group', { p_name: name });
+  if (error) throw error;
+  return data;
+}
+
+async function joinSocialGroup(joinCode) {
+  const { data, error } = await _supabase.rpc('social_join_group', { p_join_code: joinCode });
+  if (error) throw error;
+  return data;
+}
+
+async function leaveSocialGroup(groupId) {
+  const { error } = await _supabase.rpc('social_leave_group', { p_group_id: groupId });
+  if (error) throw error;
+}
+
+async function sendSocialMessage({ senderId, recipientId = null, groupId = null, body }) {
+  const text = String(body || '').trim();
+  if (!text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_social_messages').insert({
+    sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
+  }).select('id, sender_id, recipient_id, group_id, body, created_at').single();
+  if (error) throw error;
+  return mapSocialMessage(data);
+}
+
+async function markSocialMessagesRead(userId, messageIds = []) {
+  const ids = [...new Set(messageIds.filter(Boolean))];
+  if (!userId || !ids.length) return;
+  const { error } = await _supabase.from('zane_social_message_reads').upsert(
+    ids.map(messageId => ({ message_id: messageId, user_id: userId })),
+    { onConflict: 'message_id,user_id' },
+  );
+  if (error) throw error;
+}
+
+async function uploadSocialAttachment(file, userId, messageId) {
+  if (!file || !userId || !messageId) throw new Error('Attachment is incomplete');
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowed.includes(file.type)) throw new Error('Only image attachments are supported');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Image is too large');
+  const safeName = String(file.name || 'image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || 'image';
+  const storagePath = `${userId}/${messageId}/${Date.now()}-${safeName}`;
+  const storage = _supabase.storage.from('social-chat-attachments');
+  const uploaded = await storage.upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (uploaded.error) throw uploaded.error;
+  const inserted = await _supabase.from('zane_social_message_attachments').insert({
+    message_id: messageId, uploaded_by: userId, storage_path: storagePath,
+    file_name: safeName, mime_type: file.type,
+  }).select('id, message_id, storage_path, file_name, mime_type, created_at').single();
+  if (inserted.error) {
+    await storage.remove([storagePath]).catch(() => {});
+    throw inserted.error;
+  }
+  return signedSocialAttachment(inserted.data);
+}
+
+async function createSocialPlanShare(recipientId, planName, snapshot) {
+  const { data, error } = await _supabase.rpc('social_create_plan_share', {
+    p_recipient_id: recipientId, p_plan_name: planName, p_snapshot: snapshot,
+  });
+  if (error) throw error;
+  return data;
+}
+
+async function markSocialPlanImported(shareId) {
+  const { error } = await _supabase.rpc('social_mark_plan_imported', { p_share_id: shareId });
+  if (error) throw error;
+}
+
+async function reportSocial({ targetUserId = null, messageId = null, groupId = null, reason = 'other', details = '' }) {
+  const { data, error } = await _supabase.rpc('social_report', {
+    p_target_user_id: targetUserId, p_message_id: messageId, p_group_id: groupId,
+    p_reason: reason, p_details: details,
+  });
+  if (error) throw error;
+  return data;
+}
+
+let _friendsRealtimeChannel = null;
+function subscribeToFriends(userId, onChange) {
+  if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
+  const channel = _supabase.channel(`social-${userId}-${Date.now()}`);
+  const refresh = () => onChange?.();
+  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_plan_shares'].forEach(table => {
+    channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh);
+  });
+  _friendsRealtimeChannel = channel.subscribe();
+  return () => {
+    if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
+    _friendsRealtimeChannel = null;
+  };
 }
 
 // Whether Smart Progression is active for a given exercise entry/item.
@@ -10934,7 +11192,10 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges,
+  subscribeToChanges, socialWeekStartISO, loadFriendsState, updateSocialProfile, lookupSocialProfile,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
+  createSocialGroup, joinSocialGroup, leaveSocialGroup, sendSocialMessage, markSocialMessagesRead,
+  uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,

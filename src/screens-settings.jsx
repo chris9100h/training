@@ -619,6 +619,7 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
 
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
+  const [friendsSheet, setFriendsSheet] = useStateSet(false);
   const [healthSheet, setHealthSheet] = useStateSet(false);
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
@@ -2123,6 +2124,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
           <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
+          <NavRow label="Friends" onTap={() => setFriendsSheet(true)} />
           <NavRow label="Health & Nutrition" onTap={() => setHealthSheet(true)} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
@@ -2309,6 +2311,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           toggleable sub-categories. Each has its OWN "Show tab" switch (see
           each sub-sheet below) instead of one bundled switch that used to
           turn Health, Water and Food on or off together. ══ */}
+      <SettingsSheet open={friendsSheet} onClose={() => setFriendsSheet(false)} title="Friends">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Friends tab" first>
+            <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => patchSettings({ showFriendsTab: !store.settings?.showFriendsTab })} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing and plan snapshots. You choose which metrics are visible.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFriendsSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
       <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health & Nutrition">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>

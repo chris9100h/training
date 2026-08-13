@@ -43,6 +43,7 @@ const routeBundles = {
     'src/screens-coaching-detail.jsx',
     'src/screens-coaching-tabs.jsx',
   ],
+  friends: ['src/screens-friends.jsx'],
   health: ['src/screens-health.jsx'],
   water: ['src/screens-water.jsx'],
   food: ['src/screens-food.jsx'],

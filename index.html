@@ -1264,6 +1264,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     'src/screens-coaching-client.jsx',
     'src/screens-coaching-detail.jsx',
     'src/screens-coaching-tabs.jsx',
+    'src/screens-friends.jsx',
     'src/screens-health.jsx',
     'src/screens-water.jsx',
     'src/screens-food.jsx',
@@ -1291,6 +1292,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     // modules before Settings can render any of its nested Health sheets.
     settings:   { dependencies: ['water', 'medications'], sources: ['src/screens-settings.jsx'] },
     coaching:   { sources: ['src/screens-coaching-core.jsx', 'src/screens-coaching-client.jsx', 'src/screens-coaching-detail.jsx', 'src/screens-coaching-tabs.jsx'] },
+    friends:    { sources: ['src/screens-friends.jsx'] },
     // Health can render coach-configured fields, so load the FieldWidget provider first.
     health:     { dependencies: ['coaching'], sources: ['src/screens-health.jsx'] },
     // These screens reuse chart components provided by Health.
@@ -1302,7 +1304,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     featuremap: { sources: ['src/screens-featuremap.jsx'] },
     autoreg:    { sources: ['src/screens-autoreg-guide.jsx'] },
   };
-  var IDLE_MODULES = ['schedule', 'train', 'lib', 'settings', 'coaching', 'health', 'water', 'food', 'medications', 'onboarding', 'cardio', 'featuremap', 'autoreg'];
+  var IDLE_MODULES = ['schedule', 'train', 'lib', 'settings', 'coaching', 'friends', 'health', 'water', 'food', 'medications', 'onboarding', 'cardio', 'featuremap', 'autoreg'];
   var BABEL_URL = 'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js';
   // Same classic-script scope as the legacy <script type="text/babel"> setup,
   // but env targets modern evergreen browsers instead of the (much slower)
@@ -1688,6 +1690,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     SettingsScreen: 'settings',
     CoachClientScreen: 'coaching', CoachPlanEditorScreen: 'coaching', CoachNewPlanScreen: 'coaching', CoachingTabScreen: 'coaching',
     CoachingUnreadBanner: 'coaching', CoachingNotesSheet: 'coaching',
+    FriendsScreen: 'friends',
     HealthScreen: 'health', HealthClientLogs: 'health', WaterScreen: 'water', FoodScreen: 'food', MedicationsScreen: 'medications',
     CardioPlanScreen: 'cardio', FeatureMapScreen: 'featuremap', AutoregGuideScreen: 'autoreg',
   };
