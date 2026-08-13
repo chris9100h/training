@@ -1851,14 +1851,40 @@ UI.isInAppBrowser = () => {
   return false;
 };
 
-// Turn an auth or network error into a user-facing message. WebKit reports a
-// failed fetch as "Load failed" (Chromium says "Failed to fetch") with no HTTP
-// response, most common inside in-app browsers, so translate those into an
-// actionable hint instead of leaking the raw string. Also softens the
-// "already registered" case into a nudge to log in.
+// Turn an auth or network error into a user-facing message. Auth errors can be
+// Error instances, plain response objects, or JSON strings depending on where
+// the request failed. Never hand an object to React: some gateway failures
+// otherwise render as the literal "{}" in the auth form.
 UI.authErrorMessage = (e, fallback = 'Something went wrong') => {
-  const msg = (e && e.message) || '';
-  if (/load failed|failed to fetch|networkerror|network request failed|the network connection was lost/i.test(msg)) {
+  const readText = (value) => {
+    if (value == null) return '';
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (!text || text === '{}' || text === '[object Object]') return '';
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && parsed !== value) return readText(parsed);
+      } catch (_) { /* plain message */ }
+      return text;
+    }
+    if (typeof value === 'object') {
+      for (const key of ['message', 'error_description', 'error', 'details', 'hint']) {
+        const text = readText(value[key]);
+        if (text) return text;
+      }
+    }
+    return '';
+  };
+
+  const msg = readText(e && (e.message || e.error_description || e.error)) || readText(e);
+  const code = readText(e && (e.code || e.error_code || e.name)).toLowerCase();
+  const status = Number(e && (e.status || e.statusCode));
+  const authText = `${msg} ${code}`;
+
+  if (status >= 500 || /authretryablefetcherror|request_timeout|context deadline exceeded|gateway timeout|database error|server error/i.test(authText)) {
+    return 'The sign-in service is temporarily unavailable. Please try again in a moment.';
+  }
+  if (/load failed|failed to fetch|networkerror|network request failed|the network connection was lost/i.test(authText)) {
     return 'Network error. Check your connection. If you opened this from another app like X or Instagram, open it in Safari or Chrome and try again.';
   }
   if (/already registered|already exists|already been registered/i.test(msg)) {
