@@ -755,6 +755,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `id` (uuid, primary key), `requester_id`, `addressee_id` (uuid auth users)
 - `status` (text, `pending` or `accepted`)
+- `accepted_at` (timestamptz, set by the accept RPC; the privacy boundary for workout history)
 - `created_at`, `updated_at` (timestamptz)
 - The pair is unique in either direction; blocks and accepted status are checked before messaging.
 
@@ -762,7 +763,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `blocker_id`, `blocked_id` (uuid auth users, composite primary key)
 - `created_at` (timestamptz)
-- Blocking removes the friendship and prevents new requests or direct messages.
+- Blocking removes the friendship and prevents new requests or direct messages. The message INSERT policy can inspect only block rows involving the current user; the table remains otherwise hidden behind the guarded block RPC.
 
 ### `zane_social_groups`
 
@@ -803,7 +804,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 - `id` (uuid, primary key), `sender_id`, `recipient_id` (uuid)
 - `plan_name` (text), `snapshot` (jsonb immutable plan copy)
 - `created_at`, `imported_at` (timestamptz, nullable)
-- Sharing is restricted to accepted friends. Import creates a new local schedule; the original snapshot is unchanged.
+- Sharing is restricted to accepted friends. Import creates a new local schedule and carries the referenced exercise-library rows with it; the original snapshot is unchanged. Either participant can delete the share row: the sender sees this as taking the share back, while the receiver can remove it after import.
 
 ### `zane_social_reports`
 
@@ -812,8 +813,14 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 - `status` (text: `open`, `reviewed`, `closed`), `created_at` (timestamptz)
 - Reports are write-once for users and readable only by the reporter or the admin review path.
 
+### `zane_social_workout_comments`
+
+- `id` (uuid, primary key), `session_id` (text, the referenced workout), `author_id` (uuid auth user)
+- `kind` (text, `comment` or `cheer`), `body` (text, 1-400 characters), `created_at` (timestamptz)
+- Comments are visible only to the workout owner and accepted friends whose friendship predates the workout. The detail RPC redacts loads, reps, notes and other private set data.
+
 ### Social RPCs
 
-`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_report` and the RLS helper `social_is_group_member` are authenticated-only. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. `subscribeToFriends` listens for membership, relationship, message, attachment and plan-share changes and triggers a fresh dashboard load.
+`social_lookup_profile`, `social_get_dashboard`, `social_update_profile`, `social_send_friend_request`, `social_respond_friend_request`, `social_remove_friend`, `social_block_user`, `social_create_group`, `social_join_group`, `social_leave_group`, `social_delete_group`, `social_create_plan_share`, `social_mark_plan_imported`, `social_delete_plan_share`, `social_report`, `social_get_workout_feed`, `social_get_workout_detail`, `social_add_workout_comment` and the RLS helpers `social_is_group_member`, `social_workout_access` and `social_can_view_workout_session` are authenticated-only. SECURITY DEFINER functions validate `auth.uid()`, use a fixed `search_path`, and do not expose health data except metrics explicitly enabled by the profile owner. The workout feed/detail path honors `accepted_at` and the owner's workout-sharing toggle; its detail payload contains exercise names and set completion only. `subscribeToFriends` also listens for workout comments and triggers a fresh dashboard load; live set progress itself is refreshed by polling.
 
-The social relationship, group, membership, message, attachment and plan-share tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.
+The social relationship, group, membership, message, attachment, plan-share and workout-comment tables are also added to `supabase_realtime` with full replica identity so enabled clients can refresh their social slice after changes.

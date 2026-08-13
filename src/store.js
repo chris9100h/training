@@ -5722,9 +5722,58 @@ function mapSocialFriend(f) {
     name: f.name || 'Zane athlete',
     handle: f.handle ?? null,
     friendCode: f.friendCode ?? f.friend_code ?? null,
+    acceptedAt: f.acceptedAt ?? f.accepted_at ?? null,
     steps: f.steps ?? null,
     workouts: f.workouts ?? null,
     adherence: f.adherence ?? null,
+  };
+}
+
+function mapSocialWorkoutSummary(row) {
+  if (!row) return null;
+  return {
+    sessionId: row.sessionId ?? row.session_id,
+    ownerId: row.ownerId ?? row.owner_id,
+    ownerName: row.ownerName ?? row.owner_name ?? 'Zane athlete',
+    dayName: row.dayName ?? row.day_name ?? '',
+    date: row.date ?? null,
+    startedAt: row.startedAt ?? row.started_at ?? null,
+    ended: row.ended ?? null,
+    live: !!row.live,
+    acceptedAt: row.acceptedAt ?? row.accepted_at ?? null,
+    setsDone: Number(row.setsDone ?? row.sets_done ?? 0),
+    setsTotal: Number(row.setsTotal ?? row.sets_total ?? 0),
+    exerciseCount: Number(row.exerciseCount ?? row.exercise_count ?? 0),
+  };
+}
+
+function mapSocialWorkoutComment(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    authorId: row.authorId ?? row.author_id,
+    authorName: row.authorName ?? row.author_name ?? 'Zane athlete',
+    kind: row.kind || 'comment',
+    body: row.body || '',
+    createdAt: row.createdAt ?? row.created_at ?? null,
+  };
+}
+
+function mapSocialWorkoutDetail(payload) {
+  if (!payload) return null;
+  const session = payload.session || {};
+  return {
+    session: mapSocialWorkoutSummary({ ...session, live: !session.ended }),
+    entries: (payload.entries || []).map(entry => ({
+      name: entry.name || 'Exercise',
+      plannedSets: entry.plannedSets ?? entry.planned_sets ?? null,
+      plannedReps: entry.plannedReps ?? entry.planned_reps ?? null,
+      supersetGroup: entry.supersetGroup ?? entry.superset_group ?? null,
+      sets: (entry.sets || []).map(set => ({
+        done: !!set.done, skipped: !!set.skipped, warmup: !!set.warmup,
+      })),
+    })),
+    comments: (payload.comments || []).map(mapSocialWorkoutComment).filter(Boolean),
   };
 }
 
@@ -5756,9 +5805,41 @@ async function signedSocialAttachment(row) {
   return mapSocialAttachment(row, data?.signedUrl || null);
 }
 
+async function loadSocialWorkoutFeed() {
+  const { data, error } = await _supabase.rpc('social_get_workout_feed');
+  if (error) throw error;
+  const feed = data || {};
+  return {
+    liveWorkouts: (feed.live || []).map(mapSocialWorkoutSummary).filter(Boolean),
+    workoutHistory: (feed.history || []).map(mapSocialWorkoutSummary).filter(Boolean),
+  };
+}
+
+let _friendsLoadInFlight = null;
 async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
   if (!userId) return null;
-  const dashboardRes = await _supabase.rpc('social_get_dashboard', { p_week_start: weekStart });
+  const key = `${userId}:${weekStart}`;
+  if (_friendsLoadInFlight?.key === key) return _friendsLoadInFlight.promise;
+  const promise = loadFriendsStateUncached(userId, weekStart);
+  _friendsLoadInFlight = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (_friendsLoadInFlight?.promise === promise) _friendsLoadInFlight = null;
+  }
+}
+
+async function loadFriendsStateUncached(userId, weekStart) {
+  const [dashboardRes, workoutFeed] = await Promise.all([
+    _supabase.rpc('social_get_dashboard', { p_week_start: weekStart }),
+    // The workout feed is an enhancement to Friends, not a prerequisite for
+    // opening chats/groups. A transient feed/RPC failure must not blank the
+    // whole social screen.
+    loadSocialWorkoutFeed().catch(error => {
+      console.warn('social workout feed load failed:', error);
+      return { liveWorkouts: [], workoutHistory: [] };
+    }),
+  ]);
   if (dashboardRes.error) throw dashboardRes.error;
   const [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes] = await Promise.all([
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
@@ -5768,8 +5849,11 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
     _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
     _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
   ]);
-  const firstError = [groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes].find(r => r?.error)?.error;
+  // Attachments are optional decoration for messages. Keep the message rows
+  // usable if signed-url metadata is briefly unavailable.
+  const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes].find(r => r?.error)?.error;
   if (firstError) throw firstError;
+  if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
   const attachments = await Promise.all((attachmentsRes.data || []).map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
   const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
   const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
@@ -5799,11 +5883,32 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO()) {
     groupMembers,
     messages,
     planShares,
+    liveWorkouts: workoutFeed.liveWorkouts,
+    workoutHistory: workoutFeed.workoutHistory,
     unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
     readMessageIds: [...reads],
     weekStart,
     loadedAt: Date.now(),
   };
+}
+
+async function loadSocialWorkoutDetail(ownerId, sessionId) {
+  if (!ownerId || !sessionId) throw new Error('Workout is incomplete');
+  const { data, error } = await _supabase.rpc('social_get_workout_detail', {
+    p_owner_id: ownerId, p_session_id: sessionId,
+  });
+  if (error) throw error;
+  return mapSocialWorkoutDetail(data);
+}
+
+async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
+  const text = String(body || '').trim();
+  if (!sessionId || !text) throw new Error('Comment cannot be empty');
+  const { data, error } = await _supabase.rpc('social_add_workout_comment', {
+    p_session_id: sessionId, p_body: text, p_kind: kind,
+  });
+  if (error) throw error;
+  return mapSocialWorkoutComment(data);
 }
 
 async function updateSocialProfile(userId, patch = {}) {
@@ -5866,6 +5971,11 @@ async function leaveSocialGroup(groupId) {
   if (error) throw error;
 }
 
+async function deleteSocialGroup(groupId) {
+  const { error } = await _supabase.rpc('social_delete_group', { p_group_id: groupId });
+  if (error) throw error;
+}
+
 async function sendSocialMessage({ senderId, recipientId = null, groupId = null, body }) {
   const text = String(body || '').trim();
   if (!text) throw new Error('Message cannot be empty');
@@ -5920,6 +6030,11 @@ async function markSocialPlanImported(shareId) {
   if (error) throw error;
 }
 
+async function deleteSocialPlanShare(shareId) {
+  const { error } = await _supabase.rpc('social_delete_plan_share', { p_share_id: shareId });
+  if (error) throw error;
+}
+
 async function reportSocial({ targetUserId = null, messageId = null, groupId = null, reason = 'other', details = '' }) {
   const { data, error } = await _supabase.rpc('social_report', {
     p_target_user_id: targetUserId, p_message_id: messageId, p_group_id: groupId,
@@ -5934,7 +6049,7 @@ function subscribeToFriends(userId, onChange) {
   if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
   const channel = _supabase.channel(`social-${userId}-${Date.now()}`);
   const refresh = () => onChange?.();
-  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_plan_shares'].forEach(table => {
+  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_plan_shares', 'zane_social_workout_comments'].forEach(table => {
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh);
   });
   _friendsRealtimeChannel = channel.subscribe();
@@ -11192,10 +11307,10 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, loadFriendsState, updateSocialProfile, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, loadFriendsState, loadSocialWorkoutFeed, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
-  createSocialGroup, joinSocialGroup, leaveSocialGroup, sendSocialMessage, markSocialMessagesRead,
-  uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, reportSocial, subscribeToFriends,
+  createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, markSocialMessagesRead,
+  uploadSocialAttachment, createSocialPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,

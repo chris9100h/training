@@ -3523,6 +3523,7 @@ CREATE TABLE public.zane_social_friendships (
   requester_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   addressee_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
+  accepted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT zane_social_friendships_not_self CHECK (requester_id <> addressee_id),
@@ -3605,6 +3606,15 @@ CREATE TABLE public.zane_social_reports (
   CONSTRAINT zane_social_reports_target_check CHECK (target_user_id IS NOT NULL OR message_id IS NOT NULL OR group_id IS NOT NULL)
 );
 
+CREATE TABLE public.zane_social_workout_comments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id text NOT NULL REFERENCES public.zane_sessions(id) ON DELETE CASCADE,
+  author_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  kind text NOT NULL DEFAULT 'comment' CHECK (kind IN ('comment', 'cheer')),
+  body text NOT NULL CHECK (char_length(trim(body)) BETWEEN 1 AND 400),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX zane_social_friendships_addressee_idx ON public.zane_social_friendships(addressee_id, status);
 CREATE INDEX zane_social_friendships_requester_idx ON public.zane_social_friendships(requester_id, status);
 CREATE INDEX zane_social_group_members_user_idx ON public.zane_social_group_members(user_id, group_id);
@@ -3612,6 +3622,8 @@ CREATE INDEX zane_social_messages_direct_idx ON public.zane_social_messages(reci
 CREATE INDEX zane_social_messages_group_idx ON public.zane_social_messages(group_id, created_at DESC);
 CREATE INDEX zane_social_message_attachments_message_idx ON public.zane_social_message_attachments(message_id);
 CREATE INDEX zane_social_reports_status_idx ON public.zane_social_reports(status, created_at DESC);
+CREATE INDEX zane_social_workout_comments_session_idx ON public.zane_social_workout_comments(session_id, created_at);
+CREATE INDEX zane_social_workout_comments_author_idx ON public.zane_social_workout_comments(author_id, created_at DESC);
 CREATE UNIQUE INDEX zane_social_friendships_canonical_pair_idx
   ON public.zane_social_friendships (LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id));
 
@@ -3845,6 +3857,22 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.social_delete_group(p_group_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  DELETE FROM zane_social_groups
+  WHERE id = p_group_id AND owner_id = v_uid;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Only the group owner can delete this group'; END IF;
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.social_create_plan_share(p_recipient_id uuid, p_plan_name text, p_snapshot jsonb)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -3913,6 +3941,22 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.social_delete_plan_share(p_share_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  DELETE FROM zane_social_plan_shares
+  WHERE id = p_share_id AND (sender_id = v_uid OR recipient_id = v_uid);
+  IF NOT FOUND THEN RAISE EXCEPTION 'Plan share not found'; END IF;
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.social_report(p_target_user_id uuid, p_message_id uuid, p_group_id uuid, p_reason text, p_details text DEFAULT '')
  RETURNS uuid
  LANGUAGE plpgsql
@@ -3946,6 +3990,8 @@ CREATE POLICY "social own profile" ON public.zane_social_profiles FOR SELECT TO 
 CREATE POLICY "social relationship participant read" ON public.zane_social_friendships FOR SELECT TO authenticated
 USING (requester_id = (select auth.uid()) OR addressee_id = (select auth.uid()));
 CREATE POLICY "social own blocks" ON public.zane_social_blocks FOR ALL TO authenticated USING (blocker_id = (select auth.uid())) WITH CHECK (blocker_id = (select auth.uid()));
+CREATE POLICY "social block relationship read" ON public.zane_social_blocks FOR SELECT TO authenticated
+USING (blocker_id = (select auth.uid()) OR blocked_id = (select auth.uid()));
 
 CREATE OR REPLACE FUNCTION public.social_is_group_member(p_group_id uuid, p_user_id uuid)
  RETURNS boolean
@@ -3988,12 +4034,12 @@ CREATE POLICY "social reports own insert" ON public.zane_social_reports FOR INSE
 CREATE POLICY "social reports admin read" ON public.zane_social_reports FOR SELECT TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz');
 
 -- Explicit Data API grants. The project may have automatic exposure disabled.
-GRANT SELECT ON public.zane_social_friendships, public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_reports TO authenticated;
+GRANT SELECT ON public.zane_social_friendships, public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_reports, public.zane_social_blocks TO authenticated;
 GRANT INSERT ON public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_reports TO authenticated;
 GRANT UPDATE ON public.zane_social_message_reads TO authenticated;
 GRANT DELETE ON public.zane_social_message_attachments, public.zane_social_message_reads TO authenticated;
 
-REVOKE ALL ON public.zane_social_profiles, public.zane_social_blocks FROM anon, authenticated;
+REVOKE ALL ON public.zane_social_profiles FROM anon, authenticated;
 REVOKE ALL ON public.zane_social_groups, public.zane_social_group_members, public.zane_social_messages, public.zane_social_message_attachments, public.zane_social_message_reads, public.zane_social_plan_shares, public.zane_social_reports FROM anon;
 
 REVOKE EXECUTE ON FUNCTION public.social_lookup_profile(text) FROM PUBLIC, anon;
@@ -4014,6 +4060,8 @@ REVOKE EXECUTE ON FUNCTION public.social_join_group(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_join_group(text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_leave_group(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_leave_group(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_delete_group(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_delete_group(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) FROM PUBLIC, anon;
@@ -4022,6 +4070,8 @@ REVOKE EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, 
 GRANT EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_is_group_member(uuid, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_is_group_member(uuid, uuid) TO authenticated;
 
@@ -4058,3 +4108,241 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   public.zane_social_messages,
   public.zane_social_message_attachments,
   public.zane_social_plan_shares;
+
+-- Friends live workout feed and encouragement (Migration 0265).
+CREATE OR REPLACE FUNCTION public.social_respond_friend_request(p_friendship_id uuid, p_accept boolean)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF p_accept THEN
+    UPDATE zane_social_friendships
+    SET status = 'accepted', accepted_at = COALESCE(accepted_at, now()), updated_at = now()
+    WHERE id = p_friendship_id AND addressee_id = v_uid AND status = 'pending';
+  ELSE
+    DELETE FROM zane_social_friendships
+    WHERE id = p_friendship_id AND addressee_id = v_uid AND status = 'pending';
+  END IF;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_workout_access(p_owner_id uuid, p_started_at timestamptz)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT auth.uid() IS NOT NULL AND (
+    auth.uid() = p_owner_id
+    OR EXISTS (
+      SELECT 1
+      FROM zane_social_friendships f
+      JOIN zane_social_profiles sp ON sp.user_id = p_owner_id
+      WHERE f.status = 'accepted'
+        AND f.accepted_at IS NOT NULL
+        AND p_started_at IS NOT NULL
+        AND f.accepted_at <= p_started_at
+        AND sp.workouts_visible
+        AND (
+          (f.requester_id = auth.uid() AND f.addressee_id = p_owner_id)
+          OR (f.requester_id = p_owner_id AND f.addressee_id = auth.uid())
+        )
+    )
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_can_view_workout_session(p_session_id text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM zane_sessions s
+    WHERE s.id = p_session_id
+      AND public.social_workout_access(s.user_id, COALESCE(s.started_at, s.date))
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_get_workout_feed()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+
+  RETURN jsonb_build_object(
+    'live', COALESCE((
+      SELECT jsonb_agg(row_data ORDER BY sort_at DESC)
+      FROM (
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', true,
+          'acceptedAt', f.accepted_at,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        s.started_at AS sort_at
+        FROM zane_social_friendships f
+        JOIN zane_social_profiles sp ON sp.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
+        JOIN zane_user_settings us ON us.user_id = sp.user_id
+        JOIN zane_sessions s ON s.id = us.in_progress_session_id AND s.user_id = sp.user_id
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE f.status = 'accepted'
+          AND f.accepted_at IS NOT NULL
+          AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
+          AND sp.workouts_visible
+          AND s.ended IS NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND f.accepted_at <= COALESCE(s.started_at, s.date)
+      ) live_rows
+    ), '[]'::jsonb),
+    'history', COALESCE((
+      SELECT jsonb_agg(row_data ORDER BY sort_at DESC)
+      FROM (
+        SELECT jsonb_build_object(
+          'sessionId', s.id, 'ownerId', s.user_id,
+          'ownerName', COALESCE(p.name, 'Zane athlete'),
+          'dayName', s.day_name, 'date', s.date, 'startedAt', s.started_at,
+          'ended', s.ended, 'live', false,
+          'acceptedAt', f.accepted_at,
+          'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND st.done)::int,
+          'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id AND NOT st.skipped)::int,
+          'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int
+        ) AS row_data,
+        COALESCE(s.ended, s.date) AS sort_at
+        FROM zane_social_friendships f
+        JOIN zane_social_profiles sp ON sp.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
+        JOIN zane_sessions s ON s.user_id = sp.user_id
+        LEFT JOIN zane_profiles p ON p.id = s.user_id
+        WHERE f.status = 'accepted'
+          AND f.accepted_at IS NOT NULL
+          AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
+          AND sp.workouts_visible
+          AND s.ended IS NOT NULL
+          AND COALESCE(s.started_at, s.date) IS NOT NULL
+          AND f.accepted_at <= COALESCE(s.started_at, s.date)
+          AND (s.duration_minutes IS NOT NULL OR (s.started_at IS NOT NULL AND s.ended > s.started_at))
+        ORDER BY COALESCE(s.ended, s.date) DESC
+        LIMIT 100
+      ) history_rows
+    ), '[]'::jsonb)
+  );
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_get_workout_detail(p_owner_id uuid, p_session_id text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_session zane_sessions%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  SELECT * INTO v_session FROM zane_sessions WHERE id = p_session_id AND user_id = p_owner_id;
+  IF NOT FOUND OR NOT public.social_workout_access(v_session.user_id, COALESCE(v_session.started_at, v_session.date)) THEN
+    RETURN NULL;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'session', jsonb_build_object(
+      'sessionId', v_session.id, 'ownerId', v_session.user_id,
+      'ownerName', COALESCE((SELECT p.name FROM zane_profiles p WHERE p.id = v_session.user_id), 'Zane athlete'),
+      'dayName', v_session.day_name, 'date', v_session.date,
+      'startedAt', v_session.started_at, 'ended', v_session.ended,
+      'durationMinutes', v_session.duration_minutes,
+      'setsDone', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = v_session.id AND st.done)::int,
+      'setsTotal', (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = v_session.id AND NOT st.skipped)::int,
+      'exerciseCount', (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = v_session.id)::int
+    ),
+    'entries', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'name', e.name, 'plannedSets', e.planned_sets, 'plannedReps', e.planned_reps,
+        'supersetGroup', e.superset_group,
+        'sets', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('done', st.done, 'skipped', st.skipped, 'warmup', st.warmup) ORDER BY st.set_idx)
+          FROM zane_sets st WHERE st.entry_id = e.id
+        ), '[]'::jsonb)
+      ) ORDER BY e.entry_idx)
+      FROM zane_session_entries e WHERE e.session_id = v_session.id
+    ), '[]'::jsonb),
+    'comments', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'id', c.id, 'authorId', c.author_id,
+        'authorName', COALESCE(p.name, 'Zane athlete'),
+        'kind', c.kind, 'body', c.body, 'createdAt', c.created_at
+      ) ORDER BY c.created_at)
+      FROM zane_social_workout_comments c
+      LEFT JOIN zane_profiles p ON p.id = c.author_id
+      WHERE c.session_id = v_session.id
+    ), '[]'::jsonb)
+  );
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_add_workout_comment(p_session_id text, p_body text, p_kind text DEFAULT 'comment')
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_owner uuid;
+  v_started_at timestamptz;
+  v_comment zane_social_workout_comments%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF p_kind NOT IN ('comment', 'cheer') THEN RAISE EXCEPTION 'Invalid comment kind'; END IF;
+  IF char_length(trim(coalesce(p_body, ''))) NOT BETWEEN 1 AND 400 THEN RAISE EXCEPTION 'Comment must be 1-400 characters'; END IF;
+  SELECT s.user_id, COALESCE(s.started_at, s.date) INTO v_owner, v_started_at
+  FROM zane_sessions s WHERE s.id = p_session_id;
+  IF NOT FOUND OR NOT public.social_workout_access(v_owner, v_started_at) THEN RAISE EXCEPTION 'Workout unavailable'; END IF;
+
+  INSERT INTO zane_social_workout_comments (session_id, author_id, kind, body)
+  VALUES (p_session_id, v_uid, p_kind, trim(p_body))
+  RETURNING * INTO v_comment;
+
+  RETURN jsonb_build_object(
+    'id', v_comment.id, 'authorId', v_comment.author_id,
+    'authorName', COALESCE((SELECT p.name FROM zane_profiles p WHERE p.id = v_comment.author_id), 'Zane athlete'),
+    'kind', v_comment.kind, 'body', v_comment.body, 'createdAt', v_comment.created_at
+  );
+END;
+$function$;
+
+ALTER TABLE public.zane_social_workout_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "social workout comments read" ON public.zane_social_workout_comments
+  FOR SELECT TO authenticated
+  USING (public.social_can_view_workout_session(session_id));
+GRANT SELECT ON public.zane_social_workout_comments TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.zane_social_workout_comments FROM anon, authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.social_workout_access(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_can_view_workout_session(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_can_view_workout_session(text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_get_workout_feed() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_get_workout_feed() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_get_workout_detail(uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_get_workout_detail(uuid, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) TO authenticated;
+
+ALTER TABLE public.zane_social_workout_comments REPLICA IDENTITY FULL;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.zane_social_workout_comments;

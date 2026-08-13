@@ -2235,6 +2235,17 @@ function App() {
       }).catch(() => {});
     };
     refreshFriends();
+    // Workout set progress is intentionally polling-only: the local workout
+    // store remains the source of truth and the Friends feed must not expose a
+    // broad session Realtime stream. Refresh only the small summary payload;
+    // the open viewer polls its redacted detail more frequently.
+    const refreshWorkoutFeed = () => {
+      LB.loadSocialWorkoutFeed().then(feed => {
+        if (!live) return;
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
+      }).catch(() => {});
+    };
+    const workoutTimer = setInterval(refreshWorkoutFeed, 5000);
     const unsubscribe = LB.subscribeToFriends(userId, () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refreshFriends, 250);
@@ -2242,6 +2253,7 @@ function App() {
     return () => {
       live = false;
       clearTimeout(refreshTimer);
+      clearInterval(workoutTimer);
       unsubscribe?.();
     };
   }, [userId, friendsTabEnabled]);
