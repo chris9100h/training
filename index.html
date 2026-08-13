@@ -3,6 +3,16 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content" />
+<script>
+// Chrome on iPhone uses WebKit too, but its iOS fixed-position compositor can
+// paint controls away from their hit-test boxes after the browser chrome moves.
+// Mark that browser early so the app shell can use document positioning there.
+(function () {
+  var ua = navigator.userAgent || '';
+  var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  if (ios && /CriOS\//i.test(ua)) document.documentElement.classList.add('ios-chrome');
+})();
+</script>
 <meta name="theme-color" content="#07060a" />
 <title>Zane</title>
 <meta name="description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
@@ -199,6 +209,11 @@
     display: flex; flex-direction: column;
     overflow: hidden;
   }
+  /* Chrome iOS 26 can paint fixed layers at a stale browser-toolbar offset
+     while hit-testing against their current CSS geometry. Keep the app shell
+     in document positioning on that browser so paint and input coordinates
+     share the same containing block. */
+  html.ios-chrome #root { position: absolute; }
   @media (min-width: 768px) {
     #root {
       max-width: 100%;
