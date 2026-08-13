@@ -6832,6 +6832,26 @@ function mealCategories(settings) {
   }));
 }
 
+// A food day is complete only when every configured meal category contains at
+// least one eaten entry. Planned entries deliberately do not count: they are
+// intent, not proof that the meal was logged. Category membership follows the
+// current time windows, just like the Food Tracker timeline does.
+function foodDayHasAllMeals(foodLogs, settings, date) {
+  if (!date) return false;
+  const loggedHours = new Set();
+  for (const log of foodLogs || []) {
+    if (!log || log.date !== date || log.planned) continue;
+    const hour = parseInt(String(log.time || '').split(':')[0], 10);
+    if (Number.isInteger(hour) && hour >= 0 && hour < 24) loggedHours.add(hour);
+  }
+  return mealCategories(settings).every(category => {
+    for (let hour = category.startHour; hour < category.endHour; hour++) {
+      if (loggedHours.has(hour)) return true;
+    }
+    return false;
+  });
+}
+
 // ── Macro target estimation (migration 0205) ────────────────────────────────
 // Everything above assumes macro targets already exist. They never did for a
 // user without a coach: the whole adherence system (ring, hero rows, week
@@ -10938,7 +10958,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayHasAllMeals, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
