@@ -51,6 +51,32 @@ CREATE TABLE public.door_events (
 ALTER TABLE public.motion_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.door_events ENABLE ROW LEVEL SECURITY;
 
+-- The ingestion app listens to these two external tables through Realtime.
+-- Keep clean snapshots aligned with production without failing when the
+-- publication or either table is not present in a minimal local database.
+DO $publication$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'motion_events'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.motion_events;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'door_events'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.door_events;
+    END IF;
+  END IF;
+END
+$publication$;
+
 -- tier (Migration 0240): account tier, server-authored. Granted by
 -- grant_lifetime_if_qualified() when an account clears the founding-member bar
 -- (5 completed workouts AND 150 logged minutes) while seats remain. A client

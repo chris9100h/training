@@ -238,9 +238,15 @@ scheinbar widersprüchlichen Fehler „Spalte/Tabelle existiert bereits“ bzw. 
 Der Branch startete mit einem Schema-Snapshot, aber einer lückenhaften Historie.
 
 Der Supabase-Branch `offline-auth-recovery` (Projekt
-`kyuwnydvvqmcqlteczyk`, datenlos) ist jetzt **gesund**:
+`kyuwnydvvqmcqlteczyk`, datenlos) enthält jetzt die vollständige
+Produktions-Historie mit 208 Einträgen:
 
-- `status = FUNCTIONS_DEPLOYED`, `preview_project_status = ACTIVE_HEALTHY`.
+- Die aktuelle Branch-Datenbank ist `preview_project_status = ACTIVE_HEALTHY`.
+- Der Supabase-Statusdienst zeigt nach einem früheren fehlgeschlagenen
+  Bootstrap weiterhin `MIGRATIONS_FAILED`, obwohl die Migrationstabelle bis
+  `coaching_broadcast` reicht und der vollständige DB-Stabilitätsvertrag grün
+  durchläuft. Das ist ein historischer Operationsstatus, kein aktueller
+  Schemafehler.
 - Die fehlenden Historieneinträge für bereits vorhandene Änderungen (u. a.
   `meal_windows`, `meal_of_choice`, `meal_of_choice_hour`, Shopping-Key und
   `food_force_grams`) wurden nur im Branch korrigiert; die zugehörigen RPCs und
@@ -248,19 +254,21 @@ Der Supabase-Branch `offline-auth-recovery` (Projekt
 - Nicht registrierte Altobjekte (Realtime-Stubtabellen, Food-Shopping,
   Medikamente, Rezept-Share und Reminder-Ledger) wurden im leeren Branch in den
   Produktionszustand rekonstruiert. RLS ist aktiv; die app-fremden
-  `door_events`/`motion_events` bleiben ohne Policies und sind damit für Clients
-  gesperrt.
+  `door_events`/`motion_events` sind ebenfalls in `supabase_realtime`, bleiben
+  aber ohne Client-Policies und damit für Clients gesperrt.
 - Alle Produktionsmigrationen und Edge Functions laufen bis zum Ende durch; der
   Build mit der Preview-URL wurde erfolgreich geprüft. Es wurden keine
   Produktionsdaten kopiert und keine Produktionsobjekte geändert.
 
 Die Reconciliation ist jetzt auch in der Produktions-Historie verankert. Die
-Produktion hatte die Objekte bereits; dort wurden deshalb ausschließlich
-fehlende Einträge in `supabase_migrations.schema_migrations` ergänzt — keine
-Produktionsdaten und keine bereits vorhandenen Tabellen wurden überschrieben.
+Produktion hatte die Objekte und ihre Publication-Zuordnung bereits; dort
+wurde deshalb ausschließlich ein fehlender Eintrag in
+`supabase_migrations.schema_migrations` ergänzt — keine Produktionsdaten und
+keine bereits vorhandenen Tabellen wurden überschrieben.
 
-Ergänzt wurden eine idempotente Altbestand-Baseline vor der ersten Migration
-und die zeitlich passenden Lücken für Coaching-Threads, Tages-/Glukose-Logs,
+Ergänzt wurden eine idempotente Altbestand-Baseline vor der ersten Migration,
+die Publication-Zuordnung für die beiden app-fremden Eventtabellen und die
+zeitlich passenden Lücken für Coaching-Threads, Tages-/Glukose-Logs,
 die App-Konfiguration, Set-/Mesocycle-Felder, Rezept-Sharing, Shopping-Listen,
 Medikamente, Messwerte, Reminder-Ledger und die Session-Flags. Die beiden
 app-fremden Tabellen `door_events` und `motion_events` sind in der Baseline
@@ -269,11 +277,10 @@ befüllt. Cron-/Secret-Migrationen wurden nicht rückwirkend ausgeführt.
 
 Der datenlose Branch `offline-auth-recovery` wurde anschließend aus dieser
 Produktions-Historie neu rebased. Die vollständige Kette läuft nun bis zur
-letzten Produktionsmigration (`20260814091236 coaching_broadcast`) durch und
-endet mit `status = FUNCTIONS_DEPLOYED` sowie
-`preview_project_status = ACTIVE_HEALTHY`. Damit können neue Supabase-Branches
-den Altbestand reproduzierbar aufbauen, statt auf einen zufälligen
-Schema-Snapshot angewiesen zu sein.
+letzten Produktionsmigration (`20260814091236 coaching_broadcast`) durch; der
+DB-Stabilitätsvertrag und `db_health()` sind grün. Damit können neue
+Supabase-Branches den Altbestand reproduzierbar aufbauen, statt auf einen
+zufälligen Schema-Snapshot angewiesen zu sein.
 
 Das temporäre Projekt `Zane db-stability-test` wurde nach den synthetischen
 Tests gelöscht. Es verursacht daher keine weiteren Kosten.
