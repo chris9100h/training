@@ -137,14 +137,14 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
 function fromStoreJs(re, label) {
   const m = read('src/store.js').match(re);
   if (!m) throw new Error(`could not parse ${label} from src/store.js`);
-  return m[1];
+  return m[1] || m[2];
 }
 
 const SUPABASE_URL =
-  process.env.SUPABASE_URL || fromStoreJs(/const SUPABASE_URL = '([^']+)'/, 'SUPABASE_URL');
+  process.env.SUPABASE_URL || fromStoreJs(/const SUPABASE_URL\s*=\s*[\s\S]*?['"]([^'"]+)['"]/, 'SUPABASE_URL');
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
-  fromStoreJs(/const SUPABASE_ANON_KEY = '([^']+)'/, 'SUPABASE_ANON_KEY');
+  fromStoreJs(/const SUPABASE_ANON_KEY\s*=\s*[\s\S]*?['"]([^'"]+)['"]/, 'SUPABASE_ANON_KEY');
 const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 const args = process.argv.slice(2);

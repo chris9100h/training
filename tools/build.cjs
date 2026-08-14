@@ -116,6 +116,17 @@ function writeBundle(name, sources, totals) {
 function patchIndex(bundlePaths) {
   const indexPath = path.join(dist, 'index.html');
   let index = fs.readFileSync(indexPath, 'utf8');
+  const previewUrl = process.env.ZANE_SUPABASE_URL || '';
+  const previewAnonKey = process.env.ZANE_SUPABASE_ANON_KEY || '';
+  if ((previewUrl && !previewAnonKey) || (!previewUrl && previewAnonKey)) {
+    throw new Error('Preview Supabase config requires both ZANE_SUPABASE_URL and ZANE_SUPABASE_ANON_KEY');
+  }
+  if (previewUrl) {
+    const config = JSON.stringify({ url: previewUrl, anonKey: previewAnonKey });
+    const marker = '<!-- BUILD_SUPABASE_CONFIG -->';
+    if (!index.includes(marker)) throw new Error('Supabase config marker missing from index.html');
+    index = index.replace(marker, `<script>window.__ZANE_SUPABASE_CONFIG__=${config};</script>`);
+  }
   const coreBlock = /<!-- BUILD_CORE_SCRIPTS_START -->[\s\S]*?<!-- BUILD_CORE_SCRIPTS_END -->/;
   if (!coreBlock.test(index)) throw new Error('Core script build markers missing from index.html');
   index = index.replace(coreBlock, [

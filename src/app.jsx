@@ -554,6 +554,7 @@ function mergeStagedBootStore(fresh, cur, base) {
 function App() {
   const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
+  const [authStatus, setAuthStatus] = useStateA('booting'); // 'booting' | 'online' | 'recovering' | 'reauth-required'
   // Detect invite/password-reset link before Supabase clears the hash
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
@@ -618,6 +619,7 @@ function App() {
   const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
+  const authStatusRef             = useRefA('booting'); // blocks writes while Auth is unavailable
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
@@ -639,12 +641,36 @@ function App() {
     adminSupportUnreadRef.current = null;
   }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
+  useEffectA(() => { authStatusRef.current = authStatus; }, [authStatus]);
+  // React state updates are batched. Recovery code often needs to start a
+  // pending sync in the same tick as it marks Auth online, so update the ref
+  // synchronously as well as the visible state.
+  const setAuthState = useCallbackA((next) => {
+    authStatusRef.current = next;
+    setAuthStatus(next);
+  }, []);
   useEffectA(() => { routeRef.current = route; }, [route]);
   useEffectA(() => {
     const onRuntimeConfig = event => setRuntimeConfig(event.detail || LB.getCachedRuntimeConfig());
     window.addEventListener('zane-runtime-config', onRuntimeConfig);
     return () => window.removeEventListener('zane-runtime-config', onRuntimeConfig);
   }, []);
+
+  useEffectA(() => {
+    const onAuthDegraded = () => {
+      setAuthState('recovering');
+      setSyncStatus('error');
+    };
+    const onAuthRecovered = () => {
+      setAuthState('online');
+    };
+    window.addEventListener('zane-auth-degraded', onAuthDegraded);
+    window.addEventListener('zane-auth-recovered', onAuthRecovered);
+    return () => {
+      window.removeEventListener('zane-auth-degraded', onAuthDegraded);
+      window.removeEventListener('zane-auth-recovered', onAuthRecovered);
+    };
+  }, [setAuthState]);
 
   // A route name alone cannot tell whether the Home screen is covered by a
   // quick-action sheet or whether a native field still owns the keyboard.
@@ -1374,6 +1400,10 @@ function App() {
     // scheduled with the old uid could otherwise fire after an account switch
     // and upsert one account's data stamped with another's user_id.
     if (uid !== userIdRef.current) return;
+    // Auth recovery must finish before an RLS write is attempted. Keeping the
+    // pending snapshot local is safer than firing a burst of guaranteed 401s
+    // while the refresh endpoint is recovering.
+    if (authStatusRef.current !== 'online') return;
     if (syncing.current) return;
     const target = pendingStore.current;
     if (!target || target === syncBase.current || !uid) return;
@@ -1447,7 +1477,47 @@ function App() {
   // session, dead network) and the local cache/pending diff is preserved.
   const markIntentionalSignOut = useCallbackA(() => { intentionalSignOut.current = Date.now(); }, []);
 
-  const loadData = async (uid) => {
+  // A transient Auth outage gets a quiet, jitter-free retry loop. The first
+  // attempt is five seconds out, then backs off to one minute. There is never
+  // a parallel refresh storm: the Auth client itself serializes refreshes and
+  // this effect owns the outer retry timer.
+  useEffectA(() => {
+    if (authStatus !== 'recovering') return undefined;
+    let cancelled = false;
+    let delay = 5000;
+    let timer = null;
+    const attempt = async () => {
+      if (cancelled) return;
+      if (!navigator.onLine) {
+        timer = setTimeout(attempt, delay);
+        return;
+      }
+      const session = await LB.recoverAuthSession();
+      if (cancelled) return;
+      if (session?.user?.id) {
+        const uid = session.user.id;
+        LB.rememberOfflineUser(uid);
+        LB.clearAuthRecovery();
+        setAuthState('online');
+        if (userIdRef.current !== uid) {
+          userIdRef.current = uid;
+          setUserId(uid);
+        }
+        loadData(uid);
+        if (pendingStore.current !== syncBase.current) flushSync(uid);
+        return;
+      }
+      delay = Math.min(delay * 2, 60000);
+      timer = setTimeout(attempt, delay);
+    };
+    // Do not immediately compete with the failed boot request. The online
+    // event handler below may probe sooner when the browser has just regained
+    // connectivity; ordinary Auth failures wait five seconds first.
+    timer = setTimeout(attempt, delay);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [authStatus, flushSync, setAuthState]);
+
+  const loadData = async (uid, { offlineOnly = false } = {}) => {
     // Generation stamp: SIGNED_OUT and every newer loadData bump this, and
     // nothing below writes to the store, the diff base or the local cache
     // unless it is still the newest load for the CURRENT user. Without it a
@@ -1465,8 +1535,16 @@ function App() {
       // tell apart locally-changed-but-unsynced settings from server state.
       const base = localState.base;
       syncBase.current = base || cached;
+      pendingStore.current = cached;
       setStore(cached);
       setPhase('ready');
+      if (offlineOnly) {
+        // Cached training remains usable while Auth is recovering. Do not
+        // start the normal boot refresh here: every request would be rejected
+        // without a usable JWT and would only add pressure to the outage.
+        setSyncStatus('error');
+        return;
+      }
       // Cached devices render immediately, then spread their background boot
       // refresh over 15 seconds. A fleet-wide reload can no longer turn into
       // one synchronized request spike.
@@ -1819,6 +1897,10 @@ function App() {
           if (foregroundRefresh.current === bootRefresh) foregroundRefresh.current = null;
         });
     } else {
+      if (offlineOnly) {
+        setPhase('error');
+        return;
+      }
       setPhase('loading');
       let essentialBase = null;
       stagedBootHydrating.current = true;
@@ -1865,17 +1947,45 @@ function App() {
     }
   };
 
+  // Reopen the last authenticated account's local cache without pretending
+  // that the browser currently has a server-valid JWT. This is intentionally
+  // limited to the short recovery lease written by store.js and never runs
+  // after an explicit logout or a permanent Auth rejection.
+  const enterOfflineCache = (uid) => {
+    if (!uid) { setPhase('error'); return; }
+    userIdRef.current = uid;
+    setUserId(uid);
+    setAuthState('recovering');
+    setSyncStatus('error');
+    loadData(uid, { offlineOnly: true });
+  };
+
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) {
+          LB.rememberOfflineUser(session.user.id);
+          LB.clearAuthRecovery();
+          setAuthState('online');
           setUserId(session.user.id);
           if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
           else loadData(session.user.id);
         }
-        // Offline with no restorable session: show the error screen, not the
-        // login screen, you can't sign in offline, and a retry recovers.
-        else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
+        else {
+          const offlineUser = LB.getOfflineUser();
+          const recovery = LB.getAuthRecoveryState();
+          // A fresh transient-auth marker means the SDK retained the session
+          // but could not refresh it. When the browser is genuinely offline,
+          // the same cached boot is safe even without that marker.
+          if (offlineUser && (recovery || !navigator.onLine)) enterOfflineCache(offlineUser.userId);
+          // With no recovery lease, this is a real first boot or a permanent
+          // Auth rejection. Do not expose cached health data as if the user
+          // were still server-authenticated.
+          else {
+            setAuthState('reauth-required');
+            setPhase(navigator.onLine ? 'unauthed' : 'error');
+          }
+        }
       } else if (event === 'SIGNED_IN') {
         // Re-arm the onboarding check for the freshly signed-in user. The ref is
         // a one-shot guard that survives in-session account switches (logout →
@@ -1890,15 +2000,33 @@ function App() {
         // stale pending state.
         clearTimeout(retryTimer.current);
         pendingStore.current = null;
+        LB.rememberOfflineUser(session.user.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
+      } else if (event === 'TOKEN_REFRESHED') {
+        const wasRecovering = authStatusRef.current !== 'online';
+        LB.rememberOfflineUser(session?.user?.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
+        if (wasRecovering && session?.user?.id && session.user.id === userIdRef.current) {
+          // The offline cache was intentionally not refreshed while Auth was
+          // down. Re-enter the normal cache-first boot path now that the JWT
+          // is valid again; its merge preserves any local pending edits.
+          loadData(session.user.id);
+          if (pendingStore.current !== syncBase.current) flushSync(session.user.id);
+        }
       } else if (event === 'PASSWORD_RECOVERY') {
         // Supabase fires this (in addition to or instead of SIGNED_IN) when a
         // recovery link is clicked, handle it explicitly so the reset screen
         // always appears regardless of whether the implicit-flow hash is present.
         recoveryInProgress.current = true;
         isRecoveryFlow.current = true;
+        LB.rememberOfflineUser(session.user.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
         setUserId(session.user.id);
         setPhase('invite');
       } else if (event === 'SIGNED_OUT') {
@@ -1921,7 +2049,18 @@ function App() {
         const armedAt = intentionalSignOut.current;
         const armed = !!armedAt && (Date.now() - armedAt) < INTENTIONAL_SIGNOUT_TTL_MS;
         intentionalSignOut.current = null;
-        if (!armed) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
+        if (!armed) {
+          setAuthState('reauth-required');
+          setSyncStatus('error');
+          const offlineUser = LB.getOfflineUser();
+          const recovery = LB.getAuthRecoveryState();
+          if (phaseRef.current === 'ready') return;
+          if (offlineUser && recovery) enterOfflineCache(offlineUser.userId);
+          else setPhase('error');
+          return;
+        }
+        LB.clearOfflineUser();
+        LB.clearAuthRecovery();
         LB.clearLocal(userIdRef.current);
         clearTimeout(retryTimer.current);
         setStore(null);
@@ -2493,9 +2632,17 @@ function App() {
   // Connectivity tracking: offline → red immediately, online → retry or clear
   useEffectA(() => {
     const onOffline = () => setSyncStatus('error');
-    const onOnline  = () => {
-      if (!userId) return;
-      if (pendingStore.current !== syncBase.current) flushSync(userId);
+    const onOnline  = async () => {
+      const session = await LB.recoverAuthSession();
+      const uid = session?.user?.id || userIdRef.current;
+      if (!session && authStatusRef.current !== 'online') {
+        setAuthState('recovering');
+        setSyncStatus('error');
+        return;
+      }
+      if (!uid) return;
+      setAuthState('online');
+      if (pendingStore.current !== syncBase.current) flushSync(uid);
       else setSyncStatus('synced');
     };
     if (!navigator.onLine) setSyncStatus('error');

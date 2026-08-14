@@ -1,7 +1,11 @@
 /* Logbook store, Supabase backend */
 
-const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
+// Production remains the safe default for the source/fallback app. A preview
+// build may inject a project URL and its public anon key through
+// window.__ZANE_SUPABASE_CONFIG__; never put a service-role key here.
+const SUPABASE_CONFIG = (typeof window !== 'undefined' && window.__ZANE_SUPABASE_CONFIG__) || {};
+const SUPABASE_URL = SUPABASE_CONFIG.url || 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
@@ -70,6 +74,81 @@ const _httpRequestQueue = [];
 let _httpRequestsActive = 0;
 let _lastPressureHttpAt = 0;
 
+// Auth must never wait behind the database admission queue. A stalled
+// PostgREST request can otherwise keep the refresh-token request queued until
+// the access token expires, which turns a temporary database incident into an
+// apparent logout. Keep a small, independent lane for every /auth/v1 request
+// and abort a stuck request so supabase-js classifies it as retryable instead
+// of receiving an arbitrary 500/429 response and deleting the session.
+const AUTH_REQUEST_LIMIT = 1;
+const AUTH_REQUEST_TIMEOUT_MS = 8000;
+const AUTH_RECOVERY_KEY = 'logbook-auth-recovery';
+const AUTH_RECOVERY_TTL_MS = 24 * 60 * 60 * 1000;
+const OFFLINE_USER_KEY = 'logbook-offline-user';
+const OFFLINE_USER_TTL_MS = 24 * 60 * 60 * 1000;
+const _authRequestQueue = [];
+let _authRequestsActive = 0;
+
+function requestUrl(input) {
+  return typeof input === 'string' ? input : String(input?.url || '');
+}
+
+function isAuthRequest(input) {
+  return /\/auth\/v1\//i.test(requestUrl(input));
+}
+
+function isTransientAuthStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function writeAuthRecovery(reason) {
+  const state = { at: Date.now(), reason: String(reason || 'temporary-auth-failure') };
+  try { localStorage.setItem(AUTH_RECOVERY_KEY, JSON.stringify(state)); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-auth-degraded', { detail: state })); } catch (_) {}
+}
+
+function clearAuthRecovery() {
+  try { localStorage.removeItem(AUTH_RECOVERY_KEY); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-auth-recovered')); } catch (_) {}
+}
+
+function getAuthRecoveryState() {
+  try {
+    const state = JSON.parse(localStorage.getItem(AUTH_RECOVERY_KEY) || 'null');
+    if (!state || !Number.isFinite(Number(state.at)) || Date.now() - Number(state.at) > AUTH_RECOVERY_TTL_MS) {
+      localStorage.removeItem(AUTH_RECOVERY_KEY);
+      return null;
+    }
+    return { at: Number(state.at), reason: String(state.reason || 'temporary-auth-failure') };
+  } catch (_) { return null; }
+}
+
+// This is only a non-secret account pointer. It lets a previously signed-in
+// browser reopen its own local cache during a short outage; it is deliberately
+// not a second copy of the Supabase access or refresh token.
+function rememberOfflineUser(userId) {
+  if (!userId) return false;
+  try {
+    localStorage.setItem(OFFLINE_USER_KEY, JSON.stringify({ userId: String(userId), at: Date.now() }));
+    return true;
+  } catch (_) { return false; }
+}
+
+function getOfflineUser() {
+  try {
+    const state = JSON.parse(localStorage.getItem(OFFLINE_USER_KEY) || 'null');
+    if (!state?.userId || !Number.isFinite(Number(state.at)) || Date.now() - Number(state.at) > OFFLINE_USER_TTL_MS) {
+      localStorage.removeItem(OFFLINE_USER_KEY);
+      return null;
+    }
+    return { userId: String(state.userId), at: Number(state.at) };
+  } catch (_) { return null; }
+}
+
+function clearOfflineUser() {
+  try { localStorage.removeItem(OFFLINE_USER_KEY); } catch (_) {}
+}
+
 function _drainHttpRequests() {
   while (_httpRequestsActive < HTTP_REQUEST_LIMIT && _httpRequestQueue.length) {
     const entry = _httpRequestQueue.shift();
@@ -89,14 +168,84 @@ function _drainHttpRequests() {
 }
 
 function limitedSupabaseFetch(...args) {
+  if (isAuthRequest(args[0])) {
+    return new Promise((resolve, reject) => {
+      _authRequestQueue.push({ args, resolve, reject });
+      _drainAuthRequests();
+    });
+  }
   return new Promise((resolve, reject) => {
     _httpRequestQueue.push({ args, resolve, reject });
     _drainHttpRequests();
   });
 }
 
+function _drainAuthRequests() {
+  while (_authRequestsActive < AUTH_REQUEST_LIMIT && _authRequestQueue.length) {
+    const entry = _authRequestQueue.shift();
+    _authRequestsActive += 1;
+    Promise.resolve()
+      .then(() => authFetch(...entry.args))
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        _authRequestsActive -= 1;
+        _drainAuthRequests();
+      });
+  }
+}
+
+async function authFetch(input, init = {}) {
+  const authRequest = isAuthRequest(input);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const originalSignal = init?.signal;
+  let timer = null;
+  let removeAbortListener = null;
+  let requestInit = init;
+  if (controller) {
+    if (originalSignal) {
+      if (originalSignal.aborted) controller.abort();
+      else {
+        const forwardAbort = () => controller.abort();
+        originalSignal.addEventListener?.('abort', forwardAbort, { once: true });
+        removeAbortListener = () => originalSignal.removeEventListener?.('abort', forwardAbort);
+      }
+    }
+    requestInit = { ...init, signal: controller.signal };
+    timer = setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+  }
+  try {
+    const response = await fetch(input, requestInit);
+    if (authRequest && isTransientAuthStatus(Number(response?.status || 0))) {
+      writeAuthRecovery(`http-${response.status}`);
+      // A plain fetch error is converted by supabase-js into its
+      // AuthRetryableFetchError class. That is important: the Auth client then
+      // retains the session and retries later instead of calling _removeSession.
+      const retryable = new TypeError(`Temporary Supabase Auth failure (${response.status})`);
+      retryable.__zaneAuthTransient = true;
+      throw retryable;
+    }
+    if (authRequest && response?.ok) clearAuthRecovery();
+    return response;
+  } catch (error) {
+    if (authRequest && !error?.__zaneAuthTransient) writeAuthRecovery(error?.name === 'AbortError' ? 'timeout' : 'network');
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbortListener?.();
+  }
+}
+
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { experimental: { passkey: true } },
+  auth: {
+    experimental: { passkey: true },
+    // Make the persistence contract explicit. These are supabase-js defaults,
+    // but spelling them out protects the offline behavior from a future client
+    // upgrade or a different build-time environment.
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+  },
   global: { fetch: limitedSupabaseFetch },
 });
 
@@ -283,6 +432,17 @@ function dbStabilityTestApi() {
   };
 }
 
+function authRecoveryTestApi() {
+  return {
+    mark: writeAuthRecovery,
+    clear: clearAuthRecovery,
+    state: getAuthRecoveryState,
+    rememberUser: rememberOfflineUser,
+    offlineUser: getOfflineUser,
+    clearUser: clearOfflineUser,
+  };
+}
+
 // Await a PostgREST builder and throw if it resolved with an { error }. The
 // supabase-js client does NOT throw on failed writes (network errors, RLS
 // denials, constraint violations all come back as a resolved { error }), so
@@ -463,9 +623,21 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
 
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
+async function recoverAuthSession() {
+  try {
+    const { data, error } = await _supabase.auth.refreshSession();
+    if (error || !data?.session) return null;
+    rememberOfflineUser(data.session.user?.id);
+    clearAuthRecovery();
+    return data.session;
+  } catch (_) { return null; }
+}
+
 async function signIn(email, password) {
   const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  rememberOfflineUser(data?.user?.id || data?.session?.user?.id);
+  clearAuthRecovery();
   return data;
 }
 
@@ -476,6 +648,8 @@ async function signUp(email, password, name, unit = null) {
   });
   if (error) throw error;
   if (data.session) {
+    rememberOfflineUser(data.session.user?.id || data.user?.id);
+    clearAuthRecovery();
     // Email confirmation disabled: the auth user exists and is signed in now.
     // Creating the profile/settings rows is best-effort here. If it fails (e.g. a
     // flaky in-app-browser network drop after the signup POST already succeeded),
@@ -507,12 +681,20 @@ async function updateDailyLogDerived(date, adherence, targetsSnap) {
 }
 
 async function signOut() {
-  return await _supabase.auth.signOut();
+  const result = await _supabase.auth.signOut();
+  if (!result?.error) {
+    clearOfflineUser();
+    clearAuthRecovery();
+  }
+  return result;
 }
 
 async function signInWithPasskey() {
   const { error } = await _supabase.auth.signInWithPasskey();
   if (error) throw error;
+  const { data } = await _supabase.auth.getSession();
+  rememberOfflineUser(data?.session?.user?.id);
+  clearAuthRecovery();
 }
 
 async function registerPasskey() {
@@ -11837,7 +12019,7 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
@@ -11881,5 +12063,5 @@ window.LB = {
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
-  ...(window.__STORE_TEST__ ? { dbStabilityTest: dbStabilityTestApi() } : {}),
+  ...(window.__STORE_TEST__ ? { dbStabilityTest: dbStabilityTestApi(), authRecoveryTest: authRecoveryTestApi() } : {}),
 };

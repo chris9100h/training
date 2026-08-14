@@ -2,7 +2,11 @@
 
 Stand: 14.08.2026
 
-Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.789`, alle sechs Stabilitätsmigrationen, `db-health`, Better Stack sowie globale Social- und Coaching-Broadcasts sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und echte private Broadcast-WebSocket-Tests sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
+Status: Der Produktionsrollout der DB-/Social-Stabilität ist abgeschlossen. Client
+`zane-v2.789`, alle sechs Stabilitätsmigrationen, `db-health`, Better Stack sowie
+globale Social- und Coaching-Broadcasts sind aktiv. Die hier beschriebene
+Auth-/Offline-Recovery liegt zusätzlich auf dem separaten Branch
+`codex/offline-auth-recovery` und ist noch nicht in Produktion.
 
 ## Die einfache Erklärung
 
@@ -58,6 +62,37 @@ Der Realtime-Fehler ist ein Symptom von DB-Timeouts. Er belegt nicht, dass Realt
 `src/store.js` setzt eine harte Grenze von vier gleichzeitigen Supabase-HTTP-Requests. Die interne Warteschlange priorisiert kritische Saves vor Vordergrund-Reads und Hintergrundarbeit. Hintergrundarbeit und Writes haben jeweils ein eigenes Limit von zwei.
 
 Ein Cache-Boot zeigt die lokalen Daten sofort, verzögert die Server-Hydrierung aber zufällig um 0 bis 15 Sekunden. Dadurch starten nach einem Reload nicht alle Geräte im selben Moment.
+
+### Auth- und Offline-Recovery
+
+Die Authentifizierung verwendet eine eigene, auf eine Anfrage begrenzte Spur.
+`/auth/v1/*` wartet nicht mehr hinter PostgREST-, Realtime- oder Hintergrund-
+Requests. Auth-Anfragen werden nach acht Sekunden abgebrochen; 408, 425, 429,
+5xx und Netzwerkfehler werden von `supabase-js` als vorübergehend retrybar
+behandelt. Dadurch darf ein kurzzeitig nicht erreichbarer Auth-/DB-Dienst die
+gespeicherte Session nicht als endgültig widerrufen.
+
+`persistSession`, `autoRefreshToken` und `detectSessionInUrl` sind im Client
+explizit aktiviert. Zusätzlich merkt sich der Browser nur die ID des zuletzt
+angemeldeten Kontos und einen 24-Stunden-Recovery-Lease. Es wird kein zweiter
+Refresh- oder Access-Token gespeichert.
+
+Wenn Auth vorübergehend nicht erreichbar ist, öffnet ein bereits angemeldeter
+Browser seinen lokalen Trainingscache wieder. Training und lokale Änderungen
+bleiben verfügbar; Server- und Social-Abfragen pausieren. Sobald ein gültiger
+JWT wiederhergestellt ist, lädt der Client den Serverstand cache-first und
+überträgt den offenen Diff mit dem bestehenden geordneten Sync.
+
+Eine echte Abmeldung, Passwortänderung oder serverseitig widerrufene Session
+führt weiterhin zu einer erneuten Anmeldung. Der lokale Diff bleibt dabei
+erhalten und wird nach einer erfolgreichen Anmeldung desselben Kontos wieder
+verarbeitet. Ein expliziter Logout löscht Recovery-Lease und lokalen Cache.
+
+Für eine Preview darf der Build ausschließlich die Preview-URL und den
+öffentlichen `anon`-Schlüssel über `ZANE_SUPABASE_URL` und
+`ZANE_SUPABASE_ANON_KEY` erhalten. Ein `service_role`-Schlüssel gehört niemals
+in den Client oder in Git. Ohne diese Variablen bleibt der Produktionsendpunkt
+der sichere Standard.
 
 ### Schutzschalter
 
@@ -197,7 +232,22 @@ from pg_stat_activity;
 
 Die Preview wurde nicht aus Produktionsdaten befüllt. Ihr automatischer Aufbau meldete bereits vor den neuen Stabilitätsmigrationen einen Fehler, weil die registrierte Produktions-Migrationshistorie nicht den vollständigen Altbestand enthält. Für die isolierten Tests wurde deshalb der versionierte Schema-Snapshot eingespielt. Dieser Baseline-Fehler muss separat korrigiert werden, bevor Preview-Branches als vollständiger Realtime-Rollout-Gate dienen können.
 
-Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklich für 10 USD/Monat angelegt und ebenfalls ausschließlich mit synthetischen Daten befüllt. Beim abschließenden Health-Test wurde ein Fehlalarm entdeckt: Supabases normaler Realtime-WAL-Sender wartet dauerhaft auf neue WAL-Daten. Migration `20260814072030_db_health_client_backends` begrenzt Warte-/Langläufer-Alarme deshalb auf echte `client backend`-Queries. Nach dem Coaching-Abnahmetest meldete `db_health()` 11/60 Verbindungen, 0 wartende Client-Queries und 0 Langläufer. Sämtliche synthetischen Auth-Nutzer und ihre kaskadierenden Social- und Coaching-Daten wurden nach den Tests gelöscht; `social_mode` steht wieder auf `normal`. Das Projekt selbst bleibt für die Produktionsvorbereitung bestehen und verursacht bis zum Löschen weiterhin 10 USD/Monat.
+Der aktuelle Supabase-Branch `offline-auth-recovery` (Projekt
+`kyuwnydvvqmcqlteczyk`, datenlos) bleibt deshalb ein **blockierter Testzweig**:
+Supabase meldete beim automatischen Bootstrap zuerst `relation "motion_events"
+does not exist`. `door_events` und `motion_events` sind app-fremde Tabellen, die
+in Produktion existieren und in `supabase_realtime` registriert sind, aber nicht
+in der versionierten Migrationshistorie liegen. Test-Stubs wurden nur auf dem
+Branch angelegt; der Branch steht weiterhin auf `MIGRATIONS_FAILED` und ist kein
+Produktions- oder Rollout-Gate. Die Stubs haben keine Produktionsdaten und
+werden nicht vom Client verwendet. Vor einer späteren Wiederverwendung müssen
+die Tabellen samt Eigentümer/RLS-Vertrag als externe Abhängigkeit sauber
+modelliert oder der Branch verworfen und neu erstellt werden.
+Supabase weist für die reinen Test-Stubs außerdem auf fehlendes RLS hin; der
+Branch darf deshalb nicht öffentlich oder mit realen Daten betrieben werden.
+
+Das temporäre Projekt `Zane db-stability-test` wurde nach den synthetischen
+Tests gelöscht. Es verursacht daher keine weiteren Kosten.
 
 ### Produktion
 

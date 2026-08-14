@@ -225,6 +225,57 @@ async function testAsync(name, fn) {
     testFetch = async () => ({ ok: true });
   });
 
+  await testAsync('Auth transport has its own single lane and never consumes DB slots', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    let authActive = 0;
+    let dbActive = 0;
+    let maxAuth = 0;
+    let maxDb = 0;
+    const releases = [];
+    testFetch = input => new Promise(resolve => {
+      const auth = String(input).includes('/auth/v1/');
+      if (auth) { authActive += 1; maxAuth = Math.max(maxAuth, authActive); }
+      else { dbActive += 1; maxDb = Math.max(maxDb, dbActive); }
+      releases.push(() => {
+        if (auth) authActive -= 1;
+        else dbActive -= 1;
+        resolve({ ok: true, status: 200 });
+      });
+    });
+    const authRequests = Array.from({ length: 3 }, (_, i) => testClientOptions.global.fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token?test=${i}`));
+    const dbRequests = Array.from({ length: 6 }, (_, i) => testClientOptions.global.fetch(`/rest/v1/request-${i}`));
+    await tick();
+    assert.strictEqual(maxAuth, 1);
+    assert.strictEqual(maxDb, 4);
+    while (releases.length) {
+      releases.splice(0).forEach(release => release());
+      await tick();
+    }
+    await Promise.all([...authRequests, ...dbRequests]);
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('transient Auth failures become retryable without clearing the recovery lease', async () => {
+    LB.authRecoveryTest.clear();
+    testFetch = async () => ({ ok: false, status: 500 });
+    await assert.rejects(
+      testClientOptions.global.fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token'),
+      /Temporary Supabase Auth failure/,
+    );
+    assert.strictEqual(LB.authRecoveryTest.state().reason, 'http-500');
+
+    LB.authRecoveryTest.clear();
+    testFetch = async () => ({ ok: false, status: 400 });
+    const permanent = await testClientOptions.global.fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token');
+    assert.strictEqual(permanent.status, 400);
+    assert.strictEqual(LB.authRecoveryTest.state(), null);
+
+    LB.authRecoveryTest.rememberUser('offline-user');
+    assert.strictEqual(LB.authRecoveryTest.offlineUser().userId, 'offline-user');
+    LB.authRecoveryTest.clearUser();
+    testFetch = async () => ({ ok: true });
+  });
+
   await testAsync('DB scheduler enforces four total, two background and two write tasks', async () => {
     const tick = () => new Promise(resolve => setImmediate(resolve));
     const runControlled = async (definitions, expected) => {
