@@ -144,7 +144,7 @@ function TopBar({ title, sub, onBack, right }) {
 
 // ─── SubTabBar, segmented control for in-screen sub-navigation ───────
 // Used e.g. to switch Plan ⇄ Library inside the merged "Plan" tab.
-function SubTabBar({ tabs, active, onChange, style = {} }) {
+function SubTabBar({ tabs, active, onChange, style = {}, itemStyle = {} }) {
   return (
     <div style={{ flexShrink: 0, minWidth: 0, display: 'flex', gap: 4, padding: '10px 22px 2px', ...style }}>
       {tabs.map(t => {
@@ -158,6 +158,7 @@ function SubTabBar({ tabs, active, onChange, style = {} }) {
             fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
             WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+            ...itemStyle,
           }}>
             {t.icon && <i className={`fa-solid ${t.icon}`} style={{ fontSize: 12 }} />}
             {t.label}
