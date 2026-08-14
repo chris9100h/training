@@ -53,6 +53,11 @@ function Screen({ children, scroll = true, style = {} }) {
       backgroundColor: UI.bg, backgroundImage: 'var(--bg-texture)', color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
+      // A screen is a vertical page, not a horizontal canvas. Keep accidental
+      // wide children from turning the whole route into a sideways scroll
+      // surface; components that intentionally scroll sideways (chip strips,
+      // tables) own their separate overflow container.
+      overflowX: 'hidden',
       // Inherits to every descendant (text-shadow is an inherited CSS
       // property) except where a surface with its own background, like Card,
       // Sheet, or a solid-fill Btn, resets it back to 'none'. 'none' outside
@@ -141,12 +146,12 @@ function TopBar({ title, sub, onBack, right }) {
 // Used e.g. to switch Plan ⇄ Library inside the merged "Plan" tab.
 function SubTabBar({ tabs, active, onChange, style = {} }) {
   return (
-    <div style={{ flexShrink: 0, display: 'flex', gap: 4, padding: '10px 22px 2px', ...style }}>
+    <div style={{ flexShrink: 0, minWidth: 0, display: 'flex', gap: 4, padding: '10px 22px 2px', ...style }}>
       {tabs.map(t => {
         const on = t.id === active;
         return (
           <button key={t.id} onClick={() => !on && onChange(t.id)} aria-current={on ? 'page' : undefined} style={{
-            flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
+            flex: 1, minWidth: 0, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
             background: on ? UI.goldFaint : 'transparent',
             border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
             color: on ? UI.gold : UI.inkSoft,

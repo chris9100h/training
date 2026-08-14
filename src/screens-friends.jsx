@@ -1318,7 +1318,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     <Screen scroll={!activeChat}>
       {confirmEl}
       <TopBar title="Friends" right={<span className="micro" style={{ color: UI.inkFaint }}>{friends.length} friend{friends.length === 1 ? '' : 's'}</span>} />
-      <SubTabBar tabs={[{ id: 'circle', label: 'Circle', icon: 'fa-users' }, { id: 'activity', label: 'Activity', icon: 'fa-bolt' }, { id: 'chats', label: 'Chats', icon: 'fa-comment' }, { id: 'groups', label: 'Groups', icon: 'fa-users-rectangle' }, { id: 'plans', label: 'Plans', icon: 'fa-share-nodes' }]} active={activeTab} onChange={setActiveTab} style={{ paddingBottom: 8 }} />
+      <SubTabBar tabs={[{ id: 'circle', label: 'Circle', icon: 'fa-users' }, { id: 'activity', label: 'Activity', icon: 'fa-bolt' }, { id: 'chats', label: 'Chats', icon: 'fa-comment' }, { id: 'groups', label: 'Groups', icon: 'fa-users-rectangle' }, { id: 'plans', label: 'Plans', icon: 'fa-share-nodes' }]} active={activeTab} onChange={setActiveTab} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', paddingBottom: 8 }} />
       <div style={{ padding: '0 18px 28px', ...(activeChat ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}) }}>
         {error && <div style={{ margin: '8px 0 12px', padding: '9px 11px', borderRadius: 4, background: 'rgba(var(--danger-rgb),0.10)', border: `var(--hair-width) solid rgba(var(--danger-rgb),0.3)`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 12 }}>{error}</div>}
         {activeTab === 'circle' && renderCircle()}
