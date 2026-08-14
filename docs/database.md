@@ -749,7 +749,7 @@ Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, option
 
 The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Friends and Coaching share one navigation slot. The client loads this slice and subscribes to social Realtime changes only after the setting is enabled. Friends are not included in the personal workout backup because they reference other users and server-side conversations. The explicit delete-all flow removes the user's social profile, relationships, groups, messages, shares, comments and private attachment objects through `delete_my_social_data`; backup restore deliberately keeps social data intact.
 
-`social_mode = 'maintenance'` is the emergency boundary around this entire feature. A restrictive RLS policy is combined with every existing Social policy, storage has the same gate for `social-chat-attachments`, and every client-facing Social RPC checks `app_private.require_social_available()` before its original implementation. Old clients therefore fail cheaply even if they do not understand the maintenance UI. New clients also stop all Social requests and channels locally.
+`social_mode = 'maintenance'` is the emergency boundary around this entire feature. A restrictive RLS policy is combined with every existing Social policy except `zane_social_reports`, whose reporter/admin policies remain available for moderation; storage has the same gate for `social-chat-attachments`, and every client-facing Social RPC checks `app_private.require_social_available()` before its original implementation. Old clients therefore fail cheaply even if they do not understand the maintenance UI. New clients also stop all Social requests and channels locally.
 
 ### `zane_social_profiles`
 
@@ -773,7 +773,7 @@ The Friends feature is opt-in through `zane_user_settings.show_friends_tab`. Fri
 
 - `blocker_id`, `blocked_id` (uuid auth users, composite primary key)
 - `created_at` (timestamptz)
-- Blocking removes the friendship, prevents new requests or direct messages, and hides common group membership, group messages and plan shares from the blocked pair. Workout access is also denied in both directions.
+- Blocking removes the friendship, prevents new requests or direct messages, and hides common group membership, group messages and plan shares from the blocked pair. Workout access is also denied in both directions. In a group owned by the blocker, the blocked member is removed; in a group owned by someone else, the blocker remains a member (the group is hidden from the blocked pair rather than mutating a third party's membership). This keeps the owner in control of membership while guaranteeing that the blocked pair cannot see or message through that group.
 
 ### `zane_social_groups`
 

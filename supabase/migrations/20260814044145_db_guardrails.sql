@@ -65,7 +65,6 @@ BEGIN
     'zane_social_message_reads',
     'zane_social_plan_shares',
     'zane_social_plan_share_imports',
-    'zane_social_reports',
     'zane_social_workout_comments'
   ]
   LOOP

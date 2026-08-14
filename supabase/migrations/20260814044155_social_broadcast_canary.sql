@@ -59,12 +59,16 @@ BEGIN
     FROM public.zane_app_config c
     WHERE c.id = 1
   ), true) THEN
-    PERFORM realtime.send(
-      jsonb_build_object('resource', p_resource),
-      'social_invalidate',
-      'social:user:' || p_user_id::text,
-      true
-    );
+    BEGIN
+      PERFORM realtime.send(
+        jsonb_build_object('resource', p_resource),
+        'social_invalidate',
+        'social:user:' || p_user_id::text,
+        true
+      );
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'social broadcast skipped (%): %', SQLSTATE, SQLERRM;
+    END;
   END IF;
 END;
 $function$;

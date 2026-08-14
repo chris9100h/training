@@ -24,21 +24,13 @@ BEGIN
   DELETE FROM zane_social_group_members victim
   USING zane_social_groups shared_group
   WHERE victim.group_id = shared_group.id
+    AND shared_group.owner_id = auth.uid()
+    AND victim.user_id = p_target_id
     AND EXISTS (
       SELECT 1
       FROM zane_social_group_members actor_members
       WHERE actor_members.group_id = shared_group.id
         AND actor_members.user_id = auth.uid()
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM zane_social_group_members target_members
-      WHERE target_members.group_id = shared_group.id
-        AND target_members.user_id = p_target_id
-    )
-    AND (
-      (shared_group.owner_id = auth.uid() AND victim.user_id = p_target_id)
-      OR (shared_group.owner_id <> auth.uid() AND victim.user_id = auth.uid())
     );
 END;
 $function$;

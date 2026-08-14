@@ -187,7 +187,7 @@ AS $function$
 DECLARE v_admin_id uuid;
 BEGIN
   SELECT id INTO v_admin_id FROM auth.users WHERE email = 'office@btc-prime.biz' LIMIT 1;
-  IF auth.uid() <> v_admin_id THEN RAISE EXCEPTION 'Unauthorized'; END IF;
+  IF auth.uid() IS NULL OR auth.uid() <> v_admin_id THEN RAISE EXCEPTION 'Unauthorized'; END IF;
   RETURN QUERY
   SELECT
     c.id,

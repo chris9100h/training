@@ -174,7 +174,7 @@ function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, sa
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
@@ -740,18 +740,21 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   // and category counts.
   const mealCats = LB.mealCategories(store.settings);
   const [mealCategoryDraft, setMealCategoryDraft] = useStateSet(null);
+  const normalizeMealCategories = (categories) => (categories || []).map((c, i) => ({
+    id: String(c.id || `meal-${i + 1}`),
+    label: String(c.label || '').trim().slice(0, 40) || `Meal ${i + 1}`,
+    startHour: Number.isInteger(c.startHour) ? c.startHour : 0,
+  })).sort((a, b) => a.startHour - b.startHour);
   useEffectSet(() => {
     if (!mealTimesSheet) { setMealCategoryDraft(null); return; }
     setMealCategoryDraft(LB.mealCategories(store.settings).map(c => ({ id: c.id, label: c.label, startHour: c.startHour })));
   }, [mealTimesSheet]);
 
   const draftMealCats = mealCategoryDraft || mealCats.map(c => ({ id: c.id, label: c.label, startHour: c.startHour }));
+  const defaultMealCats = LB.mealCategories({}).map(c => ({ id: c.id, label: c.label, startHour: c.startHour }));
+  const mealCategoriesCustomized = JSON.stringify(normalizeMealCategories(mealCats)) !== JSON.stringify(normalizeMealCategories(defaultMealCats));
   const persistMealCategories = (categories) => {
-    const next = categories.map((c, i) => ({
-      id: String(c.id || `meal-${i + 1}`),
-      label: String(c.label || '').trim().slice(0, 40) || `Meal ${i + 1}`,
-      startHour: Number.isInteger(c.startHour) ? c.startHour : 0,
-    })).sort((a, b) => a.startHour - b.startHour);
+    const next = normalizeMealCategories(categories);
     if (next.length) next[0].startHour = 0;
     setMealCategoryDraft(next);
     setStore(s => ({ ...s, settings: {
@@ -763,7 +766,9 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
     } }));
   };
   const closeMealTimes = () => {
-    if (mealCategoryDraft?.length) persistMealCategories(mealCategoryDraft);
+    const next = normalizeMealCategories(mealCategoryDraft);
+    const current = normalizeMealCategories(mealCats);
+    if (next.length && JSON.stringify(next) !== JSON.stringify(current)) persistMealCategories(next);
     setMealTimesSheet(false);
   };
   const updateMealCategoryLabel = (idx, label) => {
@@ -2807,7 +2812,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {store.settings?.showFoodTab && (
             <>
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
-              <NavRow label="Meal Times" hint={(store.settings?.mealCategories || store.settings?.mealWindows) ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+              <NavRow label="Meal Times" hint={mealCategoriesCustomized ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
               <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
               {/* Only meaningful for the imperial unit preference: on kg (or
                   mixed) the food tracker is already grams, there's nothing to
@@ -2916,7 +2921,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 background: 'none', border: 'none', padding: 0, cursor: draftMealCats.length >= 24 ? 'default' : 'pointer',
                 color: draftMealCats.length >= 24 ? UI.inkGhost : 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
               }}><i className="fa-solid fa-plus" style={{ marginRight: 6, fontSize: 10 }} />Add meal category</button>
-              {(store.settings?.mealCategories || store.settings?.mealWindows) && (
+              {mealCategoriesCustomized && (
                 <button onClick={resetMealCategories} style={{
                   background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                   color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
@@ -4162,7 +4167,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
                                 <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
                                   onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
-                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
                                   <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
                                   <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>
@@ -4341,7 +4346,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
                                 <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
                                   onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
-                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 5, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
                                   <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
                                   <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>

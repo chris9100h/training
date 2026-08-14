@@ -68,7 +68,7 @@ const EXCLUDED = {
   zane_coaching_notes: 'coaching (export archive only)',
   zane_coaching_macros: 'coaching (export archive only)',
   zane_checkins: 'coaching (export archive only)',
-  zane_social_profiles: 'friends identity and privacy settings reference other users, not personal workout backup data',
+  zane_social_profiles: 'friends identity/privacy state is shared social account data and can be regenerated from server state; it is not personal workout backup data',
   zane_social_friendships: 'friends relationships reference other users, not personal workout backup data',
   zane_social_blocks: 'friends safety relationships reference other users, not personal workout backup data',
   zane_social_groups: 'private social groups reference other users, not personal workout backup data',
@@ -210,7 +210,9 @@ function parseSelectedColumns(src) {
 function parseLoadedSettingsColumns(src) {
   const start = src.indexOf('async function loadFromSupabase(');
   const end = src.indexOf('\nasync function autoArchiveMissedDays(', start);
-  const body = src.slice(start, end);
+  const mapStart = src.indexOf('function mapUserSettings(');
+  const mapEnd = src.indexOf('\nfunction ', mapStart + 1);
+  const body = src.slice(start, end) + '\n' + (mapStart >= 0 ? src.slice(mapStart, mapEnd > mapStart ? mapEnd : undefined) : '');
   const map = new Map(); // db column -> store field
   // ".*?" so a wrapped value (normalizeHiddenHealthCards(sett.x), the
   // Array.isArray(sett.x) ? sett.x : [] ternaries) still resolves to its own

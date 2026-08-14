@@ -15,6 +15,9 @@ const required = [
 for (const name of required) {
   if (!process.env[name]) throw new Error(`Missing ${name}`);
 }
+if (process.env.SUPABASE_TEST_ROLLBACK === '1' && !process.env.SUPABASE_TEST_ADMIN_EMAIL) {
+  throw new Error('Missing SUPABASE_TEST_ADMIN_EMAIL (the rollback RPC is restricted to office@btc-prime.biz)');
+}
 
 vm.runInThisContext(fs.readFileSync('src/supabase.js', 'utf8'), {
   filename: 'src/supabase.js',
@@ -67,12 +70,12 @@ async function loginOrSignUp(client, email) {
   };
 }
 
-function subscribe(client, topic, label, timeoutMs = 12000) {
+function subscribe(client, topic, label, transport = 'broadcast', timeoutMs = 12000) {
   return new Promise(resolve => {
     let settled = false;
-    const channel = client
-      .channel(topic, { config: { private: true } })
-      .on('broadcast', { event: 'coaching_invalidate' }, event => {
+    let channel = client.channel(topic, transport === 'broadcast' ? { config: { private: true } } : undefined);
+    if (transport === 'broadcast') {
+      channel = channel.on('broadcast', { event: 'coaching_invalidate' }, event => {
         const payload = event?.payload ?? {};
         events.push({
           label,
@@ -81,8 +84,11 @@ function subscribe(client, topic, label, timeoutMs = 12000) {
           resource: payload.resource ?? null,
           payloadKeys: Object.keys(payload).sort(),
         });
-      })
-      .subscribe((status, error) => {
+      });
+    } else {
+      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching_notes' }, () => {});
+    }
+    channel.subscribe((status, error) => {
         if (settled || status === 'CLOSED') return;
         if (status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           settled = true;
@@ -98,6 +104,17 @@ function subscribe(client, topic, label, timeoutMs = 12000) {
   });
 }
 
+async function ensureTestProfile(client, identity, role) {
+  const { error } = await withTimeout(
+    `Ensure ${role} profile`,
+    client.from('zane_profiles').upsert({
+      id: identity.id,
+      name: `Broadcast Test ${role}`,
+    }, { onConflict: 'id' }),
+  );
+  if (error) throw new Error(`Ensure ${role} profile: ${error.message}`);
+}
+
 function resourcesFor(label) {
   return new Set(events.filter(event => event.label === label).map(event => event.resource));
 }
@@ -108,6 +125,7 @@ async function main() {
     client: makeClient(),
     outsider: makeClient(),
   };
+  if (process.env.SUPABASE_TEST_ROLLBACK === '1') clients.admin = makeClient();
   activeClients.push(...Object.values(clients));
   console.log('STEP auth');
   const identities = await Promise.all([
@@ -121,6 +139,16 @@ async function main() {
     outsider: identities[2],
   };
 
+  if (clients.admin) {
+    const { data, error } = await withTimeout(
+      'Sign in admin for transport rollback',
+      clients.admin.auth.signInWithPassword({ email: process.env.SUPABASE_TEST_ADMIN_EMAIL, password: process.env.SUPABASE_TEST_PASSWORD }),
+    );
+    if (error) throw new Error(`Admin rollback login: ${error.message}`);
+    if (!data?.session) throw new Error('Admin rollback login returned no session');
+    clients.admin.realtime.setAuth(data.session.access_token);
+  }
+
   if (identities.some(identity => !identity.session)) {
     console.log(`CONFIRM_REQUIRED ${JSON.stringify(Object.values(users).map(({ id, email }) => ({ id, email })))}`);
     process.exitCode = 2;
@@ -129,6 +157,9 @@ async function main() {
   for (const [role, identity] of Object.entries(users)) {
     clients[role].realtime.setAuth(identity.session.access_token);
   }
+  await Promise.all(Object.entries(users).map(([role, identity]) =>
+    ensureTestProfile(clients[role], identity, role),
+  ));
 
   console.log('STEP subscribe');
   const subscriptions = await Promise.all([
@@ -210,7 +241,9 @@ async function main() {
   const coachResources = resourcesFor('coach-own');
   const clientResources = resourcesFor('client-own');
   const outsiderResources = resourcesFor('outsider-own');
-  const missingCoach = ['relationships', 'notes', 'support', 'status'].filter(resource => !coachResources.has(resource));
+  // Support tickets belong to the admin, not the regular coaching partner;
+  // the client-side support channel is covered by missingClient below.
+  const missingCoach = ['relationships', 'notes', 'status'].filter(resource => !coachResources.has(resource));
   const missingClient = ['relationships', 'notes', 'support'].filter(resource => !clientResources.has(resource));
   let rollback = null;
 
@@ -218,29 +251,44 @@ async function main() {
     console.log('STEP rollback legacy');
     const { error: legacyError } = await withTimeout(
       'Switch coaching transport to legacy',
-      clients.coach.rpc('admin_set_coaching_transport', { p_transport: 'legacy' }),
+      clients.admin.rpc('admin_set_coaching_transport', { p_transport: 'legacy' }),
     );
     if (legacyError) throw legacyError;
     const { data: legacyConfig, error: legacyConfigError } = await withTimeout(
       'Read legacy runtime config',
-      clients.coach.rpc('get_runtime_config'),
+      clients.admin.rpc('get_runtime_config'),
     );
     if (legacyConfigError) throw legacyConfigError;
+    // The admin controls the switch, but only the client may subscribe to
+    // the client's private topic.  Using the admin here would correctly be
+    // rejected by the realtime authorization policy and would not test the
+    // rollback transport itself.
+    const legacySubscription = await subscribe(clients.client, `coaching-legacy:${users.client.id}`, 'rollback-legacy', 'legacy');
+
+    // Tear down the original Broadcast channel before reopening the same
+    // logical topic after the transport switch. Realtime does not guarantee
+    // duplicate simultaneous subscriptions for one topic.
+    const originalClientChannel = subscriptions.find(item => item.label === 'client-own')?.channel;
+    if (originalClientChannel) await clients.client.removeChannel(originalClientChannel);
 
     console.log('STEP rollback broadcast');
     const { error: broadcastError } = await withTimeout(
       'Switch coaching transport to broadcast',
-      clients.coach.rpc('admin_set_coaching_transport', { p_transport: 'broadcast' }),
+      clients.admin.rpc('admin_set_coaching_transport', { p_transport: 'broadcast' }),
     );
     if (broadcastError) throw broadcastError;
     const { data: broadcastConfig, error: broadcastConfigError } = await withTimeout(
       'Read broadcast runtime config',
-      clients.coach.rpc('get_runtime_config'),
+      clients.admin.rpc('get_runtime_config'),
     );
     if (broadcastConfigError) throw broadcastConfigError;
+    await clients.client.removeChannel(legacySubscription.channel);
+    const broadcastSubscription = await subscribe(clients.client, `coaching:user:${users.client.id}`, 'rollback-broadcast', 'broadcast');
     rollback = {
       legacy: legacyConfig?.coachingTransport ?? null,
       broadcast: broadcastConfig?.coachingTransport ?? null,
+      legacySubscription: legacySubscription.status,
+      broadcastSubscription: broadcastSubscription.status,
     };
   }
 
@@ -265,7 +313,7 @@ async function main() {
     || missingCoach.length > 0
     || missingClient.length > 0
     || outsiderResources.size > 0
-    || (rollback && (rollback.legacy !== 'legacy' || rollback.broadcast !== 'broadcast'));
+    || (rollback && (rollback.legacy !== 'legacy' || rollback.broadcast !== 'broadcast' || rollback.legacySubscription !== 'SUBSCRIBED' || rollback.broadcastSubscription !== 'SUBSCRIBED'));
 
   await clients.client.from('zane_user_settings').update({ status_mode: null, status_mode_since: null }).eq('user_id', users.client.id);
   await clients.client.from('zane_coaching').delete().eq('id', supportId);

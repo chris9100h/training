@@ -664,7 +664,6 @@ CREATE INDEX IF NOT EXISTS idx_zane_push_subscriptions_user_id ON public.zane_pu
 CREATE INDEX IF NOT EXISTS idx_zane_schedules_user_id          ON public.zane_schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_zane_session_entries_user_id    ON public.zane_session_entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_zane_sessions_user_id           ON public.zane_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_zane_sets_user_id               ON public.zane_sets(user_id);
 CREATE INDEX IF NOT EXISTS idx_zane_skips_user_id              ON public.zane_skips(user_id);
 CREATE INDEX zane_adaptive_tdee_history_user_idx ON public.zane_adaptive_tdee_history USING btree (user_id, as_of_date DESC);
 
@@ -3192,7 +3191,7 @@ AS $function$
 DECLARE v_admin_id uuid;
 BEGIN
   SELECT id INTO v_admin_id FROM auth.users WHERE email = 'office@btc-prime.biz' LIMIT 1;
-  IF auth.uid() <> v_admin_id THEN RAISE EXCEPTION 'Unauthorized'; END IF;
+  IF auth.uid() IS NULL OR auth.uid() <> v_admin_id THEN RAISE EXCEPTION 'Unauthorized'; END IF;
   RETURN QUERY
   SELECT
     c.id,
@@ -4642,112 +4641,6 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.social_health_metric_value(uuid, text, date, date) FROM PUBLIC, anon, authenticated;
 
-CREATE OR REPLACE FUNCTION public.social_get_dashboard(p_week_start date, p_today date)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_uid uuid := auth.uid();
-  v_all_metric_keys text[] := ARRAY[
-    'steps','workouts','adherence','calories','protein','carbs','fat','fiber',
-    'water','cardioMinutes','cardioDistance','weight','bodyFatPct','waistCm',
-    'hipsCm','chestCm','armCm','thighCm','calfCm','glucose','bloodPressure','bodyTemp'
-  ];
-  v_metric_keys text[] := ARRAY['steps','workouts','adherence'];
-BEGIN
-  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
-
-  SELECT ARRAY(
-    SELECT DISTINCT candidate
-    FROM unnest(
-      ARRAY['steps','workouts','adherence']::text[] ||
-      ARRAY(SELECT jsonb_array_elements_text(COALESCE(sp.metric_slots, '[]'::jsonb)))
-    ) AS candidate
-    WHERE candidate = ANY(v_all_metric_keys)
-  )
-  INTO v_metric_keys
-  FROM zane_social_profiles sp
-  WHERE sp.user_id = v_uid;
-
-  IF COALESCE(cardinality(v_metric_keys), 0) < 3 THEN
-    v_metric_keys := ARRAY['steps','workouts','adherence'];
-  END IF;
-  RETURN jsonb_build_object(
-    'profile', (
-      SELECT jsonb_build_object(
-        'userId', sp.user_id, 'handle', sp.handle, 'friendCode', sp.friend_code,
-        'weightUnit', us.unit,
-        'stepsVisible', sp.steps_visible, 'workoutsVisible', sp.workouts_visible,
-        'adherenceVisible', sp.adherence_visible, 'metricVisibility', sp.metric_visibility,
-        'metricSlots', sp.metric_slots
-      )
-      FROM zane_social_profiles sp LEFT JOIN zane_user_settings us ON us.user_id = sp.user_id
-      WHERE sp.user_id = v_uid
-    ),
-    'friends', coalesce((
-      SELECT jsonb_agg(jsonb_build_object(
-        'friendshipId', f.id, 'userId', other.user_id, 'name', coalesce(p.name, 'Zane athlete'),
-        'handle', other.handle, 'friendCode', other.friend_code, 'weightUnit', ous.unit,
-        'stepsVisible', other.steps_visible, 'workoutsVisible', other.workouts_visible,
-        'adherenceVisible', other.adherence_visible,
-        'metricVisibility', visibility.metric_visibility,
-        'metrics', (SELECT jsonb_object_agg(metric_key, CASE WHEN lower(coalesce(visibility.metric_visibility->>metric_key, 'false')) = 'true' THEN public.social_health_metric_value(other.user_id, metric_key, NULL, NULL) ELSE NULL END) FROM unnest(v_metric_keys) AS metric_key)
-      ) ORDER BY f.updated_at DESC)
-      FROM zane_social_friendships f
-      JOIN zane_social_profiles other ON other.user_id = CASE WHEN f.requester_id = v_uid THEN f.addressee_id ELSE f.requester_id END
-      LEFT JOIN zane_profiles p ON p.id = other.user_id
-      LEFT JOIN zane_user_settings ous ON ous.user_id = other.user_id
-      LEFT JOIN LATERAL (
-        SELECT COALESCE(other.metric_visibility, '{}'::jsonb) || jsonb_build_object(
-          'steps', COALESCE(other.metric_visibility->'steps', to_jsonb(other.steps_visible)),
-          'workouts', COALESCE(other.metric_visibility->'workouts', to_jsonb(other.workouts_visible)),
-          'adherence', COALESCE(other.metric_visibility->'adherence', to_jsonb(other.adherence_visible))
-        ) AS metric_visibility
-      ) visibility ON true
-      WHERE f.status = 'accepted' AND (f.requester_id = v_uid OR f.addressee_id = v_uid)
-        AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = v_uid AND b.blocked_id = other.user_id) OR (b.blocker_id = other.user_id AND b.blocked_id = v_uid))
-    ), '[]'::jsonb),
-    'incoming', coalesce((
-      SELECT jsonb_agg(jsonb_build_object('id', f.id, 'userId', f.requester_id, 'name', coalesce(p.name, 'Zane athlete'), 'handle', sp.handle) ORDER BY f.created_at DESC)
-      FROM zane_social_friendships f JOIN zane_social_profiles sp ON sp.user_id = f.requester_id LEFT JOIN zane_profiles p ON p.id = f.requester_id
-      WHERE f.addressee_id = v_uid AND f.status = 'pending'
-        AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = v_uid AND b.blocked_id = f.requester_id) OR (b.blocker_id = f.requester_id AND b.blocked_id = v_uid))
-    ), '[]'::jsonb),
-    'outgoing', coalesce((
-      SELECT jsonb_agg(jsonb_build_object('id', f.id, 'userId', f.addressee_id, 'name', coalesce(p.name, 'Zane athlete'), 'handle', sp.handle) ORDER BY f.created_at DESC)
-      FROM zane_social_friendships f JOIN zane_social_profiles sp ON sp.user_id = f.addressee_id LEFT JOIN zane_profiles p ON p.id = f.addressee_id
-      WHERE f.requester_id = v_uid AND f.status = 'pending'
-        AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = v_uid AND b.blocked_id = f.addressee_id) OR (b.blocker_id = f.addressee_id AND b.blocked_id = v_uid))
-    ), '[]'::jsonb),
-    'groupMembers', coalesce((
-      SELECT jsonb_agg(jsonb_build_object(
-        'groupId', gm.group_id, 'userId', gm.user_id, 'role', gm.role, 'joinedAt', gm.joined_at,
-        'name', coalesce(p.name, 'Zane athlete'), 'handle', sp.handle,
-        'steps', CASE WHEN sp.steps_visible THEN public.social_health_metric_value(gm.user_id, 'steps', NULL, NULL) END,
-        'workouts', CASE WHEN sp.workouts_visible THEN public.social_health_metric_value(gm.user_id, 'workouts', NULL, NULL) END,
-        'adherence', CASE WHEN sp.adherence_visible THEN public.social_health_metric_value(gm.user_id, 'adherence', NULL, NULL) END
-      ) ORDER BY gm.joined_at)
-      FROM zane_social_group_members gm
-      JOIN zane_social_profiles sp ON sp.user_id = gm.user_id
-      LEFT JOIN zane_profiles p ON p.id = gm.user_id
-      WHERE EXISTS (SELECT 1 FROM zane_social_group_members viewer WHERE viewer.group_id = gm.group_id AND viewer.user_id = v_uid)
-        AND NOT EXISTS (
-          SELECT 1
-          FROM zane_social_group_members other_member
-          JOIN zane_social_blocks b ON (b.blocker_id = v_uid AND b.blocked_id = other_member.user_id) OR (b.blocker_id = other_member.user_id AND b.blocked_id = v_uid)
-          WHERE other_member.group_id = gm.group_id AND other_member.user_id <> v_uid
-        )
-    ), '[]'::jsonb)
-  );
-END;
-$function$;
-
-REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date, date) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date, date) TO authenticated;
-
-
 CREATE OR REPLACE FUNCTION public.social_get_friend_metrics(p_friend_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -5194,10 +5087,8 @@ BEGIN
       WHERE target_members.group_id = shared_group.id
         AND target_members.user_id = p_target_id
     )
-    AND (
-      (shared_group.owner_id = auth.uid() AND victim.user_id = p_target_id)
-      OR (shared_group.owner_id <> auth.uid() AND victim.user_id = auth.uid())
-    );
+    AND shared_group.owner_id = auth.uid()
+    AND victim.user_id = p_target_id;
 END;
 $function$;
 
@@ -5441,7 +5332,6 @@ BEGIN
     'zane_social_message_reads',
     'zane_social_plan_shares',
     'zane_social_plan_share_imports',
-    'zane_social_reports',
     'zane_social_workout_comments'
   ]
   LOOP
@@ -5729,7 +5619,7 @@ GRANT EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) TO authenticated;
 -- CREATE OR REPLACE would create an overload because the argument list
 -- changes. Drop and recreate in this migration transaction so old one-arg
 -- callers continue to resolve through the default second argument.
-DROP FUNCTION public.get_session_stats(uuid);
+DROP FUNCTION IF EXISTS public.get_session_stats(uuid);
 
 CREATE FUNCTION public.get_session_stats(
   p_user_id uuid DEFAULT NULL,
@@ -5808,7 +5698,21 @@ BEGIN
       WHERE m.sender_id <> v_uid
         AND (
           m.recipient_id = v_uid
-          OR (m.group_id IS NOT NULL AND public.social_group_visible(m.group_id, v_uid))
+          OR (
+            m.group_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM zane_social_group_members own_member
+              WHERE own_member.group_id = m.group_id AND own_member.user_id = v_uid
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM zane_social_group_members other_member
+              JOIN zane_social_blocks b
+                ON (b.blocker_id = v_uid AND b.blocked_id = other_member.user_id)
+                OR (b.blocker_id = other_member.user_id AND b.blocked_id = v_uid)
+              WHERE other_member.group_id = m.group_id AND other_member.user_id <> v_uid
+            )
+          )
         )
         AND NOT EXISTS (
           SELECT 1
@@ -6216,6 +6120,22 @@ END;
 $function$;
 
 REVOKE EXECUTE ON FUNCTION public.social_health_metric_value(uuid, text, date, date) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_block_user(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_group(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_delete_group(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_join_group(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_leave_group(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_remove_friend(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_send_friend_request(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_update_metric_preferences(jsonb, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean, jsonb, jsonb) FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.social_block_user(uuid) TO authenticated;
@@ -6295,12 +6215,16 @@ BEGIN
     FROM public.zane_app_config c
     WHERE c.id = 1
   ), true) THEN
-    PERFORM realtime.send(
-      jsonb_build_object('resource', p_resource),
-      'social_invalidate',
-      'social:user:' || p_user_id::text,
-      true
-    );
+    BEGIN
+      PERFORM realtime.send(
+        jsonb_build_object('resource', p_resource),
+        'social_invalidate',
+        'social:user:' || p_user_id::text,
+        true
+      );
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'social broadcast skipped (%): %', SQLSTATE, SQLERRM;
+    END;
   END IF;
 END;
 $function$;

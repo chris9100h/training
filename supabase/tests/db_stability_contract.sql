@@ -79,6 +79,45 @@ BEGIN
   IF has_function_privilege('anon', 'public.social_get_badge()', 'execute') THEN
     RAISE EXCEPTION 'anon can execute social_get_badge';
   END IF;
+  IF has_function_privilege('anon', 'public.social_block_user(uuid)', 'execute')
+     OR has_function_privilege('anon', 'public.social_add_workout_comment(text, text, text)', 'execute') THEN
+    RAISE EXCEPTION 'anon can execute a guarded Social mutation';
+  END IF;
+  IF position(
+    'auth.uid() IS NULL OR auth.uid() <> v_admin_id'
+    IN pg_get_functiondef('public.get_archived_support_chats()'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'archived support admin guard has no NULL-auth check';
+  END IF;
+  IF position(
+    'EXCEPTION WHEN OTHERS'
+    IN pg_get_functiondef('app_private.broadcast_social_user(uuid, text)'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'Social Broadcast sender can roll back the source write';
+  END IF;
+  IF position(
+    'shared_group.owner_id <> auth.uid()'
+    IN pg_get_functiondef('app_private.social_block_user(uuid)'::regprocedure)
+  ) > 0 THEN
+    RAISE EXCEPTION 'blocking still removes the blocker from a foreign-owned group';
+  END IF;
+  IF position(
+    'own_member'
+    IN pg_get_functiondef('public.social_get_badge()'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'social_get_badge still hides group membership behind a per-row function call';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'zane_social_reports'
+      AND policyname = 'social runtime gate'
+  ) THEN
+    RAISE EXCEPTION 'social report moderation is blocked by the maintenance gate';
+  END IF;
+  IF to_regclass('public.idx_zane_sets_user_id') IS NOT NULL THEN
+    RAISE EXCEPTION 'redundant single-column zane_sets index remains';
+  END IF;
   IF has_function_privilege('authenticated', 'public.db_health()', 'execute') THEN
     RAISE EXCEPTION 'authenticated can execute db_health';
   END IF;

@@ -75,7 +75,7 @@ async function testAsync(name, fn) {
 (async () => {
   const LB = loadStore();
 
-  await testAsync('runtime config applies global Social and Coaching transports with rollback', async () => {
+  await testAsync('runtime config exposes global Social and Coaching transports in both directions', async () => {
     testRpc = async name => {
       assert.strictEqual(name, 'get_runtime_config');
       return { data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast', coachingTransport: 'broadcast' }, error: null };
@@ -89,6 +89,42 @@ async function testAsync(name, fn) {
     assert.strictEqual(legacy.socialTransport, 'legacy');
     assert.strictEqual(legacy.coachingTransport, 'legacy');
     testRpc = async () => ({ data: null, error: null });
+  });
+
+  test('Social mappers accept both RPC camelCase and legacy PostgREST snake_case rows', () => {
+    const profile = LB.mapSocialProfile({ user_id: 'u1', steps_visible: true, workouts_visible: false, adherence_visible: true, metric_visibility: { weight: true }, metric_slots: ['weight', 'steps', 'weight'] });
+    assert.strictEqual(profile.userId, 'u1');
+    assert.strictEqual(profile.metricVisibility.weight, true);
+    assert.strictEqual(profile.metricVisibility.steps, true);
+    assert.deepStrictEqual([...profile.metricSlots], ['steps', 'workouts', 'adherence'], 'invalid/duplicate slots fall back to the safe default');
+
+    const friend = LB.mapSocialFriend({ id: 'f1', user_id: 'u2', steps: 12, steps_visible: true, accepted_at: '2026-01-01T00:00:00Z' });
+    assert.strictEqual(friend.friendshipId, 'f1');
+    assert.strictEqual(friend.userId, 'u2');
+    assert.strictEqual(friend.steps, 12);
+    assert.strictEqual(friend.metricVisibility.steps, true);
+
+    const modern = LB.mapSocialFriend({ friendshipId: 'f2', userId: 'u3', metricVisibility: { workouts: true }, metrics: { workouts: 4 } });
+    assert.strictEqual(modern.userId, 'u3');
+    assert.strictEqual(modern.metricVisibility.workouts, true);
+    assert.strictEqual(modern.workouts, 4);
+  });
+
+  test('Social workout/message mappers preserve snake_case fields and safe defaults', () => {
+    const detail = LB.mapSocialWorkoutDetail({
+      session: { session_id: 's1', owner_id: 'u1', ended: null, sets_done: 2 },
+      entries: [{ planned_sets: 3, sets: [{ reps_l: 4, reps_r: 5, time_sec: 30, done: 1 }] }],
+      comments: [{ author_id: 'u2', created_at: '2026-01-01T00:00:00Z', body: 'nice' }],
+    });
+    assert.strictEqual(detail.session.sessionId, 's1');
+    assert.strictEqual(detail.session.live, true);
+    assert.strictEqual(detail.entries[0].plannedSets, 3);
+    assert.strictEqual(detail.entries[0].sets[0].repsL, 4);
+    assert.strictEqual(detail.comments[0].authorId, 'u2');
+    const message = LB.mapSocialMessage({ id: 'm1', sender_id: 'u2', group_id: 'g1', created_at: '2026-01-01T00:00:00Z' }, [LB.mapSocialAttachment({ id: 'a1', message_id: 'm1', storage_path: 'u2/m1/a.png' })]);
+    assert.strictEqual(message.senderId, 'u2');
+    assert.strictEqual(message.groupId, 'g1');
+    assert.strictEqual(message.attachments[0].storagePath, 'u2/m1/a.png');
   });
 
   await testAsync('Coaching Broadcast uses one private user topic and coalesces content-free invalidations', async () => {
@@ -364,6 +400,16 @@ async function testAsync(name, fn) {
     state = api.breakerState();
     assert.ok(state.openUntil - Date.now() > 14.9 * 60 * 1000, 'failed half-open probe extends the pause');
     assert.strictEqual(state.longPause, true);
+    api.resetBreaker();
+  });
+
+  await testAsync('aborted database requests count as pressure even after Supabase wraps the error', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    const abortError = new Error('AbortError: This operation was aborted');
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(abortError)));
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(abortError)));
+    assert.ok(api.breakerState().openUntil > Date.now(), 'an aborted request must open the optional-work breaker');
     api.resetBreaker();
   });
 

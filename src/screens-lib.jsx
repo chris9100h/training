@@ -6339,7 +6339,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       {/* TopBar */}
       <div style={{
         flexShrink: 0,
-        padding: `env(safe-area-inset-top, 0px) 22px 14px`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 30px) 22px 14px`,
         borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',

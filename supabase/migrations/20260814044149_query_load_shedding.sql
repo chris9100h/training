@@ -48,7 +48,7 @@ GRANT EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) TO authenticated;
 -- CREATE OR REPLACE would create an overload because the argument list
 -- changes. Drop and recreate in this migration transaction so old one-arg
 -- callers continue to resolve through the default second argument.
-DROP FUNCTION public.get_session_stats(uuid);
+DROP FUNCTION IF EXISTS public.get_session_stats(uuid);
 
 CREATE FUNCTION public.get_session_stats(
   p_user_id uuid DEFAULT NULL,
@@ -127,7 +127,21 @@ BEGIN
       WHERE m.sender_id <> v_uid
         AND (
           m.recipient_id = v_uid
-          OR (m.group_id IS NOT NULL AND public.social_group_visible(m.group_id, v_uid))
+          OR (
+            m.group_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM zane_social_group_members own_member
+              WHERE own_member.group_id = m.group_id AND own_member.user_id = v_uid
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM zane_social_group_members other_member
+              JOIN zane_social_blocks b
+                ON (b.blocker_id = v_uid AND b.blocked_id = other_member.user_id)
+                OR (b.blocker_id = other_member.user_id AND b.blocked_id = v_uid)
+              WHERE other_member.group_id = m.group_id AND other_member.user_id <> v_uid
+            )
+          )
         )
         AND NOT EXISTS (
           SELECT 1
@@ -552,3 +566,22 @@ GRANT EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) TO
 GRANT EXECUTE ON FUNCTION public.social_send_friend_request(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.social_update_metric_preferences(jsonb, jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean, jsonb, jsonb) TO authenticated;
+
+-- CREATE FUNCTION grants EXECUTE to PUBLIC by default; all guarded Social
+-- mutations are authenticated-only.
+REVOKE EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_block_user(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_group(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_delete_group(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_join_group(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_leave_group(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_remove_friend(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_send_friend_request(uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_update_metric_preferences(jsonb, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean, jsonb, jsonb) FROM PUBLIC, anon;

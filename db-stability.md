@@ -117,7 +117,7 @@ Training und kritische Saves bleiben lokal erhalten. Der normale Sync versucht s
 - `admin_set_social_transport(p_transport)` ist der globale Broadcast-Rollback und ebenfalls nur für die Admin-Adresse ausführbar.
 - `admin_set_coaching_transport(p_transport)` schaltet Coaching, Support und Coach-Status global. Bei `legacy` stellt der RPC zuerst die vier Publication-Tabellen wieder her.
 - `get_runtime_config()` liefert Update-Nonce, Social-Modus und beide globalen Transportwerte.
-- Neue Clients zeigen im Wartungsmodus eine Wartungsseite und starten keine Social-RPCs, Polls oder Channels.
+- Neue Clients zeigen im Wartungsmodus eine Wartungsseite und starten keine Social-RPCs, Polls oder Channels. Moderationszugriff auf `zane_social_reports` bleibt für den Admin und den jeweiligen Reporter erhalten, damit ein Vorfall weiterhin bearbeitet werden kann.
 - Restriktive RLS-Policies blockieren die Social-Tabellen und den privaten Attachment-Bucket.
 - Alle clientseitig erreichbaren Social-RPCs prüfen den Modus vor ihrer bisherigen Implementierung.
 - Login, Training, Health und der normale Sync hängen nicht vom Social-Modus ab.

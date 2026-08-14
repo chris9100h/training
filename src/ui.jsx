@@ -105,11 +105,13 @@ function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
       flexShrink: 0,
-      // Keep header content inside the system safe area. Extra top padding and
-      // backdrop blur can make the iOS status-bar readout appear blurry.
-      padding: 'env(safe-area-inset-top, 0px) 22px 0',
+      // iOS devices can smear the status-bar readout against a screen header;
+      // the extra clearance and backdrop keep the confirmed device fix intact.
+      padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0',
       position: 'sticky', top: 0,
       background: 'rgba(var(--bg-rgb),0.97)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
       zIndex: 5,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12 }}>
@@ -1575,7 +1577,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
-      flexShrink: 0, padding: 'env(safe-area-inset-top, 0px) 22px 14px',
+      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 14px',
       position: 'relative', ...style,
     }}>
       {sub && (

@@ -70,9 +70,9 @@ async function unsubscribeWebPush(userId) {
 }
 
 const HTTP_REQUEST_LIMIT = 4;
+const DB_REQUEST_TIMEOUT_MS = 8000;
 const _httpRequestQueue = [];
 let _httpRequestsActive = 0;
-let _lastPressureHttpAt = 0;
 
 // Auth must never wait behind the database admission queue. A stalled
 // PostgREST request can otherwise keep the refresh-token request queued until
@@ -90,7 +90,9 @@ const _authRequestQueue = [];
 let _authRequestsActive = 0;
 
 function requestUrl(input) {
-  return typeof input === 'string' ? input : String(input?.url || '');
+  if (typeof input === 'string') return input;
+  if (input?.url) return String(input.url);
+  return String(input || '');
 }
 
 function isAuthRequest(input) {
@@ -149,16 +151,60 @@ function clearOfflineUser() {
   try { localStorage.removeItem(OFFLINE_USER_KEY); } catch (_) {}
 }
 
+function httpRequestPriority(input, init = {}, meta = {}) {
+  if (meta.priority === 'critical' || meta.priority === 'foreground' || meta.priority === 'background') {
+    return meta.priority;
+  }
+  const method = String(init?.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) return 'critical';
+  const url = requestUrl(input);
+  if (/\/rpc\/(?:get_runtime_config|db_health)(?:[?/]|$)/i.test(url)) return 'critical';
+  if (/\/rpc\/(?:social_|get_social|load_social|friends|badge)|\/rest\/v1\/zane_social_|\/realtime\//i.test(url)) return 'background';
+  return 'foreground';
+}
+
+async function dbFetch(input, init = {}) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const originalSignal = init?.signal;
+  let timer = null;
+  let removeAbortListener = null;
+  let requestInit = init;
+  if (controller) {
+    if (originalSignal) {
+      if (originalSignal.aborted) controller.abort();
+      else {
+        const forwardAbort = () => controller.abort();
+        originalSignal.addEventListener?.('abort', forwardAbort, { once: true });
+        removeAbortListener = () => originalSignal.removeEventListener?.('abort', forwardAbort);
+      }
+    }
+    requestInit = { ...init, signal: controller.signal };
+    timer = setTimeout(() => controller.abort(), DB_REQUEST_TIMEOUT_MS);
+  }
+  try {
+    return await fetch(input, requestInit);
+  } catch (error) {
+    if (controller && !originalSignal?.aborted && error?.name === 'AbortError') {
+      error.__zaneDbTimeout = true;
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbortListener?.();
+  }
+}
+
 function _drainHttpRequests() {
   while (_httpRequestsActive < HTTP_REQUEST_LIMIT && _httpRequestQueue.length) {
-    const entry = _httpRequestQueue.shift();
+    const index = _httpRequestQueue.findIndex(entry => entry.priority === 'critical') >= 0
+      ? _httpRequestQueue.findIndex(entry => entry.priority === 'critical')
+      : (_httpRequestQueue.findIndex(entry => entry.priority === 'foreground') >= 0
+        ? _httpRequestQueue.findIndex(entry => entry.priority === 'foreground')
+        : 0);
+    const [entry] = _httpRequestQueue.splice(index, 1);
     _httpRequestsActive += 1;
     Promise.resolve()
-      .then(() => fetch(...entry.args))
-      .then(response => {
-        if (response?.status === 429 || response?.status >= 500) _lastPressureHttpAt = Date.now();
-        return response;
-      })
+      .then(() => dbFetch(...entry.args))
       .then(entry.resolve, entry.reject)
       .finally(() => {
         _httpRequestsActive -= 1;
@@ -167,15 +213,15 @@ function _drainHttpRequests() {
   }
 }
 
-function limitedSupabaseFetch(...args) {
-  if (isAuthRequest(args[0])) {
+function limitedSupabaseFetch(input, init = {}, meta = {}) {
+  if (isAuthRequest(input)) {
     return new Promise((resolve, reject) => {
-      _authRequestQueue.push({ args, resolve, reject });
+      _authRequestQueue.push({ args: [input, init], resolve, reject });
       _drainAuthRequests();
     });
   }
   return new Promise((resolve, reject) => {
-    _httpRequestQueue.push({ args, resolve, reject });
+    _httpRequestQueue.push({ args: [input, init], priority: httpRequestPriority(input, init, meta), resolve, reject });
     _drainHttpRequests();
   });
 }
@@ -369,8 +415,8 @@ function isDatabasePressureError(error) {
   const message = String(error?.message || error || '');
   return status === 429 || status >= 500
     || code === '57014' || code === 'PGRST003'
-    || Date.now() - _lastPressureHttpAt < 5000
-    || /timeout|timed out|failed to fetch|networkerror|network request|load failed/i.test(message);
+    || error?.__zaneDbTimeout === true
+    || /timeout|timed out|abort(?:ed)?|failed to fetch|networkerror|network request|load failed/i.test(message);
 }
 
 function optionalDbPausedError() {
@@ -496,11 +542,11 @@ async function fnFetch(url, body) {
     const { data } = await _supabase.auth.getSession();
     const token = data?.session?.access_token;
     if (!token) return null;
-    return await fetch(url, {
+    return await limitedSupabaseFetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, { priority: 'background' });
   } catch (_) { return null; }
 }
 
@@ -12027,7 +12073,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,

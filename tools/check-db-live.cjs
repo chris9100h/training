@@ -100,7 +100,14 @@ const docSections = new Map();
 
 // Realtime publication: expected zane_ members. Foreign (non-zane) tables in
 // the same database are reported as info only.
-const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes', 'zane_user_settings', 'zane_checkins']);
+// Social now uses Broadcast invalidations. The nine tables below remain in the
+// publication only for the legacy rollback path; coaching tables are no longer
+// part of the app publication after the Broadcast migration.
+const EXPECTED_REALTIME = new Set([
+  'zane_social_friendships', 'zane_social_group_members', 'zane_social_groups',
+  'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_messages',
+  'zane_social_plan_share_imports', 'zane_social_plan_shares', 'zane_social_workout_comments',
+]);
 
 // Functions where anon EXECUTE is intentional (documented in docs/database.md,
 // "Grant-Fallen"). Every other function must have anon_exec === false.
