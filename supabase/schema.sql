@@ -65,8 +65,10 @@ CREATE TABLE public.zane_app_config (
   id int PRIMARY KEY DEFAULT 1,
   force_update_nonce text,
   social_mode text NOT NULL DEFAULT 'normal',
+  social_transport text NOT NULL DEFAULT 'broadcast',
   lifetime_seats_total int NOT NULL DEFAULT 75,
   CONSTRAINT zane_app_config_social_mode_check CHECK (social_mode IN ('normal', 'maintenance')),
+  CONSTRAINT zane_app_config_social_transport_check CHECK (social_transport IN ('legacy', 'broadcast')),
   CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
@@ -5433,7 +5435,6 @@ SET search_path = ''
 AS $function$
 DECLARE
   v_uid uuid := (SELECT auth.uid());
-  v_email text := lower(COALESCE((SELECT auth.email()), ''));
   v_config public.zane_app_config%ROWTYPE;
 BEGIN
   IF v_uid IS NULL THEN
@@ -5447,12 +5448,7 @@ BEGIN
   RETURN jsonb_build_object(
     'forceUpdateNonce', v_config.force_update_nonce,
     'socialMode', COALESCE(v_config.social_mode, 'normal'),
-    'socialTransport', CASE WHEN EXISTS (
-      SELECT 1
-      FROM public.zane_feature_grants fg
-      WHERE fg.feature = 'social_broadcast_canary'
-        AND lower(fg.email) = v_email
-    ) THEN 'broadcast' ELSE 'legacy' END
+    'socialTransport', COALESCE(v_config.social_transport, 'broadcast')
   );
 END;
 $function$;
@@ -5477,6 +5473,31 @@ BEGIN
   VALUES (1, v_mode)
   ON CONFLICT (id) DO UPDATE SET social_mode = EXCLUDED.social_mode;
   RETURN v_mode;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.admin_set_social_transport(p_transport text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_transport text := lower(trim(COALESCE(p_transport, '')));
+BEGIN
+  IF lower(COALESCE((SELECT auth.email()), '')) <> 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  IF v_transport NOT IN ('legacy', 'broadcast') THEN
+    RAISE EXCEPTION 'Invalid social transport';
+  END IF;
+
+  INSERT INTO public.zane_app_config (id, social_transport)
+  VALUES (1, v_transport)
+  ON CONFLICT (id) DO UPDATE
+  SET social_transport = EXCLUDED.social_transport;
+
+  RETURN v_transport;
 END;
 $function$;
 
@@ -5540,6 +5561,8 @@ REVOKE EXECUTE ON FUNCTION public.get_runtime_config() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_runtime_config() TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.admin_set_social_mode(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_set_social_mode(text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_set_social_transport(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_social_transport(text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.db_health() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.db_health() TO service_role;
 

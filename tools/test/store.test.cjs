@@ -11,6 +11,7 @@ let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
 let testClientOptions = null;
+let testRpc = async () => ({ data: null, error: null });
 const rpcLog = []; // records every rpc(name, args) call
 // The sandbox's own `window`, exposed so a test can set the globals store.js
 // reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
@@ -25,13 +26,14 @@ function loadStore() {
       getSession: async () => ({ data: { session: testSession } }),
     },
     from: (...args) => testFrom(...args),
-    rpc: async (name, args) => { rpcLog.push({ name, args }); return { data: null, error: null }; },
+    rpc: async (name, args) => { rpcLog.push({ name, args }); return testRpc(name, args); },
     channel: () => ({ on() { return this; }, subscribe() { return this; } }),
     removeChannel: () => {},
   };
   const sandbox = {
-    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, __STORE_TEST__: true },
+    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, dispatchEvent() {}, __STORE_TEST__: true },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
   };
   sandbox.global = sandbox;
@@ -61,6 +63,20 @@ async function testAsync(name, fn) {
 
 (async () => {
   const LB = loadStore();
+
+  await testAsync('runtime config applies the global Social transport and its rollback', async () => {
+    testRpc = async name => {
+      assert.strictEqual(name, 'get_runtime_config');
+      return { data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast' }, error: null };
+    };
+    const broadcast = await LB.fetchRuntimeConfig();
+    assert.strictEqual(broadcast.socialTransport, 'broadcast');
+
+    testRpc = async () => ({ data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy' }, error: null });
+    const legacy = await LB.fetchRuntimeConfig();
+    assert.strictEqual(legacy.socialTransport, 'legacy');
+    testRpc = async () => ({ data: null, error: null });
+  });
 
   // ── todayISO: local calendar date, not UTC ───────────────────────────────
   test('todayISO returns local YYYY-MM-DD matching local getDate', () => {

@@ -986,8 +986,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
 const [adminSheet, setAdminSheet] = useStateSet(false);
   const [dbStabilitySheet, setDbStabilitySheet] = useStateSet(false);
   const [socialModeBusy, setSocialModeBusy] = useStateSet(false);
-  const [canaryEmail, setCanaryEmail] = useStateSet('office@btc-prime.biz');
-  const [canaryBusy, setCanaryBusy] = useStateSet(false);
+  const [socialTransportBusy, setSocialTransportBusy] = useStateSet(false);
   const [dbStabilityMsg, setDbStabilityMsg] = useStateSet(null);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
@@ -2150,22 +2149,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     } finally { setSocialModeBusy(false); }
   };
 
-  const setBroadcastCanary = async enabled => {
-    const email = canaryEmail.trim().toLowerCase();
-    if (!email || canaryBusy) return;
-    setCanaryBusy(true);
+  const setSocialTransport = async transport => {
+    if (socialTransportBusy || !['legacy', 'broadcast'].includes(transport)) return;
+    if (transport === 'legacy' && !await confirm('All Friends users will switch back to Postgres Changes within two minutes. Use this only as a Broadcast rollback.', { title: 'Use legacy Realtime?', ok: 'Switch' })) return;
+    setSocialTransportBusy(true);
     setDbStabilityMsg(null);
     try {
-      const { error } = await LB.supabase.rpc('admin_set_social_broadcast_canary', {
-        p_email: email,
-        p_enabled: !!enabled,
-      });
+      const { error } = await LB.supabase.rpc('admin_set_social_transport', { p_transport: transport });
       if (error) throw error;
-      if (email === String(store.user?.email || '').toLowerCase()) await LB.fetchRuntimeConfig();
-      setDbStabilityMsg({ ok: true, text: `${email} now uses ${enabled ? 'Broadcast' : 'legacy Realtime'}.` });
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: transport === 'broadcast' ? 'All current and future Friends users now use Broadcast.' : 'All Friends users now use legacy Realtime.' });
     } catch (error) {
-      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the canary.' });
-    } finally { setCanaryBusy(false); }
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the Social transport.' });
+    } finally { setSocialTransportBusy(false); }
   };
 
   const sendAdminEmail = async () => {
@@ -3851,7 +3847,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
-                <NavRow label="Database stability" hint={`Social ${runtimeConfig?.socialMode || 'normal'}`} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
+                <NavRow label="Database stability" hint={`${runtimeConfig?.socialMode === 'maintenance' ? 'Paused' : 'Normal'} · ${runtimeConfig?.socialTransport === 'broadcast' ? 'Broadcast' : 'Legacy'}`} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
@@ -3875,17 +3871,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>
           <Frame style={{ padding: '0 14px' }}>
             <NavRow label="Social mode" first hint={runtimeConfig?.socialMode === 'maintenance' ? 'Maintenance' : 'Normal'} />
+            <NavRow label="Social transport" hint={runtimeConfig?.socialTransport === 'broadcast' ? 'Broadcast' : 'Legacy'} />
           </Frame>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setSocialMode('maintenance')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'maintenance'}>Pause Friends</Btn>
             <Btn onClick={() => setSocialMode('normal')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'normal'}>Resume Friends</Btn>
           </div>
           <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
-            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>BROADCAST CANARY</div>
-            <input type="email" value={canaryEmail} onChange={event => setCanaryEmail(event.target.value)} placeholder="user@example.com" style={{ ...SETTINGS_INPUT_STYLE, padding: '10px 12px' }} />
+            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>SOCIAL TRANSPORT</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+              Broadcast applies automatically to every current and future Friends user. Legacy is the global rollback if Broadcast has a problem.
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
-              <Btn kind="ghost" onClick={() => setBroadcastCanary(false)} disabled={canaryBusy || !canaryEmail.trim()}>Use legacy</Btn>
-              <Btn onClick={() => setBroadcastCanary(true)} disabled={canaryBusy || !canaryEmail.trim()}>Use Broadcast</Btn>
+              <Btn kind="ghost" onClick={() => setSocialTransport('legacy')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'legacy'}>Use Legacy</Btn>
+              <Btn onClick={() => setSocialTransport('broadcast')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'broadcast'}>Use Broadcast</Btn>
             </div>
           </div>
           {dbStabilityMsg && <div style={{ fontSize: 12, color: dbStabilityMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: dbStabilityMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>{dbStabilityMsg.text}</div>}

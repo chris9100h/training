@@ -2,7 +2,7 @@
 
 Stand: 14.08.2026
 
-Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.784`, alle vier Stabilitätsmigrationen, `db-health`, Better Stack und Broadcast für alle acht Social-freigeschalteten Konten sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und der echte private Broadcast-WebSocket-Test sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
+Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.785`, alle fünf Stabilitätsmigrationen, `db-health`, Better Stack und globaler Broadcast für alle aktuellen und zukünftigen Friends-Konten sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und der echte private Broadcast-WebSocket-Test sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
 
 ## Die einfache Erklärung
 
@@ -76,10 +76,11 @@ Training und kritische Saves bleiben lokal erhalten. Der normale Sync versucht s
 
 ### Globaler Friends-Schalter
 
-`zane_app_config.social_mode` kennt `normal` und `maintenance`.
+`zane_app_config.social_mode` kennt `normal` und `maintenance`. `zane_app_config.social_transport` kennt `broadcast` und `legacy`.
 
 - `admin_set_social_mode(p_mode)` ist nur für `office@btc-prime.biz` ausführbar.
-- `get_runtime_config()` liefert Update-Nonce, Social-Modus und den Transport des aktuellen Users.
+- `admin_set_social_transport(p_transport)` ist der globale Broadcast-Rollback und ebenfalls nur für die Admin-Adresse ausführbar.
+- `get_runtime_config()` liefert Update-Nonce, Social-Modus und den globalen Transport.
 - Neue Clients zeigen im Wartungsmodus eine Wartungsseite und starten keine Social-RPCs, Polls oder Channels.
 - Restriktive RLS-Policies blockieren die Social-Tabellen und den privaten Attachment-Bucket.
 - Alle clientseitig erreichbaren Social-RPCs prüfen den Modus vor ihrer bisherigen Implementierung.
@@ -95,7 +96,7 @@ Der Admin-Schalter liegt in Settings > Admin > Database stability.
 - `social_get_dashboard` ermittelt sichtbare Metriken pro Besitzer einmal und aggregiert sie set-basiert.
 - Message-Signale laden nur Messages, Reads und Attachments neu, nicht das gesamte Dashboard.
 
-### Broadcast-Canary
+### Globaler Broadcast-Transport
 
 Jeder Nutzer hat genau ein privates Topic: `social:user:<user-id>`.
 
@@ -107,7 +108,7 @@ Trigger senden über `realtime.send()` nur ein inhaltsloses Invalidierungssignal
 
 Der Trigger übergibt nur `resource`; Supabases `realtime.send()` ergänzt technisch eine zufällige, inhaltslose Event-UUID als `id`. Es werden keine Nutzer-/Datensatz-IDs, Nachrichten, Namen, Gesundheitswerte, Workout-Daten oder vollständigen Zeilen übertragen. Nach dem Signal liest der Client die betroffene Ressource wieder regulär über RLS oder RPC. Signale innerhalb von 250 ms werden zusammengefasst. Nach Reconnect oder App-Fokus folgt ein autoritativer Abruf.
 
-`zane_feature_grants.feature = 'social_broadcast_canary'` schaltet einzelne E-Mail-Adressen auf Broadcast. Während des Canary bleibt Postgres Changes vollständig aktiv. Coaching, `door_events` und `motion_events` werden nicht verändert.
+`social_transport = 'broadcast'` gilt automatisch für jeden aktuellen und zukünftigen Friends-Nutzer. `legacy` schaltet alle Clients spätestens beim nächsten zweiminütigen Runtime-Config-Abruf auf Postgres Changes zurück. Die alte Publication bleibt als sofortiger Rückweg aktiv. Coaching, `door_events` und `motion_events` werden nicht verändert.
 
 ## Monitoring einrichten
 
@@ -184,7 +185,7 @@ from pg_stat_activity;
 
 ### Preview
 
-1. Erledigt: Die vier Migrationen sind auf `db-stability-2026-08-14` beziehungsweise dem sauberen Testprojekt installiert.
+1. Erledigt: Die ersten vier Migrationen sind auf `db-stability-2026-08-14` beziehungsweise dem sauberen Testprojekt installiert. `social_global_transport` wurde danach auf dem sauberen Testprojekt validiert.
 2. Erledigt: Es wurden ausschließlich synthetische Testdaten verwendet; das Testkonto wurde nach dem Lasttest wieder gelöscht.
 3. Erledigt: `db-health` ist deployt, das zufällige Preview-Secret `DB_HEALTH_TOKEN` ist gesetzt, ein Aufruf ohne Token wird mit HTTP 401 abgewiesen, der zugrunde liegende Health-RPC ist grün und Better Stack bestätigt den geschützten HTTP-200-Pfad als `Up`.
 4. Erledigt auf dem sauberen Testprojekt: Grants, RLS-Verträge, Maintenance und Canary-Zuordnung sind geprüft. Drei Nutzer konnten ihr eigenes privates Topic abonnieren; der Admin wurde am Topic des zweiten Nutzers mit `Unauthorized` abgewiesen. Elf Trigger erzeugten 30 Signale und deckten `dashboard`, `feed`, `groups`, `messages` und `shares` ab. Jeder Payload enthielt ausschließlich `resource` plus die von Supabase erzeugte inhaltslose Event-UUID `id`. Im Wartungsmodus erzeugten absichtlich ausgelöste Änderungen bei weiterhin offenen Test-Channels exakt null Events.
@@ -199,10 +200,10 @@ Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklic
 Der Nutzer hat am 14.08.2026 ausdrücklich den direkten Voll-Rollout ohne gestaffelte Wartezeiten freigegeben.
 
 1. Erledigt: Vor dem Rollout war ein tägliches physisches Produktions-Backup vorhanden. Social wurde während der Datenbankänderungen auf `maintenance` gesetzt.
-2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary` und `db_health_client_backends` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
-3. Erledigt: Client `zane-v2.784` wurde gebaut, getestet, gepusht und ist unter `https://zane-wo.com/sw.js` live. GitHub-Syntaxchecks und die vollständigen lokalen Repo-Prüfungen sind grün.
+2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary`, `db_health_client_backends` und `social_global_transport` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
+3. Erledigt: Client `zane-v2.785` wurde gebaut und vollständig lokal geprüft. Die Veröffentlichung wird über den Feature-Branch ausgelöst.
 4. Erledigt: Die Production-Function `db-health` ist mit eigenem Secret aktiv. Better Stack prüft sie alle drei Minuten und meldet `Up`.
-5. Erledigt: Broadcast wurde für alle acht Konten mit aktiviertem Friends-Tab freigeschaltet, danach wurde `social_mode` atomar auf `normal` zurückgesetzt.
+5. Erledigt: Der globale Transport steht auf `broadcast` und gilt ohne E-Mail-Grant für alle aktuellen und zukünftigen Friends-Konten. `social_mode` steht auf `normal`.
 6. Abschlussmessung: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,2 MB in `net._http_response`. Seit dem Rollout sind keine neuen Realtime-Timeouts oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
 7. Absichtlich offen: Die neun Social-Tabellen bleiben in `supabase_realtime`, damit alte Clients und ein sofortiger Rollback weiterhin funktionieren. Entfernt werden sie erst nach eigener Freigabe, wenn die neue Client-Version ausreichend verteilt ist.
 
@@ -215,7 +216,7 @@ Sofort stoppen bei:
 - mehr als 1 Prozent Requestfehlern,
 - wachsender Client- oder DB-Warteschlange.
 
-## Publication erst nach erfolgreichem Canary entfernen
+## Publication erst nach stabilem globalen Broadcast entfernen
 
 Dieser Schritt ist absichtlich nicht Teil der installierenden Migrationen:
 
@@ -243,11 +244,16 @@ alter table public.zane_social_plan_share_imports replica identity default;
 alter table public.zane_social_workout_comments replica identity default;
 ```
 
+Rollback vor Entfernung der Publication:
+
+1. `admin_set_social_transport('legacy')` ausführen. Alle neuen Clients wechseln sofort, die übrigen spätestens nach zwei Minuten.
+2. Bei Datenbankdruck zusätzlich `admin_set_social_mode('maintenance')` ausführen.
+
 Rollback nach bereits entfernter Publication:
 
 1. Die neun Tabellen wieder zu `supabase_realtime` hinzufügen.
 2. Die benötigten Tabellen wieder auf `REPLICA IDENTITY FULL` setzen.
-3. Erst danach die Canary-Grants auf `legacy` zurückstellen.
+3. Erst danach `admin_set_social_transport('legacy')` ausführen.
 
 ## Abnahmekriterien
 

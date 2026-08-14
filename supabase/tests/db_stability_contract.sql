@@ -11,6 +11,41 @@ BEGIN
   IF NOT has_function_privilege('authenticated', 'public.get_runtime_config()', 'execute') THEN
     RAISE EXCEPTION 'authenticated cannot execute get_runtime_config';
   END IF;
+  IF has_function_privilege('anon', 'public.admin_set_social_transport(text)', 'execute') THEN
+    RAISE EXCEPTION 'anon can execute admin_set_social_transport';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.admin_set_social_transport(text)', 'execute') THEN
+    RAISE EXCEPTION 'authenticated cannot execute admin_set_social_transport';
+  END IF;
+  IF position(
+    'v_config.social_transport'
+    IN pg_get_functiondef('public.get_runtime_config()'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'get_runtime_config does not use the global Social transport';
+  END IF;
+  IF position(
+    'zane_feature_grants'
+    IN pg_get_functiondef('public.get_runtime_config()'::regprocedure)
+  ) > 0 THEN
+    RAISE EXCEPTION 'get_runtime_config still depends on per-user Broadcast grants';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'zane_app_config'
+      AND column_name = 'social_transport'
+      AND is_nullable = 'NO'
+  ) THEN
+    RAISE EXCEPTION 'zane_app_config.social_transport is missing or nullable';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.zane_app_config
+    WHERE social_transport NOT IN ('legacy', 'broadcast')
+  ) THEN
+    RAISE EXCEPTION 'zane_app_config contains an invalid Social transport';
+  END IF;
   IF has_function_privilege('anon', 'public.social_get_badge()', 'execute') THEN
     RAISE EXCEPTION 'anon can execute social_get_badge';
   END IF;
@@ -78,7 +113,7 @@ BEGIN
       'zane_social_workout_comments'
     ]);
   IF v_count <> 9 THEN
-    RAISE EXCEPTION 'Canary publication has % Social tables, expected 9', v_count;
+    RAISE EXCEPTION 'Rollback publication has % Social tables, expected 9', v_count;
   END IF;
 END;
 $test$;
