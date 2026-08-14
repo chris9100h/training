@@ -748,9 +748,10 @@ window.onunhandledrejection = function(e) {
   showErrOverlay().textContent += '[PROMISE] ' + reason + '\n\n';
 };
 // Fallback: if React never mounts in time, show diagnostic info.
-// If a new SW is waiting, auto-send SKIP_WAITING and reload, this breaks
-// the deadlock where a broken SW serves bad files and React never mounts,
-// which means the update banner never shows and the new SW never activates.
+// Never auto-send SKIP_WAITING or reload here. A slow network, a suspended
+// browser tab, or a waiting worker must not turn a recoverable boot delay into
+// an unsolicited page navigation loop. The diagnostic overlay already offers
+// the deliberate cache-and-reload recovery path.
 // "Clear cache & reload" (this file's own button, and LB.clearCachesAndReload
 // in store.js) sets zane-cold-boot right before navigating here: a wiped
 // cache forces the guaranteed-slowest boot path (every source file including
@@ -766,23 +767,10 @@ try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; sessionStorag
 window.__ZANE_COLD_BOOT = coldBoot;
 setTimeout(async function() {
   if (document.getElementById('root').children.length) return;
-  // If a new SW is waiting, skip it immediately and reload, breaks the deadlock
-  // where a broken SW serves bad files so React never mounts and the update
-  // banner never appears.
+  var waitingWorker = false;
   try {
     var reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
-    if (reg && reg.waiting) {
-      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      // Reaching this point at all means the CURRENT load is already stuck
-      // (React hasn't mounted by the timeout), so the reload it triggers is
-      // itself a compound-recovery boot (new SW activating, precompile cache
-      // possibly still cold from whatever made this load slow in the first
-      // place) and deserves the same extended grace period as a cache wipe,
-      // whether or not this load itself carried the coldBoot flag in.
-      try { sessionStorage.setItem('zane-cold-boot', '1'); } catch (e) {}
-      setTimeout(function() { window.location.reload(); }, 400);
-      return;
-    }
+    waitingWorker = !!(reg && reg.waiting);
   } catch(e) {}
   // Routed through showErrOverlay() rather than toggling #err directly:
   // it's a no-op display-wise if a BOOT/JS-ERROR overlay is already up (its
@@ -790,6 +778,7 @@ setTimeout(async function() {
   // a bare timeout with nothing else having fired yet.
   var log = showErrOverlay();
   log.textContent += '[TIMEOUT] React did not mount.\n';
+  if (waitingWorker) log.textContent += '[SERVICE WORKER] An update is waiting; no automatic reload was attempted.\n';
   log.textContent += 'window.LB: ' + typeof window.LB + '\n';
   log.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
   log.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';

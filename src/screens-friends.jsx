@@ -321,7 +321,15 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   const [metricSlotsDraft, setMetricSlotsDraft] = useStateF(() => [...(LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'])]);
   const [metricSlotsSaving, setMetricSlotsSaving] = useStateF(false);
 
-  const data = store.friends;
+  // Keep the last usable snapshot visible while the app reconciles a
+  // reconnect or runtime-config transition. The app-level loader can briefly
+  // clear its slice, but an open Circle, chat, or plan view must not fall back
+  // to a full-screen "Loading Friends" state for that gap.
+  const liveFriendsData = store.friends;
+  const friendsDataRef = useRefF({ userId, data: null });
+  if (friendsDataRef.current.userId !== userId) friendsDataRef.current = { userId, data: null };
+  if (liveFriendsData) friendsDataRef.current.data = liveFriendsData;
+  const data = liveFriendsData || friendsDataRef.current.data;
   const friends = data?.friends || [];
   const groups = data?.groups || [];
   const messages = data?.messages || [];
