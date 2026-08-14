@@ -2,7 +2,7 @@
 
 Stand: 14.08.2026
 
-Status: Die bestehende Stabilisierung und der globale Social-Broadcast sind in Produktion aktiv. Coaching-Broadcast, Client `zane-v2.786` und die sechste Stabilitätsmigration sind im synthetischen Testprojekt vollständig grün und warten auf den Produktionsrollout. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
+Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.786`, alle sechs Stabilitätsmigrationen, `db-health`, Better Stack sowie globale Social- und Coaching-Broadcasts sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und echte private Broadcast-WebSocket-Tests sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
 
 ## Die einfache Erklärung
 
@@ -204,12 +204,12 @@ Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklic
 Der Nutzer hat am 14.08.2026 ausdrücklich den direkten Voll-Rollout ohne gestaffelte Wartezeiten freigegeben.
 
 1. Erledigt: Vor dem Rollout war ein tägliches physisches Produktions-Backup vorhanden. Social wurde während der Datenbankänderungen auf `maintenance` gesetzt.
-2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary`, `db_health_client_backends` und `social_global_transport` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
-3. Erledigt: Client `zane-v2.785` wurde gebaut, vollständig geprüft und über den Feature-Branch veröffentlicht.
+2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary`, `db_health_client_backends`, `social_global_transport` und `coaching_broadcast` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
+3. Erledigt: Client `zane-v2.786` wurde gebaut, vollständig geprüft und über den Feature-Branch veröffentlicht. Der öffentliche Service Worker liefert diese Version; ein globaler Update-Hinweis wurde ausgelöst.
 4. Erledigt: Die Production-Function `db-health` ist mit eigenem Secret aktiv. Better Stack prüft sie alle drei Minuten und meldet `Up`.
 5. Erledigt: Der globale Transport steht auf `broadcast` und gilt ohne E-Mail-Grant für alle aktuellen und zukünftigen Friends-Konten. `social_mode` steht auf `normal`.
-6. Ausstehend: Client `zane-v2.786` veröffentlichen, dann `coaching_broadcast` installieren und den Produktionsvertrag erneut ausführen.
-7. Letzte Messung vor diesem Rollout: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,2 MB in `net._http_response`. Seit dem Social-Rollout sind keine neuen Realtime-Timeouts oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
+6. Erledigt: Coaching, Support und Coach-Status stehen global auf `broadcast`; ihre vier Postgres-Changes-Tabellen wurden entfernt. Der Legacy-Setter kann sie atomar wiederherstellen.
+7. Abschlussmessung: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,4 MB in `net._http_response`. Seit der Umschaltung sind keine neuen Auth-, Realtime- oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
 8. Absichtlich offen: Die neun Social-Tabellen bleiben in `supabase_realtime`, damit alte Clients und ein sofortiger Rollback weiterhin funktionieren. Entfernt werden sie erst nach eigener Freigabe, wenn die neue Client-Version ausreichend verteilt ist.
 
 Sofort stoppen bei:
