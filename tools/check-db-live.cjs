@@ -129,6 +129,7 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
   'bump_api_usage(uuid, text, integer)',
   'collapse_water_logs()',
   'admin_schema_inventory()',
+  'db_health()',
 ]);
 
 // ── Config ───────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ const assert = require('assert');
 let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
+let testClientOptions = null;
 const rpcLog = []; // records every rpc(name, args) call
 // The sandbox's own `window`, exposed so a test can set the globals store.js
 // reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
@@ -29,7 +30,7 @@ function loadStore() {
     removeChannel: () => {},
   };
   const sandbox = {
-    window: { supabase: { createClient: () => fakeClient }, addEventListener() {} },
+    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, __STORE_TEST__: true },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
   };
@@ -137,6 +138,132 @@ async function testAsync(name, fn) {
     const enabled = await LB.refreshHealthLogs('u1', { medsEnabled: true });
     assert.strictEqual(enabled.medicationsLoaded, true);
     assert.strictEqual(queried.filter(table => table.startsWith('zane_medication')).length, 6);
+  });
+
+  await testAsync('Supabase transport never starts more than four HTTP requests', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    let active = 0;
+    let maxActive = 0;
+    const releases = [];
+    testFetch = () => new Promise(resolve => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      releases.push(() => { active -= 1; resolve({ ok: true }); });
+    });
+    const requests = Array.from({ length: 9 }, (_, index) => testClientOptions.global.fetch(`/request-${index}`));
+    await tick();
+    assert.strictEqual(active, 4);
+    while (active || releases.length) {
+      releases.splice(0).forEach(release => release());
+      await tick();
+    }
+    await Promise.all(requests);
+    assert.strictEqual(maxActive, 4);
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('DB scheduler enforces four total, two background and two write tasks', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    const runControlled = async (definitions, expected) => {
+      let active = 0;
+      let backgroundActive = 0;
+      let writesActive = 0;
+      let maxActive = 0;
+      let maxBackground = 0;
+      let maxWrites = 0;
+      const releases = [];
+      const promises = definitions.map(definition => LB.scheduleDbTask(() => new Promise(resolve => {
+        active += 1;
+        if (definition.priority === 'background') backgroundActive += 1;
+        if (definition.kind === 'write') writesActive += 1;
+        maxActive = Math.max(maxActive, active);
+        maxBackground = Math.max(maxBackground, backgroundActive);
+        maxWrites = Math.max(maxWrites, writesActive);
+        releases.push(() => {
+          active -= 1;
+          if (definition.priority === 'background') backgroundActive -= 1;
+          if (definition.kind === 'write') writesActive -= 1;
+          resolve();
+        });
+      }), definition));
+      while (releases.length < expected.total) await tick();
+      while (active || releases.length || maxActive < Math.min(definitions.length, 4)) {
+        const batch = releases.splice(0);
+        batch.forEach(release => release());
+        await tick();
+        if (!active && releases.length === 0) break;
+      }
+      await Promise.all(promises);
+      assert.strictEqual(maxActive, expected.total);
+      assert.strictEqual(maxBackground, expected.background);
+      assert.strictEqual(maxWrites, expected.writes);
+    };
+
+    await runControlled(
+      Array.from({ length: 8 }, () => ({ priority: 'foreground', kind: 'read' })),
+      { total: 4, background: 0, writes: 0 },
+    );
+    await runControlled(
+      Array.from({ length: 6 }, () => ({ priority: 'background', kind: 'read' })),
+      { total: 2, background: 2, writes: 0 },
+    );
+    await runControlled(
+      Array.from({ length: 6 }, () => ({ priority: 'critical', kind: 'write' })),
+      { total: 2, background: 0, writes: 2 },
+    );
+  });
+
+  await testAsync('DB scheduler starts critical work before queued foreground and background work', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    const starts = [];
+    const releases = [];
+    const task = label => () => new Promise(resolve => {
+      starts.push(label);
+      releases.push(resolve);
+    });
+    const running = Array.from({ length: 4 }, (_, index) => LB.scheduleDbTask(task(`running-${index}`), { priority: 'foreground' }));
+    await tick();
+    const background = LB.scheduleDbTask(task('background'), { priority: 'background' });
+    const foreground = LB.scheduleDbTask(task('foreground'), { priority: 'foreground' });
+    const critical = LB.scheduleDbTask(task('critical'), { priority: 'critical' });
+    releases.shift()();
+    await tick();
+    assert.strictEqual(starts[4], 'critical');
+    while (releases.length) {
+      releases.splice(0).forEach(resolve => resolve());
+      await tick();
+    }
+    await Promise.all([...running, background, foreground, critical]);
+  });
+
+  await testAsync('optional DB breaker opens for five minutes and a failed probe extends it to fifteen', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    const pressure = Object.assign(new Error('server timeout'), { status: 503 });
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    assert.strictEqual(api.breakerState().openUntil, 0, 'one pressure failure is not enough');
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    let state = api.breakerState();
+    assert.ok(state.openUntil - Date.now() > 4.9 * 60 * 1000, 'second failure opens the five-minute pause');
+    api.forceHalfOpen();
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    state = api.breakerState();
+    assert.ok(state.openUntil - Date.now() > 14.9 * 60 * 1000, 'failed half-open probe extends the pause');
+    assert.strictEqual(state.longPause, true);
+    api.resetBreaker();
+  });
+
+  await testAsync('social maintenance rejects optional work before its task starts', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    api.setSocialMode('maintenance');
+    let started = false;
+    await assert.rejects(
+      api.runOptionalDbTask(async () => { started = true; }, { social: true }),
+      error => error.code === 'SOCIAL_MAINTENANCE',
+    );
+    assert.strictEqual(started, false);
+    api.setSocialMode('normal');
   });
 
   test('foodTemplateDayMarkerId scopes the fill marker to the active meal plan', () => {

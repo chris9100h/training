@@ -738,7 +738,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
     const refresh = async () => {
       try {
         const detail = await LB.loadSocialWorkoutDetail(userId, sessionId);
-        if (!live) return;
+        if (!live) return true;
         const next = detail?.comments || [];
         if (!seeded) {
           next.forEach(comment => seenRef.current.add(comment.id));
@@ -754,17 +754,27 @@ function TrainingSocialFeedback({ sessionId, userId }) {
           }
         }
         setComments(next);
+        return true;
       } catch {
         // Social feedback is an enhancement to the workout flow. A transient
         // social/RPC failure must never interrupt logging the session.
+        return false;
       }
     };
 
-    refresh();
-    const timer = window.setInterval(refresh, 2000);
+    let timer = null;
+    let failures = 0;
+    const run = async () => {
+      const ok = await refresh();
+      if (!live) return;
+      failures = ok ? 0 : failures + 1;
+      const retryDelay = [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
+      timer = window.setTimeout(run, failures ? retryDelay : 5000);
+    };
+    run();
     return () => {
       live = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
       window.clearTimeout(toastTimerRef.current);
     };
   }, [sessionId, userId]);
@@ -826,7 +836,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
   </>;
 }
 
-function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncStatus, storageFull, onRetrySync }) {
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, runtimeConfig, syncStatus, storageFull, onRetrySync }) {
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
   // sessions finished on other devices since boot). Offline keeps the cached
@@ -8043,7 +8053,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </button>
             )}
             <div style={{ flex: 1 }} />
-            {store.settings?.showFriendsTab && <TrainingSocialFeedback sessionId={sessionId} userId={userId} />}
+            {store.settings?.showFriendsTab && runtimeConfig?.socialMode === 'normal' && <TrainingSocialFeedback sessionId={sessionId} userId={userId} />}
             <button onClick={() => { if (entry.note) { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); } else { setNotePicker(true); } }} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,

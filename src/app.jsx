@@ -563,6 +563,7 @@ function App() {
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
+  const [runtimeConfig, setRuntimeConfig] = useStateA(() => LB.getCachedRuntimeConfig());
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings test queues the banner for the next safe Home view
   const [updateApplying, setUpdateApplying] = useStateA(false);
@@ -639,6 +640,11 @@ function App() {
   }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
+  useEffectA(() => {
+    const onRuntimeConfig = event => setRuntimeConfig(event.detail || LB.getCachedRuntimeConfig());
+    window.addEventListener('zane-runtime-config', onRuntimeConfig);
+    return () => window.removeEventListener('zane-runtime-config', onRuntimeConfig);
+  }, []);
 
   // A route name alone cannot tell whether the Home screen is covered by a
   // quick-action sheet or whether a native field still owns the keyboard.
@@ -1461,7 +1467,18 @@ function App() {
       syncBase.current = base || cached;
       setStore(cached);
       setPhase('ready');
-      const bootRefresh = LB.loadFromSupabase(uid);
+      // Cached devices render immediately, then spread their background boot
+      // refresh over 15 seconds. A fleet-wide reload can no longer turn into
+      // one synchronized request spike.
+      const bootRefresh = new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 15001)))
+        .then(() => {
+          if (isStale()) {
+            const error = new Error('Stale boot refresh');
+            error.code = 'STALE_BOOT';
+            throw error;
+          }
+          return LB.loadFromSupabase(uid);
+        });
       foregroundRefresh.current = bootRefresh;
       lastForegroundRefreshAt.current = Date.now();
       bootRefresh
@@ -2221,24 +2238,70 @@ function App() {
   // channel, or local-store hydration. Toggling it on while the app is alive
   // starts the same load path without requiring a remount.
   const friendsTabEnabled = phase === 'ready' && !!store?.settings?.showFriendsTab;
+  const friendsDataEnabled = friendsTabEnabled && runtimeConfig.socialMode === 'normal';
   useEffectA(() => {
-    if (!friendsTabEnabled || !userId) {
+    if (!friendsDataEnabled || !userId) {
       if (storeRefA.current?.friends) setStore(s => s ? { ...s, friends: null } : s);
       return;
     }
     let live = true;
     let refreshTimer = null;
+    let feedTimer = null;
+    let badgeTimer = null;
     let socialRefreshInFlight = null;
     let socialRefreshQueued = false;
     let feedRefreshInFlight = null;
+    let feedRefreshQueued = false;
+    let messageRefreshInFlight = null;
+    let messageRefreshQueued = false;
+    let badgeRefreshInFlight = null;
+    const pendingResources = new Set();
+    let feedFailures = 0;
+    let badgeFailures = 0;
     const refreshWorkoutFeed = (force = false) => {
-      if (!live || (!force && !storeRefA.current?.friends)) return Promise.resolve();
-      if (feedRefreshInFlight) return feedRefreshInFlight;
+      if (!live || routeRef.current.name !== 'friends' || (!force && !storeRefA.current?.friends)) return Promise.resolve();
+      if (feedRefreshInFlight) {
+        feedRefreshQueued = feedRefreshQueued || force;
+        return feedRefreshInFlight;
+      }
       feedRefreshInFlight = LB.loadSocialWorkoutFeed().then(feed => {
         if (!live) return;
+        feedFailures = 0;
         setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
-      }).catch(() => {}).finally(() => { feedRefreshInFlight = null; });
+      }).catch(() => { feedFailures += 1; }).finally(() => {
+        feedRefreshInFlight = null;
+        if (feedRefreshQueued && live) {
+          feedRefreshQueued = false;
+          setTimeout(() => refreshWorkoutFeed(true), 0);
+        }
+      });
       return feedRefreshInFlight;
+    };
+    const refreshMessages = (force = false) => {
+      if (!live) return Promise.resolve();
+      if (messageRefreshInFlight) {
+        messageRefreshQueued = messageRefreshQueued || force;
+        return messageRefreshInFlight;
+      }
+      messageRefreshInFlight = LB.loadSocialMessageState(userId).then(messageState => {
+        if (!live) return;
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...messageState } } : s);
+      }).catch(() => {}).finally(() => {
+        messageRefreshInFlight = null;
+        if (messageRefreshQueued && live) {
+          messageRefreshQueued = false;
+          setTimeout(() => refreshMessages(true), 0);
+        }
+      });
+      return messageRefreshInFlight;
+    };
+    const refreshBadge = () => {
+      if (!live || badgeRefreshInFlight) return badgeRefreshInFlight || Promise.resolve();
+      badgeRefreshInFlight = LB.loadSocialBadge().then(badge => {
+        badgeFailures = 0;
+        if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...badge } } : s);
+      }).catch(() => { badgeFailures += 1; }).finally(() => { badgeRefreshInFlight = null; });
+      return badgeRefreshInFlight;
     };
     const refreshFriends = (force = false) => {
       if (!live) return Promise.resolve();
@@ -2258,7 +2321,7 @@ function App() {
         } : s);
         // Feed summaries are intentionally staged after Circle and Groups
         // have their core data, so the first render is not feed-bound.
-        refreshWorkoutFeed(true);
+        if (routeRef.current.name === 'friends') refreshWorkoutFeed(true);
       }).catch(() => {}).finally(() => {
         socialRefreshInFlight = null;
         if (socialRefreshQueued && live) {
@@ -2269,27 +2332,68 @@ function App() {
       });
       return socialRefreshInFlight;
     };
-    refreshFriends();
-    // Workout set progress is intentionally polling-only: the local workout
-    // store remains the source of truth and the Friends feed must not expose a
-    // broad session Realtime stream. Refresh only the small summary payload;
-    // the open viewer polls its redacted detail more frequently.
-    const workoutTimer = setInterval(refreshWorkoutFeed, 5000);
-    // Realtime handles normal changes. Keep this as a slower recovery fallback
-    // for reconnects and missed events instead of polling the full snapshot.
-    const socialTimer = setInterval(refreshFriends, 120000);
-    const unsubscribe = LB.subscribeToFriends(userId, () => {
+    if (route.name === 'friends') {
+      if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
+    } else {
+      refreshBadge();
+    }
+    const nextFailureDelay = failures => [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
+    const scheduleFeed = delay => {
+      clearTimeout(feedTimer);
+      if (!live || routeRef.current.name !== 'friends') return;
+      feedTimer = setTimeout(async () => {
+        await refreshWorkoutFeed();
+        scheduleFeed(feedFailures ? nextFailureDelay(feedFailures) : 10000);
+      }, delay);
+    };
+    if (route.name === 'friends') scheduleFeed(10000);
+
+    const scheduleBadge = delay => {
+      clearTimeout(badgeTimer);
+      if (!live || routeRef.current.name === 'friends') return;
+      badgeTimer = setTimeout(async () => {
+        await refreshBadge();
+        scheduleBadge(badgeFailures ? nextFailureDelay(badgeFailures) : 120000 + Math.floor(Math.random() * 15001));
+      }, delay);
+    };
+    if (route.name !== 'friends') scheduleBadge(120000 + Math.floor(Math.random() * 15001));
+
+    const flushResources = () => {
+      refreshTimer = null;
+      const resources = new Set(pendingResources);
+      pendingResources.clear();
+      if (routeRef.current.name !== 'friends') {
+        refreshBadge();
+        return;
+      }
+      const onlyTargeted = [...resources].every(resource => resource === 'messages' || resource === 'feed');
+      if (!onlyTargeted || resources.has('authoritative')) refreshFriends(true);
+      else {
+        if (resources.has('messages')) refreshMessages(true);
+        if (resources.has('feed')) refreshWorkoutFeed(true);
+      }
+    };
+    const unsubscribe = LB.subscribeToFriends(userId, resource => {
+      pendingResources.add(resource || 'dashboard');
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => refreshFriends(true), 250);
-    });
+      refreshTimer = setTimeout(flushResources, 250);
+    }, { transport: runtimeConfig.socialTransport });
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      pendingResources.add('authoritative');
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(flushResources, 250);
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       live = false;
       clearTimeout(refreshTimer);
-      clearInterval(workoutTimer);
-      clearInterval(socialTimer);
+      clearTimeout(feedTimer);
+      clearTimeout(badgeTimer);
+      document.removeEventListener('visibilitychange', onVisible);
       unsubscribe?.();
     };
-  }, [userId, friendsTabEnabled]);
+  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name]);
 
   useEffectA(() => {
     if (phase === 'ready' && route.name === 'friends' && !friendsTabEnabled) go({ name: 'home' });
@@ -2386,8 +2490,9 @@ function App() {
     // just logs a guaranteed permission-denied server-side for no reason.
     // Nobody's watching for a force-update broadcast before they're signed in.
     if (phaseRef.current !== 'ready') return;
-    LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
-      if (error || !data) return;
+    return LB.fetchRuntimeConfig().then(config => {
+      const data = config?.forceUpdateNonce;
+      if (!data) return;
       let stored = null;
       try { stored = localStorage.getItem('logbook-force-nonce-seen'); } catch (_) {}
       if (!stored) {
@@ -2402,6 +2507,18 @@ function App() {
   }, []);
 
   useEffectA(() => { checkSwUpdate(); checkForceUpdate(); }, [route]);
+
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId) return;
+    let live = true;
+    let timer = null;
+    const poll = async () => {
+      await checkForceUpdate();
+      if (live) timer = setTimeout(poll, 120000);
+    };
+    timer = setTimeout(poll, 120000);
+    return () => { live = false; clearTimeout(timer); };
+  }, [phase, userId, checkForceUpdate]);
 
   // "Later" is deliberately a one-home-visit deferral. The banner stays out
   // of an editor or another tab, then returns when the user actually enters
@@ -2545,7 +2662,7 @@ function App() {
     && openSheetCount === 0
     && !textEntryFocused;
 
-  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
+  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water,
@@ -2570,7 +2687,9 @@ function App() {
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
-  const friendsBadge = showFriends ? { count: (store?.friends?.unreadCount || 0) + (store?.friends?.incoming?.length || 0) } : null;
+  const friendsBadge = showFriends && runtimeConfig.socialMode === 'normal' ? {
+    count: (store?.friends?.unreadCount || 0) + (store?.friends?.incomingCount ?? store?.friends?.incoming?.length ?? 0),
+  } : null;
 
   let screen;
   switch (route.name) {
@@ -2600,7 +2719,9 @@ function App() {
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
-    case 'friends':             screen = <window.Screens.FriendsScreen {...props} initialTab={route.initialTab} />; break;
+    case 'friends':             screen = runtimeConfig.socialMode === 'maintenance'
+      ? <window.Screens.FriendsMaintenanceScreen {...props} />
+      : <window.Screens.FriendsScreen {...props} initialTab={route.initialTab} />; break;
     case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;

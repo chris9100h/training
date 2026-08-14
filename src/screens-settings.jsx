@@ -679,7 +679,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -984,6 +984,11 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
 const [adminSheet, setAdminSheet] = useStateSet(false);
+  const [dbStabilitySheet, setDbStabilitySheet] = useStateSet(false);
+  const [socialModeBusy, setSocialModeBusy] = useStateSet(false);
+  const [canaryEmail, setCanaryEmail] = useStateSet('office@btc-prime.biz');
+  const [canaryBusy, setCanaryBusy] = useStateSet(false);
+  const [dbStabilityMsg, setDbStabilityMsg] = useStateSet(null);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
   const [vipBgList, setVipBgList] = useStateSet([]);
@@ -2123,10 +2128,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       // The broadcast has no per-user exclusion, without this, the device
       // that sent it would see its own banner too. Mark the freshly-set nonce
       // as already seen on THIS device before checkForceUpdate ever polls it.
-      const { data: nonce } = await LB.supabase.rpc('get_force_update_nonce');
+      const config = await LB.fetchRuntimeConfig().catch(() => null);
+      const nonce = config?.forceUpdateNonce;
       if (nonce) { try { localStorage.setItem('logbook-force-nonce-seen', nonce); } catch (_) {} }
     }
     await confirm(error ? (error.message || 'Could not trigger the broadcast.') : 'All connected clients will see the update banner shortly.', { title: error ? 'Error' : 'Sent', ok: 'OK' });
+  };
+
+  const setSocialMode = async mode => {
+    if (socialModeBusy || !['normal', 'maintenance'].includes(mode)) return;
+    if (mode === 'maintenance' && !await confirm('Friends will stop querying immediately. Login, training and sync stay available.', { title: 'Pause Friends?', ok: 'Pause' })) return;
+    setSocialModeBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_social_mode', { p_mode: mode });
+      if (error) throw error;
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: mode === 'maintenance' ? 'Friends is now paused.' : 'Friends is back in normal mode.' });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change social mode.' });
+    } finally { setSocialModeBusy(false); }
+  };
+
+  const setBroadcastCanary = async enabled => {
+    const email = canaryEmail.trim().toLowerCase();
+    if (!email || canaryBusy) return;
+    setCanaryBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_social_broadcast_canary', {
+        p_email: email,
+        p_enabled: !!enabled,
+      });
+      if (error) throw error;
+      if (email === String(store.user?.email || '').toLowerCase()) await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: `${email} now uses ${enabled ? 'Broadcast' : 'legacy Realtime'}.` });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the canary.' });
+    } finally { setCanaryBusy(false); }
   };
 
   const sendAdminEmail = async () => {
@@ -3812,6 +3851,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
+                <NavRow label="Database stability" hint={`Social ${runtimeConfig?.socialMode || 'normal'}`} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
@@ -3828,6 +3868,30 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Message all users (admin) ══ */}
+      <SettingsSheet open={dbStabilitySheet} onClose={() => setDbStabilitySheet(false)} title="Database Stability">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+            The emergency switch stops all Friends reads, polls and channels. Use it first when database pressure rises. Training and login are unaffected.
+          </div>
+          <Frame style={{ padding: '0 14px' }}>
+            <NavRow label="Social mode" first hint={runtimeConfig?.socialMode === 'maintenance' ? 'Maintenance' : 'Normal'} />
+          </Frame>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => setSocialMode('maintenance')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'maintenance'}>Pause Friends</Btn>
+            <Btn onClick={() => setSocialMode('normal')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'normal'}>Resume Friends</Btn>
+          </div>
+          <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>BROADCAST CANARY</div>
+            <input type="email" value={canaryEmail} onChange={event => setCanaryEmail(event.target.value)} placeholder="user@example.com" style={{ ...SETTINGS_INPUT_STYLE, padding: '10px 12px' }} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+              <Btn kind="ghost" onClick={() => setBroadcastCanary(false)} disabled={canaryBusy || !canaryEmail.trim()}>Use legacy</Btn>
+              <Btn onClick={() => setBroadcastCanary(true)} disabled={canaryBusy || !canaryEmail.trim()}>Use Broadcast</Btn>
+            </div>
+          </div>
+          {dbStabilityMsg && <div style={{ fontSize: 12, color: dbStabilityMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: dbStabilityMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>{dbStabilityMsg.text}</div>}
+        </div>
+      </SettingsSheet>
+
       <SettingsSheet open={broadcastSheet} onClose={() => setBroadcastSheet(false)} title="Message All Users">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>

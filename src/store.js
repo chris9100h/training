@@ -65,9 +65,221 @@ async function unsubscribeWebPush(userId) {
   }
 }
 
+const HTTP_REQUEST_LIMIT = 4;
+const _httpRequestQueue = [];
+let _httpRequestsActive = 0;
+let _lastPressureHttpAt = 0;
+
+function _drainHttpRequests() {
+  while (_httpRequestsActive < HTTP_REQUEST_LIMIT && _httpRequestQueue.length) {
+    const entry = _httpRequestQueue.shift();
+    _httpRequestsActive += 1;
+    Promise.resolve()
+      .then(() => fetch(...entry.args))
+      .then(response => {
+        if (response?.status === 429 || response?.status >= 500) _lastPressureHttpAt = Date.now();
+        return response;
+      })
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        _httpRequestsActive -= 1;
+        _drainHttpRequests();
+      });
+  }
+}
+
+function limitedSupabaseFetch(...args) {
+  return new Promise((resolve, reject) => {
+    _httpRequestQueue.push({ args, resolve, reject });
+    _drainHttpRequests();
+  });
+}
+
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { experimental: { passkey: true } },
+  global: { fetch: limitedSupabaseFetch },
 });
+
+// Shared admission control for the bursty paths below. Query builders are
+// lazy, so a task does not touch the network until the scheduler starts it.
+const DB_REQUEST_LIMIT = 4;
+const DB_BACKGROUND_LIMIT = 2;
+const DB_WRITE_LIMIT = 2;
+const _dbTaskQueues = { critical: [], foreground: [], background: [] };
+let _dbTasksActive = 0;
+let _dbBackgroundActive = 0;
+let _dbWritesActive = 0;
+
+function _canStartDbTask(entry) {
+  if (_dbTasksActive >= DB_REQUEST_LIMIT) return false;
+  if (entry.priority === 'background' && _dbBackgroundActive >= DB_BACKGROUND_LIMIT) return false;
+  if (entry.kind === 'write' && _dbWritesActive >= DB_WRITE_LIMIT) return false;
+  return true;
+}
+
+function _drainDbTasks() {
+  let started = true;
+  while (started && _dbTasksActive < DB_REQUEST_LIMIT) {
+    started = false;
+    for (const priority of ['critical', 'foreground', 'background']) {
+      const queue = _dbTaskQueues[priority];
+      const index = queue.findIndex(_canStartDbTask);
+      if (index < 0) continue;
+      const [entry] = queue.splice(index, 1);
+      _dbTasksActive += 1;
+      if (entry.priority === 'background') _dbBackgroundActive += 1;
+      if (entry.kind === 'write') _dbWritesActive += 1;
+      started = true;
+      Promise.resolve()
+        .then(entry.task)
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          _dbTasksActive -= 1;
+          if (entry.priority === 'background') _dbBackgroundActive -= 1;
+          if (entry.kind === 'write') _dbWritesActive -= 1;
+          _drainDbTasks();
+        });
+      break;
+    }
+  }
+}
+
+function scheduleDbTask(task, { priority = 'foreground', kind = 'read' } = {}) {
+  const lane = _dbTaskQueues[priority] ? priority : 'foreground';
+  return new Promise((resolve, reject) => {
+    _dbTaskQueues[lane].push({ task, priority: lane, kind, resolve, reject });
+    _drainDbTasks();
+  });
+}
+
+function runDbTaskBatch(items, worker, options) {
+  return Promise.all(items.map((item, index) => scheduleDbTask(() => worker(item, index), options)));
+}
+
+const RUNTIME_CONFIG_KEY = 'logbook-runtime-config';
+const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy' };
+let _runtimeConfig = (() => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RUNTIME_CONFIG_KEY) || 'null');
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_RUNTIME_CONFIG };
+    return {
+      forceUpdateNonce: parsed.forceUpdateNonce || null,
+      socialMode: parsed.socialMode === 'maintenance' ? 'maintenance' : 'normal',
+      socialTransport: parsed.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+    };
+  } catch (_) { return { ...DEFAULT_RUNTIME_CONFIG }; }
+})();
+let _runtimeConfigRequest = 0;
+let _runtimeConfigApplied = 0;
+window.__socialRuntimeConfig = _runtimeConfig;
+
+function getCachedRuntimeConfig() {
+  return { ..._runtimeConfig };
+}
+
+function _publishRuntimeConfig(next) {
+  _runtimeConfig = {
+    forceUpdateNonce: next?.forceUpdateNonce || null,
+    socialMode: next?.socialMode === 'maintenance' ? 'maintenance' : 'normal',
+    socialTransport: next?.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+  };
+  window.__socialRuntimeConfig = _runtimeConfig;
+  try { localStorage.setItem(RUNTIME_CONFIG_KEY, JSON.stringify(_runtimeConfig)); } catch (_) {}
+  window.dispatchEvent(new CustomEvent('zane-runtime-config', { detail: getCachedRuntimeConfig() }));
+  return getCachedRuntimeConfig();
+}
+
+async function fetchRuntimeConfig() {
+  const requestId = ++_runtimeConfigRequest;
+  const { data, error } = await scheduleDbTask(
+    () => _supabase.rpc('get_runtime_config'),
+    { priority: 'critical' },
+  );
+  if (error) throw error;
+  if (requestId < _runtimeConfigApplied) return getCachedRuntimeConfig();
+  _runtimeConfigApplied = requestId;
+  return _publishRuntimeConfig(data || DEFAULT_RUNTIME_CONFIG);
+}
+
+function socialDataAvailable() {
+  return _runtimeConfig.socialMode !== 'maintenance';
+}
+
+const _optionalDbBreaker = {
+  failures: 0,
+  openUntil: 0,
+  probeInFlight: false,
+  longPause: false,
+};
+
+function isDatabasePressureError(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const code = String(error?.code || '');
+  const message = String(error?.message || error || '');
+  return status === 429 || status >= 500
+    || code === '57014' || code === 'PGRST003'
+    || Date.now() - _lastPressureHttpAt < 5000
+    || /timeout|timed out|failed to fetch|networkerror|network request|load failed/i.test(message);
+}
+
+function optionalDbPausedError() {
+  const error = new Error('Background updates are paused while the database recovers.');
+  error.code = 'OPTIONAL_DB_PAUSED';
+  error.retryAt = _optionalDbBreaker.openUntil;
+  return error;
+}
+
+async function runOptionalDbTask(task, { social = false } = {}) {
+  if (social && !socialDataAvailable()) {
+    const error = new Error('Friends is temporarily under maintenance.');
+    error.code = 'SOCIAL_MAINTENANCE';
+    throw error;
+  }
+
+  const now = Date.now();
+  const halfOpen = _optionalDbBreaker.openUntil > 0 && now >= _optionalDbBreaker.openUntil;
+  if (_optionalDbBreaker.openUntil > now || (halfOpen && _optionalDbBreaker.probeInFlight)) {
+    throw optionalDbPausedError();
+  }
+  if (halfOpen) _optionalDbBreaker.probeInFlight = true;
+
+  try {
+    const result = await task();
+    _optionalDbBreaker.failures = 0;
+    _optionalDbBreaker.openUntil = 0;
+    _optionalDbBreaker.probeInFlight = false;
+    _optionalDbBreaker.longPause = false;
+    return result;
+  } catch (error) {
+    if (isDatabasePressureError(error)) {
+      _optionalDbBreaker.failures += 1;
+      if (halfOpen || _optionalDbBreaker.failures >= 2) {
+        _optionalDbBreaker.longPause = halfOpen || _optionalDbBreaker.longPause;
+        _optionalDbBreaker.openUntil = Date.now() + (_optionalDbBreaker.longPause ? 15 : 5) * 60 * 1000;
+      }
+    }
+    _optionalDbBreaker.probeInFlight = false;
+    throw error;
+  }
+}
+
+function dbStabilityTestApi() {
+  return {
+    runOptionalDbTask,
+    resetBreaker() {
+      _optionalDbBreaker.failures = 0;
+      _optionalDbBreaker.openUntil = 0;
+      _optionalDbBreaker.probeInFlight = false;
+      _optionalDbBreaker.longPause = false;
+    },
+    forceHalfOpen() {
+      _optionalDbBreaker.openUntil = Date.now() - 1;
+      _optionalDbBreaker.probeInFlight = false;
+    },
+    breakerState() { return { ..._optionalDbBreaker }; },
+    setSocialMode(mode) { _runtimeConfig.socialMode = mode === 'maintenance' ? 'maintenance' : 'normal'; },
+  };
+}
 
 // Await a PostgREST builder and throw if it resolved with an { error }. The
 // supabase-js client does NOT throw on failed writes (network errors, RLS
@@ -1546,7 +1758,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // baselines per exercise + per-session volume/set counts for everything
     // outside the boot window. Passing p_user_id covers coach loads too.
     _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
-    _supabase.rpc('get_session_stats', { p_user_id: userId }),
+    _supabase.rpc('get_session_stats', { p_user_id: userId, p_cutoff: histCutoff }),
     // Coaching data, only for own store load, not when a coach loads a client
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
@@ -1646,9 +1858,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const coreQueryIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 23];
   const medicationQueryIndexes = [34, 35, 36, 37, 38, 39];
   const queryResults = new Array(queries.length);
-  await Promise.all(coreQueryIndexes.map(async idx => {
+  await runDbTaskBatch(coreQueryIndexes, async idx => {
     queryResults[idx] = await queries[idx];
-  }));
+  }, { priority: 'foreground' });
 
   const coreProfileRes = queryResults[0];
   const coreSettRes = queryResults[4];
@@ -1736,9 +1948,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const deferredQueryIndexes = queries.map((_, idx) => idx)
     .filter(idx => !coreQueryIndexes.includes(idx))
     .filter(idx => medsEnabledAtLoad || !medicationQueryIndexes.includes(idx));
-  await Promise.all(deferredQueryIndexes.map(async idx => {
+  await runDbTaskBatch(deferredQueryIndexes, async idx => {
     queryResults[idx] = await queries[idx];
-  }));
+  }, { priority: 'background' });
   for (const idx of medicationQueryIndexes) {
     if (!queryResults[idx]) queryResults[idx] = { data: [], error: null };
   }
@@ -3048,18 +3260,29 @@ async function syncStore(prev, next, userId) {
   // unwrap() turns a failed write (network/RLS/constraint) into a thrown
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
-  if (preOps.length) await Promise.all(preOps.map(unwrap));
+  if (preOps.length) {
+    // These are parents for later writes and some parent rows depend on an
+    // earlier parent in this same list. Preserve their business/FK order.
+    for (const op of preOps) {
+      await scheduleDbTask(() => unwrap(op), { priority: 'critical', kind: 'write' });
+    }
+  }
   // Only start the food-log request now that any new recipe it references
   // has actually committed; see the foodLogUpsertThunk comment above.
-  if (foodLogUpsertThunk) ops.push(foodLogUpsertThunk());
+  if (foodLogUpsertThunk) ops.push(foodLogUpsertThunk);
   // allSettled, not all: ops spans ~25 unrelated tables in one diff, and the
   // sessions upsert (sessionsUpsertOp, tracked separately above) must get its
   // own result independent of whatever else in ops fails, otherwise a broken
   // write anywhere in that list can throw before _syncEntryRelational below
   // ever runs, blocking workout data with no relation to the actual failure.
   const [opResults, sessionsErr] = await Promise.all([
-    Promise.allSettled(ops.map(unwrap)),
-    sessionsUpsertOp ? unwrap(sessionsUpsertOp).then(() => null, e => e) : Promise.resolve(null),
+    Promise.allSettled(ops.map(op => scheduleDbTask(
+      () => unwrap(typeof op === 'function' ? op() : op),
+      { priority: 'critical', kind: 'write' },
+    ))),
+    sessionsUpsertOp
+      ? scheduleDbTask(() => unwrap(sessionsUpsertOp), { priority: 'critical', kind: 'write' }).then(() => null, e => e)
+      : Promise.resolve(null),
   ]);
   // Dual-write entries then sets after sessions are committed (FK order:
   // sessions → entries → sets). Gated on sessionsErr specifically, not on
@@ -5896,20 +6119,30 @@ async function signedSocialAttachment(row) {
 }
 
 async function loadSocialWorkoutFeed() {
-  const { data, error } = await _supabase.rpc('social_get_workout_feed');
-  if (error) throw error;
-  const feed = data || {};
-  return {
-    liveWorkouts: (feed.live || []).map(mapSocialWorkoutSummary).filter(Boolean),
-    workoutHistory: (feed.history || []).map(mapSocialWorkoutSummary).filter(Boolean),
-  };
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_workout_feed'),
+      { priority: 'background' },
+    );
+    if (error) throw error;
+    const feed = data || {};
+    return {
+      liveWorkouts: (feed.live || []).map(mapSocialWorkoutSummary).filter(Boolean),
+      workoutHistory: (feed.history || []).map(mapSocialWorkoutSummary).filter(Boolean),
+    };
+  }, { social: true });
 }
 
 async function loadSocialFriendMetrics(friendId) {
   if (!friendId) throw new Error('Friend is incomplete');
-  const { data, error } = await _supabase.rpc('social_get_friend_metrics', { p_friend_id: friendId });
-  if (error) throw error;
-  return mapSocialFriendMetrics(data, friendId);
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_friend_metrics', { p_friend_id: friendId }),
+      { priority: 'foreground' },
+    );
+    if (error) throw error;
+    return mapSocialFriendMetrics(data, friendId);
+  }, { social: true });
 }
 
 let _friendsLoadInFlight = null;
@@ -5924,7 +6157,11 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO(), { forc
     // the same time. Share the promise without starting a second full load.
     return _friendsLoadInFlight.promise;
   }
-  const entry = { key, version, promise: loadFriendsStateUncached(userId, weekStart) };
+  const entry = {
+    key,
+    version,
+    promise: runOptionalDbTask(() => loadFriendsStateUncached(userId, weekStart), { social: true }),
+  };
   _friendsLoadInFlight = entry;
   try {
     const result = await entry.promise;
@@ -5952,16 +6189,16 @@ async function loadFriendsStateUncached(userId, weekStart) {
   // them together removes the old dashboard/feed -> table-query waterfall.
   // Workout feed summaries are loaded separately after this core snapshot so
   // Circle and Groups can render without waiting for live activity data.
-  const [dashboardRes, groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await Promise.all([
-    _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
-    _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
-    _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
-    fetchSocialMessageRows(),
-    _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
-    _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
-    _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
-    _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
-  ]);
+  const [dashboardRes, groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await runDbTaskBatch([
+    () => _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
+    () => _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
+    () => _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
+    () => fetchSocialMessageRows(),
+    () => _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
+    () => _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
+    () => _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
+    () => _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
+  ], query => query(), { priority: 'background' });
   if (dashboardRes.error) throw dashboardRes.error;
   // Attachments are optional decoration for messages. Keep the message rows
   // usable if signed-url metadata is briefly unavailable.
@@ -5969,9 +6206,9 @@ async function loadFriendsStateUncached(userId, weekStart) {
   if (firstError) throw firstError;
   if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
   const messageIds = new Set((messagesRes.data || []).map(row => row.id));
-  const attachments = await Promise.all((attachmentsRes.data || [])
+  const attachments = await runDbTaskBatch((attachmentsRes.data || [])
     .filter(row => messageIds.has(row.message_id))
-    .map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
+    .map(row => row), row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)), { priority: 'background' });
   const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
   const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
   const groups = (groupsRes.data || []).map(g => ({
@@ -6002,6 +6239,7 @@ async function loadFriendsStateUncached(userId, weekStart) {
     groupMembers,
     messages,
     planShares,
+    incomingCount: (dashboard.incoming || []).length,
     unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
     readMessageIds: [...reads],
     weekStart,
@@ -6011,11 +6249,58 @@ async function loadFriendsStateUncached(userId, weekStart) {
 
 async function loadSocialWorkoutDetail(ownerId, sessionId) {
   if (!ownerId || !sessionId) throw new Error('Workout is incomplete');
-  const { data, error } = await _supabase.rpc('social_get_workout_detail', {
-    p_owner_id: ownerId, p_session_id: sessionId,
-  });
-  if (error) throw error;
-  return mapSocialWorkoutDetail(data);
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_workout_detail', {
+        p_owner_id: ownerId, p_session_id: sessionId,
+      }),
+      { priority: 'foreground' },
+    );
+    if (error) throw error;
+    return mapSocialWorkoutDetail(data);
+  }, { social: true });
+}
+
+async function loadSocialBadge() {
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_badge'),
+      { priority: 'background' },
+    );
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      incomingCount: Number(row?.incoming_count ?? row?.incomingCount ?? 0),
+      unreadCount: Number(row?.unread_count ?? row?.unreadCount ?? 0),
+    };
+  }, { social: true });
+}
+
+async function loadSocialMessageState(userId) {
+  if (!userId) throw new Error('Authentication required');
+  return runOptionalDbTask(async () => {
+    const [messagesRes, attachmentsRes, readsRes] = await runDbTaskBatch([
+      () => fetchSocialMessageRows(),
+      () => _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
+      () => _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
+    ], query => query(), { priority: 'background' });
+    const firstError = [messagesRes, readsRes].find(result => result?.error)?.error;
+    if (firstError) throw firstError;
+    if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
+    const messageIds = new Set((messagesRes.data || []).map(row => row.id));
+    const attachments = await runDbTaskBatch(
+      (attachmentsRes.data || []).filter(row => messageIds.has(row.message_id)),
+      row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)),
+      { priority: 'background' },
+    );
+    const reads = new Set((readsRes.data || []).map(row => row.message_id));
+    const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
+    return {
+      messages,
+      readMessageIds: [...reads],
+      unreadCount: messages.filter(message => message.senderId !== userId && !reads.has(message.id)).length,
+    };
+  }, { social: true });
 }
 
 async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
@@ -6221,18 +6506,68 @@ async function reportSocial({ targetUserId = null, messageId = null, groupId = n
   return data;
 }
 
-let _friendsRealtimeChannel = null;
-function subscribeToFriends(userId, onChange) {
-  if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
-  const channel = _supabase.channel(`social-${userId}-${Date.now()}`);
-  const refresh = () => onChange?.();
-  ['zane_social_friendships', 'zane_social_groups', 'zane_social_group_members', 'zane_social_messages', 'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_plan_shares', 'zane_social_plan_share_imports', 'zane_social_workout_comments'].forEach(table => {
-    channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh);
-  });
-  _friendsRealtimeChannel = channel.subscribe();
+const _friendsChannelRegistry = new Map();
+const SOCIAL_TABLE_RESOURCES = {
+  zane_social_friendships: 'relationships',
+  zane_social_groups: 'groups',
+  zane_social_group_members: 'groups',
+  zane_social_messages: 'messages',
+  zane_social_message_attachments: 'messages',
+  zane_social_message_reads: 'messages',
+  zane_social_plan_shares: 'shares',
+  zane_social_plan_share_imports: 'shares',
+  zane_social_workout_comments: 'feed',
+};
+
+function subscribeToFriends(userId, onChange, { transport = 'legacy' } = {}) {
+  if (!userId || typeof onChange !== 'function' || !socialDataAvailable()) return () => {};
+  const selectedTransport = transport === 'broadcast' ? 'broadcast' : 'legacy';
+  const key = `${selectedTransport}:${userId}`;
+  let entry = _friendsChannelRegistry.get(key);
+  if (entry?.removeTimer) {
+    clearTimeout(entry.removeTimer);
+    entry.removeTimer = null;
+  }
+  if (!entry) {
+    const listeners = new Set();
+    const emit = resource => listeners.forEach(listener => listener(resource));
+    let channel;
+    if (selectedTransport === 'broadcast') {
+      channel = _supabase
+        .channel(`social:user:${userId}`, { config: { private: true } })
+        .on('broadcast', { event: 'social_invalidate' }, event => emit(event?.payload?.resource || 'dashboard'));
+    } else {
+      channel = _supabase.channel(`social-${userId}`);
+      Object.entries(SOCIAL_TABLE_RESOURCES).forEach(([table, resource]) => {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => emit(resource));
+      });
+    }
+    entry = {
+      channel: channel.subscribe(status => {
+        if (status === 'SUBSCRIBED') emit('authoritative');
+      }),
+      listeners,
+      removeTimer: null,
+    };
+    _friendsChannelRegistry.set(key, entry);
+  }
+  entry.listeners.add(onChange);
   return () => {
-    if (_friendsRealtimeChannel) _supabase.removeChannel(_friendsRealtimeChannel);
-    _friendsRealtimeChannel = null;
+    const current = _friendsChannelRegistry.get(key);
+    if (!current) return;
+    current.listeners.delete(onChange);
+    if (current.listeners.size || current.removeTimer) return;
+    // React effects can tear down and re-add this same stable subscription in
+    // one navigation commit. Keep it briefly so that transition reuses the
+    // channel instead of racing an async removeChannel call with a duplicate.
+    current.removeTimer = setTimeout(() => {
+      if (current.listeners.size) {
+        current.removeTimer = null;
+        return;
+      }
+      _friendsChannelRegistry.delete(key);
+      Promise.resolve(_supabase.removeChannel(current.channel)).catch(() => {});
+    }, 1000);
   };
 }
 
@@ -8688,8 +9023,7 @@ async function refreshHealthLogs(userId, _opts = {}) {
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ] : Array.from({ length: 6 }, () => Promise.resolve({ data: [], error: null }));
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
-         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
+  const healthQueries = [
     _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -8698,9 +9032,19 @@ async function refreshHealthLogs(userId, _opts = {}) {
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     ...medicationQueries,
-  ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error
-      || medicationPlansRes.error || medicationsRes.error || medicationScheduleSlotsRes.error || medicationLogsRes.error || medicationPlanItemsRes.error || medicationPillboxChecksRes.error) return null;
+  ];
+  const healthResults = await runOptionalDbTask(async () => {
+    const results = await runDbTaskBatch(
+      healthQueries,
+      async query => await query,
+      { priority: 'background' },
+    );
+    const firstError = results.find(result => result?.error)?.error;
+    if (firstError) throw firstError;
+    return results;
+  });
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
+         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = healthResults;
   return {
     medicationsLoaded: !!_opts.medsEnabled,
     dailyLogs: (dailyRes.data || []).map(l => ({
@@ -11513,7 +11857,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
@@ -11538,6 +11882,8 @@ window.LB = {
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
+  getCachedRuntimeConfig, fetchRuntimeConfig, socialDataAvailable,
+  scheduleDbTask, runDbTaskBatch,
   dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn, foodTemplateDayMarkerId, foodTemplateDayLegacyMarkerId, upsertMedicationLog,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
@@ -11547,4 +11893,5 @@ window.LB = {
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
+  ...(window.__STORE_TEST__ ? { dbStabilityTest: dbStabilityTestApi() } : {}),
 };

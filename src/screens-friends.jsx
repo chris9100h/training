@@ -165,12 +165,14 @@ function SocialWorkoutSheet({ workout, onClose }) {
     const requestId = ++detailRequestRef.current;
     try {
       const next = await LB.loadSocialWorkoutDetail(workout.ownerId, workout.sessionId);
-      if (requestId !== detailRequestRef.current) return;
+      if (requestId !== detailRequestRef.current) return { ok: false, live: !!workout.live };
       setDetail(current => mergeDetail(current, next));
       setError(next ? '' : 'This workout is no longer available.');
+      return { ok: true, live: next ? !next.session?.ended : false };
     } catch (e) {
-      if (requestId !== detailRequestRef.current) return;
+      if (requestId !== detailRequestRef.current) return { ok: false, live: !!workout.live };
       setError(e.message || 'Could not load workout');
+      return { ok: false, live: !!workout.live };
     } finally {
       if (requestId === detailRequestRef.current) setLoading(false);
     }
@@ -178,10 +180,18 @@ function SocialWorkoutSheet({ workout, onClose }) {
 
   useEffectF(() => {
     let live = true;
-    const run = () => { if (live) load(); };
+    let timer = null;
+    let failures = 0;
+    const run = async () => {
+      if (!live) return;
+      const result = await load();
+      if (!live) return;
+      failures = result?.ok ? 0 : failures + 1;
+      const failureDelay = [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
+      timer = setTimeout(run, failures ? failureDelay : (result?.live ? 5000 : 15000));
+    };
     run();
-    const interval = setInterval(run, workout.live ? 2000 : 10000);
-    return () => { live = false; detailRequestRef.current += 1; clearInterval(interval); };
+    return () => { live = false; detailRequestRef.current += 1; clearTimeout(timer); };
   }, [workout.ownerId, workout.sessionId, workout.live]);
 
   const send = async (body, kind = 'comment') => {
@@ -1375,6 +1385,23 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   );
 }
 
+function FriendsMaintenanceScreen() {
+  return (
+    <Screen scroll>
+      <TopBar title="Friends" />
+      <div style={{ padding: '22px 18px 30px' }}>
+        <Card style={{ padding: 20, textAlign: 'center' }}>
+          <i className="fa-solid fa-screwdriver-wrench" style={{ color: UI.gold, fontSize: 24 }} />
+          <div className="display" style={{ color: UI.ink, fontSize: 24, marginTop: 14 }}>FRIENDS IS PAUSED</div>
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.55, marginTop: 9 }}>
+            Social features are temporarily under maintenance. Training, login and your saved data continue to work normally.
+          </div>
+        </Card>
+      </div>
+    </Screen>
+  );
+}
+
 function FriendRequestBanner({ store, setStore, userId }) {
   const [dismissedId, setDismissedId] = useStateF(null);
   const [loading, setLoading] = useStateF(false);
@@ -1434,4 +1461,4 @@ function FriendRequestBanner({ store, setStore, userId }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { FriendsScreen, FriendRequestBanner });
+Object.assign(window.Screens, { FriendsScreen, FriendsMaintenanceScreen, FriendRequestBanner });
