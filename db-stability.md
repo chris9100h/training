@@ -230,21 +230,34 @@ from pg_stat_activity;
 5. Erledigt: Coaching-Broadcast wurde mit drei weiteren synthetischen Nutzern geprüft. Eigene private Topics verbanden sich; ein fremdes Topic wurde mit `Unauthorized` abgewiesen. Beziehung, Nachricht, Support und Coach-Status erzeugten 12 gültige Signale ohne Nutzdaten. Der Admin-Rollback schaltete erfolgreich auf `legacy` und zurück auf `broadcast`; danach standen null Coaching-Tabellen in der Publication und `zane_coaching` wieder auf `REPLICA IDENTITY DEFAULT`.
 6. Erledigt: Beide Query-Pläne verwenden den vorgesehenen Nutzerindex beziehungsweise Datumsfilter. Der Lasttest vom 14.08.2026 lief zehn Minuten mit 20 kalten Starts, fünf Social-Clients und drei Viewern: 1.142 Requests, 0 Fehler, 0 Timeouts, p95 185 ms. Alle DB-Messpunkte lagen bei 25/60 Verbindungen, ohne wartende oder länger als fünf Sekunden laufende Query.
 
-Die Preview wurde nicht aus Produktionsdaten befüllt. Ihr automatischer Aufbau meldete bereits vor den neuen Stabilitätsmigrationen einen Fehler, weil die registrierte Produktions-Migrationshistorie nicht den vollständigen Altbestand enthält. Für die isolierten Tests wurde deshalb der versionierte Schema-Snapshot eingespielt. Dieser Baseline-Fehler muss separat korrigiert werden, bevor Preview-Branches als vollständiger Realtime-Rollout-Gate dienen können.
+Die Preview wurde nicht aus Produktionsdaten befüllt. Ihr erster automatischer
+Aufbau meldete bereits vor den neuen Stabilitätsmigrationen Fehler, weil die
+Produktions-Migrationshistorie den tatsächlich per SQL-Editor gewachsenen
+Altbestand nicht vollständig beschreibt. Das war der eigentliche Grund für die
+scheinbar widersprüchlichen Fehler „Spalte/Tabelle existiert bereits“ bzw. „fehlt“:
+Der Branch startete mit einem Schema-Snapshot, aber einer lückenhaften Historie.
 
-Der aktuelle Supabase-Branch `offline-auth-recovery` (Projekt
-`kyuwnydvvqmcqlteczyk`, datenlos) bleibt deshalb ein **blockierter Testzweig**:
-Supabase meldete beim automatischen Bootstrap zuerst `relation "motion_events"
-does not exist`. `door_events` und `motion_events` sind app-fremde Tabellen, die
-in Produktion existieren und in `supabase_realtime` registriert sind, aber nicht
-in der versionierten Migrationshistorie liegen. Test-Stubs wurden nur auf dem
-Branch angelegt; der Branch steht weiterhin auf `MIGRATIONS_FAILED` und ist kein
-Produktions- oder Rollout-Gate. Die Stubs haben keine Produktionsdaten und
-werden nicht vom Client verwendet. Vor einer späteren Wiederverwendung müssen
-die Tabellen samt Eigentümer/RLS-Vertrag als externe Abhängigkeit sauber
-modelliert oder der Branch verworfen und neu erstellt werden.
-Supabase weist für die reinen Test-Stubs außerdem auf fehlendes RLS hin; der
-Branch darf deshalb nicht öffentlich oder mit realen Daten betrieben werden.
+Der Supabase-Branch `offline-auth-recovery` (Projekt
+`kyuwnydvvqmcqlteczyk`, datenlos) ist jetzt **gesund**:
+
+- `status = FUNCTIONS_DEPLOYED`, `preview_project_status = ACTIVE_HEALTHY`.
+- Die fehlenden Historieneinträge für bereits vorhandene Änderungen (u. a.
+  `meal_windows`, `meal_of_choice`, `meal_of_choice_hour`, Shopping-Key und
+  `food_force_grams`) wurden nur im Branch korrigiert; die zugehörigen RPCs und
+  Kommentare wurden dabei ebenfalls abgeglichen.
+- Nicht registrierte Altobjekte (Realtime-Stubtabellen, Food-Shopping,
+  Medikamente, Rezept-Share und Reminder-Ledger) wurden im leeren Branch in den
+  Produktionszustand rekonstruiert. RLS ist aktiv; die app-fremden
+  `door_events`/`motion_events` bleiben ohne Policies und sind damit für Clients
+  gesperrt.
+- Alle Produktionsmigrationen und Edge Functions laufen bis zum Ende durch; der
+  Build mit der Preview-URL wurde erfolgreich geprüft. Es wurden keine
+  Produktionsdaten kopiert und keine Produktionsobjekte geändert.
+
+Die Branch-Reparatur ist bewusst noch keine neue Produktionsmigration. Vor einem
+späteren Merge muss aus dem realen Produktionsschema eine formale, versionierte
+Reconciliation-Migration erzeugt und geprüft werden; die Branch-History darf
+nicht einfach als Produktionshistorie übernommen werden.
 
 Das temporäre Projekt `Zane db-stability-test` wurde nach den synthetischen
 Tests gelöscht. Es verursacht daher keine weiteren Kosten.
