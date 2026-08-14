@@ -254,10 +254,26 @@ Der Supabase-Branch `offline-auth-recovery` (Projekt
   Build mit der Preview-URL wurde erfolgreich geprüft. Es wurden keine
   Produktionsdaten kopiert und keine Produktionsobjekte geändert.
 
-Die Branch-Reparatur ist bewusst noch keine neue Produktionsmigration. Vor einem
-späteren Merge muss aus dem realen Produktionsschema eine formale, versionierte
-Reconciliation-Migration erzeugt und geprüft werden; die Branch-History darf
-nicht einfach als Produktionshistorie übernommen werden.
+Die Reconciliation ist jetzt auch in der Produktions-Historie verankert. Die
+Produktion hatte die Objekte bereits; dort wurden deshalb ausschließlich
+fehlende Einträge in `supabase_migrations.schema_migrations` ergänzt — keine
+Produktionsdaten und keine bereits vorhandenen Tabellen wurden überschrieben.
+
+Ergänzt wurden eine idempotente Altbestand-Baseline vor der ersten Migration
+und die zeitlich passenden Lücken für Coaching-Threads, Tages-/Glukose-Logs,
+die App-Konfiguration, Set-/Mesocycle-Felder, Rezept-Sharing, Shopping-Listen,
+Medikamente, Messwerte, Reminder-Ledger und die Session-Flags. Die beiden
+app-fremden Tabellen `door_events` und `motion_events` sind in der Baseline
+enthalten, bleiben RLS-geschützt ohne Client-Policies und werden nicht inhaltlich
+befüllt. Cron-/Secret-Migrationen wurden nicht rückwirkend ausgeführt.
+
+Der datenlose Branch `offline-auth-recovery` wurde anschließend aus dieser
+Produktions-Historie neu rebased. Die vollständige Kette läuft nun bis zur
+letzten Produktionsmigration (`20260814091236 coaching_broadcast`) durch und
+endet mit `status = FUNCTIONS_DEPLOYED` sowie
+`preview_project_status = ACTIVE_HEALTHY`. Damit können neue Supabase-Branches
+den Altbestand reproduzierbar aufbauen, statt auf einen zufälligen
+Schema-Snapshot angewiesen zu sein.
 
 Das temporäre Projekt `Zane db-stability-test` wurde nach den synthetischen
 Tests gelöscht. Es verursacht daher keine weiteren Kosten.
