@@ -2,7 +2,7 @@
 
 Stand: 14.08.2026
 
-Status: Die Schutzmechanismen sind im Repository implementiert. SQL-Verträge, Query-Pläne, Maintenance-/Canary-Schaltung, der zehnminütige HTTP-Lasttest und der echte private Broadcast-WebSocket-Test sind grün. Der WebSocket-Test lief auf einem sauberen temporären Supabase-Projekt, weil die aus der unvollständigen historischen Migrationskette erzeugte Preview keinen funktionsfähigen Realtime-Dienst provisioniert hat. Produktion bleibt bis zur ausdrücklichen Rollout-Freigabe unverändert.
+Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.784`, alle vier Stabilitätsmigrationen, `db-health`, Better Stack und Broadcast für alle acht Social-freigeschalteten Konten sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und der echte private Broadcast-WebSocket-Test sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
 
 ## Die einfache Erklärung
 
@@ -140,7 +140,7 @@ Zwei Monitore im Drei-Minuten-Takt:
 
 Alarm und Entwarnung gehen ab dem ersten fehlgeschlagenen Check an `office@btc-prime.biz`. Die genaue Better-Stack-Konfiguration ist ein externer Betriebsschritt und nicht im Repository ausführbar.
 
-Preview-Stand vom 14.08.2026: `Zane app` und `Zane DB health Preview` sind aktiv und werden alle drei Minuten geprüft. Beide verwenden einen sofortigen Incident-Start, sofortige Entwarnung und E-Mail-Benachrichtigung. Better Stack meldet beide Monitore `Up`; damit ist auch der geschützte HTTP-200-Pfad der Preview-Function samt `x-health-token` praktisch verifiziert. Das Team besteht derzeit ausschließlich aus `office@btc-prime.biz`, daher geht die Benachrichtigung an diese Adresse. Beim Produktionsrollout wird der Preview-DB-Monitor erst nach Deployment der Production-Function durch den oben genannten Production-Endpunkt ersetzt.
+Produktionsstand vom 14.08.2026: `Zane app` und `Zane DB health Production` sind aktiv und werden alle drei Minuten geprüft. Beide verwenden einen sofortigen Incident-Start, sofortige Entwarnung und E-Mail-Benachrichtigung. Better Stack meldet den geschützten Produktions-Health-Endpunkt `Up` mit 100 Prozent Verfügbarkeit und null Incidents. Damit ist der HTTP-200-Pfad der Production-Function samt `x-health-token` praktisch verifiziert. Das Team besteht derzeit ausschließlich aus `office@btc-prime.biz`, daher geht die Benachrichtigung an diese Adresse.
 
 ## Notfallablauf
 
@@ -176,9 +176,9 @@ from pg_stat_activity;
 ## Datenbank-Betrieb
 
 - Das effektive `statement_timeout` von acht Sekunden bleibt bestehen. Es wird kein 30-Sekunden-Limit eingeführt.
-- `pg_net.ttl` wird außerhalb der transaktionalen Migration über Supabase Postgres Config auf eine Stunde gesetzt und danach mit `SHOW "pg_net.ttl"` geprüft. Der Rollout-Befehl lautet `supabase --experimental --project-ref <ref> postgres-config update --config "pg_net.ttl=1 hour"`.
+- `pg_net.ttl` steht weiterhin auf sechs Stunden. Supabase CLI 2.114.0 lehnt den laut Dokumentation unterstützten Schlüssel aktuell mit HTTP 400 als unbekannt ab; `ALTER ROLE` wird für diesen Parameter ebenfalls abgewiesen und `ALTER SYSTEM` kann über die transaktionale Management-Verbindung nicht ausgeführt werden. Es wurde kein unsicherer Umweg erzwungen. `db_health()` meldet deshalb die Größe von `net._http_response`; beim Abschluss lag sie bei rund 1,2 MB. Die Einstellung wird nach einer Supabase-Korrektur erneut auf eine Stunde gesetzt.
 - Der redundante Cron-Job wird nur anhand des geprüften Namens `cleanup-net-http-response` entfernt, nie blind anhand einer Job-ID.
-- Die Micro-Instanz und 60 Verbindungen bleiben vorerst bestehen. Ein Compute-Upgrade darf keine fehlenden Schutzmechanismen verdecken.
+- Das Supabase-Projekt läuft im Pro-Tarif weiterhin auf Nano mit 60 Datenbankverbindungen. Ein Compute-Upgrade darf keine fehlenden Schutzmechanismen verdecken.
 
 ## Rollout
 
@@ -196,14 +196,15 @@ Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklic
 
 ### Produktion
 
-1. Stufe 1 ausrollen: Runtime-Config, Scheduler, Schutzschalter, Health und Wartungsschalter.
-2. Den neuen Client mit Cache-Bump ausliefern. Force-Refresh nur gestaffelt auslösen.
-3. Mindestens zwei fehlerfreie Stunden beobachten.
-4. Stufe 2 aktivieren und weitere zwei Stunden beobachten.
-5. Broadcast für `office@btc-prime.biz` aktivieren.
-6. Nach zwei fehlerfreien Stunden zwei weitere aktive Testnutzer hinzufügen.
-7. Nach weiteren zwei fehlerfreien Stunden alle Social-Nutzer hinzufügen.
-8. Die Publication frühestens nach zwölf fehlerfreien Stunden mit allen Social-Nutzern entfernen.
+Der Nutzer hat am 14.08.2026 ausdrücklich den direkten Voll-Rollout ohne gestaffelte Wartezeiten freigegeben.
+
+1. Erledigt: Vor dem Rollout war ein tägliches physisches Produktions-Backup vorhanden. Social wurde während der Datenbankänderungen auf `maintenance` gesetzt.
+2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary` und `db_health_client_backends` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
+3. Erledigt: Client `zane-v2.784` wurde gebaut, getestet, gepusht und ist unter `https://zane-wo.com/sw.js` live. GitHub-Syntaxchecks und die vollständigen lokalen Repo-Prüfungen sind grün.
+4. Erledigt: Die Production-Function `db-health` ist mit eigenem Secret aktiv. Better Stack prüft sie alle drei Minuten und meldet `Up`.
+5. Erledigt: Broadcast wurde für alle acht Konten mit aktiviertem Friends-Tab freigeschaltet, danach wurde `social_mode` atomar auf `normal` zurückgesetzt.
+6. Abschlussmessung: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,2 MB in `net._http_response`. Seit dem Rollout sind keine neuen Realtime-Timeouts oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
+7. Absichtlich offen: Die neun Social-Tabellen bleiben in `supabase_realtime`, damit alte Clients und ein sofortiger Rollback weiterhin funktionieren. Entfernt werden sie erst nach eigener Freigabe, wenn die neue Client-Version ausreichend verteilt ist.
 
 Sofort stoppen bei:
 
