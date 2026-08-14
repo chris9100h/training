@@ -4,6 +4,7 @@
 DO $test$
 DECLARE
   v_count integer;
+  v_expected integer;
 BEGIN
   IF has_function_privilege('anon', 'public.get_runtime_config()', 'execute') THEN
     RAISE EXCEPTION 'anon can execute get_runtime_config';
@@ -46,6 +47,35 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'zane_app_config contains an invalid Social transport';
   END IF;
+  IF has_function_privilege('anon', 'public.admin_set_coaching_transport(text)', 'execute') THEN
+    RAISE EXCEPTION 'anon can execute admin_set_coaching_transport';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.admin_set_coaching_transport(text)', 'execute') THEN
+    RAISE EXCEPTION 'authenticated cannot execute admin_set_coaching_transport';
+  END IF;
+  IF position(
+    'v_config.coaching_transport'
+    IN pg_get_functiondef('public.get_runtime_config()'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'get_runtime_config does not use the global Coaching transport';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'zane_app_config'
+      AND column_name = 'coaching_transport'
+      AND is_nullable = 'NO'
+  ) THEN
+    RAISE EXCEPTION 'zane_app_config.coaching_transport is missing or nullable';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.zane_app_config
+    WHERE coaching_transport NOT IN ('legacy', 'broadcast')
+  ) THEN
+    RAISE EXCEPTION 'zane_app_config contains an invalid Coaching transport';
+  END IF;
   IF has_function_privilege('anon', 'public.social_get_badge()', 'execute') THEN
     RAISE EXCEPTION 'anon can execute social_get_badge';
   END IF;
@@ -87,6 +117,15 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO v_count
+  FROM pg_policies
+  WHERE schemaname = 'realtime'
+    AND tablename = 'messages'
+    AND policyname = 'coaching users receive own invalidations';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'private Coaching Broadcast policy is missing';
+  END IF;
+
+  SELECT count(*) INTO v_count
   FROM pg_trigger t
   JOIN pg_class c ON c.oid = t.tgrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -95,6 +134,56 @@ BEGIN
     AND NOT t.tgisinternal;
   IF v_count <> 11 THEN
     RAISE EXCEPTION 'Social Broadcast trigger count is %, expected 11', v_count;
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM pg_trigger t
+  JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND t.tgname = ANY(ARRAY[
+      'zane_coaching_broadcast_invalidate',
+      'zane_coaching_notes_broadcast_invalidate',
+      'zane_user_settings_coaching_broadcast_invalidate',
+      'zane_checkins_coaching_broadcast_invalidate'
+    ])
+    AND NOT t.tgisinternal;
+  IF v_count <> 4 THEN
+    RAISE EXCEPTION 'Coaching Broadcast trigger count is %, expected 4', v_count;
+  END IF;
+  IF has_function_privilege('authenticated', 'app_private.broadcast_coaching_user(uuid, text)', 'execute')
+     OR has_function_privilege('service_role', 'app_private.broadcast_coaching_user(uuid, text)', 'execute') THEN
+    RAISE EXCEPTION 'internal Coaching Broadcast sender is directly executable';
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM pg_publication_tables
+  WHERE pubname = 'supabase_realtime'
+    AND schemaname = 'public'
+    AND tablename = ANY(ARRAY[
+      'zane_coaching',
+      'zane_coaching_notes',
+      'zane_user_settings',
+      'zane_checkins'
+    ]);
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Postgres Changes still contains % app-owned Coaching tables', v_count;
+  END IF;
+  IF (SELECT relreplident FROM pg_class WHERE oid = 'public.zane_coaching'::regclass) <> 'd' THEN
+    RAISE EXCEPTION 'zane_coaching replica identity is not DEFAULT';
+  END IF;
+
+  SELECT count(*) INTO v_expected
+  FROM unnest(ARRAY['door_events', 'motion_events']) AS foreign_table(name)
+  WHERE to_regclass('public.' || foreign_table.name) IS NOT NULL;
+
+  SELECT count(*) INTO v_count
+  FROM pg_publication_tables
+  WHERE pubname = 'supabase_realtime'
+    AND schemaname = 'public'
+    AND tablename = ANY(ARRAY['door_events', 'motion_events']);
+  IF v_count <> v_expected THEN
+    RAISE EXCEPTION 'App-foreign Realtime table count is %, expected %', v_count, v_expected;
   END IF;
 
   SELECT count(*) INTO v_count

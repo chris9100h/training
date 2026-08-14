@@ -317,8 +317,9 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
       .finally(() => setLoading(false));
   };
 
-  // zane_coaching_notes is in the realtime publication, so a message from the
-  // other party arrives via the unreadNotes prop while this thread is open.
+  // A private Broadcast invalidation reloads unread notes authoritatively, so
+  // a message from the other party arrives via this prop without carrying the
+  // message itself over Realtime.
   // Keying on the thread's unread ids (not just coachingId/thread.id) re-runs
   // this on a live message so the open thread shows it and marks it read,
   // instead of the message lingering in the badge until the thread is reopened.
@@ -348,8 +349,16 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     const refresh = () => LB.loadCoachingNotes(coachingId, thread.id)
       .then(data => { setNotes([...data].reverse()); setLoadErr(false); })
       .catch(e => { console.error('coaching notes refresh failed:', e); setLoadErr(true); });
-    const timer = setInterval(refresh, 8000);
-    return () => clearInterval(timer);
+    const onInvalidate = event => {
+      const resource = event?.detail?.resource;
+      if (resource === 'notes' || resource === 'authoritative') refresh();
+    };
+    window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    const timer = setInterval(refresh, 60000);
+    return () => {
+      window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      clearInterval(timer);
+    };
   }, [coachingId, thread.id]);
 
   useEffectC(() => {

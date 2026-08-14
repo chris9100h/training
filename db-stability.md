@@ -2,7 +2,7 @@
 
 Stand: 14.08.2026
 
-Status: Der Produktionsrollout ist abgeschlossen. Client `zane-v2.785`, alle fünf Stabilitätsmigrationen, `db-health`, Better Stack und globaler Broadcast für alle aktuellen und zukünftigen Friends-Konten sind aktiv. SQL-Verträge, Query-Pläne, Maintenance-/Broadcast-Schaltung, der zehnminütige HTTP-Lasttest und der echte private Broadcast-WebSocket-Test sind grün. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
+Status: Die bestehende Stabilisierung und der globale Social-Broadcast sind in Produktion aktiv. Coaching-Broadcast, Client `zane-v2.786` und die sechste Stabilitätsmigration sind im synthetischen Testprojekt vollständig grün und warten auf den Produktionsrollout. Die alte Social-Publication bleibt zunächst als sofortiger Rückweg bestehen.
 
 ## Die einfache Erklärung
 
@@ -76,11 +76,12 @@ Training und kritische Saves bleiben lokal erhalten. Der normale Sync versucht s
 
 ### Globaler Friends-Schalter
 
-`zane_app_config.social_mode` kennt `normal` und `maintenance`. `zane_app_config.social_transport` kennt `broadcast` und `legacy`.
+`zane_app_config.social_mode` kennt `normal` und `maintenance`. `social_transport` und `coaching_transport` kennen jeweils `broadcast` und `legacy`.
 
 - `admin_set_social_mode(p_mode)` ist nur für `office@btc-prime.biz` ausführbar.
 - `admin_set_social_transport(p_transport)` ist der globale Broadcast-Rollback und ebenfalls nur für die Admin-Adresse ausführbar.
-- `get_runtime_config()` liefert Update-Nonce, Social-Modus und den globalen Transport.
+- `admin_set_coaching_transport(p_transport)` schaltet Coaching, Support und Coach-Status global. Bei `legacy` stellt der RPC zuerst die vier Publication-Tabellen wieder her.
+- `get_runtime_config()` liefert Update-Nonce, Social-Modus und beide globalen Transportwerte.
 - Neue Clients zeigen im Wartungsmodus eine Wartungsseite und starten keine Social-RPCs, Polls oder Channels.
 - Restriktive RLS-Policies blockieren die Social-Tabellen und den privaten Attachment-Bucket.
 - Alle clientseitig erreichbaren Social-RPCs prüfen den Modus vor ihrer bisherigen Implementierung.
@@ -108,7 +109,9 @@ Trigger senden über `realtime.send()` nur ein inhaltsloses Invalidierungssignal
 
 Der Trigger übergibt nur `resource`; Supabases `realtime.send()` ergänzt technisch eine zufällige, inhaltslose Event-UUID als `id`. Es werden keine Nutzer-/Datensatz-IDs, Nachrichten, Namen, Gesundheitswerte, Workout-Daten oder vollständigen Zeilen übertragen. Nach dem Signal liest der Client die betroffene Ressource wieder regulär über RLS oder RPC. Signale innerhalb von 250 ms werden zusammengefasst. Nach Reconnect oder App-Fokus folgt ein autoritativer Abruf.
 
-`social_transport = 'broadcast'` gilt automatisch für jeden aktuellen und zukünftigen Friends-Nutzer. `legacy` schaltet alle Clients spätestens beim nächsten zweiminütigen Runtime-Config-Abruf auf Postgres Changes zurück. Die alte Publication bleibt als sofortiger Rückweg aktiv. Coaching, `door_events` und `motion_events` werden nicht verändert.
+`social_transport = 'broadcast'` gilt automatisch für jeden aktuellen und zukünftigen Friends-Nutzer. `legacy` schaltet alle Clients spätestens beim nächsten zweiminütigen Runtime-Config-Abruf auf Postgres Changes zurück. Die alte Social-Publication bleibt als sofortiger Rückweg aktiv.
+
+Coaching verwendet getrennt davon `coaching:user:<user-id>` und ausschließlich die Ressourcen `relationships`, `notes`, `support` und `status`. Die vier app-eigenen Tabellen `zane_coaching`, `zane_coaching_notes`, `zane_user_settings` und `zane_checkins` sind im normalen Broadcast-Betrieb nicht mehr in `supabase_realtime`. Broadcast-Fehler werden im Trigger abgefangen und können deshalb keinen Coaching- oder Training-Write zurückrollen. Offene Chats aktualisieren nach einem Signal autoritativ; ihre 60-Sekunden-Polls sind nur noch Fallbacks. `door_events` und `motion_events` gehören einer anderen Anwendung und bleiben unverändert.
 
 ## Monitoring einrichten
 
@@ -189,11 +192,12 @@ from pg_stat_activity;
 2. Erledigt: Es wurden ausschließlich synthetische Testdaten verwendet; das Testkonto wurde nach dem Lasttest wieder gelöscht.
 3. Erledigt: `db-health` ist deployt, das zufällige Preview-Secret `DB_HEALTH_TOKEN` ist gesetzt, ein Aufruf ohne Token wird mit HTTP 401 abgewiesen, der zugrunde liegende Health-RPC ist grün und Better Stack bestätigt den geschützten HTTP-200-Pfad als `Up`.
 4. Erledigt auf dem sauberen Testprojekt: Grants, RLS-Verträge, Maintenance und Canary-Zuordnung sind geprüft. Drei Nutzer konnten ihr eigenes privates Topic abonnieren; der Admin wurde am Topic des zweiten Nutzers mit `Unauthorized` abgewiesen. Elf Trigger erzeugten 30 Signale und deckten `dashboard`, `feed`, `groups`, `messages` und `shares` ab. Jeder Payload enthielt ausschließlich `resource` plus die von Supabase erzeugte inhaltslose Event-UUID `id`. Im Wartungsmodus erzeugten absichtlich ausgelöste Änderungen bei weiterhin offenen Test-Channels exakt null Events.
-5. Erledigt: Beide Query-Pläne verwenden den vorgesehenen Nutzerindex beziehungsweise Datumsfilter. Der Lasttest vom 14.08.2026 lief zehn Minuten mit 20 kalten Starts, fünf Social-Clients und drei Viewern: 1.142 Requests, 0 Fehler, 0 Timeouts, p95 185 ms. Alle DB-Messpunkte lagen bei 25/60 Verbindungen, ohne wartende oder länger als fünf Sekunden laufende Query.
+5. Erledigt: Coaching-Broadcast wurde mit drei weiteren synthetischen Nutzern geprüft. Eigene private Topics verbanden sich; ein fremdes Topic wurde mit `Unauthorized` abgewiesen. Beziehung, Nachricht, Support und Coach-Status erzeugten 12 gültige Signale ohne Nutzdaten. Der Admin-Rollback schaltete erfolgreich auf `legacy` und zurück auf `broadcast`; danach standen null Coaching-Tabellen in der Publication und `zane_coaching` wieder auf `REPLICA IDENTITY DEFAULT`.
+6. Erledigt: Beide Query-Pläne verwenden den vorgesehenen Nutzerindex beziehungsweise Datumsfilter. Der Lasttest vom 14.08.2026 lief zehn Minuten mit 20 kalten Starts, fünf Social-Clients und drei Viewern: 1.142 Requests, 0 Fehler, 0 Timeouts, p95 185 ms. Alle DB-Messpunkte lagen bei 25/60 Verbindungen, ohne wartende oder länger als fünf Sekunden laufende Query.
 
 Die Preview wurde nicht aus Produktionsdaten befüllt. Ihr automatischer Aufbau meldete bereits vor den neuen Stabilitätsmigrationen einen Fehler, weil die registrierte Produktions-Migrationshistorie nicht den vollständigen Altbestand enthält. Für die isolierten Tests wurde deshalb der versionierte Schema-Snapshot eingespielt. Dieser Baseline-Fehler muss separat korrigiert werden, bevor Preview-Branches als vollständiger Realtime-Rollout-Gate dienen können.
 
-Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklich für 10 USD/Monat angelegt und ebenfalls ausschließlich mit synthetischen Daten befüllt. Beim abschließenden Health-Test wurde ein Fehlalarm entdeckt: Supabases normaler Realtime-WAL-Sender wartet dauerhaft auf neue WAL-Daten. Migration `20260814072030_db_health_client_backends` begrenzt Warte-/Langläufer-Alarme deshalb auf echte `client backend`-Queries. Danach meldete `db_health()` 8/60 Verbindungen, 0 wartende Client-Queries und 0 Langläufer. Die drei synthetischen Auth-Nutzer und ihre kaskadierenden Social-Daten wurden nach dem Test gelöscht; `social_mode` steht wieder auf `normal`. Das Projekt selbst bleibt für die Produktionsvorbereitung bestehen und verursacht bis zum Löschen weiterhin 10 USD/Monat.
+Das temporäre Projekt `Zane db-stability-test` wurde am 14.08.2026 ausdrücklich für 10 USD/Monat angelegt und ebenfalls ausschließlich mit synthetischen Daten befüllt. Beim abschließenden Health-Test wurde ein Fehlalarm entdeckt: Supabases normaler Realtime-WAL-Sender wartet dauerhaft auf neue WAL-Daten. Migration `20260814072030_db_health_client_backends` begrenzt Warte-/Langläufer-Alarme deshalb auf echte `client backend`-Queries. Nach dem Coaching-Abnahmetest meldete `db_health()` 11/60 Verbindungen, 0 wartende Client-Queries und 0 Langläufer. Sämtliche synthetischen Auth-Nutzer und ihre kaskadierenden Social- und Coaching-Daten wurden nach den Tests gelöscht; `social_mode` steht wieder auf `normal`. Das Projekt selbst bleibt für die Produktionsvorbereitung bestehen und verursacht bis zum Löschen weiterhin 10 USD/Monat.
 
 ### Produktion
 
@@ -201,11 +205,12 @@ Der Nutzer hat am 14.08.2026 ausdrücklich den direkten Voll-Rollout ohne gestaf
 
 1. Erledigt: Vor dem Rollout war ein tägliches physisches Produktions-Backup vorhanden. Social wurde während der Datenbankänderungen auf `maintenance` gesetzt.
 2. Erledigt: `db_guardrails`, `query_load_shedding`, `social_broadcast_canary`, `db_health_client_backends` und `social_global_transport` wurden auf Produktion installiert. Der vollständige DB-Stabilitätsvertrag lief dort fehlerfrei.
-3. Erledigt: Client `zane-v2.785` wurde gebaut und vollständig lokal geprüft. Die Veröffentlichung wird über den Feature-Branch ausgelöst.
+3. Erledigt: Client `zane-v2.785` wurde gebaut, vollständig geprüft und über den Feature-Branch veröffentlicht.
 4. Erledigt: Die Production-Function `db-health` ist mit eigenem Secret aktiv. Better Stack prüft sie alle drei Minuten und meldet `Up`.
 5. Erledigt: Der globale Transport steht auf `broadcast` und gilt ohne E-Mail-Grant für alle aktuellen und zukünftigen Friends-Konten. `social_mode` steht auf `normal`.
-6. Abschlussmessung: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,2 MB in `net._http_response`. Seit dem Rollout sind keine neuen Realtime-Timeouts oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
-7. Absichtlich offen: Die neun Social-Tabellen bleiben in `supabase_realtime`, damit alte Clients und ein sofortiger Rollback weiterhin funktionieren. Entfernt werden sie erst nach eigener Freigabe, wenn die neue Client-Version ausreichend verteilt ist.
+6. Ausstehend: Client `zane-v2.786` veröffentlichen, dann `coaching_broadcast` installieren und den Produktionsvertrag erneut ausführen.
+7. Letzte Messung vor diesem Rollout: 23 von 60 Verbindungen, null wartende Client-Queries, null Client-Queries über fünf Sekunden und rund 1,2 MB in `net._http_response`. Seit dem Social-Rollout sind keine neuen Realtime-Timeouts oder `IncreaseSubscriptionConnectionPool`-Fehler sichtbar.
+8. Absichtlich offen: Die neun Social-Tabellen bleiben in `supabase_realtime`, damit alte Clients und ein sofortiger Rollback weiterhin funktionieren. Entfernt werden sie erst nach eigener Freigabe, wenn die neue Client-Version ausreichend verteilt ist.
 
 Sofort stoppen bei:
 

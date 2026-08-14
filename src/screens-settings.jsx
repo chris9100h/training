@@ -987,6 +987,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [dbStabilitySheet, setDbStabilitySheet] = useStateSet(false);
   const [socialModeBusy, setSocialModeBusy] = useStateSet(false);
   const [socialTransportBusy, setSocialTransportBusy] = useStateSet(false);
+  const [coachingTransportBusy, setCoachingTransportBusy] = useStateSet(false);
   const [dbStabilityMsg, setDbStabilityMsg] = useStateSet(null);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
@@ -1197,12 +1198,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     }
   }, [supportSheet]);
 
-  // Load notes + mark read when user opens a ticket thread, then keep polling
-  // for new ones every 12s while it stays open. Support tickets aren't wired
-  // into the live unreadNotes/Realtime path regular coach chats use (see
-  // app.jsx's subscribeToChanges, which only bumps the unread badge for a
-  // support note instead of pushing it into an open thread), without this
-  // poll, a reply only ever showed up after closing and reopening the sheet.
+  // Load notes + mark read when a user opens a ticket. Private Broadcast
+  // invalidations refresh the open thread; the slow poll remains a recovery
+  // path for a suspended or reconnecting channel.
   // `first` gates the loading spinner + support-ticket-list badge clear to
   // just the initial open, so background refreshes don't flash "Loading…" or
   // redundantly re-zero an already-cleared unread count.
@@ -1245,15 +1243,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         });
     };
     load();
-    const poll = setInterval(load, 12000);
-    return () => { mounted = false; clearInterval(poll); };
+    const onInvalidate = event => {
+      const resource = event?.detail?.resource;
+      if (resource === 'support' || resource === 'authoritative') load();
+    };
+    window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    const poll = setInterval(load, 60000);
+    return () => {
+      mounted = false;
+      window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      clearInterval(poll);
+    };
   }, [supportActiveTicketId]);
 
-  // Load admin ticket notes + mark user messages read, then keep polling for
-  // new ones every 12s while the ticket stays open (see the client-side
-  // support effect above for why this can't just ride the Realtime
-  // unreadNotes path coach chats use). `first` gates the loading spinner to
-  // the initial open only.
+  // Admin tickets use the same Broadcast invalidation plus a slow fallback.
+  // `first` gates the loading spinner to the initial open only.
   useEffectSet(() => {
     if (!supportTicket) { setSupportTicketNotes([]); return; }
     let mounted = true;
@@ -1284,8 +1288,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         });
     };
     load();
-    const poll = setInterval(load, 12000);
-    return () => { mounted = false; clearInterval(poll); };
+    const onInvalidate = event => {
+      const resource = event?.detail?.resource;
+      if (resource === 'support' || resource === 'authoritative') load();
+    };
+    window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    const poll = setInterval(load, 60000);
+    return () => {
+      mounted = false;
+      window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      clearInterval(poll);
+    };
   }, [supportTicket]);
 
   // Admin-only: load all admin state on mount (support inbox).
@@ -2162,6 +2175,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     } catch (error) {
       setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the Social transport.' });
     } finally { setSocialTransportBusy(false); }
+  };
+
+  const setCoachingTransport = async transport => {
+    if (coachingTransportBusy || !['legacy', 'broadcast'].includes(transport)) return;
+    if (transport === 'legacy' && !await confirm('Coaching, support and coach-status updates will switch back to Postgres Changes within two minutes. The rollback publication is restored first.', { title: 'Use legacy Coaching?', ok: 'Switch' })) return;
+    setCoachingTransportBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_coaching_transport', { p_transport: transport });
+      if (error) throw error;
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: transport === 'broadcast' ? 'All current and future users now receive Coaching updates through Broadcast.' : 'Coaching now uses legacy Realtime.' });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the Coaching transport.' });
+    } finally { setCoachingTransportBusy(false); }
   };
 
   const sendAdminEmail = async () => {
@@ -3847,7 +3875,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
-                <NavRow label="Database stability" hint={`${runtimeConfig?.socialMode === 'maintenance' ? 'Paused' : 'Normal'} · ${runtimeConfig?.socialTransport === 'broadcast' ? 'Broadcast' : 'Legacy'}`} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
+                <NavRow label="Database stability" hint={runtimeConfig?.socialMode === 'maintenance' ? 'Friends paused' : (runtimeConfig?.socialTransport === 'broadcast' && runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Mixed')} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
@@ -3872,6 +3900,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Frame style={{ padding: '0 14px' }}>
             <NavRow label="Social mode" first hint={runtimeConfig?.socialMode === 'maintenance' ? 'Maintenance' : 'Normal'} />
             <NavRow label="Social transport" hint={runtimeConfig?.socialTransport === 'broadcast' ? 'Broadcast' : 'Legacy'} />
+            <NavRow label="Coaching transport" hint={runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Legacy'} />
           </Frame>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setSocialMode('maintenance')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'maintenance'}>Pause Friends</Btn>
@@ -3885,6 +3914,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
               <Btn kind="ghost" onClick={() => setSocialTransport('legacy')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'legacy'}>Use Legacy</Btn>
               <Btn onClick={() => setSocialTransport('broadcast')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'broadcast'}>Use Broadcast</Btn>
+            </div>
+          </div>
+          <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COACHING TRANSPORT</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+              Broadcast covers coaching invitations, messages, support and coach-status badges. Legacy restores the four Postgres Changes tables before clients switch.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+              <Btn kind="ghost" onClick={() => setCoachingTransport('legacy')} disabled={coachingTransportBusy || runtimeConfig?.coachingTransport === 'legacy'}>Use Legacy</Btn>
+              <Btn onClick={() => setCoachingTransport('broadcast')} disabled={coachingTransportBusy || runtimeConfig?.coachingTransport === 'broadcast'}>Use Broadcast</Btn>
             </div>
           </div>
           {dbStabilityMsg && <div style={{ fontSize: 12, color: dbStabilityMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: dbStabilityMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>{dbStabilityMsg.text}</div>}

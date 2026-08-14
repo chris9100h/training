@@ -2116,122 +2116,74 @@ function App() {
     return () => document.removeEventListener('visibilitychange', recheck);
   }, [phase, userId, store?.settings?.unit]);
 
-
-
-  // was removed, the local store is the single source of truth for a session.)
-  //
-  // activeCoachClients feeds the two coach-status realtime listeners below
-  // (client training-status / check-in pushes) added to the same channel.
-  // Keyed separately as coachClientsKey (stable string of coachingId:clientId
-  // pairs) so the effect only tears down and re-subscribes when the actual
-  // set of active clients changes (invite accepted/ended), not on every
-  // store update: reloadCoachingState always returns a fresh asCoach array
-  // reference even when its contents are unchanged.
-  // Excludes support_-prefixed pseudo-coaching entries (admin support tickets,
-  // status forced 'active' forever, see store.js's isNoteFromClient/
-  // unreadCoachingNotes for the same established filter): without this the
-  // admin account's list grows roughly one entry per registered user with an
-  // open ticket, churning coachClientsKey (and the whole channel resubscribe)
-  // on every unrelated support chat, and realistically risking the 100-id
-  // in.() filter cap this isn't meant to hit.
-  const activeCoachClients = React.useMemo(() => (
-    (store?.coaching?.asCoach || [])
-      .filter(c => c.status === 'active' && c.clientId && c.id && !c.id.startsWith('support_'))
-      .map(c => ({ clientId: c.clientId, coachingId: c.id }))
-  ), [store?.coaching?.asCoach]);
-  const coachClientsKey = activeCoachClients.map(c => `${c.coachingId}:${c.clientId}`).sort().join(',');
-  // Set by the isCoachActive poll effect below to whatever its current
-  // `poll` closure is; read here (lazily, at event time) so the realtime
-  // listener can trigger a re-poll without a second status-aggregation path.
+  // Coaching Broadcast carries only invalidation types. All relationship,
+  // message, support, and status data is reconciled through RLS/RPC here.
+  // pollFnRef keeps live-client aggregation in the existing status RPC path.
   const pollFnRef = useRefA(null);
   useEffectA(() => {
     if (!userId) return;
-    // A burst of realtime events (several clients finishing sets around the
-    // same time, or one client's settings row updating repeatedly) should
-    // still only trigger one re-poll, not one per event.
+    let disposed = false;
     let debounceTimer = null;
     const triggerPoll = () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => { pollFnRef.current?.(); }, 400);
     };
-    const unsubscribe = LB.subscribeToChanges(
-      userId,
-      (note) => {
-        setStore(s => {
-          if (!s) return s;
-          if (note.coachingId?.startsWith('support_')) {
-            // Own support ticket reply → update badge and ticket list
-            const myTicket = (s.supportTickets || []).some(t => t.coachingId === note.coachingId);
-            if (myTicket) {
-              return {
-                ...s,
-                supportUnread: (s.supportUnread || 0) + 1,
-                supportTickets: (s.supportTickets || []).map(t =>
-                  t.coachingId === note.coachingId
-                    ? { ...t, unreadCount: t.unreadCount + 1, lastMessageAt: note.createdAt, lastMessageBody: note.body }
-                    : t
-                ),
-              };
-            }
-            // Admin inbox: increment admin unread counter
-            adminSupportUnreadRevision.current += 1;
-            const nextUnread = (s.adminSupportUnread || 0) + 1;
-            adminSupportUnreadRef.current = nextUnread;
-            return { ...s, adminSupportUnread: nextUnread };
-          }
-          if (!s.coaching) return s;
-          if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
-          return {
-            ...s,
-            coaching: { ...s.coaching, unreadNotes: [note, ...(s.coaching.unreadNotes || [])] },
-          };
-        });
-      },
-      (eventType, coachingId, newRow) => {
-        if (coachingId?.startsWith('support_')) {
-          // A newly-created ticket can arrive before its first note, and a
-          // reconnect can miss the note event entirely. Reconcile the durable
-          // server count for all support-row changes; note events still win
-          // over an older in-flight RPC through the revision guard above.
-          adminSupportUnreadRevision.current += 1;
-          refreshAdminSupportUnread();
-        }
-        if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
-          setStore(s => s ? {
-            ...s,
-            supportTickets: (s.supportTickets || []).filter(t => t.coachingId !== coachingId),
-            supportUnread: Math.max(0, (s.supportUnread || 0) - ((s.supportTickets || []).find(t => t.coachingId === coachingId)?.unreadCount || 0)),
-          } : s);
-          return;
-        }
-        if (eventType === 'UPDATE' && coachingId?.startsWith('support_') && newRow?.support_status) {
-          setStore(s => s ? {
-            ...s,
-            supportTickets: (s.supportTickets || []).map(t =>
-              t.coachingId === coachingId ? { ...t, status: newRow.support_status } : t
-            ),
-          } : s);
-          return;
-        }
-        LB.reloadCoachingState(userId).then(coaching => {
-          // reloadCoachingState rebuilds the relationship data only. Two
-          // fields on store.coaching come from the 60s status poll instead
-          // (anyClientLive, pendingCheckinsCount), and that poll skips its own
-          // setStore while the values look unchanged, so replacing the object
-          // wholesale dropped the live dot and the check-in badge until the
-          // next real change.
-          setStore(s => s ? { ...s, coaching: {
+
+    let coachingInFlight = false;
+    let coachingPending = false;
+    const refreshCoaching = async () => {
+      if (coachingInFlight) { coachingPending = true; return; }
+      coachingInFlight = true;
+      do {
+        coachingPending = false;
+        try {
+          const coaching = await LB.reloadCoachingState(userId);
+          if (!disposed) setStore(s => s ? { ...s, coaching: {
             ...coaching,
             anyClientLive: s.coaching?.anyClientLive,
             pendingCheckinsCount: s.coaching?.pendingCheckinsCount,
           } } : s);
-        }).catch(() => {});
-      },
-      activeCoachClients,
-      triggerPoll,
-    );
-    return () => { clearTimeout(debounceTimer); unsubscribe(); };
-  }, [userId, coachClientsKey]);
+        } catch (_) {}
+      } while (!disposed && coachingPending);
+      coachingInFlight = false;
+    };
+
+    let supportInFlight = false;
+    let supportPending = false;
+    const refreshSupport = async () => {
+      if (supportInFlight) { supportPending = true; return; }
+      supportInFlight = true;
+      do {
+        supportPending = false;
+        if (storeRefA.current?.user?.email === ADMIN_SUPPORT_EMAIL) {
+          adminSupportUnreadRevision.current += 1;
+          await refreshAdminSupportUnread();
+        } else {
+          try {
+            const tickets = await LB.loadUserSupportChats();
+            if (!disposed) setStore(s => s ? {
+              ...s,
+              supportTickets: tickets,
+              supportUnread: tickets.reduce((sum, ticket) => sum + Number(ticket.unreadCount || 0), 0),
+            } : s);
+          } catch (_) {}
+        }
+      } while (!disposed && supportPending);
+      supportInFlight = false;
+    };
+
+    const onChange = resource => {
+      if (resource === 'relationships' || resource === 'notes' || resource === 'authoritative') refreshCoaching();
+      if (resource === 'support' || resource === 'authoritative') refreshSupport();
+      if (resource === 'status' || resource === 'authoritative') triggerPoll();
+    };
+    const unsubscribe = LB.subscribeToChanges(userId, onChange, { transport: runtimeConfig.coachingTransport });
+    return () => {
+      disposed = true;
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
+  }, [userId, runtimeConfig.coachingTransport, refreshAdminSupportUnread]);
 
   // Social data is deliberately feature-gated. A user who has not enabled the
   // Friends tab should not trigger any social RPC, table query, realtime

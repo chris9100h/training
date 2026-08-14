@@ -157,7 +157,7 @@ function runDbTaskBatch(items, worker, options) {
 }
 
 const RUNTIME_CONFIG_KEY = 'logbook-runtime-config';
-const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy' };
+const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy', coachingTransport: 'legacy' };
 let _runtimeConfig = (() => {
   try {
     const parsed = JSON.parse(localStorage.getItem(RUNTIME_CONFIG_KEY) || 'null');
@@ -166,6 +166,7 @@ let _runtimeConfig = (() => {
       forceUpdateNonce: parsed.forceUpdateNonce || null,
       socialMode: parsed.socialMode === 'maintenance' ? 'maintenance' : 'normal',
       socialTransport: parsed.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+      coachingTransport: parsed.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
     };
   } catch (_) { return { ...DEFAULT_RUNTIME_CONFIG }; }
 })();
@@ -182,6 +183,7 @@ function _publishRuntimeConfig(next) {
     forceUpdateNonce: next?.forceUpdateNonce || null,
     socialMode: next?.socialMode === 'maintenance' ? 'maintenance' : 'normal',
     socialTransport: next?.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+    coachingTransport: next?.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
   };
   window.__socialRuntimeConfig = _runtimeConfig;
   try { localStorage.setItem(RUNTIME_CONFIG_KEY, JSON.stringify(_runtimeConfig)); } catch (_) {}
@@ -1732,6 +1734,26 @@ function buildEssentialLoadResult({
   };
 }
 
+function mapUserSupportTickets(rows) {
+  return (rows || []).map(t => ({
+    coachingId: t.coaching_id,
+    status: t.support_status,
+    category: t.support_category,
+    createdAt: t.created_at,
+    lastMessageAt: t.last_message_at,
+    lastMessageBody: t.last_message_body,
+    unreadCount: Number(t.unread_count || 0),
+    archived: t.archived || false,
+    archivedAt: t.archived_at || null,
+  }));
+}
+
+async function loadUserSupportChats() {
+  const { data, error } = await _supabase.rpc('get_user_support_chats');
+  if (error) throw error;
+  return mapUserSupportTickets(data);
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
@@ -2325,17 +2347,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         attachments: n.attachments || null,
       })),
     },
-    supportTickets: (supportTicketsRes?.data || []).map(t => ({
-      coachingId: t.coaching_id,
-      status: t.support_status,
-      category: t.support_category,
-      createdAt: t.created_at,
-      lastMessageAt: t.last_message_at,
-      lastMessageBody: t.last_message_body,
-      unreadCount: Number(t.unread_count || 0),
-      archived: t.archived || false,
-      archivedAt: t.archived_at || null,
-    })),
+    supportTickets: mapUserSupportTickets(supportTicketsRes?.data),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
@@ -5839,85 +5851,61 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-// Realtime: coaching invites (zane_coaching), coaching messages
-// (zane_coaching_notes), and, when the caller is an active coach, client
-// training-status/check-in pushes (zane_user_settings, zane_checkins).
-// Live workout *set* sync across a user's own devices was removed: the
-// local store is the single source of truth for a session. But a coach's
-// "is my client training right now / do they have a pending check-in" badge
-// (app.jsx isCoachActive effect) now updates from these last two listeners
-// instead of a tight poll; polling stays only as an infrequent fallback.
-//
-// coachClients: optional array of { clientId, coachingId } for this user's
-// currently-active coaching relationships (only meaningful when the caller
-// coaches someone). Pass [] / omit when not an active coach: the two
-// coach-status listeners are then skipped entirely rather than attached
-// with an empty/invalid filter.
-// onCoachStatusChange: fired (no payload, callers just re-poll) for any
-// UPDATE on a watched client's zane_user_settings row or any change on a
-// watched coaching relationship's zane_checkins rows. Aggregation
-// (anyLive / pendingCheckinsCount) intentionally stays in app.jsx; this
-// function is thin plumbing only.
-function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClients, onCoachStatusChange) {
-  const mapNote = n => ({
-    id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
-    type: n.type, entityId: n.entity_id, entityName: n.entity_name,
-    threadId: n.thread_id, body: n.body, createdAt: n.created_at,
-    editedAt: n.edited_at,
-    attachments: n.attachments || null,
+// Coaching Realtime carries invalidations only. Broadcast sends no message,
+// relationship, support, check-in, or workout data. The caller always reloads
+// the authoritative rows through RLS/RPC. Legacy Postgres Changes remains in
+// the client solely for the global emergency rollback.
+function subscribeToChanges(userId, onChange, { transport = 'legacy' } = {}) {
+  if (!userId || typeof onChange !== 'function') return () => {};
+  const selectedTransport = transport === 'broadcast' ? 'broadcast' : 'legacy';
+  const pendingResources = new Set();
+  let flushTimer = null;
+  let disposed = false;
+  const emit = resource => {
+    if (disposed) return;
+    pendingResources.add(['relationships', 'notes', 'support', 'status', 'authoritative'].includes(resource) ? resource : 'authoritative');
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      const resources = [...pendingResources];
+      pendingResources.clear();
+      resources.forEach(item => {
+        onChange(item);
+        try { window.dispatchEvent(new CustomEvent('zane-coaching-invalidate', { detail: { resource: item } })); } catch (_) {}
+      });
+    }, 250);
+  };
+
+  let channel;
+  if (selectedTransport === 'broadcast') {
+    channel = _supabase
+      .channel(`coaching:user:${userId}`, { config: { private: true } })
+      .on('broadcast', { event: 'coaching_invalidate' }, event => emit(event?.payload?.resource));
+  } else {
+    channel = _supabase
+      .channel(`coaching-legacy:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => emit('relationships'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => emit('relationships'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching_notes' }, payload => {
+        const coachingId = payload?.new?.coaching_id || payload?.old?.coaching_id || '';
+        emit(String(coachingId).startsWith('support_') ? 'support' : 'notes');
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_user_settings' }, () => emit('status'))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_checkins' }, () => emit('status'))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_checkins' }, () => emit('status'));
+  }
+
+  const subscribedChannel = channel.subscribe(status => {
+    if (status === 'SUBSCRIBED') emit('authoritative');
   });
-  const clientIds = [...new Set((coachClients || []).map(c => c.clientId).filter(Boolean))];
-  const coachingIds = [...new Set((coachClients || []).map(c => c.coachingId).filter(Boolean))];
-
-  let channel = _supabase
-    .channel(`rt-${userId}`)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
-      if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, p => {
-      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, p => {
-      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
-    });
-
-  // Realtime's postgres_changes `in.(...)` filter does support a list of
-  // values (Postgres `= ANY`, confirmed against current Supabase docs), but
-  // caps at 100 values. A coach past that (implausible for a real coaching
-  // relationship, but the admin account's asCoach also carries one
-  // pseudo-entry per open support ticket, filtered out by the caller before
-  // this list is built) drops the filter and leans on the RLS policies from
-  // migration 0177 ("coach can read client settings" / "checkins_coach_read")
-  // which already scope reads to this coach's own active clients: Realtime
-  // evaluates postgres_changes INSERT/UPDATE reads through RLS regardless, so
-  // an unfiltered listener is still provably scoped for those, just less
-  // precise. DELETE is the one exception (Supabase can't filter or RLS-scope
-  // DELETE for postgres_changes, since the row is already gone), which is
-  // exactly why zane_checkins only listens for INSERT/UPDATE below, never '*'
-  // or DELETE: an unfiltered/unscoped DELETE listener would fire for every
-  // coach watching any client, for any other coach's client's deleted row.
-  if (clientIds.length > 0) {
-    const filter = clientIds.length <= 100 ? `user_id=in.(${clientIds.join(',')})` : undefined;
-    channel = channel.on('postgres_changes', {
-      event: 'UPDATE', schema: 'public', table: 'zane_user_settings',
-      ...(filter ? { filter } : {}),
-    }, () => onCoachStatusChange?.());
-  }
-  if (coachingIds.length > 0) {
-    const filter = coachingIds.length <= 100 ? `coaching_id=in.(${coachingIds.join(',')})` : undefined;
-    channel = channel
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'zane_checkins',
-        ...(filter ? { filter } : {}),
-      }, () => onCoachStatusChange?.())
-      .on('postgres_changes', {
-        event: 'UPDATE', schema: 'public', table: 'zane_checkins',
-        ...(filter ? { filter } : {}),
-      }, () => onCoachStatusChange?.());
-  }
-
-  _realtimeChannel = channel.subscribe();
-  return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
+  _realtimeChannel = subscribedChannel;
+  return () => {
+    disposed = true;
+    clearTimeout(flushTimer);
+    pendingResources.clear();
+    if (_realtimeChannel === subscribedChannel) _realtimeChannel = null;
+    _supabase.removeChannel(subscribedChannel);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -11865,7 +11853,7 @@ window.LB = {
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
-  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs

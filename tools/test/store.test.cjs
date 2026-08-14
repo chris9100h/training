@@ -13,6 +13,9 @@ let testSession = null; // swapped per test to give fnFetch a bearer token to se
 let testClientOptions = null;
 let testRpc = async () => ({ data: null, error: null });
 const rpcLog = []; // records every rpc(name, args) call
+const channelLog = [];
+const removedChannels = [];
+const windowEventLog = [];
 // The sandbox's own `window`, exposed so a test can set the globals store.js
 // reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
 // is a different object entirely, setting that one has no effect in here.
@@ -27,11 +30,19 @@ function loadStore() {
     },
     from: (...args) => testFrom(...args),
     rpc: async (name, args) => { rpcLog.push({ name, args }); return testRpc(name, args); },
-    channel: () => ({ on() { return this; }, subscribe() { return this; } }),
-    removeChannel: () => {},
+    channel: (name, options) => {
+      const channel = {
+        name, options, handlers: [], statusCallback: null,
+        on(type, filter, callback) { this.handlers.push({ type, filter, callback }); return this; },
+        subscribe(callback) { this.statusCallback = callback || null; return this; },
+      };
+      channelLog.push(channel);
+      return channel;
+    },
+    removeChannel: channel => { removedChannels.push(channel); },
   };
   const sandbox = {
-    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, dispatchEvent() {}, __STORE_TEST__: true },
+    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, dispatchEvent(event) { windowEventLog.push(event); }, __STORE_TEST__: true },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
     CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
@@ -64,18 +75,54 @@ async function testAsync(name, fn) {
 (async () => {
   const LB = loadStore();
 
-  await testAsync('runtime config applies the global Social transport and its rollback', async () => {
+  await testAsync('runtime config applies global Social and Coaching transports with rollback', async () => {
     testRpc = async name => {
       assert.strictEqual(name, 'get_runtime_config');
-      return { data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast' }, error: null };
+      return { data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast', coachingTransport: 'broadcast' }, error: null };
     };
     const broadcast = await LB.fetchRuntimeConfig();
     assert.strictEqual(broadcast.socialTransport, 'broadcast');
+    assert.strictEqual(broadcast.coachingTransport, 'broadcast');
 
-    testRpc = async () => ({ data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy' }, error: null });
+    testRpc = async () => ({ data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy', coachingTransport: 'legacy' }, error: null });
     const legacy = await LB.fetchRuntimeConfig();
     assert.strictEqual(legacy.socialTransport, 'legacy');
+    assert.strictEqual(legacy.coachingTransport, 'legacy');
     testRpc = async () => ({ data: null, error: null });
+  });
+
+  await testAsync('Coaching Broadcast uses one private user topic and coalesces content-free invalidations', async () => {
+    const resources = [];
+    const channelStart = channelLog.length;
+    const eventStart = windowEventLog.length;
+    const unsubscribe = LB.subscribeToChanges('coach-user', resource => resources.push(resource), { transport: 'broadcast' });
+    const channel = channelLog[channelStart];
+    assert.strictEqual(channel.name, 'coaching:user:coach-user');
+    assert.strictEqual(channel.options.config.private, true);
+    assert.strictEqual(channel.handlers.length, 1);
+    assert.strictEqual(channel.handlers[0].type, 'broadcast');
+    assert.strictEqual(channel.handlers[0].filter.event, 'coaching_invalidate');
+
+    channel.statusCallback('SUBSCRIBED');
+    channel.handlers[0].callback({ payload: { resource: 'notes' } });
+    channel.handlers[0].callback({ payload: { resource: 'notes' } });
+    channel.handlers[0].callback({ payload: { resource: 'status' } });
+    await new Promise(resolve => setTimeout(resolve, 320));
+
+    assert.deepStrictEqual(resources, ['authoritative', 'notes', 'status']);
+    assert.deepStrictEqual(windowEventLog.slice(eventStart).map(event => event.detail.resource), resources);
+    unsubscribe();
+    assert.strictEqual(removedChannels.at(-1), channel);
+  });
+
+  test('Coaching legacy rollback keeps the four Postgres Changes resources available', () => {
+    const channelStart = channelLog.length;
+    const unsubscribe = LB.subscribeToChanges('legacy-user', () => {}, { transport: 'legacy' });
+    const channel = channelLog[channelStart];
+    assert.strictEqual(channel.name, 'coaching-legacy:legacy-user');
+    const tables = channel.handlers.filter(item => item.type === 'postgres_changes').map(item => item.filter.table);
+    assert.deepStrictEqual([...new Set(tables)].sort(), ['zane_checkins', 'zane_coaching', 'zane_coaching_notes', 'zane_user_settings']);
+    unsubscribe();
   });
 
   // ── todayISO: local calendar date, not UTC ───────────────────────────────

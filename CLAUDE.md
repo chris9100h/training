@@ -165,7 +165,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - Admin- (All-Users, Broadcast, Force-Update, VIP), Coaching- und Support-RPCs: siehe Referenz
 - Edge Function `auto-close-sessions`: schließt abgelaufene offene Sessions (Cron alle 15 min, Timeout je User via `session_timeout_minutes`)
 
-**Realtime:** in der `supabase_realtime`-Publikation sind `zane_coaching` und `zane_coaching_notes` (Live-Einladungen/-Nachrichten) sowie `zane_user_settings` und `zane_checkins` (Live-Badges: "Client trainiert gerade", ausstehendes Check-in); die dort ebenfalls gelisteten `door_events`/`motion_events` sind app-fremd (anderes Projekt in derselben DB, ignorieren). Laufende Sessions haben keinen Realtime-Sync: der lokale Store ist die alleinige Quelle, ein Coach pollt `get_active_session_detail`.
+**Realtime:** Coaching, Support und Coach-Status verwenden private, inhaltslose Broadcast-Signale auf `coaching:user:<user-id>`. `zane_coaching`, `zane_coaching_notes`, `zane_user_settings` und `zane_checkins` sind nicht mehr in `supabase_realtime`; der globale Legacy-Rollback stellt sie bei Bedarf atomar wieder her. Die dort gelisteten `door_events`/`motion_events` sind app-fremd (anderes Projekt in derselben DB, ignorieren). Laufende Sessions haben keinen Realtime-Sync: der lokale Store ist die alleinige Quelle, ein Coach pollt `get_active_session_detail`.
 
 ## History-Windowing (Kurzfassung)
 
