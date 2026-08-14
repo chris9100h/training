@@ -2275,7 +2275,9 @@ function App() {
     // broad session Realtime stream. Refresh only the small summary payload;
     // the open viewer polls its redacted detail more frequently.
     const workoutTimer = setInterval(refreshWorkoutFeed, 5000);
-    const socialTimer = setInterval(refreshFriends, 30000);
+    // Realtime handles normal changes. Keep this as a slower recovery fallback
+    // for reconnects and missed events instead of polling the full snapshot.
+    const socialTimer = setInterval(refreshFriends, 120000);
     const unsubscribe = LB.subscribeToFriends(userId, () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => refreshFriends(true), 250);

@@ -5938,17 +5938,13 @@ async function loadFriendsState(userId, weekStart = socialWeekStartISO(), { forc
   }
 }
 
-async function fetchSocialMessageRows(pageSize = 250) {
-  const rows = [];
-  for (let from = 0; ; from += pageSize) {
-    const response = await _supabase.from('zane_social_messages')
-      .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
-      .order('created_at', { ascending: false })
-      .range(from, from + pageSize - 1);
-    if (response.error) return response;
-    rows.push(...(response.data || []));
-    if (!response.data || response.data.length < pageSize) return { data: rows, error: null };
-  }
+async function fetchSocialMessageRows(limit = 300) {
+  // Realtime keeps the snapshot fresh. Only load the recent window needed by
+  // the inbox so an old account cannot turn every refresh into a full-table scan.
+  return _supabase.from('zane_social_messages')
+    .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
+    .order('created_at', { ascending: false })
+    .limit(limit);
 }
 
 async function loadFriendsStateUncached(userId, weekStart) {
@@ -5961,7 +5957,7 @@ async function loadFriendsStateUncached(userId, weekStart) {
     _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
     _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
     fetchSocialMessageRows(),
-    _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at'),
+    _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
     _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
     _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
     _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
@@ -5972,7 +5968,10 @@ async function loadFriendsStateUncached(userId, weekStart) {
   const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes, shareImportsRes].find(r => r?.error)?.error;
   if (firstError) throw firstError;
   if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
-  const attachments = await Promise.all((attachmentsRes.data || []).map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
+  const messageIds = new Set((messagesRes.data || []).map(row => row.id));
+  const attachments = await Promise.all((attachmentsRes.data || [])
+    .filter(row => messageIds.has(row.message_id))
+    .map(row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row))));
   const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
   const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
   const groups = (groupsRes.data || []).map(g => ({
