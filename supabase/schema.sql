@@ -1748,6 +1748,46 @@ CREATE TRIGGER zane_coaching_guard_update
 -- Migration 0148: the "recipient can mark read" UPDATE policy on
 -- zane_coaching_notes can't be column-restricted by RLS, so a BEFORE UPDATE
 -- trigger enforces that a non-author may only change read_at.
+CREATE OR REPLACE FUNCTION public.zane_coaching_notes_guard_update()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $function$
+begin
+  if (select auth.uid()) = old.author_id then
+    if new.id             is distinct from old.id
+       or new.coaching_id is distinct from old.coaching_id
+       or new.author_id   is distinct from old.author_id
+       or new.type        is distinct from old.type
+       or new.entity_id   is distinct from old.entity_id
+       or new.entity_name is distinct from old.entity_name
+       or new.created_at  is distinct from old.created_at
+       or new.read_at     is distinct from old.read_at
+       or new.thread_id   is distinct from old.thread_id
+       or new.attachments is distinct from old.attachments
+    then
+      raise exception 'author may only update body and edited_at';
+    end if;
+  else
+    if new.id             is distinct from old.id
+       or new.coaching_id is distinct from old.coaching_id
+       or new.author_id   is distinct from old.author_id
+       or new.type        is distinct from old.type
+       or new.entity_id   is distinct from old.entity_id
+       or new.entity_name is distinct from old.entity_name
+       or new.body        is distinct from old.body
+       or new.created_at  is distinct from old.created_at
+       or new.edited_at   is distinct from old.edited_at
+       or new.thread_id   is distinct from old.thread_id
+       or new.attachments is distinct from old.attachments
+    then
+      raise exception 'recipient may only update read_at';
+    end if;
+  end if;
+  return new;
+end;
+$function$;
 REVOKE EXECUTE ON FUNCTION public.zane_coaching_notes_guard_update() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS zane_coaching_notes_guard_update ON public.zane_coaching_notes;
@@ -4051,32 +4091,18 @@ REVOKE ALL ON public.zane_social_groups, public.zane_social_group_members, publi
 
 REVOKE EXECUTE ON FUNCTION public.social_lookup_profile(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_lookup_profile(text) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date, date) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date, date) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_send_friend_request(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_send_friend_request(uuid) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_respond_friend_request(uuid, boolean) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_remove_friend(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_remove_friend(uuid) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_block_user(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_block_user(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_create_group(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_create_group(text) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_join_group(text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_join_group(text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_leave_group(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_leave_group(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_delete_group(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_delete_group(uuid) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_create_plan_share(uuid, text, jsonb) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_create_group_plan_share(uuid, text, jsonb) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_report(uuid, uuid, uuid, text, text) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_mark_plan_imported(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_delete_plan_share(uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_is_group_member(uuid, uuid) FROM PUBLIC, anon;
@@ -4249,11 +4275,8 @@ CREATE POLICY "social workout comments read" ON public.zane_social_workout_comme
 GRANT SELECT ON public.zane_social_workout_comments TO authenticated;
 REVOKE INSERT, UPDATE, DELETE ON public.zane_social_workout_comments FROM anon, authenticated;
 
-REVOKE EXECUTE ON FUNCTION public.social_workout_access(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_can_view_workout_session(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_can_view_workout_session(text) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_get_workout_feed() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_workout_feed() TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_get_workout_detail(uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_get_workout_detail(uuid, text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_add_workout_comment(text, text, text) FROM PUBLIC, anon;
@@ -4360,9 +4383,6 @@ BEGIN
 END;
 $function$;
 
-REVOKE EXECUTE ON FUNCTION public.social_health_metric_value(uuid, text, date, date) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.social_get_dashboard(date, date) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_dashboard(date, date) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean, jsonb, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.social_update_profile(text, boolean, boolean, boolean, jsonb, jsonb) TO authenticated;
 
@@ -4403,47 +4423,6 @@ CREATE POLICY "authors can edit notes" ON public.zane_coaching_notes
     )
   );
 
-CREATE OR REPLACE FUNCTION public.zane_coaching_notes_guard_update()
-  RETURNS trigger
-  LANGUAGE plpgsql
-  SECURITY DEFINER
-  SET search_path = public, pg_temp
-AS $function$
-begin
-  if (select auth.uid()) = old.author_id then
-    if new.id             is distinct from old.id
-       or new.coaching_id is distinct from old.coaching_id
-       or new.author_id   is distinct from old.author_id
-       or new.type        is distinct from old.type
-       or new.entity_id   is distinct from old.entity_id
-       or new.entity_name is distinct from old.entity_name
-       or new.created_at  is distinct from old.created_at
-       or new.read_at     is distinct from old.read_at
-       or new.thread_id   is distinct from old.thread_id
-       or new.attachments is distinct from old.attachments
-    then
-      raise exception 'author may only update body and edited_at';
-    end if;
-  else
-    if new.id             is distinct from old.id
-       or new.coaching_id is distinct from old.coaching_id
-       or new.author_id   is distinct from old.author_id
-       or new.type        is distinct from old.type
-       or new.entity_id   is distinct from old.entity_id
-       or new.entity_name is distinct from old.entity_name
-       or new.body        is distinct from old.body
-       or new.created_at  is distinct from old.created_at
-       or new.edited_at   is distinct from old.edited_at
-       or new.thread_id   is distinct from old.thread_id
-       or new.attachments is distinct from old.attachments
-    then
-      raise exception 'recipient may only update read_at';
-    end if;
-  end if;
-  return new;
-end;
-$function$;
-REVOKE EXECUTE ON FUNCTION public.zane_coaching_notes_guard_update() FROM PUBLIC, anon, authenticated;
 GRANT UPDATE, DELETE ON public.zane_coaching_notes TO authenticated;
 
 -- Migration 0274: enforce a 60-minute edit/delete window for chat messages.
@@ -4546,8 +4525,6 @@ GRANT EXECUTE ON FUNCTION public.delete_coaching_thread(text) TO authenticated;
 
 -- Migration 0275: only show the current user's workouts in Friends activity
 -- after they have received workout feedback. Personal history remains separate.
-REVOKE EXECUTE ON FUNCTION public.social_get_workout_feed() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_workout_feed() TO authenticated;
 -- Migration 0279: Social audit hardening. Keep the snapshot's final
 -- definitions aligned with the deploy migration below.
 -- Security and correctness hardening for the Friends preview.
@@ -5130,9 +5107,6 @@ BEGIN
     AND victim.user_id = p_target_id;
 END;
 $function$;
-
-REVOKE EXECUTE ON FUNCTION public.social_get_workout_feed() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.social_get_workout_feed() TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.social_create_group_plan_share(p_group_id uuid, p_plan_name text, p_snapshot jsonb)
 RETURNS uuid
