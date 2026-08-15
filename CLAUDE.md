@@ -131,7 +131,13 @@ Die drei Seiten sind untereinander verlinkt (Footer-Links, Wordmark/Eyebrow zur�
 
 ## Datenbank (Supabase)
 
-Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die vollständige Tabellen-/Spalten- und RPC-Referenz steht in `docs/database.md`: vor jeder DB-Arbeit den passenden Abschnitt lesen.**
+Migrationen liegen in `supabase/migrations/` als timestamped SQL-Dateien. Die
+vollständige Produktions-Baseline liegt dort als
+`20260528000000_legacy_schema_baseline.sql`; historische, nie in der
+Produktions-Historie aufgezeichnete Einzelmigrationen liegen ausschließlich in
+`supabase/migrations_archive/` und dürfen nicht wieder in den aktiven Ordner
+verschoben werden. **Die vollständige Tabellen-/Spalten- und RPC-Referenz steht
+in `docs/database.md`: vor jeder DB-Arbeit den passenden Abschnitt lesen.**
 
 **WICHTIG, Workflow bei jeder DB-Änderung** (neue Spalte, Tabelle, Funktion):
 1. Migration in `supabase/migrations/` anlegen

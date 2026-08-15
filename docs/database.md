@@ -10,6 +10,16 @@ Abschnitt „Datenbank (Supabase)"). `supabase/schema.sql` ist der vollständige
 Schema-Snapshot (Tabellen, RLS, Funktionen, Trigger, Realtime) und muss immer mit
 dem Live-Schema übereinstimmen.
 
+**Migrations-Basis für Preview-Branches:**
+`supabase/migrations/20260528000000_legacy_schema_baseline.sql` ist der vollständige
+aktuelle Produktions-Snapshot und damit der Startpunkt für einen frischen Branch.
+Die historischen Einzelmigrationen, die vor dieser Baseline nie in der
+Produktions-Historie aufgezeichnet waren, liegen ausschließlich unter
+`supabase/migrations_archive/` und werden von Supabase nicht ausgeführt. Neue
+Schemaänderungen müssen als neue Migration mit einem späteren Zeitstempel direkt
+unter `supabase/migrations/` angelegt werden. Die Archivdateien dürfen nicht in
+diesen aktiven Ordner zurückkopiert werden.
+
 **Drift-Checks (automatisiert):** `tools/check-db-docs.cjs` (CI, bei jedem Push)
 replayt alle Migrationen und schlägt fehl, wenn Tabellen/Spalten/Funktionen nicht
 in `schema.sql` und dieser Datei nachgezogen wurden. `tools/check-db-live.cjs`
