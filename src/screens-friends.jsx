@@ -194,7 +194,7 @@ function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comm
 
   const chooseCheer = async cheer => {
     if (sending) return;
-    const sent = await send(`${cheer.emoji} ${cheer.text}`, 'cheer');
+    const sent = await send(cheer.text, 'cheer');
     if (sent) setCheerPickerOpen(false);
   };
 

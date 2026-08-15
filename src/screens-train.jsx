@@ -721,8 +721,10 @@ function TrainingSocialFeedback({ sessionId, userId }) {
   const seenRef = useRefT(new Set());
   const toastTimerRef = useRefT(null);
 
+  const cheerMessageText = body => String(body || '').replace(/^\s*(?:💥|💪|🙌|🚀|🔥)\s*/u, '').trim();
+
   const cheerEmoji = body => {
-    const text = String(body || '').toLowerCase();
+    const text = cheerMessageText(body).toLowerCase();
     if (text.includes('let') && text.includes('go')) return '💥';
     if (text.includes('strong')) return '💪';
     if (text.includes('finish')) return '🙌';
@@ -811,7 +813,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
             <i className="fa-solid fa-comment" style={{ display: 'block', color: UI.inkSoft, fontSize: 36, marginBottom: 18 }} />
           )}
 
-          <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.body}</div>
+          <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.kind === 'cheer' ? cheerMessageText(toast.body) : toast.body}</div>
           <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} {'\u00b7'} {toast.authorName || 'Friend'}</div>
         </button>
       </div>,
@@ -4587,7 +4589,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wasPostWarmup = !sessionRef.current.startedAt;
     if (wasPostWarmup) {
       updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
-      if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionRef.current.id);
+      void LB.notifySocialFriendStarted(sessionRef.current.id);
     } else {
       setRestModalOpen(true);
     }
@@ -6531,14 +6533,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ),
       };
     });
-    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionId);
+    void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
   const startNow = () => {
     const sessionId = session.id;
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
-    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionId);
+    void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
