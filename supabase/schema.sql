@@ -2602,6 +2602,30 @@ ALTER TABLE zane_foods ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "authenticated read foods"
   ON zane_foods FOR SELECT TO authenticated USING (true);
 
+CREATE TABLE zane_food_recipes (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  items       jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  portions    integer     NOT NULL DEFAULT 1,  -- how many servings the batch in `items` splits into
+  cooked_weight_g numeric                      -- 0228, optional: weight of the finished (cooked) dish, freely typed, never derived from items' raw grams
+);
+
+CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_recipes_own"
+  ON zane_food_recipes FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+CREATE POLICY "coach can read client recipes"   ON public.zane_food_recipes FOR SELECT TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client recipes"  ON public.zane_food_recipes FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client recipes" ON public.zane_food_recipes FOR UPDATE TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client recipes" ON public.zane_food_recipes FOR DELETE TO public USING (zane_is_coach_of(user_id));
+
 CREATE TABLE zane_food_logs (
   id           text        PRIMARY KEY,
   user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -2701,30 +2725,6 @@ ALTER TABLE zane_food_favorites ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "zane_food_favorites_own"
   ON zane_food_favorites FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
-
-CREATE TABLE zane_food_recipes (
-  id          text        PRIMARY KEY,
-  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name        text        NOT NULL,
-  items       jsonb       NOT NULL DEFAULT '[]',
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now(),
-  portions    integer     NOT NULL DEFAULT 1,  -- how many servings the batch in `items` splits into
-  cooked_weight_g numeric                      -- 0228, optional: weight of the finished (cooked) dish, freely typed, never derived from items' raw grams
-);
-
-CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
-
-ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "zane_food_recipes_own"
-  ON zane_food_recipes FOR ALL
-  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
-
-CREATE POLICY "coach can read client recipes"   ON public.zane_food_recipes FOR SELECT TO public USING (zane_is_coach_of(user_id));
-CREATE POLICY "coach can write client recipes"  ON public.zane_food_recipes FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
-CREATE POLICY "coach can update client recipes" ON public.zane_food_recipes FOR UPDATE TO public USING (zane_is_coach_of(user_id));
-CREATE POLICY "coach can delete client recipes" ON public.zane_food_recipes FOR DELETE TO public USING (zane_is_coach_of(user_id));
 
 -- ── Plan Mode meal templates (migration 0197) ───────────────────────────────
 -- Recurring fixum slots that auto-fill each day's plan. Denormalized food/
