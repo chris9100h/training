@@ -3680,6 +3680,18 @@ CREATE TABLE public.zane_social_notification_deliveries (
 CREATE INDEX zane_social_notification_deliveries_recipient_idx
   ON public.zane_social_notification_deliveries(recipient_id, delivered_at);
 
+-- Server-only rate state for the notification Edge Function. This table is
+-- derived operational state, not user content, and has no client policies.
+CREATE TABLE public.zane_social_notification_attempts (
+  caller_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0)
+);
+
+ALTER TABLE public.zane_social_notification_attempts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.zane_social_notification_attempts FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.zane_social_notification_attempts TO service_role;
+
 CREATE INDEX zane_social_friendships_addressee_idx ON public.zane_social_friendships(addressee_id, status);
 CREATE INDEX zane_social_friendships_requester_idx ON public.zane_social_friendships(requester_id, status);
 CREATE INDEX zane_social_group_members_user_idx ON public.zane_social_group_members(user_id, group_id);
@@ -5571,6 +5583,217 @@ REVOKE EXECUTE ON FUNCTION public.admin_set_social_transport(text) FROM PUBLIC, 
 GRANT EXECUTE ON FUNCTION public.admin_set_social_transport(text) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.admin_set_coaching_transport(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_set_coaching_transport(text) TO authenticated;
+
+-- Final Friends audit-hardening state (Migration 20260815110000). The
+-- migration history above intentionally retains the original Broadcast
+-- rollout statements; these last definitions are the effective snapshot.
+CREATE OR REPLACE FUNCTION public.social_is_group_member(p_group_id uuid, p_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT auth.uid() IS NOT NULL
+    AND p_group_id IS NOT NULL
+    AND p_user_id IS NOT NULL
+    AND p_user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.zane_social_group_members
+      WHERE group_id = p_group_id AND user_id = p_user_id
+    );
+$function$;
+
+DROP POLICY IF EXISTS "social attachment storage read" ON storage.objects;
+CREATE POLICY "social attachment storage read" ON storage.objects
+FOR SELECT TO authenticated USING (
+  bucket_id = 'social-chat-attachments' AND EXISTS (
+    SELECT 1
+    FROM public.zane_social_message_attachments a
+    JOIN public.zane_social_messages m ON m.id = a.message_id
+    WHERE a.storage_path = name
+      AND (
+        m.sender_id = (select auth.uid())
+        OR (m.recipient_id = (select auth.uid()) AND EXISTS (
+          SELECT 1 FROM public.zane_social_friendships f
+          WHERE f.status = 'accepted'
+            AND ((f.requester_id = (select auth.uid()) AND f.addressee_id = m.sender_id)
+              OR (f.requester_id = m.sender_id AND f.addressee_id = (select auth.uid())))
+            AND NOT EXISTS (
+              SELECT 1 FROM public.zane_social_blocks b
+              WHERE (b.blocker_id = (select auth.uid()) AND b.blocked_id = m.sender_id)
+                 OR (b.blocker_id = m.sender_id AND b.blocked_id = (select auth.uid()))
+            )
+        ))
+        OR (m.group_id IS NOT NULL AND public.social_group_visible(m.group_id, (select auth.uid())))
+      )
+  )
+);
+
+DROP POLICY IF EXISTS "social own message reads" ON public.zane_social_message_reads;
+CREATE POLICY "social own message reads" ON public.zane_social_message_reads
+FOR ALL TO authenticated
+USING (
+  user_id = (select auth.uid()) AND EXISTS (
+    SELECT 1 FROM public.zane_social_messages m
+    WHERE m.id = message_id AND (
+      m.sender_id = (select auth.uid())
+      OR (m.recipient_id = (select auth.uid()) AND EXISTS (
+        SELECT 1 FROM public.zane_social_friendships f
+        WHERE f.status = 'accepted'
+          AND ((f.requester_id = (select auth.uid()) AND f.addressee_id = m.sender_id)
+            OR (f.requester_id = m.sender_id AND f.addressee_id = (select auth.uid())))
+          AND NOT EXISTS (
+            SELECT 1 FROM public.zane_social_blocks b
+            WHERE (b.blocker_id = (select auth.uid()) AND b.blocked_id = m.sender_id)
+               OR (b.blocker_id = m.sender_id AND b.blocked_id = (select auth.uid()))
+          )
+      ))
+      OR (m.group_id IS NOT NULL AND public.social_group_visible(m.group_id, (select auth.uid())))
+    )
+  )
+)
+WITH CHECK (
+  user_id = (select auth.uid()) AND EXISTS (
+    SELECT 1 FROM public.zane_social_messages m
+    WHERE m.id = message_id AND (
+      m.sender_id = (select auth.uid())
+      OR (m.recipient_id = (select auth.uid()) AND EXISTS (
+        SELECT 1 FROM public.zane_social_friendships f
+        WHERE f.status = 'accepted'
+          AND ((f.requester_id = (select auth.uid()) AND f.addressee_id = m.sender_id)
+            OR (f.requester_id = m.sender_id AND f.addressee_id = (select auth.uid())))
+          AND NOT EXISTS (
+            SELECT 1 FROM public.zane_social_blocks b
+            WHERE (b.blocker_id = (select auth.uid()) AND b.blocked_id = m.sender_id)
+               OR (b.blocker_id = m.sender_id AND b.blocked_id = (select auth.uid()))
+          )
+      ))
+      OR (m.group_id IS NOT NULL AND public.social_group_visible(m.group_id, (select auth.uid())))
+    )
+  )
+);
+
+CREATE OR REPLACE FUNCTION app_private.broadcast_social_read_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE v_row jsonb := CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
+BEGIN
+  PERFORM app_private.broadcast_social_user((v_row->>'user_id')::uuid, 'messages');
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS zane_social_broadcast_invalidate ON public.zane_social_message_reads;
+CREATE TRIGGER zane_social_broadcast_invalidate
+AFTER INSERT OR UPDATE OR DELETE ON public.zane_social_message_reads
+FOR EACH ROW EXECUTE FUNCTION app_private.broadcast_social_read_change();
+REVOKE EXECUTE ON FUNCTION app_private.broadcast_social_read_change() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION app_private.broadcast_social_group(
+  p_group_id uuid,
+  p_resource text,
+  p_extra_user uuid DEFAULT NULL
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE v_user_id uuid;
+BEGIN
+  FOR v_user_id IN
+    SELECT candidate.user_id
+    FROM (
+      SELECT p_extra_user AS user_id WHERE p_extra_user IS NOT NULL
+      UNION
+      SELECT gm.user_id FROM public.zane_social_group_members gm WHERE gm.group_id = p_group_id
+    ) candidate
+    WHERE candidate.user_id IS NOT NULL
+    LIMIT 200
+  LOOP
+    PERFORM app_private.broadcast_social_user(v_user_id, p_resource);
+  END LOOP;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.admin_set_social_transport(p_transport text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE v_transport text := lower(trim(coalesce(p_transport, ''))); v_table text;
+BEGIN
+  IF lower(coalesce((SELECT auth.email()), '')) <> 'office@btc-prime.biz' THEN RAISE EXCEPTION 'Unauthorized'; END IF;
+  IF v_transport NOT IN ('legacy', 'broadcast') THEN RAISE EXCEPTION 'Invalid social transport'; END IF;
+  FOREACH v_table IN ARRAY ARRAY['zane_social_friendships','zane_social_group_members','zane_social_groups','zane_social_message_attachments','zane_social_message_reads','zane_social_messages','zane_social_plan_share_imports','zane_social_plan_shares','zane_social_workout_comments'] LOOP
+    IF v_transport = 'legacy' THEN
+      EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY FULL', v_table);
+      IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = v_table) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', v_table);
+      END IF;
+    ELSE
+      IF EXISTS (SELECT 1 FROM pg_catalog.pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = v_table) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime DROP TABLE public.%I', v_table);
+      END IF;
+      EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY DEFAULT', v_table);
+    END IF;
+  END LOOP;
+  INSERT INTO public.zane_app_config (id, social_transport) VALUES (1, v_transport)
+  ON CONFLICT (id) DO UPDATE SET social_transport = EXCLUDED.social_transport;
+  RETURN v_transport;
+END;
+$function$;
+
+DO $publication$
+DECLARE v_table text;
+BEGIN
+  FOREACH v_table IN ARRAY ARRAY['zane_social_friendships','zane_social_group_members','zane_social_groups','zane_social_message_attachments','zane_social_message_reads','zane_social_messages','zane_social_plan_share_imports','zane_social_plan_shares','zane_social_workout_comments'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = v_table) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime DROP TABLE public.%I', v_table);
+    END IF;
+    EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY DEFAULT', v_table);
+  END LOOP;
+END;
+$publication$;
+
+UPDATE public.zane_app_config SET social_transport = 'broadcast' WHERE id = 1;
+
+-- Notification retention hardening (Migration 20260815113000): operational
+-- delivery rows older than 30 days are pruned when the service rate window is
+-- reopened after a quiet hour.
+CREATE OR REPLACE FUNCTION public.social_take_notification_rate_limit(p_caller_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_window timestamptz; v_attempts integer;
+BEGIN
+  IF p_caller_id IS NULL THEN RETURN false; END IF;
+  INSERT INTO public.zane_social_notification_attempts(caller_id, window_started_at, attempts)
+  VALUES (p_caller_id, now(), 0) ON CONFLICT (caller_id) DO NOTHING;
+  SELECT window_started_at, attempts INTO v_window, v_attempts
+    FROM public.zane_social_notification_attempts WHERE caller_id = p_caller_id FOR UPDATE;
+  IF v_window < now() - interval '1 hour' THEN
+    DELETE FROM public.zane_social_notification_deliveries WHERE created_at < now() - interval '30 days';
+  END IF;
+  IF v_window < now() - interval '1 minute' THEN
+    UPDATE public.zane_social_notification_attempts SET window_started_at = now(), attempts = 1 WHERE caller_id = p_caller_id;
+    RETURN true;
+  END IF;
+  IF v_attempts >= 120 THEN RETURN false; END IF;
+  UPDATE public.zane_social_notification_attempts SET attempts = v_attempts + 1 WHERE caller_id = p_caller_id;
+  RETURN true;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.social_take_notification_rate_limit(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.social_take_notification_rate_limit(uuid) TO service_role;
 REVOKE EXECUTE ON FUNCTION public.db_health() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.db_health() TO service_role;
 
@@ -6703,3 +6926,88 @@ DROP TRIGGER IF EXISTS zane_checkins_coaching_broadcast_invalidate ON public.zan
 CREATE TRIGGER zane_checkins_coaching_broadcast_invalidate
 AFTER INSERT OR UPDATE ON public.zane_checkins
 FOR EACH ROW EXECUTE FUNCTION app_private.broadcast_coaching_change();
+
+-- Friends audit hardening (Migration 20260815110000). These service-role-only
+-- helpers keep notification authorization and rate state inside Postgres.
+CREATE OR REPLACE FUNCTION public.social_take_notification_rate_limit(p_caller_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_window timestamptz; v_attempts integer;
+BEGIN
+  IF p_caller_id IS NULL THEN RETURN false; END IF;
+  INSERT INTO public.zane_social_notification_attempts(caller_id, window_started_at, attempts)
+  VALUES (p_caller_id, now(), 0) ON CONFLICT (caller_id) DO NOTHING;
+  SELECT window_started_at, attempts INTO v_window, v_attempts
+    FROM public.zane_social_notification_attempts WHERE caller_id = p_caller_id FOR UPDATE;
+  IF v_window < now() - interval '1 minute' THEN
+    UPDATE public.zane_social_notification_attempts SET window_started_at = now(), attempts = 1 WHERE caller_id = p_caller_id;
+    RETURN true;
+  END IF;
+  IF v_attempts >= 120 THEN RETURN false; END IF;
+  UPDATE public.zane_social_notification_attempts SET attempts = v_attempts + 1 WHERE caller_id = p_caller_id;
+  RETURN true;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_can_notify_message(p_message_id uuid, p_recipient_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_sender uuid; v_recipient uuid; v_group uuid; v_created timestamptz;
+BEGIN
+  IF p_message_id IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  SELECT sender_id, recipient_id, group_id, created_at INTO v_sender, v_recipient, v_group, v_created FROM public.zane_social_messages WHERE id = p_message_id;
+  IF NOT FOUND OR v_sender = p_recipient_id OR v_created < now() - interval '24 hours' THEN RETURN false; END IF;
+  IF v_recipient IS NOT NULL THEN
+    RETURN v_recipient = p_recipient_id
+      AND EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL AND f.accepted_at <= v_created AND ((f.requester_id = v_sender AND f.addressee_id = p_recipient_id) OR (f.requester_id = p_recipient_id AND f.addressee_id = v_sender)))
+      AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = v_sender AND b.blocked_id = p_recipient_id) OR (b.blocker_id = p_recipient_id AND b.blocked_id = v_sender));
+  END IF;
+  IF v_group IS NULL THEN RETURN false; END IF;
+  RETURN EXISTS (SELECT 1 FROM public.zane_social_group_members gm WHERE gm.group_id = v_group AND gm.user_id = p_recipient_id)
+    AND NOT EXISTS (SELECT 1 FROM public.zane_social_group_members gm JOIN public.zane_social_blocks b ON (b.blocker_id = p_recipient_id AND b.blocked_id = gm.user_id) OR (b.blocker_id = gm.user_id AND b.blocked_id = p_recipient_id) WHERE gm.group_id = v_group AND gm.user_id <> p_recipient_id);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_can_notify_finished_comment(p_comment_id uuid, p_recipient_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_author uuid; v_created timestamptz; v_owner uuid; v_started timestamptz; v_ended timestamptz; v_visible boolean;
+BEGIN
+  IF p_comment_id IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  SELECT wc.author_id, wc.created_at, s.user_id, COALESCE(s.started_at, s.date::timestamptz), s.ended, sp.workouts_visible INTO v_author, v_created, v_owner, v_started, v_ended, v_visible
+    FROM public.zane_social_workout_comments wc JOIN public.zane_sessions s ON s.id = wc.session_id JOIN public.zane_social_profiles sp ON sp.user_id = s.user_id WHERE wc.id = p_comment_id;
+  IF NOT FOUND OR v_owner <> p_recipient_id OR v_author = p_recipient_id OR v_ended IS NULL OR v_created < v_ended OR v_created < now() - interval '7 days' OR NOT COALESCE(v_visible, false) THEN RETURN false; END IF;
+  RETURN EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL AND f.accepted_at <= v_started AND ((f.requester_id = p_recipient_id AND f.addressee_id = v_author) OR (f.requester_id = v_author AND f.addressee_id = p_recipient_id)))
+    AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = p_recipient_id AND b.blocked_id = v_author) OR (b.blocker_id = v_author AND b.blocked_id = p_recipient_id));
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_can_notify_friend_started(p_session_id text, p_recipient_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_owner uuid; v_started timestamptz; v_ended timestamptz; v_visible boolean;
+BEGIN
+  IF NULLIF(trim(p_session_id), '') IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  SELECT s.user_id, s.started_at, s.ended, sp.workouts_visible INTO v_owner, v_started, v_ended, v_visible FROM public.zane_sessions s JOIN public.zane_social_profiles sp ON sp.user_id = s.user_id WHERE s.id = p_session_id;
+  IF NOT FOUND OR v_started IS NULL OR v_ended IS NOT NULL OR v_started < now() - interval '24 hours' OR v_owner = p_recipient_id OR NOT COALESCE(v_visible, false) THEN RETURN false; END IF;
+  RETURN EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL AND f.accepted_at <= v_started AND ((f.requester_id = v_owner AND f.addressee_id = p_recipient_id) OR (f.requester_id = p_recipient_id AND f.addressee_id = v_owner)))
+    AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = v_owner AND b.blocked_id = p_recipient_id) OR (b.blocker_id = p_recipient_id AND b.blocked_id = v_owner));
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.social_can_notify_friend_request(p_friendship_id uuid, p_recipient_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.id = p_friendship_id AND f.addressee_id = p_recipient_id AND f.status = 'pending' AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = f.requester_id AND b.blocked_id = f.addressee_id) OR (b.blocker_id = f.addressee_id AND b.blocked_id = f.requester_id)));
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.social_take_notification_rate_limit(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_can_notify_message(uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_can_notify_finished_comment(uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_can_notify_friend_started(text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.social_can_notify_friend_request(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.social_take_notification_rate_limit(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.social_can_notify_message(uuid, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.social_can_notify_finished_comment(uuid, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.social_can_notify_friend_started(text, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.social_can_notify_friend_request(uuid, uuid) TO service_role;

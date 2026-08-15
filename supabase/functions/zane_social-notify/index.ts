@@ -14,18 +14,34 @@ const PREF_BY_EVENT: Record<string, string> = {
   friend_started: 'social_push_friend_started',
 };
 
-function dbFetch(path: string, options: RequestInit = {}) {
+async function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${key}`,
-      apikey: key,
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4500);
+  try {
+    return await fetch(`${base}/rest/v1/${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        apikey: key,
+        'Content-Type': 'application/json',
+        ...(options.headers ?? {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function dbRpc<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const result = await dbFetch(`rpc/${name}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
+  if (!result.ok) throw new Error(`${name} failed: ${result.status} ${await result.text().catch(() => '')}`);
+  return await result.json() as T;
 }
 
 function response(body: Record<string, unknown>, status = 200) {
@@ -173,8 +189,8 @@ async function deliver(eventKind: string, eventId: string, push: PendingPush) {
 }
 
 async function notifyMessage(callerId: string, messageId: string): Promise<PendingPush[]> {
-  const messages = await rows<{ sender_id: string; recipient_id: string | null; group_id: string | null; body: string }>(
-    `zane_social_messages?id=eq.${encodeURIComponent(messageId)}&select=sender_id,recipient_id,group_id,body`,
+  const messages = await rows<{ sender_id: string; recipient_id: string | null; group_id: string | null; body: string; created_at: string }>(
+    `zane_social_messages?id=eq.${encodeURIComponent(messageId)}&select=sender_id,recipient_id,group_id,body,created_at&limit=1`,
     'message',
   );
   const message = messages[0];
@@ -183,11 +199,12 @@ async function notifyMessage(callerId: string, messageId: string): Promise<Pendi
   const sender = await profileName(callerId);
   const text = oneLine(message.body);
   if (message.recipient_id && message.recipient_id !== callerId) {
+    if (!await dbRpc<boolean>('social_can_notify_message', { p_message_id: messageId, p_recipient_id: message.recipient_id })) return [];
     return [{ recipientId: message.recipient_id, title: `Zane · ${sender}`, message: text || 'New message' }];
   }
   if (!message.group_id) return [];
   const members = await rows<{ user_id: string }>(
-    `zane_social_group_members?group_id=eq.${encodeURIComponent(message.group_id)}&select=user_id`,
+    `zane_social_group_members?group_id=eq.${encodeURIComponent(message.group_id)}&select=user_id&limit=200`,
     'group members',
   );
   const groupRows = await rows<{ name: string | null }>(
@@ -195,10 +212,15 @@ async function notifyMessage(callerId: string, messageId: string): Promise<Pendi
     'group',
   );
   const groupName = oneLine(groupRows[0]?.name || 'Friends group', 60);
-  return members
+  const candidates = members
     .map(member => member.user_id)
     .filter(userId => userId && userId !== callerId)
     .slice(0, 50)
+    ;
+  const allowed = await Promise.all(candidates.map(async recipientId => (
+    await dbRpc<boolean>('social_can_notify_message', { p_message_id: messageId, p_recipient_id: recipientId }) ? recipientId : null
+  )));
+  return allowed.filter((recipientId): recipientId is string => !!recipientId)
     .map(recipientId => ({ recipientId, title: `Zane · ${groupName}`, message: text || 'New group message' }));
 }
 
@@ -211,33 +233,35 @@ async function notifyFriendRequest(callerId: string, friendshipId: string): Prom
   if (!friendship) return [];
   if (friendship.requester_id !== callerId) throw new Error('forbidden');
   if (friendship.status !== 'pending') return [];
+  if (!await dbRpc<boolean>('social_can_notify_friend_request', { p_friendship_id: friendshipId, p_recipient_id: friendship.addressee_id })) return [];
   const sender = await profileName(callerId);
   return [{ recipientId: friendship.addressee_id, title: 'Zane · Friend request', message: `${sender} sent you a friend request.` }];
 }
 
 async function notifyFinishedComment(callerId: string, commentId: string): Promise<PendingPush[]> {
-  const comments = await rows<{ author_id: string; session_id: string; kind: string; body: string }>(
-    `zane_social_workout_comments?id=eq.${encodeURIComponent(commentId)}&select=author_id,session_id,kind,body`,
+  const comments = await rows<{ author_id: string; session_id: string; kind: string; body: string; created_at: string }>(
+    `zane_social_workout_comments?id=eq.${encodeURIComponent(commentId)}&select=author_id,session_id,kind,body,created_at&limit=1`,
     'workout comment',
   );
   const comment = comments[0];
   if (!comment) return [];
   if (comment.author_id !== callerId) throw new Error('forbidden');
-  const sessions = await rows<{ user_id: string; ended: string | null; day_name: string | null }>(
-    `zane_sessions?id=eq.${encodeURIComponent(comment.session_id)}&select=user_id,ended,day_name`,
+  const sessions = await rows<{ user_id: string; started_at: string | null; ended: string | null; day_name: string | null }>(
+    `zane_sessions?id=eq.${encodeURIComponent(comment.session_id)}&select=user_id,started_at,ended,day_name&limit=1`,
     'workout session',
   );
   const session = sessions[0];
   // The setting is intentionally for finished workouts only. A live comment
   // remains an in-app overlay/broadcast and is never turned into an OS push.
   if (!session?.ended || session.user_id === callerId) return [];
+  if (!await dbRpc<boolean>('social_can_notify_finished_comment', { p_comment_id: commentId, p_recipient_id: session.user_id })) return [];
   const label = comment.kind === 'cheer' ? 'Cheer' : 'Comment';
   return [{ recipientId: session.user_id, title: `Zane · ${label} on your workout`, message: oneLine(comment.body) || 'New workout comment' }];
 }
 
 async function notifyFriendStarted(callerId: string, sessionId: string): Promise<PendingPush[]> {
-  const sessions = await rows<{ user_id: string; ended: string | null }>(
-    `zane_sessions?id=eq.${encodeURIComponent(sessionId)}&select=user_id,ended`,
+  const sessions = await rows<{ user_id: string; started_at: string | null; ended: string | null }>(
+    `zane_sessions?id=eq.${encodeURIComponent(sessionId)}&select=user_id,started_at,ended&limit=1`,
     'workout session',
   );
   const session = sessions[0];
@@ -246,15 +270,15 @@ async function notifyFriendStarted(callerId: string, sessionId: string): Promise
   // a successful, silent skip.
   if (!session) throw new Error('session not ready');
   if (session.user_id !== callerId) throw new Error('forbidden');
-  if (session.ended) return [];
+  if (session.ended || !session.started_at) return [];
 
   const [outgoing, incoming] = await Promise.all([
     rows<{ addressee_id: string }>(
-      `zane_social_friendships?requester_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=addressee_id`,
+      `zane_social_friendships?requester_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=addressee_id&limit=200`,
       'outgoing friendships',
     ),
     rows<{ requester_id: string }>(
-      `zane_social_friendships?addressee_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=requester_id`,
+      `zane_social_friendships?addressee_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=requester_id&limit=200`,
       'incoming friendships',
     ),
   ]);
@@ -262,7 +286,10 @@ async function notifyFriendStarted(callerId: string, sessionId: string): Promise
     ...outgoing.map(row => row.addressee_id),
     ...incoming.map(row => row.requester_id),
   ])].filter(userId => userId && userId !== callerId).slice(0, 50);
-  return ids.map(recipientId => ({
+  const allowed = await Promise.all(ids.map(async recipientId => (
+    await dbRpc<boolean>('social_can_notify_friend_started', { p_session_id: sessionId, p_recipient_id: recipientId }) ? recipientId : null
+  )));
+  return allowed.filter((recipientId): recipientId is string => !!recipientId).map(recipientId => ({
     recipientId,
     title: 'Zane · Friend started a workout',
     message: 'A friend started a workout.',
@@ -277,9 +304,14 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const event = String(body?.event || '');
   const id = String(body?.id || '');
-  if (!EVENT_KINDS.has(event) || !id || id.length > 200) return response({ error: 'invalid event' }, 400);
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const sessionLike = /^[A-Za-z0-9_-]{1,200}$/;
+  if (!EVENT_KINDS.has(event) || !id || id.length > 200 || (event === 'friend_started' ? !sessionLike.test(id) : !uuidLike.test(id))) return response({ error: 'invalid event' }, 400);
 
   try {
+    if (!await dbRpc<boolean>('social_take_notification_rate_limit', { p_caller_id: callerId })) {
+      return response({ error: 'rate limited', retry: true }, 429);
+    }
     const pending = event === 'message'
       ? await notifyMessage(callerId, id)
       : event === 'friend_request'

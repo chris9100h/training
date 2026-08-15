@@ -2650,7 +2650,12 @@ function App() {
   }, [route.name]);
 
   useEffectA(() => {
-    const onVisible = () => { if (document.visibilityState === 'visible') { checkSwUpdate(); checkForceUpdate(); } };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      checkSwUpdate();
+      checkForceUpdate();
+      if (phaseRef.current === 'ready') LB.flushSocialNotificationOutbox?.();
+    };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
@@ -2668,6 +2673,8 @@ function App() {
       }
       if (!uid) return;
       setAuthState('online');
+      checkForceUpdate();
+      LB.flushSocialNotificationOutbox?.();
       if (pendingStore.current !== syncBase.current) flushSync(uid);
       else setSyncStatus('synced');
     };

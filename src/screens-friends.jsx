@@ -107,6 +107,88 @@ function socialInitials(name) {
   return (parts.slice(0, 2).map(part => part[0]).join('') || 'Z').toUpperCase();
 }
 
+// Shared plans are user-controlled JSON. Keep the import useful while
+// bounding its size and copying only fields the local schedule/exercise model
+// understands. This prevents a friend share from becoming an unbounded local
+// storage write or from smuggling arbitrary schedule properties into state.
+const SOCIAL_PLAN_IMPORT_LIMITS = {
+  bytes: 250000,
+  exercises: 500,
+  days: 14,
+  itemsPerDay: 100,
+  setsPerItem: 30,
+  historyPerLift: 64,
+};
+
+function socialBoundText(value, max) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+function socialFiniteNumber(value, min = -1000000, max = 1000000) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : null;
+}
+
+function socialBoundStringArray(value, maxItems, maxLength) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => typeof item === 'string').slice(0, maxItems).map(item => item.slice(0, maxLength));
+}
+
+function socialSanitizeProgramData(value, idMap) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result = {};
+  if (value.unit === 'kg' || value.unit === 'lbs') result.unit = value.unit;
+  if (typeof value.includeDeload === 'boolean') result.includeDeload = value.includeDeload;
+  const remapLifts = source => Object.fromEntries(Object.entries(source || {}).slice(0, 500).filter(([key]) => Object.prototype.hasOwnProperty.call(idMap, key) && idMap[key] && source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])).map(([key, raw]) => [idMap[key], {
+    ...(socialFiniteNumber(raw.tm, 0, 100000) != null ? { tm: socialFiniteNumber(raw.tm, 0, 100000) } : {}),
+    ...(typeof raw.kind === 'string' ? { kind: raw.kind.slice(0, 24) } : {}),
+    ...(socialFiniteNumber(raw.stall, 0, 100) != null ? { stall: Math.round(socialFiniteNumber(raw.stall, 0, 100)) } : {}),
+  }]));
+  const remapHistory = source => Object.fromEntries(Object.entries(source || {}).slice(0, 500).filter(([key]) => Object.prototype.hasOwnProperty.call(idMap, key) && idMap[key] && Array.isArray(source[key])).map(([key, rows]) => [idMap[key], rows.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.historyPerLift).filter(row => row && typeof row === 'object').map(row => ({
+    ...(socialFiniteNumber(row.cycle, 0, 100000) != null ? { cycle: Math.round(socialFiniteNumber(row.cycle, 0, 100000)) } : {}),
+    ...(socialFiniteNumber(row.tm, 0, 100000) != null ? { tm: socialFiniteNumber(row.tm, 0, 100000) } : {}),
+    ...(typeof row.reason === 'string' ? { reason: row.reason.slice(0, 32) } : {}),
+  }))]));
+  if (value.mainLifts && typeof value.mainLifts === 'object' && !Array.isArray(value.mainLifts)) result.mainLifts = remapLifts(value.mainLifts);
+  if (value.tmHistory && typeof value.tmHistory === 'object' && !Array.isArray(value.tmHistory)) result.tmHistory = remapHistory(value.tmHistory);
+  if (socialFiniteNumber(value.bumpedCycle, 0, 100000) != null) result.bumpedCycle = Math.round(socialFiniteNumber(value.bumpedCycle, 0, 100000));
+  return Object.keys(result).length ? result : null;
+}
+
+function socialSanitizePlanItem(item, idMap) {
+  if (!item || typeof item !== 'object' || Array.isArray(item) || !Object.prototype.hasOwnProperty.call(idMap, item.exId) || !idMap[item.exId]) return null;
+  const result = { exId: idMap[item.exId] };
+  const sets = socialFiniteNumber(item.sets, 0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem);
+  if (sets != null) result.sets = Math.round(sets);
+  const reps = socialFiniteNumber(item.reps, 0, 1000);
+  if (reps != null) result.reps = Math.round(reps);
+  if (Array.isArray(item.repsPerSet)) result.repsPerSet = item.repsPerSet.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => socialFiniteNumber(value, 0, 1000)).filter(value => value != null).map(value => Math.round(value));
+  const repsMax = socialFiniteNumber(item.repsMax, 0, 1000);
+  if (repsMax != null) result.repsMax = Math.round(repsMax);
+  const progressionOffset = socialFiniteNumber(item.progressionOffset, -1000, 1000);
+  if (progressionOffset != null) result.progressionOffset = Math.round(progressionOffset);
+  if (Array.isArray(item.plannedTechniques)) result.plannedTechniques = item.plannedTechniques.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => typeof value === 'string' ? value.slice(0, 80) : null);
+  if (Array.isArray(item.timeSecPerSet)) result.timeSecPerSet = item.timeSecPerSet.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => socialFiniteNumber(value, 0, 86400)).filter(value => value != null).map(value => Math.round(value));
+  if (typeof item.supersetGroup === 'string') result.supersetGroup = item.supersetGroup.slice(0, 80);
+  return result;
+}
+
+function socialSanitizePlanSchedule(raw, idMap) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const result = {
+    name: socialBoundText(raw.name, 120) || 'Shared plan',
+    days: Array.isArray(raw.days) ? raw.days.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.days).filter(day => day && typeof day === 'object' && !Array.isArray(day)).map(day => ({
+      id: LB.uid(),
+      name: socialBoundText(day.name, 80) || 'Training day',
+      ...(Number.isInteger(day.weekday) && day.weekday >= 0 && day.weekday <= 6 ? { weekday: day.weekday } : {}),
+      items: Array.isArray(day.items) ? day.items.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.itemsPerDay).map(item => socialSanitizePlanItem(item, idMap)).filter(Boolean) : [],
+    })) : [],
+  };
+  if (raw.program_type === '531') result.program_type = '531';
+  return result;
+}
+
 function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comment, setComment, sending, send }) {
   return (
     <div>
@@ -289,6 +371,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   const [searchResult, setSearchResult] = useStateF(null);
   const [searchComplete, setSearchComplete] = useStateF(false);
   const [searching, setSearching] = useStateF(false);
+  const [friendRequestBusy, setFriendRequestBusy] = useStateF(false);
   const [loading, setLoading] = useStateF(true);
   const [error, setError] = useStateF('');
   const [selectedChat, setSelectedChat] = useStateF(null);
@@ -491,8 +574,32 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
       await action();
       await reload(true);
       if (successTab) setActiveTab(successTab);
+      return true;
     } catch (e) {
       setError(e.message || 'Action failed');
+      return false;
+    }
+  };
+
+  const addSearchResultAsFriend = async () => {
+    const target = searchResult;
+    if (!target?.userId || target.relationship !== 'none' || friendRequestBusy) return;
+    const accepted = await confirm(`Add ${target.name || 'this person'} as a friend?`, {
+      title: 'Add friend', ok: 'Send request', cancel: 'Cancel',
+    });
+    if (!accepted) return;
+    setFriendRequestBusy(true);
+    try {
+      const sent = await runAction(() => LB.sendSocialFriendRequest(target.userId));
+      if (!sent) return;
+      // Keep the result honest even if the reload returns an older snapshot
+      // while Broadcast and the dashboard RPC are still catching up.
+      setSearchResult(current => current?.userId === target.userId ? { ...current, relationship: 'pending' } : current);
+      await confirm(`Request sent to ${target.name || 'this person'}.`, {
+        title: 'Request sent', ok: 'OK', cancel: null,
+      });
+    } finally {
+      setFriendRequestBusy(false);
     }
   };
 
@@ -786,14 +893,22 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   const importPlan = async share => {
     const source = share.snapshot && typeof share.snapshot === 'object' ? share.snapshot : null;
     if (!source) return;
-    const sourceSchedule = source.schedule && typeof source.schedule === 'object' ? source.schedule : source;
-    const sourceExercises = Array.isArray(source.exercises) ? source.exercises : [];
+    let sourceBytes = 0;
+    try { sourceBytes = JSON.stringify(source).length; } catch (_) { sourceBytes = SOCIAL_PLAN_IMPORT_LIMITS.bytes + 1; }
+    if (sourceBytes > SOCIAL_PLAN_IMPORT_LIMITS.bytes) {
+      setError('This shared plan is too large to import.');
+      return;
+    }
+    const sourceSchedule = source.schedule && typeof source.schedule === 'object' && !Array.isArray(source.schedule) ? source.schedule : source;
+    const sourceExercises = Array.isArray(source.exercises) ? source.exercises.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.exercises) : [];
     const existingByName = new Map((store.exercises || []).map(ex => [String(ex.name || '').trim().toLowerCase(), ex]));
-    const idMap = {};
+    const idMap = Object.create(null);
     const newExercises = [];
     sourceExercises.forEach(ex => {
-      if (!ex || !ex.id || !String(ex.name || '').trim()) return;
-      const existing = existingByName.get(String(ex.name).trim().toLowerCase());
+      if (!ex || typeof ex !== 'object' || Array.isArray(ex) || !ex.id || !String(ex.name || '').trim()) return;
+      const name = socialBoundText(String(ex.name).trim(), 120);
+      if (!name) return;
+      const existing = existingByName.get(name.toLowerCase());
       if (existing) {
         idMap[ex.id] = existing.id;
         return;
@@ -801,34 +916,37 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
       const id = LB.uid();
       idMap[ex.id] = id;
       newExercises.push({
-        id, name: ex.name, tags: ex.tags ?? [], note: ex.note ?? '', category: ex.category ?? null,
-        unilateral: !!ex.unilateral, equipment: ex.equipment ?? null,
-        progression_reps: ex.progression_reps ?? null, movement_type: ex.movement_type ?? null,
-        log_mode: ex.log_mode ?? null, no_weight_reps: !!ex.no_weight_reps,
-        pull_bodyweight: !!ex.pull_bodyweight, bodyweight_mode: ex.bodyweight_mode ?? null,
-        youtube_url: ex.youtube_url ?? null, note_pinned: !!ex.note_pinned,
-        progression_increment: ex.progression_increment ?? null, horn_labels: ex.horn_labels ?? null,
+        id, name,
+        tags: socialBoundStringArray(ex.tags, 20, 40),
+        note: socialBoundText(ex.note, 2000),
+        category: socialBoundText(ex.category, 80) || null,
+        unilateral: !!ex.unilateral,
+        equipment: socialBoundText(ex.equipment, 80) || null,
+        progression_reps: socialFiniteNumber(ex.progression_reps, 0, 1000),
+        movement_type: socialBoundText(ex.movement_type, 40) || null,
+        log_mode: socialBoundText(ex.log_mode, 40) || null,
+        no_weight_reps: !!ex.no_weight_reps,
+        pull_bodyweight: !!ex.pull_bodyweight,
+        bodyweight_mode: socialBoundText(ex.bodyweight_mode, 40) || null,
+        youtube_url: socialBoundText(ex.youtube_url, 500) || null,
+        note_pinned: !!ex.note_pinned,
+        progression_increment: socialFiniteNumber(ex.progression_increment, 0, 1000),
+        horn_labels: socialBoundStringArray(ex.horn_labels, 12, 80),
       });
     });
+    const safeSchedule = socialSanitizePlanSchedule(sourceSchedule, idMap);
+    if (!safeSchedule) {
+      setError('This shared plan has an invalid schedule.');
+      return;
+    }
     const imported = {
-      ...sourceSchedule,
+      ...safeSchedule,
       id: LB.uid(),
-      name: `${share.planName || 'Shared plan'} (shared)`,
+      name: `${socialBoundText(share.planName, 120) || safeSchedule.name || 'Shared plan'} (shared)`.slice(0, 140),
       archived: false,
       is_template: false,
     };
-    imported.days = (sourceSchedule.days || []).map(day => ({
-      ...day,
-      id: LB.uid(),
-      // Do not keep plan items whose source exercise was not in the snapshot.
-      // Their old id cannot be resolved in the receiving account.
-      items: (day.items || []).filter(item => idMap[item.exId]).map(item => ({ ...item, exId: idMap[item.exId] })),
-    }));
-    if (imported.program_data && typeof imported.program_data === 'object') {
-      const remapKeys = object => Object.fromEntries(Object.entries(object || {}).filter(([key]) => idMap[key]).map(([key, value]) => [idMap[key], value]));
-      if (imported.program_data.mainLifts) imported.program_data.mainLifts = remapKeys(imported.program_data.mainLifts);
-      if (imported.program_data.tmHistory) imported.program_data.tmHistory = remapKeys(imported.program_data.tmHistory);
-    }
+    imported.program_data = socialSanitizeProgramData(sourceSchedule.program_data, idMap);
     delete imported.versions;
     delete imported.user_id;
     delete imported.userId;
@@ -905,7 +1023,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
             <div className="micro" style={{ marginTop: 3 }}>{searchResult.handle ? `@${searchResult.handle.replace(/^@/, '')}` : searchResult.friendCode}</div>
           </div>
           {searchResult.relationship === 'none'
-            ? <Btn onClick={() => runAction(() => LB.sendSocialFriendRequest(searchResult.userId))} style={{ padding: '9px 12px', minHeight: 0, fontSize: 10 }}>Add</Btn>
+            ? <Btn onClick={addSearchResultAsFriend} disabled={friendRequestBusy} style={{ padding: '9px 12px', minHeight: 0, fontSize: 10 }}>{friendRequestBusy ? '...' : 'Add'}</Btn>
             : <span className="micro" style={{ color: UI.gold }}>{searchResult.relationship}</span>}
         </div>
       )}

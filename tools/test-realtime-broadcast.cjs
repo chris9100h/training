@@ -220,11 +220,16 @@ async function main() {
     subscribe(clients.admin, `social:user:${userIds.peer}`, 'admin-foreign'),
   ]);
 
-  const { error: grantError } = await clients.admin.rpc('admin_set_social_broadcast_canary', {
-    p_email: process.env.SUPABASE_TEST_PEER_EMAIL,
-    p_enabled: true,
-  });
-  if (grantError) throw grantError;
+  // Production canary toggles are office-admin-only. Preview branches can
+  // run the matrix against the global Broadcast transport directly.
+  const useCanary = process.env.SUPABASE_SKIP_CANARY !== '1';
+  if (useCanary) {
+    const { error: grantError } = await clients.admin.rpc('admin_set_social_broadcast_canary', {
+      p_email: process.env.SUPABASE_TEST_PEER_EMAIL,
+      p_enabled: true,
+    });
+    if (grantError) throw grantError;
+  }
   const { data: runtimeConfig, error: runtimeError } = await clients.peer.rpc('get_runtime_config');
   if (runtimeError) throw runtimeError;
 
@@ -258,10 +263,12 @@ async function main() {
   const missingAdmin = requiredForAdminAndPeer.filter(resource => !adminResources.has(resource));
   const missingPeer = requiredForAdminAndPeer.filter(resource => !peerResources.has(resource));
 
-  const { error: cleanupGrantError } = await clients.admin.rpc('admin_set_social_broadcast_canary', {
-    p_email: process.env.SUPABASE_TEST_PEER_EMAIL,
-    p_enabled: false,
-  });
+  const { error: cleanupGrantError } = useCanary
+    ? await clients.admin.rpc('admin_set_social_broadcast_canary', {
+      p_email: process.env.SUPABASE_TEST_PEER_EMAIL,
+      p_enabled: false,
+    })
+    : { error: null };
 
   const summary = {
     subscriptions: subscriptions.map(({ label, topic, status, error }) => ({ label, topic, status, error })),

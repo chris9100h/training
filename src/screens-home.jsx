@@ -2701,7 +2701,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       inProgress: session.id,
       ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
     }));
-    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
+    // A warm-up session is not visible as "started" until the first working
+    // set begins. The training screen sends the notification at that point.
+    if (startedAt && store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
     go({ name: 'train', sessionId: session.id });
   };
 

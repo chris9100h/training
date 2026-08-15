@@ -353,7 +353,7 @@ function runDbTaskBatch(items, worker, options) {
 }
 
 const RUNTIME_CONFIG_KEY = 'logbook-runtime-config';
-const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy', coachingTransport: 'legacy' };
+const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast', coachingTransport: 'legacy' };
 let _runtimeConfig = (() => {
   try {
     const parsed = JSON.parse(localStorage.getItem(RUNTIME_CONFIG_KEY) || 'null');
@@ -361,7 +361,7 @@ let _runtimeConfig = (() => {
     return {
       forceUpdateNonce: parsed.forceUpdateNonce || null,
       socialMode: parsed.socialMode === 'maintenance' ? 'maintenance' : 'normal',
-      socialTransport: parsed.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+      socialTransport: parsed.socialTransport === 'legacy' ? 'legacy' : 'broadcast',
       coachingTransport: parsed.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
     };
   } catch (_) { return { ...DEFAULT_RUNTIME_CONFIG }; }
@@ -378,7 +378,7 @@ function _publishRuntimeConfig(next) {
   _runtimeConfig = {
     forceUpdateNonce: next?.forceUpdateNonce || null,
     socialMode: next?.socialMode === 'maintenance' ? 'maintenance' : 'normal',
-    socialTransport: next?.socialTransport === 'broadcast' ? 'broadcast' : 'legacy',
+    socialTransport: next?.socialTransport === 'legacy' ? 'legacy' : 'broadcast',
     coachingTransport: next?.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
   };
   window.__socialRuntimeConfig = _runtimeConfig;
@@ -6350,7 +6350,9 @@ function mapSocialAttachment(row, url = null) {
 }
 
 async function signedSocialAttachment(row) {
-  const { data, error } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 3600);
+  // Attachments are private; keep the bearer URL short-lived so a copied URL
+  // cannot remain useful after a friendship is removed or a block is added.
+  const { data, error } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 300);
   if (error) throw error;
   return mapSocialAttachment(row, data?.signedUrl || null);
 }
@@ -6441,8 +6443,10 @@ async function loadFriendsStateUncached(userId, weekStart) {
   // Circle and Groups can render without waiting for live activity data.
   const [dashboardRes, groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await runDbTaskBatch([
     () => _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
-    () => _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }),
-    () => _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at'),
+    // A user can belong to many groups. Bound both fan-out queries so one
+    // account cannot turn every Friends refresh into an unbounded row load.
+    () => _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }).limit(200),
+    () => _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at').limit(1000),
     () => fetchSocialMessageRows(),
     () => _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
     () => _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
@@ -6553,16 +6557,68 @@ async function loadSocialMessageState(userId) {
   }, { social: true });
 }
 
-// Push delivery is deliberately detached from the social write. The social
-// row is already committed before this best-effort handoff starts, and a
-// provider outage can therefore never roll back or slow the user's action.
+// Push delivery is detached from the social write, but the handoff itself is
+// durable. A tab can be closed or go offline immediately after a message is
+// committed; the small local outbox retries after the next auth/online/focus
+// event. The server still re-checks the event and caller, so an old outbox
+// entry is harmless and is discarded on a permanent 4xx response.
+const SOCIAL_NOTIFY_OUTBOX_KEY = 'zane-social-notification-outbox-v1';
+let _socialNotifyFlushPromise = null;
+
+function readSocialNotifyOutbox() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(SOCIAL_NOTIFY_OUTBOX_KEY) || '[]');
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(row => row && typeof row.event === 'string' && typeof row.id === 'string').slice(-200);
+  } catch (_) { return []; }
+}
+
+function writeSocialNotifyOutbox(rows) {
+  try {
+    if (!rows.length) localStorage.removeItem(SOCIAL_NOTIFY_OUTBOX_KEY);
+    else localStorage.setItem(SOCIAL_NOTIFY_OUTBOX_KEY, JSON.stringify(rows.slice(-200)));
+  } catch (_) {}
+}
+
+function enqueueSocialNotify(event, eventId) {
+  const rows = readSocialNotifyOutbox();
+  if (!rows.some(row => row.event === event && row.id === String(eventId))) {
+    rows.push({ event, id: String(eventId), queuedAt: Date.now() });
+    writeSocialNotifyOutbox(rows);
+  }
+}
+
+async function flushSocialNotificationOutbox() {
+  if (_socialNotifyFlushPromise) return _socialNotifyFlushPromise;
+  _socialNotifyFlushPromise = (async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+    let rows = readSocialNotifyOutbox();
+    let lastResponse = null;
+    while (rows.length) {
+      const current = rows[0];
+      const response = await fnFetch(SOCIAL_NOTIFY_URL, { event: current.event, id: current.id });
+      lastResponse = response;
+      if (!response) break;
+      if (response.ok || [400, 401, 403, 404].includes(response.status)) {
+        rows.shift();
+        writeSocialNotifyOutbox(rows);
+        continue;
+      }
+      // 409 (session row not replicated yet), 429, 5xx and network errors
+      // remain queued for a later attempt. Keep order to avoid a newer event
+      // overtaking an older retry for the same account.
+      console.warn('social notification handoff deferred:', response.status);
+      break;
+    }
+    return lastResponse;
+  })().finally(() => { _socialNotifyFlushPromise = null; });
+  return _socialNotifyFlushPromise;
+}
+
 async function notifySocialEvent(event, eventId) {
   if (!event || !eventId) return null;
-  const response = await fnFetch(SOCIAL_NOTIFY_URL, { event, id: eventId });
-  if (response && !response.ok && response.status !== 409) {
-    console.warn('social notification handoff failed:', response.status);
-  }
-  return response;
+  enqueueSocialNotify(event, eventId);
+  return flushSocialNotificationOutbox();
 }
 
 async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
@@ -6797,7 +6853,7 @@ const SOCIAL_TABLE_RESOURCES = {
   zane_social_workout_comments: 'feed',
 };
 
-function subscribeToFriends(userId, onChange, { transport = 'legacy' } = {}) {
+function subscribeToFriends(userId, onChange, { transport = 'broadcast' } = {}) {
   if (!userId || typeof onChange !== 'function' || !socialDataAvailable()) return () => {};
   const selectedTransport = transport === 'broadcast' ? 'broadcast' : 'legacy';
   const key = `${selectedTransport}:${userId}`;
@@ -12136,7 +12192,7 @@ window.LB = {
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
-  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,

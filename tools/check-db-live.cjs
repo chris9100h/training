@@ -100,14 +100,10 @@ const docSections = new Map();
 
 // Realtime publication: expected zane_ members. Foreign (non-zane) tables in
 // the same database are reported as info only.
-// Social now uses Broadcast invalidations. The nine tables below remain in the
-// publication only for the legacy rollback path; coaching tables are no longer
-// part of the app publication after the Broadcast migration.
-const EXPECTED_REALTIME = new Set([
-  'zane_social_friendships', 'zane_social_group_members', 'zane_social_groups',
-  'zane_social_message_attachments', 'zane_social_message_reads', 'zane_social_messages',
-  'zane_social_plan_share_imports', 'zane_social_plan_shares', 'zane_social_workout_comments',
-]);
+// Social and Coaching use private Broadcast invalidations. Their Postgres
+// Changes tables are deliberately absent from the normal publication; the
+// reversible admin transport switch restores them only during an emergency.
+const EXPECTED_REALTIME = new Set();
 
 // Functions where anon EXECUTE is intentional (documented in docs/database.md,
 // "Grant-Fallen"). Every other function must have anon_exec === false.
@@ -137,6 +133,11 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
   'collapse_water_logs()',
   'admin_schema_inventory()',
   'db_health()',
+  'social_take_notification_rate_limit(uuid)',
+  'social_can_notify_message(uuid, uuid)',
+  'social_can_notify_finished_comment(uuid, uuid)',
+  'social_can_notify_friend_started(text, uuid)',
+  'social_can_notify_friend_request(uuid, uuid)',
 ]);
 
 // ── Config ───────────────────────────────────────────────────────────────────

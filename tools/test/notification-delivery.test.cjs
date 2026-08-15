@@ -29,7 +29,7 @@ const sandbox = {
   fetch: async (url) => {
     if (url === 'https://api.pushover.net/1/messages.json') return fakeResponse(500, 'provider down');
     if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, [{ id: 'sub-1' }]);
-    if (url.includes('/functions/v1/web-push')) return fakeResponse(202, 'accepted');
+    if (url.includes('/functions/v1/web-push')) return fakeResponse(200, 'accepted');
     throw new Error(`unexpected fetch: ${url}`);
   },
 };
@@ -51,7 +51,17 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   const webPushAccepted = await sendNotification({
     userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
   });
-  assert(webPushAccepted === true, 'a subscription plus 202 web-push handoff was not accepted');
+  assert(webPushAccepted === true, 'a subscription plus immediate web-push handoff was not accepted');
+
+  sandbox.fetch = async (url) => {
+    if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, [{ id: 'sub-1' }]);
+    if (url.includes('/functions/v1/web-push')) return fakeResponse(202, 'scheduled');
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  const delayedHandoff = await sendNotification({
+    userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
+  });
+  assert(delayedHandoff === false, 'a delayed web-push schedule was treated as delivered');
 
   sandbox.fetch = async (url) => {
     if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, []);

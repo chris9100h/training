@@ -4587,6 +4587,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wasPostWarmup = !sessionRef.current.startedAt;
     if (wasPostWarmup) {
       updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+      if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionRef.current.id);
     } else {
       setRestModalOpen(true);
     }
@@ -6516,6 +6517,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const skipWarmup = () => {
+    const sessionId = session.id;
     updateSession(sess => {
       // The warmup-carrying entry isn't necessarily at index 0, superset
       // linking / reorder can move it. Find it by content, like warmupEntry.
@@ -6529,11 +6531,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ),
       };
     });
+    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
   const startNow = () => {
+    const sessionId = session.id;
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
