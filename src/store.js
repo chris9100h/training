@@ -72,6 +72,19 @@ async function unsubscribeWebPush(userId) {
 
 const HTTP_REQUEST_LIMIT = 4;
 const DB_REQUEST_TIMEOUT_MS = 8000;
+// Model-backed Edge Functions are not database requests. A meal photo can
+// legitimately take more than eight seconds while the provider reasons about
+// portions, so giving these calls the database timeout turns a healthy
+// response into the misleading "Network error" shown by the food sheet.
+// Keep this separate from the DB timeout so normal PostgREST requests retain
+// their eight-second failure-fast behaviour.
+const AI_FUNCTION_TIMEOUT_MS = 45_000;
+const AI_FUNCTION_URLS = new Set([
+  SCAN_LABEL_URL,
+  PARSE_MEAL_URL,
+  AI_DAILY_SUMMARY_URL,
+  AI_CHECKIN_OPINION_URL,
+]);
 const _httpRequestQueue = [];
 let _httpRequestsActive = 0;
 
@@ -164,7 +177,7 @@ function httpRequestPriority(input, init = {}, meta = {}) {
   return 'foreground';
 }
 
-async function dbFetch(input, init = {}) {
+async function dbFetch(input, init = {}, timeoutMs = DB_REQUEST_TIMEOUT_MS) {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const originalSignal = init?.signal;
   let timer = null;
@@ -180,13 +193,14 @@ async function dbFetch(input, init = {}) {
       }
     }
     requestInit = { ...init, signal: controller.signal };
-    timer = setTimeout(() => controller.abort(), DB_REQUEST_TIMEOUT_MS);
+    timer = setTimeout(() => controller.abort(), timeoutMs);
   }
   try {
     return await fetch(input, requestInit);
   } catch (error) {
     if (controller && !originalSignal?.aborted && error?.name === 'AbortError') {
-      error.__zaneDbTimeout = true;
+      error.__zaneRequestTimeout = true;
+      if (timeoutMs === DB_REQUEST_TIMEOUT_MS) error.__zaneDbTimeout = true;
     }
     throw error;
   } finally {
@@ -205,7 +219,7 @@ function _drainHttpRequests() {
     const [entry] = _httpRequestQueue.splice(index, 1);
     _httpRequestsActive += 1;
     Promise.resolve()
-      .then(() => dbFetch(...entry.args))
+      .then(() => dbFetch(...entry.args, entry.timeoutMs))
       .then(entry.resolve, entry.reject)
       .finally(() => {
         _httpRequestsActive -= 1;
@@ -221,8 +235,18 @@ function limitedSupabaseFetch(input, init = {}, meta = {}) {
       _drainAuthRequests();
     });
   }
+  const requestedTimeout = Number(meta.timeoutMs);
+  const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? requestedTimeout
+    : DB_REQUEST_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
-    _httpRequestQueue.push({ args: [input, init], priority: httpRequestPriority(input, init, meta), resolve, reject });
+    _httpRequestQueue.push({
+      args: [input, init],
+      priority: httpRequestPriority(input, init, meta),
+      timeoutMs,
+      resolve,
+      reject,
+    });
     _drainHttpRequests();
   });
 }
@@ -543,11 +567,18 @@ async function fnFetch(url, body) {
     const { data } = await _supabase.auth.getSession();
     const token = data?.session?.access_token;
     if (!token) return null;
+    const isAiFunction = AI_FUNCTION_URLS.has(url);
     return await limitedSupabaseFetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    }, { priority: 'background' });
+    }, {
+      // Meal parsing and the other model-backed actions are user-triggered;
+      // they should not wait behind social/background refreshes. Their longer
+      // timeout is carried only by this queued request, not by DB traffic.
+      priority: isAiFunction ? 'foreground' : 'background',
+      timeoutMs: isAiFunction ? AI_FUNCTION_TIMEOUT_MS : DB_REQUEST_TIMEOUT_MS,
+    });
   } catch (_) { return null; }
 }
 
