@@ -18,8 +18,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SELF_URL  = 'https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/web-push';
-const ANON_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
+const FALLBACK_ANON_KEY = '';
 const MAX_CHUNK = 10;
 const MAX_DELAY = 3600;
 
@@ -56,7 +55,7 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   if (serviceKey && token === serviceKey) return { internal: true, userId: null };
   const base = Deno.env.get('SUPABASE_URL') ?? '';
-  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
+  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? FALLBACK_ANON_KEY;
   const r = await fetch(`${base}/auth/v1/user`, {
     headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
   }).catch(() => null);
@@ -65,7 +64,7 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   return { internal: false, userId: user?.id ?? null };
 }
 
-async function deliverPush(userId: string, title: string, text: string, url: string) {
+async function deliverPush(userId: string, title: string, text: string, url: string): Promise<{ sent: number; failed: number }> {
   const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=id,endpoint,p256dh,auth`);
   // Same non-2xx-still-parses-as-JSON trap as isNonceCurrent above: an error
   // object's .length is undefined, `undefined === 0` is false, so the "no
@@ -73,9 +72,9 @@ async function deliverPush(userId: string, title: string, text: string, url: str
   // has none) threw inside run()'s EdgeRuntime.waitUntil, after the 202
   // response had already gone out, silently killing the push with nothing
   // ever surfacing the failure.
-  if (!subRes.ok) { console.error(`[web-push] subscriptions query failed for ${userId}: ${subRes.status} ${await subRes.text().catch(() => '')}`); return; }
+  if (!subRes.ok) { console.error(`[web-push] subscriptions query failed for ${userId}: ${subRes.status} ${await subRes.text().catch(() => '')}`); return { sent: 0, failed: 1 }; }
   const subs: { id: string; endpoint: string; p256dh: string; auth: string }[] = await subRes.json().catch(() => []);
-  if (subs.length === 0) { console.log(`[web-push] no subscriptions for ${userId}`); return; }
+  if (subs.length === 0) { console.log(`[web-push] no subscriptions for ${userId}`); return { sent: 0, failed: 1 }; }
 
   const vapidPublic  = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';
   const vapidPrivate = Deno.env.get('VAPID_PRIVATE_KEY') ?? '';
@@ -103,6 +102,7 @@ async function deliverPush(userId: string, title: string, text: string, url: str
     }
   }));
   console.log(`[web-push] sent=${sent} failed=${failed} user=${userId}`);
+  return { sent, failed };
 }
 
 Deno.serve(async (req) => {
@@ -167,17 +167,17 @@ Deno.serve(async (req) => {
     });
   }
 
-  const run = async () => {
+  const run = async (): Promise<{ sent: number; failed: number }> => {
     console.log(`[web-push] delay=${delaySeconds} nonce=${nonce || '(none)'} relay=${_relay}`);
 
     if (delaySeconds > MAX_CHUNK) {
       await new Promise(r => setTimeout(r, MAX_CHUNK * 1000));
       if (nonce && !await isNonceCurrent(nonce, targetUserId)) {
         console.log('[web-push] cancelled, newer rest timer active');
-        return;
+        return { sent: 0, failed: 0 };
       }
       EdgeRuntime.waitUntil(
-        fetch(SELF_URL, {
+        fetch(`${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/web-push`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
@@ -190,11 +190,20 @@ Deno.serve(async (req) => {
       if (delaySeconds > 0) await new Promise(r => setTimeout(r, delaySeconds * 1000));
       if (nonce && !await isNonceCurrent(nonce, targetUserId)) {
         console.log('[web-push] cancelled, newer rest timer active');
-        return;
+        return { sent: 0, failed: 0 };
       }
-      await deliverPush(targetUserId, title, text, url);
+      return await deliverPush(targetUserId, title, text, url);
     }
+    return { sent: 0, failed: 0 };
   };
+
+  if (delaySeconds === 0) {
+    const result = await run();
+    return new Response(JSON.stringify({ sent: result.sent, failed: result.failed, scheduled: false }), {
+      status: result.sent > 0 && result.failed === 0 ? 200 : 503,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   EdgeRuntime.waitUntil(run());
 

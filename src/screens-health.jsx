@@ -116,6 +116,13 @@ function healthCardioSeries(cardioLogs, days, windowOverride) {
   return { from, to, data };
 }
 
+// Today's adherence is provisional until the user explicitly closes the food
+// day. Older dates keep their persisted adherence values unchanged.
+function healthAdherenceLogs(logs, today) {
+  if (LB.foodDayIsClosed(logs, today)) return logs;
+  return (logs || []).filter(log => log.date !== today);
+}
+
 // Period overview (Mon-anchored week or rolling 1M/3M window), pure, shared
 // by HealthScreen and HealthClientLogs. planningState is whatever
 // LB.plannedTrainingDay needs (store, or clientStore || {}).
@@ -133,7 +140,9 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   }
   const allDays = Array.from({ length: periodDays }, (_, i) => LB.shiftDate(from, i));
   const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
+  const adherenceLogs = healthAdherenceLogs(inPeriod, today);
   const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+  const avgAdherence = () => { const vs = adherenceLogs.map(l => l.adherence).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
   const sessionDatesInPeriod = new Set((sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
   const trainingsDone = sessionDatesInPeriod.size;
@@ -167,7 +176,7 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
     weight: avgK('weight'), steps: avgK('steps'),
     stepsSum: tf === '1W' ? sumK('steps') : null,
     calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
-    fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
+    fat: avgK('fat'), water: avgK('waterMl'), adherence: avgAdherence(),
     snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
     snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
   };
@@ -1499,6 +1508,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       // reset the food module's timeline slot for the day back to default.
       mealOfChoice: !!existing?.mealOfChoice,
       mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
+      foodDayClosed: !!existing?.foodDayClosed,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -3828,7 +3838,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit, foodDayClosed = true, onOpenFood }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -3896,6 +3906,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
           <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
             {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh) }} />}
           </div>
+        </div>
+      )}
+      {isToday && !foodDayClosed && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -5, marginBottom: 12, padding: '8px 10px', borderRadius: 4, background: 'rgba(var(--accent-rgb),0.08)', border: `var(--hair-width) solid ${UI.hair}` }}>
+          <span style={{ flex: 1, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, lineHeight: 1.4 }}>Today is provisional until the food day is marked done.</span>
+          {onOpenFood && <button type="button" onClick={onOpenFood} style={{ flexShrink: 0, padding: '5px 7px', borderRadius: 4, border: `var(--hair-width) solid ${UI.goldSoft}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>Open Food</button>}
         </div>
       )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
@@ -5176,7 +5192,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         // day, effectiveTargets changing again later just no-ops here since
         // dayTargetOverride always wins once a snap exists, screens-food.jsx's
         // own dayTarget memo makes the exact same assumption for today.
-        const snap = log.date !== today ? log.targetsSnap : null;
+        // Closing today explicitly turns the live target into history. An
+        // open current day must continue tracking later macro changes.
+        const snap = (log.date !== today || log.foodDayClosed) ? log.targetsSnap : null;
         const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
         // Only sick and vacation blank the day, not every status: see
         // LB.isNutritionUnscoredMode. A deload or cleanup week eats to the
@@ -5205,7 +5223,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       reconciled.forEach(l => { LB.updateDailyLogDerived(l.date, l.adherence, l.targetsSnap); });
       return { ...s, dailyLogs: nextLogs };
     });
-  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, coachingId, coachingMacrosLoaded]);
+  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId, store.sessions, store.statusMode, store.statusPeriods, coachingId, coachingMacrosLoaded]);
 
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
@@ -5284,7 +5302,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps }), weekWindow), [dailyLogs, tf, selectedDate]);
   const waterSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.waterMl }), weekWindow), [dailyLogs, tf, selectedDate]);
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
-  const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
+  const adherenceLogs = useMemoH(() => healthAdherenceLogs(dailyLogs, today), [dailyLogs, today]);
+  const adhSeries = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate]);
 
   // Cardio chart series, minutes summed per day from store.cardioLogs.
   const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays, weekWindow), [store.cardioLogs, tf, selectedDate]);
@@ -5507,7 +5526,9 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
-      mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal} />,
+      mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
+      foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
+      onOpenFood={go && store.settings?.showFoodTab ? () => go({ name: 'food', date: today }) : null} />,
     aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
@@ -5755,6 +5776,7 @@ function HealthClientLogs({ clientStore }) {
   const isCardVisible = id => cardEls[id] && !hiddenCards.has(id);
 
   const [selectedDate, setSelectedDate] = useStateH(() => LB.todayISO());
+  const today = LB.todayISO();
 
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
@@ -5766,7 +5788,8 @@ function HealthClientLogs({ clientStore }) {
   const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps }), weekWindow), [logs, tf, selectedDate]);
   const waterSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.waterMl }), weekWindow), [logs, tf, selectedDate]);
   const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [logs, tf, selectedDate]);
-  const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence }), weekWindow), [logs, tf, selectedDate]);
+  const adherenceLogs = useMemoH(() => healthAdherenceLogs(logs, today), [logs, today]);
+  const adhSeries    = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate]);
   const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
@@ -5788,6 +5811,7 @@ function HealthClientLogs({ clientStore }) {
       const ws = LB.fmtISO(mon);
       (byWeek[ws] = byWeek[ws] || []).push(l);
     }
+    const adherenceDates = new Set(adherenceLogs.map(l => l.date));
     const avg = (arr, k) => { const vs = arr.map(x => x[k]).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length * 10) / 10 : null; };
     return Object.keys(byWeek).sort((a, b) => b.localeCompare(a)).slice(0, 8).map(ws => ({
       ws,
@@ -5797,11 +5821,9 @@ function HealthClientLogs({ clientStore }) {
       protein: avg(byWeek[ws], 'protein'),
       carbs: avg(byWeek[ws], 'carbs'),
       fat: avg(byWeek[ws], 'fat'),
-      adherence: avg(byWeek[ws], 'adherence'),
+      adherence: avg(byWeek[ws].filter(l => adherenceDates.has(l.date)), 'adherence'),
     }));
-  }, [logs]);
-
-  const today = LB.todayISO();
+  }, [logs, adherenceLogs]);
 
   const weekStats = useMemoH(() => computeHealthWeekStats({
     logs, sessions: clientStore?.sessions, cardioLogs: clientStore?.cardioLogs,
@@ -5849,6 +5871,7 @@ function HealthClientLogs({ clientStore }) {
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit}
+        foodDayClosed={LB.foodDayIsClosed(logs, today)}
         mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(logs, selectedDate).ordinal} />
     ),
     // Read-only: no Generate button here at all, a coach's own tap would

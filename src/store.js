@@ -1,11 +1,16 @@
 /* Logbook store, Supabase backend */
 
-const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
+// Production remains the safe default for the source/fallback app. A preview
+// build may inject a project URL and its public anon key through
+// window.__ZANE_SUPABASE_CONFIG__; never put a service-role key here.
+const SUPABASE_CONFIG = (typeof window !== 'undefined' && window.__ZANE_SUPABASE_CONFIG__) || {};
+const SUPABASE_URL = SUPABASE_CONFIG.url || 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+const SOCIAL_NOTIFY_URL     = `${SUPABASE_URL}/functions/v1/zane_social-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 // One endpoint each, whichever AI backend the device is set to. Both used to
@@ -65,9 +70,449 @@ async function unsubscribeWebPush(userId) {
   }
 }
 
+const HTTP_REQUEST_LIMIT = 4;
+const DB_REQUEST_TIMEOUT_MS = 8000;
+// Model-backed Edge Functions are not database requests. A meal photo can
+// legitimately take more than eight seconds while the provider reasons about
+// portions, so giving these calls the database timeout turns a healthy
+// response into the misleading "Network error" shown by the food sheet.
+// Keep this separate from the DB timeout so normal PostgREST requests retain
+// their eight-second failure-fast behaviour.
+const AI_FUNCTION_TIMEOUT_MS = 45_000;
+const AI_FUNCTION_URLS = new Set([
+  SCAN_LABEL_URL,
+  PARSE_MEAL_URL,
+  AI_DAILY_SUMMARY_URL,
+  AI_CHECKIN_OPINION_URL,
+]);
+const _httpRequestQueue = [];
+let _httpRequestsActive = 0;
+
+// Auth must never wait behind the database admission queue. A stalled
+// PostgREST request can otherwise keep the refresh-token request queued until
+// the access token expires, which turns a temporary database incident into an
+// apparent logout. Keep a small, independent lane for every /auth/v1 request
+// and abort a stuck request so supabase-js classifies it as retryable instead
+// of receiving an arbitrary 500/429 response and deleting the session.
+const AUTH_REQUEST_LIMIT = 1;
+const AUTH_REQUEST_TIMEOUT_MS = 8000;
+const AUTH_RECOVERY_KEY = 'logbook-auth-recovery';
+const AUTH_RECOVERY_TTL_MS = 24 * 60 * 60 * 1000;
+const OFFLINE_USER_KEY = 'logbook-offline-user';
+const OFFLINE_USER_TTL_MS = 24 * 60 * 60 * 1000;
+const _authRequestQueue = [];
+let _authRequestsActive = 0;
+
+function requestUrl(input) {
+  if (typeof input === 'string') return input;
+  if (input?.url) return String(input.url);
+  return String(input || '');
+}
+
+function isAuthRequest(input) {
+  return /\/auth\/v1\//i.test(requestUrl(input));
+}
+
+function isTransientAuthStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function writeAuthRecovery(reason) {
+  const state = { at: Date.now(), reason: String(reason || 'temporary-auth-failure') };
+  try { localStorage.setItem(AUTH_RECOVERY_KEY, JSON.stringify(state)); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-auth-degraded', { detail: state })); } catch (_) {}
+}
+
+function clearAuthRecovery() {
+  try { localStorage.removeItem(AUTH_RECOVERY_KEY); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('zane-auth-recovered')); } catch (_) {}
+}
+
+function getAuthRecoveryState() {
+  try {
+    const state = JSON.parse(localStorage.getItem(AUTH_RECOVERY_KEY) || 'null');
+    if (!state || !Number.isFinite(Number(state.at)) || Date.now() - Number(state.at) > AUTH_RECOVERY_TTL_MS) {
+      localStorage.removeItem(AUTH_RECOVERY_KEY);
+      return null;
+    }
+    return { at: Number(state.at), reason: String(state.reason || 'temporary-auth-failure') };
+  } catch (_) { return null; }
+}
+
+// This is only a non-secret account pointer. It lets a previously signed-in
+// browser reopen its own local cache during a short outage; it is deliberately
+// not a second copy of the Supabase access or refresh token.
+function rememberOfflineUser(userId) {
+  if (!userId) return false;
+  try {
+    localStorage.setItem(OFFLINE_USER_KEY, JSON.stringify({ userId: String(userId), at: Date.now() }));
+    return true;
+  } catch (_) { return false; }
+}
+
+function getOfflineUser() {
+  try {
+    const state = JSON.parse(localStorage.getItem(OFFLINE_USER_KEY) || 'null');
+    if (!state?.userId || !Number.isFinite(Number(state.at)) || Date.now() - Number(state.at) > OFFLINE_USER_TTL_MS) {
+      localStorage.removeItem(OFFLINE_USER_KEY);
+      return null;
+    }
+    return { userId: String(state.userId), at: Number(state.at) };
+  } catch (_) { return null; }
+}
+
+function clearOfflineUser() {
+  try { localStorage.removeItem(OFFLINE_USER_KEY); } catch (_) {}
+}
+
+function httpRequestPriority(input, init = {}, meta = {}) {
+  if (meta.priority === 'critical' || meta.priority === 'foreground' || meta.priority === 'background') {
+    return meta.priority;
+  }
+  const method = String(init?.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) return 'critical';
+  const url = requestUrl(input);
+  if (/\/rpc\/(?:get_runtime_config|db_health)(?:[?/]|$)/i.test(url)) return 'critical';
+  if (/\/rpc\/(?:social_|get_social|load_social|friends|badge)|\/rest\/v1\/zane_social_|\/realtime\//i.test(url)) return 'background';
+  return 'foreground';
+}
+
+async function dbFetch(input, init = {}, timeoutMs = DB_REQUEST_TIMEOUT_MS) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const originalSignal = init?.signal;
+  let timer = null;
+  let removeAbortListener = null;
+  let requestInit = init;
+  if (controller) {
+    if (originalSignal) {
+      if (originalSignal.aborted) controller.abort();
+      else {
+        const forwardAbort = () => controller.abort();
+        originalSignal.addEventListener?.('abort', forwardAbort, { once: true });
+        removeAbortListener = () => originalSignal.removeEventListener?.('abort', forwardAbort);
+      }
+    }
+    requestInit = { ...init, signal: controller.signal };
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+  }
+  try {
+    return await fetch(input, requestInit);
+  } catch (error) {
+    if (controller && !originalSignal?.aborted && error?.name === 'AbortError') {
+      error.__zaneRequestTimeout = true;
+      if (timeoutMs === DB_REQUEST_TIMEOUT_MS) error.__zaneDbTimeout = true;
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbortListener?.();
+  }
+}
+
+function _drainHttpRequests() {
+  while (_httpRequestsActive < HTTP_REQUEST_LIMIT && _httpRequestQueue.length) {
+    const index = _httpRequestQueue.findIndex(entry => entry.priority === 'critical') >= 0
+      ? _httpRequestQueue.findIndex(entry => entry.priority === 'critical')
+      : (_httpRequestQueue.findIndex(entry => entry.priority === 'foreground') >= 0
+        ? _httpRequestQueue.findIndex(entry => entry.priority === 'foreground')
+        : 0);
+    const [entry] = _httpRequestQueue.splice(index, 1);
+    _httpRequestsActive += 1;
+    Promise.resolve()
+      .then(() => dbFetch(...entry.args, entry.timeoutMs))
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        _httpRequestsActive -= 1;
+        _drainHttpRequests();
+      });
+  }
+}
+
+function limitedSupabaseFetch(input, init = {}, meta = {}) {
+  if (isAuthRequest(input)) {
+    return new Promise((resolve, reject) => {
+      _authRequestQueue.push({ args: [input, init], resolve, reject });
+      _drainAuthRequests();
+    });
+  }
+  const requestedTimeout = Number(meta.timeoutMs);
+  const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? requestedTimeout
+    : DB_REQUEST_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    _httpRequestQueue.push({
+      args: [input, init],
+      priority: httpRequestPriority(input, init, meta),
+      timeoutMs,
+      resolve,
+      reject,
+    });
+    _drainHttpRequests();
+  });
+}
+
+function _drainAuthRequests() {
+  while (_authRequestsActive < AUTH_REQUEST_LIMIT && _authRequestQueue.length) {
+    const entry = _authRequestQueue.shift();
+    _authRequestsActive += 1;
+    Promise.resolve()
+      .then(() => authFetch(...entry.args))
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        _authRequestsActive -= 1;
+        _drainAuthRequests();
+      });
+  }
+}
+
+async function authFetch(input, init = {}) {
+  const authRequest = isAuthRequest(input);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const originalSignal = init?.signal;
+  let timer = null;
+  let removeAbortListener = null;
+  let requestInit = init;
+  if (controller) {
+    if (originalSignal) {
+      if (originalSignal.aborted) controller.abort();
+      else {
+        const forwardAbort = () => controller.abort();
+        originalSignal.addEventListener?.('abort', forwardAbort, { once: true });
+        removeAbortListener = () => originalSignal.removeEventListener?.('abort', forwardAbort);
+      }
+    }
+    requestInit = { ...init, signal: controller.signal };
+    timer = setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+  }
+  try {
+    const response = await fetch(input, requestInit);
+    if (authRequest && isTransientAuthStatus(Number(response?.status || 0))) {
+      writeAuthRecovery(`http-${response.status}`);
+      // A plain fetch error is converted by supabase-js into its
+      // AuthRetryableFetchError class. That is important: the Auth client then
+      // retains the session and retries later instead of calling _removeSession.
+      const retryable = new TypeError(`Temporary Supabase Auth failure (${response.status})`);
+      retryable.__zaneAuthTransient = true;
+      throw retryable;
+    }
+    if (authRequest && response?.ok) clearAuthRecovery();
+    return response;
+  } catch (error) {
+    if (authRequest && !error?.__zaneAuthTransient) writeAuthRecovery(error?.name === 'AbortError' ? 'timeout' : 'network');
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbortListener?.();
+  }
+}
+
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { experimental: { passkey: true } },
+  auth: {
+    experimental: { passkey: true },
+    // Make the persistence contract explicit. These are supabase-js defaults,
+    // but spelling them out protects the offline behavior from a future client
+    // upgrade or a different build-time environment.
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+  },
+  global: { fetch: limitedSupabaseFetch },
 });
+
+// Shared admission control for the bursty paths below. Query builders are
+// lazy, so a task does not touch the network until the scheduler starts it.
+const DB_REQUEST_LIMIT = 4;
+const DB_BACKGROUND_LIMIT = 2;
+const DB_WRITE_LIMIT = 2;
+const _dbTaskQueues = { critical: [], foreground: [], background: [] };
+let _dbTasksActive = 0;
+let _dbBackgroundActive = 0;
+let _dbWritesActive = 0;
+
+function _canStartDbTask(entry) {
+  if (_dbTasksActive >= DB_REQUEST_LIMIT) return false;
+  if (entry.priority === 'background' && _dbBackgroundActive >= DB_BACKGROUND_LIMIT) return false;
+  if (entry.kind === 'write' && _dbWritesActive >= DB_WRITE_LIMIT) return false;
+  return true;
+}
+
+function _drainDbTasks() {
+  let started = true;
+  while (started && _dbTasksActive < DB_REQUEST_LIMIT) {
+    started = false;
+    for (const priority of ['critical', 'foreground', 'background']) {
+      const queue = _dbTaskQueues[priority];
+      const index = queue.findIndex(_canStartDbTask);
+      if (index < 0) continue;
+      const [entry] = queue.splice(index, 1);
+      _dbTasksActive += 1;
+      if (entry.priority === 'background') _dbBackgroundActive += 1;
+      if (entry.kind === 'write') _dbWritesActive += 1;
+      started = true;
+      Promise.resolve()
+        .then(entry.task)
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          _dbTasksActive -= 1;
+          if (entry.priority === 'background') _dbBackgroundActive -= 1;
+          if (entry.kind === 'write') _dbWritesActive -= 1;
+          _drainDbTasks();
+        });
+      break;
+    }
+  }
+}
+
+function scheduleDbTask(task, { priority = 'foreground', kind = 'read' } = {}) {
+  const lane = _dbTaskQueues[priority] ? priority : 'foreground';
+  return new Promise((resolve, reject) => {
+    _dbTaskQueues[lane].push({ task, priority: lane, kind, resolve, reject });
+    _drainDbTasks();
+  });
+}
+
+function runDbTaskBatch(items, worker, options) {
+  return Promise.all(items.map((item, index) => scheduleDbTask(() => worker(item, index), options)));
+}
+
+const RUNTIME_CONFIG_KEY = 'logbook-runtime-config';
+const DEFAULT_RUNTIME_CONFIG = { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast', coachingTransport: 'legacy' };
+let _runtimeConfig = (() => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RUNTIME_CONFIG_KEY) || 'null');
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_RUNTIME_CONFIG };
+    return {
+      forceUpdateNonce: parsed.forceUpdateNonce || null,
+      socialMode: parsed.socialMode === 'maintenance' ? 'maintenance' : 'normal',
+      socialTransport: parsed.socialTransport === 'legacy' ? 'legacy' : 'broadcast',
+      coachingTransport: parsed.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
+    };
+  } catch (_) { return { ...DEFAULT_RUNTIME_CONFIG }; }
+})();
+let _runtimeConfigRequest = 0;
+let _runtimeConfigApplied = 0;
+window.__socialRuntimeConfig = _runtimeConfig;
+
+function getCachedRuntimeConfig() {
+  return { ..._runtimeConfig };
+}
+
+function _publishRuntimeConfig(next) {
+  _runtimeConfig = {
+    forceUpdateNonce: next?.forceUpdateNonce || null,
+    socialMode: next?.socialMode === 'maintenance' ? 'maintenance' : 'normal',
+    socialTransport: next?.socialTransport === 'legacy' ? 'legacy' : 'broadcast',
+    coachingTransport: next?.coachingTransport === 'broadcast' ? 'broadcast' : 'legacy',
+  };
+  window.__socialRuntimeConfig = _runtimeConfig;
+  try { localStorage.setItem(RUNTIME_CONFIG_KEY, JSON.stringify(_runtimeConfig)); } catch (_) {}
+  window.dispatchEvent(new CustomEvent('zane-runtime-config', { detail: getCachedRuntimeConfig() }));
+  return getCachedRuntimeConfig();
+}
+
+async function fetchRuntimeConfig() {
+  const requestId = ++_runtimeConfigRequest;
+  const { data, error } = await scheduleDbTask(
+    () => _supabase.rpc('get_runtime_config'),
+    { priority: 'critical' },
+  );
+  if (error) throw error;
+  if (requestId < _runtimeConfigApplied) return getCachedRuntimeConfig();
+  _runtimeConfigApplied = requestId;
+  return _publishRuntimeConfig(data || DEFAULT_RUNTIME_CONFIG);
+}
+
+function socialDataAvailable() {
+  return _runtimeConfig.socialMode !== 'maintenance';
+}
+
+const _optionalDbBreaker = {
+  failures: 0,
+  openUntil: 0,
+  probeInFlight: false,
+  longPause: false,
+};
+
+function isDatabasePressureError(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const code = String(error?.code || '');
+  const message = String(error?.message || error || '');
+  return status === 429 || status >= 500
+    || code === '57014' || code === 'PGRST003'
+    || error?.__zaneDbTimeout === true
+    || /timeout|timed out|abort(?:ed)?|failed to fetch|networkerror|network request|load failed/i.test(message);
+}
+
+function optionalDbPausedError() {
+  const error = new Error('Background updates are paused while the database recovers.');
+  error.code = 'OPTIONAL_DB_PAUSED';
+  error.retryAt = _optionalDbBreaker.openUntil;
+  return error;
+}
+
+async function runOptionalDbTask(task, { social = false } = {}) {
+  if (social && !socialDataAvailable()) {
+    const error = new Error('Friends is temporarily under maintenance.');
+    error.code = 'SOCIAL_MAINTENANCE';
+    throw error;
+  }
+
+  const now = Date.now();
+  const halfOpen = _optionalDbBreaker.openUntil > 0 && now >= _optionalDbBreaker.openUntil;
+  if (_optionalDbBreaker.openUntil > now || (halfOpen && _optionalDbBreaker.probeInFlight)) {
+    throw optionalDbPausedError();
+  }
+  if (halfOpen) _optionalDbBreaker.probeInFlight = true;
+
+  try {
+    const result = await task();
+    _optionalDbBreaker.failures = 0;
+    _optionalDbBreaker.openUntil = 0;
+    _optionalDbBreaker.probeInFlight = false;
+    _optionalDbBreaker.longPause = false;
+    return result;
+  } catch (error) {
+    if (isDatabasePressureError(error)) {
+      _optionalDbBreaker.failures += 1;
+      if (halfOpen || _optionalDbBreaker.failures >= 2) {
+        _optionalDbBreaker.longPause = halfOpen || _optionalDbBreaker.longPause;
+        _optionalDbBreaker.openUntil = Date.now() + (_optionalDbBreaker.longPause ? 15 : 5) * 60 * 1000;
+      }
+    }
+    _optionalDbBreaker.probeInFlight = false;
+    throw error;
+  }
+}
+
+function dbStabilityTestApi() {
+  return {
+    runOptionalDbTask,
+    resetBreaker() {
+      _optionalDbBreaker.failures = 0;
+      _optionalDbBreaker.openUntil = 0;
+      _optionalDbBreaker.probeInFlight = false;
+      _optionalDbBreaker.longPause = false;
+    },
+    forceHalfOpen() {
+      _optionalDbBreaker.openUntil = Date.now() - 1;
+      _optionalDbBreaker.probeInFlight = false;
+    },
+    breakerState() { return { ..._optionalDbBreaker }; },
+    setSocialMode(mode) { _runtimeConfig.socialMode = mode === 'maintenance' ? 'maintenance' : 'normal'; },
+  };
+}
+
+function authRecoveryTestApi() {
+  return {
+    mark: writeAuthRecovery,
+    clear: clearAuthRecovery,
+    state: getAuthRecoveryState,
+    rememberUser: rememberOfflineUser,
+    offlineUser: getOfflineUser,
+    clearUser: clearOfflineUser,
+  };
+}
 
 // Await a PostgREST builder and throw if it resolved with an { error }. The
 // supabase-js client does NOT throw on failed writes (network errors, RLS
@@ -122,15 +567,42 @@ async function fnFetch(url, body) {
     const { data } = await _supabase.auth.getSession();
     const token = data?.session?.access_token;
     if (!token) return null;
-    return await fetch(url, {
+    const isAiFunction = AI_FUNCTION_URLS.has(url);
+    return await limitedSupabaseFetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    }, {
+      // Meal parsing and the other model-backed actions are user-triggered;
+      // they should not wait behind social/background refreshes. Their longer
+      // timeout is carried only by this queued request, not by DB traffic.
+      priority: isAiFunction ? 'foreground' : 'background',
+      timeoutMs: isAiFunction ? AI_FUNCTION_TIMEOUT_MS : DB_REQUEST_TIMEOUT_MS,
     });
   } catch (_) { return null; }
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
+
+// Canonical X handle input for the profile field. The UI accepts the common
+// forms users paste (`name`, `@name`, and x.com/name), while the store keeps one
+// stable value so every device and future social surface can use the same
+// representation without re-parsing it.
+function normalizeXHandle(value) {
+  if (value == null) return null;
+  let raw = String(value).trim();
+  if (!raw) return null;
+  const url = raw.match(/^(?:https?:\/\/)?(?:www\.)?x\.com\/([^/?#]+)\/?$/i);
+  if (url) raw = url[1];
+  raw = raw.replace(/^@/, '');
+  return /^[A-Za-z0-9_]{1,15}$/.test(raw) ? `@${raw}` : null;
+}
+
+function xHandleUrl(value) {
+  const handle = normalizeXHandle(value);
+  return handle ? `https://x.com/${handle.slice(1)}` : null;
+}
+
 // Local calendar date as YYYY-MM-DD. Never use toISOString() here, that
 // returns the UTC date, which is yesterday between midnight and UTC-offset
 // o'clock (and tomorrow in negative-offset timezones from the evening on).
@@ -229,9 +701,21 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
 
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
+async function recoverAuthSession() {
+  try {
+    const { data, error } = await _supabase.auth.refreshSession();
+    if (error || !data?.session) return null;
+    rememberOfflineUser(data.session.user?.id);
+    clearAuthRecovery();
+    return data.session;
+  } catch (_) { return null; }
+}
+
 async function signIn(email, password) {
   const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  rememberOfflineUser(data?.user?.id || data?.session?.user?.id);
+  clearAuthRecovery();
   return data;
 }
 
@@ -242,6 +726,8 @@ async function signUp(email, password, name, unit = null) {
   });
   if (error) throw error;
   if (data.session) {
+    rememberOfflineUser(data.session.user?.id || data.user?.id);
+    clearAuthRecovery();
     // Email confirmation disabled: the auth user exists and is signed in now.
     // Creating the profile/settings rows is best-effort here. If it fails (e.g. a
     // flaky in-app-browser network drop after the signup POST already succeeded),
@@ -273,12 +759,20 @@ async function updateDailyLogDerived(date, adherence, targetsSnap) {
 }
 
 async function signOut() {
-  return await _supabase.auth.signOut();
+  const result = await _supabase.auth.signOut();
+  if (!result?.error) {
+    clearOfflineUser();
+    clearAuthRecovery();
+  }
+  return result;
 }
 
 async function signInWithPasskey() {
   const { error } = await _supabase.auth.signInWithPasskey();
   if (error) throw error;
+  const { data } = await _supabase.auth.getSession();
+  rememberOfflineUser(data?.session?.user?.id);
+  clearAuthRecovery();
 }
 
 async function registerPasskey() {
@@ -366,6 +860,11 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   if (!keepPush) {
     ops.push(unwrap(_supabase.from('zane_push_subscriptions').delete().eq('user_id', userId)));
   }
+  // Social data is intentionally outside personal backups. An explicit
+  // delete-all must still remove the user's profile, relationships,
+  // conversations, shares and attachment objects. Restore keeps this data,
+  // so the social wipe is only part of the explicit delete flow.
+  if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_my_social_data')));
   await Promise.all(ops);
 }
 
@@ -379,6 +878,13 @@ function validateBackup(b) {
     if (!Array.isArray(b[key])) return `Backup is missing or has an invalid "${key}" list.`;
   }
   if (b.settings != null && typeof b.settings !== 'object') return 'Backup "settings" is malformed.';
+  if (b.user != null && typeof b.user !== 'object') return 'Backup "user" is malformed.';
+  if (b.user?.xHandle != null && (typeof b.user.xHandle !== 'string' || !normalizeXHandle(b.user.xHandle))) {
+    return 'Backup contains an invalid X handle.';
+  }
+  for (const key of ['xHandlePublic', 'xHandlePromptOptedOut']) {
+    if (b.user?.[key] != null && typeof b.user[key] !== 'boolean') return `Backup user field "${key}" is malformed.`;
+  }
   for (const e of b.exercises) {
     if (!e || typeof e !== 'object' || typeof e.id !== 'string' || !e.id) return 'Backup contains an invalid exercise entry.';
     if (e.tags != null && !Array.isArray(e.tags)) return 'Backup contains an exercise with invalid tags.';
@@ -486,6 +992,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     rest_big: sett.restBig || 180,
     rest_medium: sett.restMedium || 120,
     rest_small: sett.restSmall || 90,
+    auto_open_rest_timer: sett.autoOpenRestTimer ?? false,
     push_enabled: sett.pushEnabled ?? false,
     pushover_user_key: sett.pushoverUserKey ?? null,
     use_pushover: sett.usePushover ?? false,
@@ -508,11 +1015,17 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
+    show_friends_tab: sett.showFriendsTab ?? false,
+    social_push_messages: sett.socialPushMessages ?? true,
+    social_push_friend_requests: sett.socialPushFriendRequests ?? true,
+    social_push_finished_comments: sett.socialPushFinishedComments ?? false,
+    social_push_friend_started: sett.socialPushFriendStarted ?? false,
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
     macro_calc: sett.macroCalc ?? null,
     meal_windows: sett.mealWindows ?? null,
+    meal_categories: sett.mealCategories ?? null,
     fasting_protocol: sett.fastingProtocol ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     show_water_tab: sett.showWaterTab ?? false,
@@ -558,8 +1071,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const totalSets = importSessions.reduce((n, s) => n + (s.entries || []).reduce((m, e) => m + (e.sets?.length || 0), 0), 0);
   const entryChunks = totalEntries ? Math.ceil(totalEntries / CHUNK) : 0;
   const setChunks = totalSets ? Math.ceil(totalSets / CHUNK) : 0;
+  const hasProfile = !!backup.user && (
+    backup.user.name != null || Object.prototype.hasOwnProperty.call(backup.user, 'xHandle') ||
+    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePublic') ||
+    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePromptOptedOut')
+  );
   const totalSteps = 1 // delete
-    + (backup.user?.name ? 1 : 0)
+    + (hasProfile ? 1 : 0)
     + exChunks
     + (backup.schedules?.length ? 1 : 0)
     + sessChunks
@@ -597,9 +1115,15 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   try { await deleteAllData(userId, { keepPush: true }); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
   stepsDone++;
 
-  if (backup.user?.name) {
+  if (hasProfile) {
     prog('Restoring profile…');
-    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })));
+    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({
+      id: userId,
+      name: backup.user?.name || '',
+      x_handle: normalizeXHandle(backup.user?.xHandle),
+      x_handle_public: backup.user?.xHandlePublic ?? true,
+      x_handle_prompt_opted_out: backup.user?.xHandlePromptOptedOut ?? false,
+    })));
     stepsDone++;
   }
 
@@ -730,6 +1254,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         off_plan_note: l.offPlanNote ?? null,
         meal_of_choice: !!l.mealOfChoice,
         meal_of_choice_hour: l.mealOfChoiceHour ?? null,
+        food_day_closed: !!l.foodDayClosed,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
         ai_summary: l.aiSummary ?? null, ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
@@ -1084,7 +1609,7 @@ async function exportBackup(store, userId) {
     bySession[e.session_id].push(e);
   }
 
-  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, ...rest } = store;
+  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, friends, ...rest } = store;
   return {
     _version: 2,
     _exportedAt: new Date().toISOString(),
@@ -1259,6 +1784,7 @@ function mapUserSettings(sett = {}) {
     restBig: sett.rest_big || 180,
     restMedium: sett.rest_medium || 120,
     restSmall: sett.rest_small || 90,
+    autoOpenRestTimer: sett.auto_open_rest_timer ?? false,
     pushEnabled: sett.push_enabled ?? false,
     pushoverUserKey: sett.pushover_user_key ?? null,
     usePushover: sett.use_pushover ?? false,
@@ -1286,12 +1812,18 @@ function mapUserSettings(sett = {}) {
     showRegression: sett.show_regression ?? true,
     pinAllNotes: sett.pin_all_notes ?? false,
     showCoachingTab: sett.show_coaching_tab ?? false,
+    showFriendsTab: sett.show_friends_tab ?? false,
+    socialPushMessages: sett.social_push_messages ?? true,
+    socialPushFriendRequests: sett.social_push_friend_requests ?? true,
+    socialPushFinishedComments: sett.social_push_finished_comments ?? false,
+    socialPushFriendStarted: sett.social_push_friend_started ?? false,
     beYourOwnCoach: sett.be_your_own_coach ?? false,
     sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
     defaultCheckinSchema: sett.default_checkin_schema ?? null,
     macroTargets: sett.macro_targets ?? null,
     macroCalc: sett.macro_calc ?? null,
     mealWindows: sett.meal_windows ?? null,
+    mealCategories: Array.isArray(sett.meal_categories) ? sett.meal_categories : null,
     fastingProtocol: sett.fasting_protocol ?? null,
     showHealthTab: sett.show_health_tab ?? false,
     showWaterTab: sett.show_water_tab ?? false,
@@ -1337,6 +1869,9 @@ function buildEssentialLoadResult({
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      xHandle: profileRes.data?.x_handle ?? null,
+      xHandlePublic: profileRes.data?.x_handle_public ?? true,
+      xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
     },
     exercises: exRes.data || [],
     schedules: (schRes.data || []).map(s => healScheduleWeekdays({
@@ -1405,6 +1940,7 @@ function buildEssentialLoadResult({
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -1468,12 +2004,32 @@ function buildEssentialLoadResult({
   };
 }
 
+function mapUserSupportTickets(rows) {
+  return (rows || []).map(t => ({
+    coachingId: t.coaching_id,
+    status: t.support_status,
+    category: t.support_category,
+    createdAt: t.created_at,
+    lastMessageAt: t.last_message_at,
+    lastMessageBody: t.last_message_body,
+    unreadCount: Number(t.unread_count || 0),
+    archived: t.archived || false,
+    archivedAt: t.archived_at || null,
+  }));
+}
+
+async function loadUserSupportChats() {
+  const { data, error } = await _supabase.rpc('get_user_support_chats');
+  if (error) throw error;
+  return mapUserSupportTickets(data);
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, tier').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, tier, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
@@ -1494,12 +2050,12 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // baselines per exercise + per-session volume/set counts for everything
     // outside the boot window. Passing p_user_id covers coach loads too.
     _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
-    _supabase.rpc('get_session_stats', { p_user_id: userId }),
+    _supabase.rpc('get_session_stats', { p_user_id: userId, p_cutoff: histCutoff }),
     // Coaching data, only for own store load, not when a coach loads a client
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
       .is('read_at', null)
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
@@ -1513,7 +2069,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -1594,9 +2150,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const coreQueryIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 23];
   const medicationQueryIndexes = [34, 35, 36, 37, 38, 39];
   const queryResults = new Array(queries.length);
-  await Promise.all(coreQueryIndexes.map(async idx => {
+  await runDbTaskBatch(coreQueryIndexes, async idx => {
     queryResults[idx] = await queries[idx];
-  }));
+  }, { priority: 'foreground' });
 
   const coreProfileRes = queryResults[0];
   const coreSettRes = queryResults[4];
@@ -1684,9 +2240,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const deferredQueryIndexes = queries.map((_, idx) => idx)
     .filter(idx => !coreQueryIndexes.includes(idx))
     .filter(idx => medsEnabledAtLoad || !medicationQueryIndexes.includes(idx));
-  await Promise.all(deferredQueryIndexes.map(async idx => {
+  await runDbTaskBatch(deferredQueryIndexes, async idx => {
     queryResults[idx] = await queries[idx];
-  }));
+  }, { priority: 'background' });
   for (const idx of medicationQueryIndexes) {
     if (!queryResults[idx]) queryResults[idx] = { data: [], error: null };
   }
@@ -1797,7 +2353,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // tier is server-authored (granted by the founding-member trigger) and never
     // written back by syncStore. Defaults to 'free' so a profile row that predates
     // the column, or a coach-side load, renders as an ordinary account.
-    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), tier: profileRes.data?.tier || 'free' },
+    user: {
+      name: profileRes.data?.name || '',
+      email: isCoachLoad ? '' : (authUser?.email || ''),
+      tier: profileRes.data?.tier || 'free',
+      xHandle: profileRes.data?.x_handle ?? null,
+      xHandlePublic: profileRes.data?.x_handle_public ?? true,
+      xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
+    },
     exercises: exRes.data || [],
     schedules: (schRes.data || []).map(s => healScheduleWeekdays({
       ...s,
@@ -1871,6 +2434,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -2049,20 +2613,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         threadId: n.thread_id,
         body: n.body,
         createdAt: n.created_at,
+        editedAt: n.edited_at,
         attachments: n.attachments || null,
       })),
     },
-    supportTickets: (supportTicketsRes?.data || []).map(t => ({
-      coachingId: t.coaching_id,
-      status: t.support_status,
-      category: t.support_category,
-      createdAt: t.created_at,
-      lastMessageAt: t.last_message_at,
-      lastMessageBody: t.last_message_body,
-      unreadCount: Number(t.unread_count || 0),
-      archived: t.archived || false,
-      archivedAt: t.archived_at || null,
-    })),
+    supportTickets: mapUserSupportTickets(supportTicketsRes?.data),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
@@ -2748,6 +3303,7 @@ async function syncStore(prev, next, userId) {
       off_plan_note: l.offPlanNote ?? null,
       meal_of_choice: !!l.mealOfChoice,
       meal_of_choice_hour: l.mealOfChoiceHour ?? null,
+      food_day_closed: !!l.foodDayClosed,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
       updated_at: l.updatedAt ?? new Date().toISOString(),
@@ -2766,8 +3322,19 @@ async function syncStore(prev, next, userId) {
     }
   }
 
-  if (prev.user?.name !== next.user?.name && next.user?.name) {
-    ops.push(_supabase.from('zane_profiles').upsert({ id: userId, name: next.user.name }));
+  const profileChanged =
+    prev.user?.name !== next.user?.name ||
+    prev.user?.xHandle !== next.user?.xHandle ||
+    prev.user?.xHandlePublic !== next.user?.xHandlePublic ||
+    prev.user?.xHandlePromptOptedOut !== next.user?.xHandlePromptOptedOut;
+  if (profileChanged) {
+    ops.push(_supabase.from('zane_profiles').upsert({
+      id: userId,
+      name: next.user?.name || prev.user?.name || '',
+      x_handle: normalizeXHandle(next.user?.xHandle),
+      x_handle_public: next.user?.xHandlePublic !== false,
+      x_handle_prompt_opted_out: !!next.user?.xHandlePromptOptedOut,
+    }));
   }
 
   const settingsChanged =
@@ -2783,6 +3350,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restBig         !== next.settings?.restBig         ||
     prev.settings?.restMedium      !== next.settings?.restMedium      ||
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
+    prev.settings?.autoOpenRestTimer !== next.settings?.autoOpenRestTimer ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.usePushover      !== next.settings?.usePushover      ||
@@ -2807,6 +3375,11 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showRegression       !== next.settings?.showRegression       ||
     prev.settings?.pinAllNotes          !== next.settings?.pinAllNotes          ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
+    prev.settings?.showFriendsTab       !== next.settings?.showFriendsTab       ||
+    prev.settings?.socialPushMessages   !== next.settings?.socialPushMessages   ||
+    prev.settings?.socialPushFriendRequests !== next.settings?.socialPushFriendRequests ||
+    prev.settings?.socialPushFinishedComments !== next.settings?.socialPushFinishedComments ||
+    prev.settings?.socialPushFriendStarted !== next.settings?.socialPushFriendStarted ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
@@ -2815,6 +3388,7 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     JSON.stringify(prev.settings?.macroCalc) !== JSON.stringify(next.settings?.macroCalc) ||
     JSON.stringify(prev.settings?.mealWindows) !== JSON.stringify(next.settings?.mealWindows) ||
+    JSON.stringify(prev.settings?.mealCategories) !== JSON.stringify(next.settings?.mealCategories) ||
     prev.settings?.fastingProtocol     !== next.settings?.fastingProtocol     ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
@@ -2857,6 +3431,7 @@ async function syncStore(prev, next, userId) {
       rest_big:     next.settings?.restBig     || 180,
       rest_medium:  next.settings?.restMedium  || 120,
       rest_small:   next.settings?.restSmall   || 90,
+      auto_open_rest_timer: next.settings?.autoOpenRestTimer ?? false,
       push_enabled: next.settings?.pushEnabled ?? false,
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
       use_pushover: next.settings?.usePushover ?? false,
@@ -2887,11 +3462,17 @@ async function syncStore(prev, next, userId) {
       show_regression: next.settings?.showRegression ?? true,
       pin_all_notes: next.settings?.pinAllNotes ?? false,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
+      show_friends_tab: next.settings?.showFriendsTab ?? false,
+      social_push_messages: next.settings?.socialPushMessages ?? true,
+      social_push_friend_requests: next.settings?.socialPushFriendRequests ?? true,
+      social_push_finished_comments: next.settings?.socialPushFinishedComments ?? false,
+      social_push_friend_started: next.settings?.socialPushFriendStarted ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
       macro_calc: next.settings?.macroCalc ?? null,
       meal_windows: next.settings?.mealWindows ?? null,
+      meal_categories: next.settings?.mealCategories ?? null,
       fasting_protocol: next.settings?.fastingProtocol ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       show_water_tab: next.settings?.showWaterTab ?? false,
@@ -2971,18 +3552,29 @@ async function syncStore(prev, next, userId) {
   // unwrap() turns a failed write (network/RLS/constraint) into a thrown
   // error so the caller (flushSync) keeps syncBase unchanged and retries,
   // instead of silently advancing past data that never reached the server.
-  if (preOps.length) await Promise.all(preOps.map(unwrap));
+  if (preOps.length) {
+    // These are parents for later writes and some parent rows depend on an
+    // earlier parent in this same list. Preserve their business/FK order.
+    for (const op of preOps) {
+      await scheduleDbTask(() => unwrap(op), { priority: 'critical', kind: 'write' });
+    }
+  }
   // Only start the food-log request now that any new recipe it references
   // has actually committed; see the foodLogUpsertThunk comment above.
-  if (foodLogUpsertThunk) ops.push(foodLogUpsertThunk());
+  if (foodLogUpsertThunk) ops.push(foodLogUpsertThunk);
   // allSettled, not all: ops spans ~25 unrelated tables in one diff, and the
   // sessions upsert (sessionsUpsertOp, tracked separately above) must get its
   // own result independent of whatever else in ops fails, otherwise a broken
   // write anywhere in that list can throw before _syncEntryRelational below
   // ever runs, blocking workout data with no relation to the actual failure.
   const [opResults, sessionsErr] = await Promise.all([
-    Promise.allSettled(ops.map(unwrap)),
-    sessionsUpsertOp ? unwrap(sessionsUpsertOp).then(() => null, e => e) : Promise.resolve(null),
+    Promise.allSettled(ops.map(op => scheduleDbTask(
+      () => unwrap(typeof op === 'function' ? op() : op),
+      { priority: 'critical', kind: 'write' },
+    ))),
+    sessionsUpsertOp
+      ? scheduleDbTask(() => unwrap(sessionsUpsertOp), { priority: 'critical', kind: 'write' }).then(() => null, e => e)
+      : Promise.resolve(null),
   ]);
   // Dual-write entries then sets after sessions are committed (FK order:
   // sessions → entries → sets). Gated on sessionsErr specifically, not on
@@ -5539,84 +6131,809 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-// Realtime: coaching invites (zane_coaching), coaching messages
-// (zane_coaching_notes), and, when the caller is an active coach, client
-// training-status/check-in pushes (zane_user_settings, zane_checkins).
-// Live workout *set* sync across a user's own devices was removed: the
-// local store is the single source of truth for a session. But a coach's
-// "is my client training right now / do they have a pending check-in" badge
-// (app.jsx isCoachActive effect) now updates from these last two listeners
-// instead of a tight poll; polling stays only as an infrequent fallback.
-//
-// coachClients: optional array of { clientId, coachingId } for this user's
-// currently-active coaching relationships (only meaningful when the caller
-// coaches someone). Pass [] / omit when not an active coach: the two
-// coach-status listeners are then skipped entirely rather than attached
-// with an empty/invalid filter.
-// onCoachStatusChange: fired (no payload, callers just re-poll) for any
-// UPDATE on a watched client's zane_user_settings row or any change on a
-// watched coaching relationship's zane_checkins rows. Aggregation
-// (anyLive / pendingCheckinsCount) intentionally stays in app.jsx; this
-// function is thin plumbing only.
-function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClients, onCoachStatusChange) {
-  const mapNote = n => ({
-    id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
-    type: n.type, entityId: n.entity_id, entityName: n.entity_name,
-    threadId: n.thread_id, body: n.body, createdAt: n.created_at,
-    attachments: n.attachments || null,
+// Coaching Realtime carries invalidations only. Broadcast sends no message,
+// relationship, support, check-in, or workout data. The caller always reloads
+// the authoritative rows through RLS/RPC. Legacy Postgres Changes remains in
+// the client solely for the global emergency rollback.
+function subscribeToChanges(userId, onChange, { transport = 'legacy' } = {}) {
+  if (!userId || typeof onChange !== 'function') return () => {};
+  const selectedTransport = transport === 'broadcast' ? 'broadcast' : 'legacy';
+  const pendingResources = new Set();
+  let flushTimer = null;
+  let disposed = false;
+  const emit = resource => {
+    if (disposed) return;
+    pendingResources.add(['relationships', 'notes', 'support', 'status', 'authoritative'].includes(resource) ? resource : 'authoritative');
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      const resources = [...pendingResources];
+      pendingResources.clear();
+      resources.forEach(item => {
+        onChange(item);
+        try { window.dispatchEvent(new CustomEvent('zane-coaching-invalidate', { detail: { resource: item } })); } catch (_) {}
+      });
+    }, 250);
+  };
+
+  let channel;
+  if (selectedTransport === 'broadcast') {
+    channel = _supabase
+      .channel(`coaching:user:${userId}`, { config: { private: true } })
+      .on('broadcast', { event: 'coaching_invalidate' }, event => emit(event?.payload?.resource));
+  } else {
+    channel = _supabase
+      .channel(`coaching-legacy:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => emit('relationships'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => emit('relationships'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching_notes' }, payload => {
+        const coachingId = payload?.new?.coaching_id || payload?.old?.coaching_id || '';
+        emit(String(coachingId).startsWith('support_') ? 'support' : 'notes');
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_user_settings' }, () => emit('status'))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_checkins' }, () => emit('status'))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_checkins' }, () => emit('status'));
+  }
+
+  const subscribedChannel = channel.subscribe(status => {
+    if (status === 'SUBSCRIBED') emit('authoritative');
   });
-  const clientIds = [...new Set((coachClients || []).map(c => c.clientId).filter(Boolean))];
-  const coachingIds = [...new Set((coachClients || []).map(c => c.coachingId).filter(Boolean))];
+  _realtimeChannel = subscribedChannel;
+  return () => {
+    disposed = true;
+    clearTimeout(flushTimer);
+    pendingResources.clear();
+    if (_realtimeChannel === subscribedChannel) _realtimeChannel = null;
+    _supabase.removeChannel(subscribedChannel);
+  };
+}
 
-  let channel = _supabase
-    .channel(`rt-${userId}`)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
-      if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, p => {
-      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, p => {
-      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
-    });
+// ---------------------------------------------------------------------------
+// FRIENDS / SOCIAL
+// ---------------------------------------------------------------------------
 
-  // Realtime's postgres_changes `in.(...)` filter does support a list of
-  // values (Postgres `= ANY`, confirmed against current Supabase docs), but
-  // caps at 100 values. A coach past that (implausible for a real coaching
-  // relationship, but the admin account's asCoach also carries one
-  // pseudo-entry per open support ticket, filtered out by the caller before
-  // this list is built) drops the filter and leans on the RLS policies from
-  // migration 0177 ("coach can read client settings" / "checkins_coach_read")
-  // which already scope reads to this coach's own active clients: Realtime
-  // evaluates postgres_changes INSERT/UPDATE reads through RLS regardless, so
-  // an unfiltered listener is still provably scoped for those, just less
-  // precise. DELETE is the one exception (Supabase can't filter or RLS-scope
-  // DELETE for postgres_changes, since the row is already gone), which is
-  // exactly why zane_checkins only listens for INSERT/UPDATE below, never '*'
-  // or DELETE: an unfiltered/unscoped DELETE listener would fire for every
-  // coach watching any client, for any other coach's client's deleted row.
-  if (clientIds.length > 0) {
-    const filter = clientIds.length <= 100 ? `user_id=in.(${clientIds.join(',')})` : undefined;
-    channel = channel.on('postgres_changes', {
-      event: 'UPDATE', schema: 'public', table: 'zane_user_settings',
-      ...(filter ? { filter } : {}),
-    }, () => onCoachStatusChange?.());
+const SOCIAL_METRIC_CATALOG = [
+  { key: 'steps', label: 'Weekly steps', group: 'Activity' },
+  { key: 'workouts', label: 'Workouts', group: 'Activity' },
+  { key: 'adherence', label: 'Weekly adherence', group: 'Activity' },
+  { key: 'calories', label: 'Average calories', group: 'Nutrition' },
+  { key: 'protein', label: 'Average protein', group: 'Nutrition' },
+  { key: 'carbs', label: 'Average carbs', group: 'Nutrition' },
+  { key: 'fat', label: 'Average fat', group: 'Nutrition' },
+  { key: 'fiber', label: 'Average fiber', group: 'Nutrition' },
+  { key: 'water', label: 'Average water', group: 'Nutrition' },
+  { key: 'cardioMinutes', label: 'Cardio minutes', group: 'Activity' },
+  { key: 'cardioDistance', label: 'Cardio distance', group: 'Activity' },
+  { key: 'weight', label: 'Latest weight', group: 'Body' },
+  { key: 'bodyFatPct', label: 'Latest body fat', group: 'Body' },
+  { key: 'waistCm', label: 'Latest waist', group: 'Body' },
+  { key: 'hipsCm', label: 'Latest hips', group: 'Body' },
+  { key: 'chestCm', label: 'Latest chest', group: 'Body' },
+  { key: 'armCm', label: 'Latest arm', group: 'Body' },
+  { key: 'thighCm', label: 'Latest thigh', group: 'Body' },
+  { key: 'calfCm', label: 'Latest calf', group: 'Body' },
+  { key: 'glucose', label: 'Latest glucose', group: 'Vitals', sensitive: true },
+  { key: 'bloodPressure', label: 'Latest blood pressure', group: 'Vitals', sensitive: true },
+  { key: 'bodyTemp', label: 'Latest body temperature', group: 'Vitals', sensitive: true },
+];
+const SOCIAL_METRIC_KEYS = SOCIAL_METRIC_CATALOG.map(metric => metric.key);
+const SOCIAL_DEFAULT_METRIC_SLOTS = ['steps', 'workouts', 'adherence'];
+
+function normalizeSocialMetricVisibility(raw, legacy = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  return Object.fromEntries(SOCIAL_METRIC_KEYS.map(key => [
+    key, source[key] != null ? !!source[key] : !!legacy[key],
+  ]));
+}
+
+function normalizeSocialMetricSlots(raw) {
+  const slots = Array.isArray(raw) ? raw.filter(key => SOCIAL_METRIC_KEYS.includes(key)) : [];
+  const unique = [...new Set(slots)];
+  return unique.length === 3 ? unique : [...SOCIAL_DEFAULT_METRIC_SLOTS];
+}
+
+window.SocialMetricCatalog = SOCIAL_METRIC_CATALOG;
+
+function socialWeekStartISO(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(12, 0, 0, 0);
+  const mondayOffset = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - mondayOffset);
+  return fmtISO(d);
+}
+
+function mapSocialProfile(p) {
+  if (!p) return null;
+  const legacy = {
+    steps: p.stepsVisible ?? p.steps_visible,
+    workouts: p.workoutsVisible ?? p.workouts_visible,
+    adherence: p.adherenceVisible ?? p.adherence_visible,
+  };
+  return {
+    userId: p.userId ?? p.user_id ?? null,
+    handle: p.handle ?? null,
+    friendCode: p.friendCode ?? p.friend_code ?? null,
+    weightUnit: p.weightUnit ?? p.weight_unit ?? null,
+    stepsVisible: !!legacy.steps,
+    workoutsVisible: !!legacy.workouts,
+    adherenceVisible: !!legacy.adherence,
+    metricVisibility: normalizeSocialMetricVisibility(p.metricVisibility ?? p.metric_visibility, legacy),
+    metricSlots: normalizeSocialMetricSlots(p.metricSlots ?? p.metric_slots),
+  };
+}
+
+function mapSocialFriend(f) {
+  if (!f) return null;
+  const legacy = {
+    steps: f.stepsVisible ?? f.steps_visible ?? f.steps != null,
+    workouts: f.workoutsVisible ?? f.workouts_visible ?? f.workouts != null,
+    adherence: f.adherenceVisible ?? f.adherence_visible ?? f.adherence != null,
+  };
+  const metrics = f.metrics && typeof f.metrics === 'object' ? f.metrics : {};
+  return {
+    friendshipId: f.friendshipId ?? f.id ?? null,
+    userId: f.userId ?? f.user_id ?? null,
+    name: f.name || 'Zane athlete',
+    handle: f.handle ?? null,
+    friendCode: f.friendCode ?? f.friend_code ?? null,
+    acceptedAt: f.acceptedAt ?? f.accepted_at ?? null,
+    weightUnit: f.weightUnit ?? f.weight_unit ?? null,
+    metricVisibility: normalizeSocialMetricVisibility(f.metricVisibility ?? f.metric_visibility, legacy),
+    metrics,
+    steps: metrics.steps ?? f.steps ?? null,
+    workouts: metrics.workouts ?? f.workouts ?? null,
+    adherence: metrics.adherence ?? f.adherence ?? null,
+  };
+}
+
+function mapSocialFriendMetrics(row, fallbackUserId = null) {
+  if (!row) return null;
+  const legacy = {
+    steps: row.stepsVisible ?? row.steps_visible,
+    workouts: row.workoutsVisible ?? row.workouts_visible,
+    adherence: row.adherenceVisible ?? row.adherence_visible,
+  };
+  return {
+    userId: row.userId ?? row.user_id ?? fallbackUserId,
+    weightUnit: row.weightUnit ?? row.weight_unit ?? null,
+    metricVisibility: normalizeSocialMetricVisibility(row.metricVisibility ?? row.metric_visibility, legacy),
+    metrics: row.metrics && typeof row.metrics === 'object' ? row.metrics : {},
+  };
+}
+
+function mapSocialWorkoutSummary(row) {
+  if (!row) return null;
+  return {
+    sessionId: row.sessionId ?? row.session_id,
+    ownerId: row.ownerId ?? row.owner_id,
+    ownerName: row.ownerName ?? row.owner_name ?? 'Zane athlete',
+    dayName: row.dayName ?? row.day_name ?? '',
+    date: row.date ?? null,
+    startedAt: row.startedAt ?? row.started_at ?? null,
+    ended: row.ended ?? null,
+    weightUnit: row.weightUnit ?? row.weight_unit ?? null,
+    live: !!row.live,
+    acceptedAt: row.acceptedAt ?? row.accepted_at ?? null,
+    setsDone: Number(row.setsDone ?? row.sets_done ?? 0),
+    setsTotal: Number(row.setsTotal ?? row.sets_total ?? 0),
+    exerciseCount: Number(row.exerciseCount ?? row.exercise_count ?? 0),
+  };
+}
+
+function mapSocialWorkoutComment(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    authorId: row.authorId ?? row.author_id,
+    authorName: row.authorName ?? row.author_name ?? 'Zane athlete',
+    kind: row.kind || 'comment',
+    body: row.body || '',
+    createdAt: row.createdAt ?? row.created_at ?? null,
+  };
+}
+
+function mapSocialWorkoutDetail(payload) {
+  if (!payload) return null;
+  const session = payload.session || {};
+  return {
+    session: mapSocialWorkoutSummary({ ...session, live: !session.ended }),
+    entries: (payload.entries || []).map(entry => ({
+      name: entry.name || 'Exercise',
+      plannedSets: entry.plannedSets ?? entry.planned_sets ?? null,
+      plannedReps: entry.plannedReps ?? entry.planned_reps ?? null,
+      supersetGroup: entry.supersetGroup ?? entry.superset_group ?? null,
+      sets: (entry.sets || []).map(set => ({
+        kg: set.kg ?? null,
+        reps: set.reps ?? null,
+        repsL: set.repsL ?? set.reps_l ?? null,
+        repsR: set.repsR ?? set.reps_r ?? null,
+        timeSec: set.timeSec ?? set.time_sec ?? null,
+        addedKg: set.addedKg ?? set.added_kg ?? null,
+        done: !!set.done, skipped: !!set.skipped, warmup: !!set.warmup,
+      })),
+    })),
+    comments: (payload.comments || []).map(mapSocialWorkoutComment).filter(Boolean),
+  };
+}
+
+function mapSocialMessage(row, attachments = []) {
+  return {
+    id: row.id,
+    senderId: row.sender_id ?? row.senderId,
+    recipientId: row.recipient_id ?? row.recipientId ?? null,
+    groupId: row.group_id ?? row.groupId ?? null,
+    body: row.body || '',
+    createdAt: row.created_at ?? row.createdAt,
+    editedAt: row.edited_at ?? row.editedAt ?? null,
+    attachments: attachments.filter(a => a.messageId === row.id),
+  };
+}
+
+function mapSocialAttachment(row, url = null) {
+  return {
+    id: row.id,
+    messageId: row.message_id ?? row.messageId,
+    storagePath: row.storage_path ?? row.storagePath,
+    fileName: row.file_name ?? row.fileName,
+    mimeType: row.mime_type ?? row.mimeType,
+    url,
+  };
+}
+
+async function signedSocialAttachment(row) {
+  // Attachments are private; keep the bearer URL short-lived so a copied URL
+  // cannot remain useful after a friendship is removed or a block is added.
+  const { data, error } = await _supabase.storage.from('social-chat-attachments').createSignedUrl(row.storage_path, 300);
+  if (error) throw error;
+  return mapSocialAttachment(row, data?.signedUrl || null);
+}
+
+async function loadSocialWorkoutFeed() {
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_workout_feed'),
+      { priority: 'background' },
+    );
+    if (error) throw error;
+    const feed = data || {};
+    return {
+      liveWorkouts: (feed.live || []).map(mapSocialWorkoutSummary).filter(Boolean),
+      workoutHistory: (feed.history || []).map(mapSocialWorkoutSummary).filter(Boolean),
+    };
+  }, { social: true });
+}
+
+async function loadSocialLiveWorkoutFeed() {
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_live_workouts'),
+      { priority: 'background' },
+    );
+    if (error) throw error;
+    return {
+      liveWorkouts: (Array.isArray(data) ? data : []).map(mapSocialWorkoutSummary).filter(Boolean),
+    };
+  }, { social: true });
+}
+
+async function loadSocialFriendMetrics(friendId) {
+  if (!friendId) throw new Error('Friend is incomplete');
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_friend_metrics', { p_friend_id: friendId }),
+      { priority: 'foreground' },
+    );
+    if (error) throw error;
+    return mapSocialFriendMetrics(data, friendId);
+  }, { social: true });
+}
+
+let _friendsLoadInFlight = null;
+const _friendsLoadVersions = new Map();
+async function loadFriendsState(userId, weekStart = socialWeekStartISO(), { force = false } = {}) {
+  if (!userId) return null;
+  const key = `${userId}:${weekStart}`;
+  const version = (_friendsLoadVersions.get(key) || 0) + (force ? 1 : 0);
+  _friendsLoadVersions.set(key, version);
+  if (!force && _friendsLoadInFlight?.key === key && _friendsLoadInFlight.version === version) {
+    // App bootstrap and the Friends screen can request the same snapshot at
+    // the same time. Share the promise without starting a second full load.
+    return _friendsLoadInFlight.promise;
   }
-  if (coachingIds.length > 0) {
-    const filter = coachingIds.length <= 100 ? `coaching_id=in.(${coachingIds.join(',')})` : undefined;
-    channel = channel
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'zane_checkins',
-        ...(filter ? { filter } : {}),
-      }, () => onCoachStatusChange?.())
-      .on('postgres_changes', {
-        event: 'UPDATE', schema: 'public', table: 'zane_checkins',
-        ...(filter ? { filter } : {}),
-      }, () => onCoachStatusChange?.());
+  const entry = {
+    key,
+    version,
+    promise: runOptionalDbTask(() => loadFriendsStateUncached(userId, weekStart), { social: true }),
+  };
+  _friendsLoadInFlight = entry;
+  try {
+    const result = await entry.promise;
+    // A write can invalidate a request that was already in flight. Let that
+    // caller consume the newest request instead of applying the stale result
+    // after the forced refresh has completed.
+    if (entry.version !== _friendsLoadVersions.get(key)) return loadFriendsState(userId, weekStart);
+    return result;
+  } finally {
+    if (_friendsLoadInFlight?.promise === entry.promise) _friendsLoadInFlight = null;
   }
+}
 
-  _realtimeChannel = channel.subscribe();
-  return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
+async function fetchSocialMessageRows(limit = 300) {
+  // Realtime keeps the snapshot fresh. Only load the recent window needed by
+  // the inbox so an old account cannot turn every refresh into a full-table scan.
+  return _supabase.from('zane_social_messages')
+    .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+}
+
+async function loadFriendsStateUncached(userId, weekStart) {
+  // The core dashboard and supporting social rows are independent. Starting
+  // them together removes the old dashboard/feed -> table-query waterfall.
+  // Workout feed summaries are loaded separately after this core snapshot so
+  // Circle and Groups can render without waiting for live activity data.
+  const [dashboardRes, groupsRes, membersRes, messagesRes, attachmentsRes, readsRes, sharesRes, shareImportsRes] = await runDbTaskBatch([
+    () => _supabase.rpc('social_get_dashboard', { p_week_start: weekStart, p_today: todayISO() }),
+    // A user can belong to many groups. Bound both fan-out queries so one
+    // account cannot turn every Friends refresh into an unbounded row load.
+    () => _supabase.from('zane_social_groups').select('id, owner_id, name, join_code, created_at').order('created_at', { ascending: false }).limit(200),
+    () => _supabase.from('zane_social_group_members').select('group_id, user_id, role, joined_at').limit(1000),
+    () => fetchSocialMessageRows(),
+    () => _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
+    () => _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
+    () => _supabase.from('zane_social_plan_shares').select('id, sender_id, recipient_id, group_id, plan_name, snapshot, created_at, imported_at').order('created_at', { ascending: false }).limit(100),
+    () => _supabase.from('zane_social_plan_share_imports').select('share_id, imported_at').eq('user_id', userId),
+  ], query => query(), { priority: 'background' });
+  if (dashboardRes.error) throw dashboardRes.error;
+  // Attachments are optional decoration for messages. Keep the message rows
+  // usable if signed-url metadata is briefly unavailable.
+  const firstError = [groupsRes, membersRes, messagesRes, readsRes, sharesRes, shareImportsRes].find(r => r?.error)?.error;
+  if (firstError) throw firstError;
+  if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
+  const messageIds = new Set((messagesRes.data || []).map(row => row.id));
+  const attachments = await runDbTaskBatch((attachmentsRes.data || [])
+    .filter(row => messageIds.has(row.message_id))
+    .map(row => row), row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)), { priority: 'background' });
+  const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
+  const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
+  const groups = (groupsRes.data || []).map(g => ({
+    id: g.id, ownerId: g.owner_id, name: g.name, joinCode: g.join_code, createdAt: g.created_at,
+  }));
+  const groupMemberMetrics = new Map((dashboardRes.data?.groupMembers || []).map(m => [`${m.groupId}:${m.userId}`, m]));
+  const groupMembers = (membersRes.data || []).map(m => {
+    const metrics = groupMemberMetrics.get(`${m.group_id}:${m.user_id}`) || {};
+    return {
+      groupId: m.group_id, userId: m.user_id, role: m.role, joinedAt: m.joined_at,
+      name: metrics.name || 'Zane athlete', handle: metrics.handle ?? null,
+      steps: metrics.steps ?? null, workouts: metrics.workouts ?? null, adherence: metrics.adherence ?? null,
+    };
+  });
+  const importedShares = new Map((shareImportsRes.data || []).map(s => [s.share_id, s.imported_at]));
+  const planShares = (sharesRes.data || []).map(s => ({
+    id: s.id, senderId: s.sender_id, recipientId: s.recipient_id, planName: s.plan_name,
+    groupId: s.group_id ?? null, snapshot: s.snapshot, createdAt: s.created_at,
+    importedAt: importedShares.get(s.id) || (s.recipient_id === userId ? s.imported_at : null),
+  }));
+  const dashboard = dashboardRes.data || {};
+  return {
+    profile: mapSocialProfile(dashboard.profile),
+    friends: (dashboard.friends || []).map(mapSocialFriend).filter(Boolean),
+    incoming: dashboard.incoming || [],
+    outgoing: dashboard.outgoing || [],
+    groups,
+    groupMembers,
+    messages,
+    planShares,
+    incomingCount: (dashboard.incoming || []).length,
+    unreadCount: messages.filter(m => m.senderId !== userId && !reads.has(m.id)).length,
+    readMessageIds: [...reads],
+    weekStart,
+    loadedAt: Date.now(),
+  };
+}
+
+async function loadSocialWorkoutDetail(ownerId, sessionId) {
+  if (!ownerId || !sessionId) throw new Error('Workout is incomplete');
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_workout_detail', {
+        p_owner_id: ownerId, p_session_id: sessionId,
+      }),
+      { priority: 'foreground' },
+    );
+    if (error) throw error;
+    return mapSocialWorkoutDetail(data);
+  }, { social: true });
+}
+
+async function loadSocialBadge() {
+  return runOptionalDbTask(async () => {
+    const { data, error } = await scheduleDbTask(
+      () => _supabase.rpc('social_get_badge'),
+      { priority: 'background' },
+    );
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      incomingCount: Number(row?.incoming_count ?? row?.incomingCount ?? 0),
+      unreadCount: Number(row?.unread_count ?? row?.unreadCount ?? 0),
+    };
+  }, { social: true });
+}
+
+async function loadSocialMessageState(userId) {
+  if (!userId) throw new Error('Authentication required');
+  return runOptionalDbTask(async () => {
+    const [messagesRes, attachmentsRes, readsRes] = await runDbTaskBatch([
+      () => fetchSocialMessageRows(),
+      () => _supabase.from('zane_social_message_attachments').select('id, message_id, storage_path, file_name, mime_type, created_at').order('created_at', { ascending: false }).limit(300),
+      () => _supabase.from('zane_social_message_reads').select('message_id, user_id, read_at').eq('user_id', userId),
+    ], query => query(), { priority: 'background' });
+    const firstError = [messagesRes, readsRes].find(result => result?.error)?.error;
+    if (firstError) throw firstError;
+    if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
+    const messageIds = new Set((messagesRes.data || []).map(row => row.id));
+    const attachments = await runDbTaskBatch(
+      (attachmentsRes.data || []).filter(row => messageIds.has(row.message_id)),
+      row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)),
+      { priority: 'background' },
+    );
+    const reads = new Set((readsRes.data || []).map(row => row.message_id));
+    const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
+    return {
+      messages,
+      readMessageIds: [...reads],
+      unreadCount: messages.filter(message => message.senderId !== userId && !reads.has(message.id)).length,
+    };
+  }, { social: true });
+}
+
+// Push delivery is detached from the social write, but the handoff itself is
+// durable. A tab can be closed or go offline immediately after a message is
+// committed; the small local outbox retries after the next auth/online/focus
+// event. The server still re-checks the event and caller, so an old outbox
+// entry is harmless and is discarded on a permanent 4xx response.
+const SOCIAL_NOTIFY_OUTBOX_KEY = 'zane-social-notification-outbox-v1';
+let _socialNotifyFlushPromise = null;
+
+function readSocialNotifyOutbox() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(SOCIAL_NOTIFY_OUTBOX_KEY) || '[]');
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(row => row && typeof row.event === 'string' && typeof row.id === 'string').slice(-200);
+  } catch (_) { return []; }
+}
+
+function writeSocialNotifyOutbox(rows) {
+  try {
+    if (!rows.length) localStorage.removeItem(SOCIAL_NOTIFY_OUTBOX_KEY);
+    else localStorage.setItem(SOCIAL_NOTIFY_OUTBOX_KEY, JSON.stringify(rows.slice(-200)));
+  } catch (_) {}
+}
+
+function enqueueSocialNotify(event, eventId) {
+  const rows = readSocialNotifyOutbox();
+  if (!rows.some(row => row.event === event && row.id === String(eventId))) {
+    rows.push({ event, id: String(eventId), queuedAt: Date.now() });
+    writeSocialNotifyOutbox(rows);
+  }
+}
+
+async function flushSocialNotificationOutbox() {
+  if (_socialNotifyFlushPromise) return _socialNotifyFlushPromise;
+  _socialNotifyFlushPromise = (async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+    let rows = readSocialNotifyOutbox();
+    let lastResponse = null;
+    while (rows.length) {
+      const current = rows[0];
+      const response = await fnFetch(SOCIAL_NOTIFY_URL, { event: current.event, id: current.id });
+      lastResponse = response;
+      if (!response) break;
+      if (response.ok || [400, 401, 403, 404].includes(response.status)) {
+        rows.shift();
+        writeSocialNotifyOutbox(rows);
+        continue;
+      }
+      // 409 (session row not replicated yet), 429, 5xx and network errors
+      // remain queued for a later attempt. Keep order to avoid a newer event
+      // overtaking an older retry for the same account.
+      console.warn('social notification handoff deferred:', response.status);
+      break;
+    }
+    return lastResponse;
+  })().finally(() => { _socialNotifyFlushPromise = null; });
+  return _socialNotifyFlushPromise;
+}
+
+async function notifySocialEvent(event, eventId) {
+  if (!event || !eventId) return null;
+  enqueueSocialNotify(event, eventId);
+  return flushSocialNotificationOutbox();
+}
+
+async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
+  const text = String(body || '').trim();
+  if (!sessionId || !text) throw new Error('Comment cannot be empty');
+  const { data, error } = await _supabase.rpc('social_add_workout_comment', {
+    p_session_id: sessionId, p_body: text, p_kind: kind,
+  });
+  if (error) throw error;
+  const mapped = mapSocialWorkoutComment(data);
+  void notifySocialEvent('finished_workout_comment', mapped?.id);
+  return mapped;
+}
+
+async function updateSocialProfile(userId, patch = {}) {
+  if (!userId) throw new Error('Authentication required');
+  const { data, error } = await _supabase.rpc('social_update_profile', {
+    p_handle: patch.handle ?? null,
+    p_steps_visible: !!patch.stepsVisible,
+    p_workouts_visible: !!patch.workoutsVisible,
+    p_adherence_visible: !!patch.adherenceVisible,
+    p_metric_visibility: patch.metricVisibility ?? {},
+    p_metric_slots: patch.metricSlots ?? SOCIAL_DEFAULT_METRIC_SLOTS,
+  });
+  if (error) {
+    const message = String(error.message || '');
+    if (error.code === '23505' || /duplicate key|unique constraint|zane_social_profiles_handle_key/i.test(message)) {
+      throw new Error('That handle is already taken. Please choose another.');
+    }
+    if (/^Handle must be /.test(message)) throw new Error(message);
+    throw new Error('Could not save your social profile. Please try again.');
+  }
+  return mapSocialProfile(data);
+}
+
+async function updateSocialMetricPreferences(userId, patch = {}) {
+  if (!userId) throw new Error('Authentication required');
+  const { data, error } = await _supabase.rpc('social_update_metric_preferences', {
+    p_metric_visibility: patch.metricVisibility ?? {},
+    p_metric_slots: patch.metricSlots ?? null,
+  });
+  if (error) throw error;
+  return mapSocialProfile(data);
+}
+
+async function lookupSocialProfile(query) {
+  const { data, error } = await _supabase.rpc('social_lookup_profile', { p_query: String(query || '').trim() });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? {
+    userId: row.user_id, handle: row.handle, name: row.display_name || 'Zane athlete',
+    friendCode: row.friend_code, relationship: row.relationship || 'none',
+  } : null;
+}
+
+async function sendSocialFriendRequest(targetUserId) {
+  const { data, error } = await _supabase.rpc('social_send_friend_request', { p_target_id: targetUserId });
+  if (error) throw error;
+  void notifySocialEvent('friend_request', data);
+  return data;
+}
+
+async function respondToSocialFriendRequest(friendshipId, accept) {
+  const { error } = await _supabase.rpc('social_respond_friend_request', { p_friendship_id: friendshipId, p_accept: !!accept });
+  if (error) throw error;
+}
+
+async function removeSocialFriend(targetUserId) {
+  const { error } = await _supabase.rpc('social_remove_friend', { p_target_id: targetUserId });
+  if (error) throw error;
+}
+
+async function blockSocialUser(targetUserId) {
+  const { error } = await _supabase.rpc('social_block_user', { p_target_id: targetUserId });
+  if (error) throw error;
+}
+
+async function createSocialGroup(name) {
+  const { data, error } = await _supabase.rpc('social_create_group', { p_name: name });
+  if (error) throw error;
+  return data;
+}
+
+async function joinSocialGroup(joinCode) {
+  const { data, error } = await _supabase.rpc('social_join_group', { p_join_code: joinCode });
+  if (error) throw error;
+  return data;
+}
+
+async function leaveSocialGroup(groupId) {
+  const { error } = await _supabase.rpc('social_leave_group', { p_group_id: groupId });
+  if (error) throw error;
+}
+
+async function deleteSocialGroup(groupId) {
+  const { error } = await _supabase.rpc('social_delete_group', { p_group_id: groupId });
+  if (error) throw error;
+}
+
+async function sendSocialMessage({ senderId, recipientId = null, groupId = null, body }) {
+  const text = String(body || '').trim();
+  if (!text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_social_messages').insert({
+    sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
+  }).select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').single();
+  if (error) throw error;
+  void notifySocialEvent('message', data?.id);
+  return mapSocialMessage(data);
+}
+
+async function notifySocialFriendStarted(sessionId) {
+  // Session rows are written by the offline-aware sync queue after the local
+  // workout is created. Retry a few times so the edge function sees the
+  // authoritative row without adding any polling or blocking the start UI.
+  for (const delay of [0, 3000, 8000]) {
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    const response = await notifySocialEvent('friend_started', sessionId);
+    if (!response || response.status !== 409) return response;
+  }
+  return null;
+}
+
+async function updateSocialMessage(messageId, userId, body) {
+  const text = String(body || '').trim();
+  if (!messageId || !userId || !text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_social_messages')
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', userId)
+    .select('id, sender_id, recipient_id, group_id, body, created_at, edited_at')
+    .single();
+  if (error) throw error;
+  return mapSocialMessage(data);
+}
+
+async function deleteSocialMessage(messageId, userId) {
+  if (!messageId || !userId) throw new Error('Message is incomplete');
+  const { data: attachmentRows, error: attachmentError } = await _supabase
+    .from('zane_social_message_attachments')
+    .select('storage_path')
+    .eq('message_id', messageId)
+    .eq('uploaded_by', userId);
+  if (attachmentError) throw attachmentError;
+  const { error } = await _supabase.from('zane_social_messages')
+    .delete()
+    .eq('id', messageId)
+    .eq('sender_id', userId);
+  if (error) throw error;
+  const paths = (attachmentRows || []).map(row => row.storage_path).filter(Boolean);
+  if (paths.length) {
+    const { error: storageError } = await _supabase.storage.from('social-chat-attachments').remove(paths);
+    if (storageError) console.warn('social attachment cleanup failed:', storageError);
+  }
+}
+
+async function markSocialMessagesRead(userId, messageIds = []) {
+  const ids = [...new Set(messageIds.filter(Boolean))];
+  if (!userId || !ids.length) return;
+  const { error } = await _supabase.from('zane_social_message_reads').upsert(
+    ids.map(messageId => ({ message_id: messageId, user_id: userId })),
+    { onConflict: 'message_id,user_id' },
+  );
+  if (error) throw error;
+}
+
+async function uploadSocialAttachment(file, userId, messageId) {
+  if (!file || !userId || !messageId) throw new Error('Attachment is incomplete');
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowed.includes(file.type)) throw new Error('Only image attachments are supported');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Image is too large');
+  const safeName = String(file.name || 'image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || 'image';
+  const storagePath = `${userId}/${messageId}/${Date.now()}-${safeName}`;
+  const storage = _supabase.storage.from('social-chat-attachments');
+  const uploaded = await storage.upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (uploaded.error) throw uploaded.error;
+  const inserted = await _supabase.from('zane_social_message_attachments').insert({
+    message_id: messageId, uploaded_by: userId, storage_path: storagePath,
+    file_name: safeName, mime_type: file.type,
+  }).select('id, message_id, storage_path, file_name, mime_type, created_at').single();
+  if (inserted.error) {
+    await storage.remove([storagePath]).catch(() => {});
+    throw inserted.error;
+  }
+  return signedSocialAttachment(inserted.data);
+}
+
+async function createSocialPlanShare(recipientId, planName, snapshot) {
+  const { data, error } = await _supabase.rpc('social_create_plan_share', {
+    p_recipient_id: recipientId, p_plan_name: planName, p_snapshot: snapshot,
+  });
+  if (error) throw error;
+  return data;
+}
+
+async function createSocialGroupPlanShare(groupId, planName, snapshot) {
+  const { data, error } = await _supabase.rpc('social_create_group_plan_share', {
+    p_group_id: groupId, p_plan_name: planName, p_snapshot: snapshot,
+  });
+  if (error) throw error;
+  return data;
+}
+
+async function markSocialPlanImported(shareId) {
+  const { error } = await _supabase.rpc('social_mark_plan_imported', { p_share_id: shareId });
+  if (error) throw error;
+}
+
+async function deleteSocialPlanShare(shareId) {
+  const { error } = await _supabase.rpc('social_delete_plan_share', { p_share_id: shareId });
+  if (error) throw error;
+}
+
+async function reportSocial({ targetUserId = null, messageId = null, groupId = null, reason = 'other', details = '' }) {
+  const { data, error } = await _supabase.rpc('social_report', {
+    p_target_user_id: targetUserId, p_message_id: messageId, p_group_id: groupId,
+    p_reason: reason, p_details: details,
+  });
+  if (error) throw error;
+  return data;
+}
+
+const _friendsChannelRegistry = new Map();
+const SOCIAL_TABLE_RESOURCES = {
+  zane_social_friendships: 'relationships',
+  zane_social_groups: 'groups',
+  zane_social_group_members: 'groups',
+  zane_social_messages: 'messages',
+  zane_social_message_attachments: 'messages',
+  zane_social_message_reads: 'messages',
+  zane_social_plan_shares: 'shares',
+  zane_social_plan_share_imports: 'shares',
+  zane_social_workout_comments: 'feed',
+};
+
+function subscribeToFriends(userId, onChange, { transport = 'broadcast' } = {}) {
+  if (!userId || typeof onChange !== 'function' || !socialDataAvailable()) return () => {};
+  const selectedTransport = transport === 'broadcast' ? 'broadcast' : 'legacy';
+  const key = `${selectedTransport}:${userId}`;
+  let entry = _friendsChannelRegistry.get(key);
+  if (entry?.removeTimer) {
+    clearTimeout(entry.removeTimer);
+    entry.removeTimer = null;
+  }
+  if (!entry) {
+    const listeners = new Set();
+    const emit = resource => listeners.forEach(listener => listener(resource));
+    let channel;
+    if (selectedTransport === 'broadcast') {
+      channel = _supabase
+        .channel(`social:user:${userId}`, { config: { private: true } })
+        .on('broadcast', { event: 'social_invalidate' }, event => emit(event?.payload?.resource || 'dashboard'));
+    } else {
+      channel = _supabase.channel(`social-${userId}`);
+      Object.entries(SOCIAL_TABLE_RESOURCES).forEach(([table, resource]) => {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => emit(resource));
+      });
+    }
+    entry = {
+      channel: channel.subscribe(status => {
+        if (status === 'SUBSCRIBED') emit('authoritative');
+      }),
+      listeners,
+      removeTimer: null,
+    };
+    _friendsChannelRegistry.set(key, entry);
+  }
+  entry.listeners.add(onChange);
+  return () => {
+    const current = _friendsChannelRegistry.get(key);
+    if (!current) return;
+    current.listeners.delete(onChange);
+    if (current.listeners.size || current.removeTimer) return;
+    // React effects can tear down and re-add this same stable subscription in
+    // one navigation commit. Keep it briefly so that transition reuses the
+    // channel instead of racing an async removeChannel call with a duplicate.
+    current.removeTimer = setTimeout(() => {
+      if (current.listeners.size) {
+        current.removeTimer = null;
+        return;
+      }
+      _friendsChannelRegistry.delete(key);
+      Promise.resolve(_supabase.removeChannel(current.channel)).catch(() => {});
+    }, 1000);
+  };
 }
 
 // Whether Smart Progression is active for a given exercise entry/item.
@@ -5905,7 +7222,7 @@ async function reloadCoachingState(userId) {
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
       .is('read_at', null)
       .neq('author_id', userId),
     // not.like support_% on BOTH: a user with a real coach AND an open support
@@ -5953,6 +7270,7 @@ async function reloadCoachingState(userId) {
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+      editedAt: n.edited_at,
       attachments: n.attachments || null,
     })),
   };
@@ -6104,8 +7422,37 @@ async function loadCoachingNotes(coachingId, threadId = null) {
     threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     body: n.body, createdAt: n.created_at, readAt: n.read_at,
+    editedAt: n.edited_at,
     attachments: n.attachments || null,
   }));
+}
+
+async function updateCoachingNote(noteId, userId, body) {
+  const text = String(body || '').trim();
+  if (!noteId || !userId || !text) throw new Error('Message cannot be empty');
+  const { data, error } = await _supabase.from('zane_coaching_notes')
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq('id', noteId)
+    .eq('author_id', userId)
+    .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, read_at, thread_id, attachments, edited_at')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id, coachingId: data.coaching_id, authorId: data.author_id,
+    threadId: data.thread_id, type: data.type, entityId: data.entity_id,
+    entityName: data.entity_name, body: data.body, createdAt: data.created_at,
+    readAt: data.read_at, editedAt: data.edited_at,
+    attachments: data.attachments || null,
+  };
+}
+
+async function deleteCoachingNote(noteId, userId) {
+  if (!noteId || !userId) throw new Error('Message is incomplete');
+  const { error } = await _supabase.from('zane_coaching_notes')
+    .delete()
+    .eq('id', noteId)
+    .eq('author_id', userId);
+  if (error) throw error;
 }
 
 async function loadCoachingThreads(coachingId) {
@@ -6139,8 +7486,7 @@ async function getOrCreateCoachingThread(coachingId, name, userId) {
 }
 
 async function deleteCoachingThread(threadId) {
-  await _supabase.from('zane_coaching_notes').delete().eq('thread_id', threadId);
-  const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
+  const { error } = await _supabase.rpc('delete_coaching_thread', { p_thread_id: threadId });
   if (error) throw error;
 }
 
@@ -6694,6 +8040,31 @@ const MEAL_CATEGORY_DEFS = [
   { id: 'dinner', label: 'Dinner', defaultStart: 16 },
   { id: 'snack3', label: 'Snack 3', defaultStart: 20 },
 ];
+// Newer clients store the complete category definition so users can rename
+// categories and add or remove them. The first category must still begin at
+// midnight and every category needs a distinct start hour, otherwise a food
+// entry could belong to two categories or to none. Invalid custom data falls
+// back as a whole rather than partially changing the timeline.
+function normalizeMealCategories(raw) {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 24) return null;
+  const ids = new Set();
+  let previousStart = -1;
+  const normalized = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const label = typeof item?.label === 'string' ? item.label.trim().slice(0, 40) : '';
+    const startHour = item?.startHour;
+    if (!id || ids.has(id) || !label || !Number.isInteger(startHour) || startHour < 0 || startHour > 23) return null;
+    if (i === 0 && startHour !== 0) return null;
+    if (startHour <= previousStart) return null;
+    ids.add(id);
+    previousStart = startHour;
+    normalized.push({ id, label, startHour });
+  }
+  return normalized;
+}
+
 // Intermittent fasting presets (migration 0249): the id is stored verbatim
 // in zane_user_settings.fasting_protocol, the hours are the timer math.
 // Lives here rather than in screens-food.jsx because two screens need it
@@ -6724,21 +8095,33 @@ function fastingCustomHours(setting) {
   }
   return 48;
 }
-// Resolves settings.mealWindows (six ascending start hours, first always 0)
-// into the [startHour, endHour) ranges the timeline groups by. Defensive about
-// the stored value: a short, non-ascending or non-numeric array falls back to
-// the defaults rather than rendering a day with holes or overlaps in it, since
-// this drives which entries appear under which heading.
+// Resolves the full custom category config first, then the legacy six-number
+// mealWindows setting, into the [startHour, endHour) ranges the timeline groups
+// by. The legacy path keeps existing users and older clients working while the
+// richer config carries labels and arbitrary category counts.
 function mealCategories(settings) {
+  const custom = normalizeMealCategories(settings?.mealCategories);
+  if (custom) {
+    return custom.map((c, i) => ({ ...c, endHour: i === custom.length - 1 ? 24 : custom[i + 1].startHour }));
+  }
   const raw = settings?.mealWindows;
-  const ok = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
+  const legacyOk = Array.isArray(raw) && raw.length === MEAL_CATEGORY_DEFS.length
     && raw.every((h, i) => Number.isInteger(h) && h >= 0 && h <= 23 && (i === 0 ? h === 0 : h > raw[i - 1]));
-  const starts = ok ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
+  const starts = legacyOk ? raw : MEAL_CATEGORY_DEFS.map(c => c.defaultStart);
   return MEAL_CATEGORY_DEFS.map((c, i) => ({
     id: c.id, label: c.label,
     startHour: starts[i],
     endHour: i === MEAL_CATEGORY_DEFS.length - 1 ? 24 : starts[i + 1],
   }));
+}
+
+// A food day is complete only after the user explicitly says they are done.
+// This is deliberately separate from the food entries: users may have no meal
+// in one or more configured categories, and planned entries are not proof that
+// a meal was eaten.
+function foodDayIsClosed(dailyLogs, date) {
+  if (!date) return false;
+  return !!(dailyLogs || []).find(log => log?.date === date)?.foodDayClosed;
 }
 
 // ── Macro target estimation (migration 0205) ────────────────────────────────
@@ -8005,9 +9388,8 @@ async function refreshHealthLogs(userId, _opts = {}) {
     _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
     _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
   ] : Array.from({ length: 6 }, () => Promise.resolve({ data: [], error: null }));
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
-         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+  const healthQueries = [
+    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
@@ -8015,9 +9397,19 @@ async function refreshHealthLogs(userId, _opts = {}) {
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     ...medicationQueries,
-  ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error
-      || medicationPlansRes.error || medicationsRes.error || medicationScheduleSlotsRes.error || medicationLogsRes.error || medicationPlanItemsRes.error || medicationPillboxChecksRes.error) return null;
+  ];
+  const healthResults = await runOptionalDbTask(async () => {
+    const results = await runDbTaskBatch(
+      healthQueries,
+      async query => await query,
+      { priority: 'background' },
+    );
+    const firstError = results.find(result => result?.error)?.error;
+    if (firstError) throw firstError;
+    return results;
+  });
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes,
+         medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes, medicationPlanItemsRes, medicationPillboxChecksRes] = healthResults;
   return {
     medicationsLoaded: !!_opts.medsEnabled,
     dailyLogs: (dailyRes.data || []).map(l => ({
@@ -8032,6 +9424,7 @@ async function refreshHealthLogs(userId, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       mealOfChoice: !!l.meal_of_choice,
       mealOfChoiceHour: l.meal_of_choice_hour ?? null,
+      foodDayClosed: !!l.food_day_closed,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
@@ -8126,6 +9519,47 @@ function dsShiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return fmtISO(d);
 }
+
+// A food-template fill marker belongs to one ACTIVE meal plan and one date.
+// The old `${userId}_${date}` shape made a marker created by plan A suppress
+// plan B when the user switched plans on the same day. Keep the marker opaque
+// to callers; only equality matters, and the plan id is part of that identity.
+function foodTemplateDayMarkerId(userId, mealPlanId, dateISO) {
+  return `ft_${userId}_${mealPlanId}_${dateISO}`;
+}
+
+// Markers written before named meal plans used only the user/date pair. They
+// belong to the migration-created default plan (`mp_<userId>`); recognizing
+// them there preserves the old "deleted planned food stays deleted" behavior
+// without letting an old marker suppress a newly selected plan.
+function foodTemplateDayLegacyMarkerId(userId, dateISO) {
+  return `${userId}_${dateISO}`;
+}
+
+// Re-activating a scheduled medication after its planned row was removed must
+// revive that row instead of appending a second object with the same id. A
+// removed scheduled dose is kept as a skipped tombstone so auto-fill cannot
+// recreate it; manual logging the same dose is the explicit inverse of that
+// tombstone. Replacing all matching ids also repairs a duplicate produced by
+// older clients without leaving two rows for syncStore's id diff.
+function upsertMedicationLog(logs, entry) {
+  const list = Array.isArray(logs) ? logs : [];
+  let found = false;
+  const next = [];
+  for (const row of list) {
+    if (row?.id !== entry?.id) {
+      next.push(row);
+      continue;
+    }
+    if (!found) {
+      next.push({ ...row, ...entry, skipped: false });
+      found = true;
+    }
+  }
+  if (!found) next.push(entry);
+  return next;
+}
+
 function dsMedsDueTaken(store, dateISO) {
   const wd = isoWd(new Date(dateISO + 'T12:00:00'));
   const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
@@ -10780,21 +12214,24 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
-  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  subscribeToChanges,
+  subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox,
+  createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
+  uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
-  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
@@ -10806,11 +12243,13 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
-  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, FD_FASTING_PRESETS, fastingCustomHours,
+  ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,
   loadAdaptiveTdeeHistory, saveAdaptiveTdeeHistory,
   refreshHealthLogs,
-  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn,
+  getCachedRuntimeConfig, fetchRuntimeConfig, socialDataAvailable,
+  scheduleDbTask, runDbTaskBatch,
+  dailySummaryDayIsEmpty, buildDailySummaryPayload, generateDailySummary, splitHeadlineBody, generateCheckinOpinion, dsMedsDueTaken, dsSlotAppliesOn, foodTemplateDayMarkerId, foodTemplateDayLegacyMarkerId, upsertMedicationLog,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,
@@ -10819,4 +12258,5 @@ window.LB = {
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
+  ...(window.__STORE_TEST__ ? { dbStabilityTest: dbStabilityTestApi(), authRecoveryTest: authRecoveryTestApi() } : {}),
 };

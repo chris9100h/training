@@ -66,6 +66,7 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
         <span className="micro" style={{ color: archived ? UI.inkGhost : (statusColor[t.support_status] || UI.inkFaint) }}>{(t.support_status || (archived ? 'resolved' : 'open')).replace('_', ' ').toUpperCase()}</span>
         {t.support_category && <span className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{catLabel}</span>}
       </div>
+      {t.x_handle && <div className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{t.x_handle}</div>}
       {t.last_message_body ? (
         <div style={{ fontSize: archived ? 11 : 12, color: archived ? UI.inkGhost : UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
       ) : (
@@ -104,10 +105,76 @@ function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
 }
 
+function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, saving, onToggleMetric }) {
+  const groups = [...new Set(catalog.map(metric => metric.group))];
+  const [openGroups, setOpenGroups] = useStateSet({ Activity: true });
+
+  const toggleGroup = group => setOpenGroups(current => ({ ...current, [group]: !current[group] }));
+  const sharedCount = catalog.filter(metric => !!profile?.metricVisibility?.[metric.key]).length;
+
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="Metric sharing">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 16 }}>
+          Choose which health values your friends can see. Shared values are summaries or the latest reading, never notes or exact reading times. Workouts also share live and finished set progress, including weight and reps.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+          <div className="micro" style={{ color: UI.gold }}>SHARED METRICS</div>
+          <div className="micro" style={{ color: UI.inkFaint }}>{sharedCount} of {catalog.length} enabled</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {groups.map(group => {
+            const metrics = catalog.filter(metric => metric.group === group);
+            const groupSharedCount = metrics.filter(metric => !!profile?.metricVisibility?.[metric.key]).length;
+            const expanded = !!openGroups[group];
+            return (
+              <div key={group} style={{ border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, background: UI.bgInset, overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group)}
+                  aria-expanded={expanded}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 14px', background: 'none', border: 'none', color: UI.ink, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span className="micro" style={{ color: UI.gold, fontWeight: 700 }}>{group.toUpperCase()}</span>
+                    <span style={{ display: 'block', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, marginTop: 3 }}>{groupSharedCount} of {metrics.length} enabled</span>
+                  </span>
+                  <i className={`fa-solid fa-chevron-${expanded ? 'up' : 'down'}`} aria-hidden="true" style={{ color: UI.inkFaint, fontSize: 11, flexShrink: 0 }} />
+                </button>
+                {expanded && (
+                  <div style={{ padding: '0 14px 8px' }}>
+                    <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }} />
+                    {metrics.map(metric => {
+                      const visible = !!profile?.metricVisibility?.[metric.key];
+                      return (
+                        <div key={metric.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
+                          <div style={{ minWidth: 0 }}>
+                            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{metric.label}</span>
+                            {metric.sensitive && <span className="micro" style={{ color: UI.inkFaint, marginLeft: 6 }}>SENSITIVE</span>}
+                          </div>
+                          <Toggle on={visible} label={metric.label} disabled={saving} onToggle={() => onToggleMetric(metric)} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {message && <div style={{ marginTop: 12, color: message.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{message.text}</div>}
+        <div style={{ marginTop: 24 }}>
+          <Btn style={{ width: '100%' }} onClick={onClose}>Done</Btn>
+        </div>
+      </div>
+    </SettingsSheet>
+  );
+}
+
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
@@ -612,12 +679,21 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
+  const [friendsSheet, setFriendsSheet] = useStateSet(false);
+  const [friendsSharingSheet, setFriendsSharingSheet] = useStateSet(false);
+  const [friendsNotificationsSheet, setFriendsNotificationsSheet] = useStateSet(false);
+  const [socialProfileDraft, setSocialProfileDraft] = useStateSet(null);
+  const [socialProfileSaving, setSocialProfileSaving] = useStateSet(false);
+  const [socialProfileMsg, setSocialProfileMsg] = useStateSet(null);
+  const [socialProfileLoadError, setSocialProfileLoadError] = useStateSet(null);
+  const [socialProfileLoading, setSocialProfileLoading] = useStateSet(false);
+  const [socialProfileRetry, setSocialProfileRetry] = useStateSet(0);
   const [healthSheet, setHealthSheet] = useStateSet(false);
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
@@ -660,23 +736,80 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   });
   const [medsSubSheet, setMedsSubSheet] = useStateSet(false);
   const [pillboxSheet, setPillboxSheet] = useStateSet(false);
-  // Food tracker meal boundaries (migration 0206). Resolved rather than read
-  // raw, so an unset setting shows the built-in defaults and the editor always
-  // has six rows to work with.
+  // Food tracker meal categories. The resolved list keeps old six-number
+  // mealWindows users working while the richer config carries custom labels
+  // and category counts.
   const mealCats = LB.mealCategories(store.settings);
-  // Moves one meal's start hour, always writing the full six-value array so a
-  // partially-set setting can never exist. The buttons already refuse to cross
-  // a neighbour; this clamps again because the array is what gets persisted
-  // and mealCategories rejects a non-ascending one outright.
+  const [mealCategoryDraft, setMealCategoryDraft] = useStateSet(null);
+  const normalizeMealCategories = (categories) => (categories || []).map((c, i) => ({
+    id: String(c.id || `meal-${i + 1}`),
+    label: String(c.label || '').trim().slice(0, 40) || `Meal ${i + 1}`,
+    startHour: Number.isInteger(c.startHour) ? c.startHour : 0,
+  })).sort((a, b) => a.startHour - b.startHour);
+  useEffectSet(() => {
+    if (!mealTimesSheet) { setMealCategoryDraft(null); return; }
+    setMealCategoryDraft(LB.mealCategories(store.settings).map(c => ({ id: c.id, label: c.label, startHour: c.startHour })));
+  }, [mealTimesSheet]);
+
+  const draftMealCats = mealCategoryDraft || mealCats.map(c => ({ id: c.id, label: c.label, startHour: c.startHour }));
+  const defaultMealCats = LB.mealCategories({}).map(c => ({ id: c.id, label: c.label, startHour: c.startHour }));
+  const mealCategoriesCustomized = JSON.stringify(normalizeMealCategories(mealCats)) !== JSON.stringify(normalizeMealCategories(defaultMealCats));
+  const persistMealCategories = (categories) => {
+    const next = normalizeMealCategories(categories);
+    if (next.length) next[0].startHour = 0;
+    setMealCategoryDraft(next);
+    setStore(s => ({ ...s, settings: {
+      ...s.settings,
+      mealCategories: next,
+      // Keep the old time-only setting in sync for older clients that do not
+      // know about custom labels or category counts yet.
+      mealWindows: next.map(c => c.startHour),
+    } }));
+  };
+  const closeMealTimes = () => {
+    const next = normalizeMealCategories(mealCategoryDraft);
+    const current = normalizeMealCategories(mealCats);
+    if (next.length && JSON.stringify(next) !== JSON.stringify(current)) persistMealCategories(next);
+    setMealTimesSheet(false);
+  };
+  const updateMealCategoryLabel = (idx, label) => {
+    setMealCategoryDraft(list => (list || draftMealCats).map((c, i) => i === idx ? { ...c, label } : c));
+  };
+  // Moves one meal's start hour without allowing empty/overlapping ranges.
   const shiftMealStart = (idx, delta) => {
-    if (idx === 0) return;
-    const starts = mealCats.map(c => c.startHour);
+    const starts = draftMealCats.map(c => c.startHour);
+    if (idx === 0 || starts[idx] == null) return;
     const lo = starts[idx - 1] + 1;
     const hi = idx === starts.length - 1 ? 23 : starts[idx + 1] - 1;
     const next = Math.min(hi, Math.max(lo, starts[idx] + delta));
     if (next === starts[idx]) return;
-    starts[idx] = next;
-    setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: starts } }));
+    const categories = draftMealCats.map((c, i) => i === idx ? { ...c, startHour: next } : c);
+    persistMealCategories(categories);
+  };
+  const addMealCategory = () => {
+    if (draftMealCats.length >= 24) return;
+    let bestStart = null;
+    let bestGap = 1;
+    draftMealCats.forEach((cat, i) => {
+      const end = i === draftMealCats.length - 1 ? 24 : draftMealCats[i + 1].startHour;
+      const gap = end - cat.startHour;
+      if (gap > bestGap) {
+        bestGap = gap;
+        bestStart = Math.floor((cat.startHour + end) / 2);
+      }
+    });
+    if (bestStart == null) return;
+    persistMealCategories([...draftMealCats, { id: LB.uid(), label: `Meal ${draftMealCats.length + 1}`, startHour: bestStart }]);
+  };
+  const removeMealCategory = (idx) => {
+    if (draftMealCats.length <= 1) return;
+    const next = draftMealCats.filter((_, i) => i !== idx);
+    if (next[0]) next[0] = { ...next[0], startHour: 0 };
+    persistMealCategories(next);
+  };
+  const resetMealCategories = () => {
+    setMealCategoryDraft(LB.mealCategories({}).map(c => ({ id: c.id, label: c.label, startHour: c.startHour })));
+    setStore(s => ({ ...s, settings: { ...s.settings, mealCategories: null, mealWindows: null } }));
   };
   const mealStepBtn = (disabled) => ({
     width: 28, height: 28, flexShrink: 0, borderRadius: 4,
@@ -685,6 +818,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
     display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
   });
   const [accountSheet, setAccountSheet] = useStateSet(false);
+  const [xHandleDraft, setXHandleDraft] = useStateSet(() => store.user?.xHandle || '');
+  const [xHandlePublicDraft, setXHandlePublicDraft] = useStateSet(() => store.user?.xHandlePublic !== false);
+  const [xHandleMsg, setXHandleMsg] = useStateSet(null);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
   const [dataSheet, setDataSheet] = useStateSet(false);
@@ -802,6 +938,9 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
+  const [supportEditingNoteId, setSupportEditingNoteId] = useStateSet(null);
+  const [supportEditingBody, setSupportEditingBody] = useStateSet('');
+  const [supportNoteActionBusy, setSupportNoteActionBusy] = useStateSet(false);
   const [adminImageFile, setAdminImageFile] = useStateSet(null);
   const [adminImagePreview, setAdminImagePreview] = useStateSet(null);
   const [archivedInbox, setArchivedInbox] = useStateSet([]);
@@ -851,6 +990,11 @@ function SettingsScreen({ store, setStore, go, userId, syncStatus, openSupportIn
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
 const [adminSheet, setAdminSheet] = useStateSet(false);
+  const [dbStabilitySheet, setDbStabilitySheet] = useStateSet(false);
+  const [socialModeBusy, setSocialModeBusy] = useStateSet(false);
+  const [socialTransportBusy, setSocialTransportBusy] = useStateSet(false);
+  const [coachingTransportBusy, setCoachingTransportBusy] = useStateSet(false);
+  const [dbStabilityMsg, setDbStabilityMsg] = useStateSet(null);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
   const [vipBgList, setVipBgList] = useStateSet([]);
@@ -873,6 +1017,140 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // screen only reads it for display, so it stays fresh even if Settings is
   // never opened.
   const swVersion = store.settings?.swVersion || '';
+  const socialMetricCatalog = LB.socialMetricCatalog || [];
+
+  useEffectSet(() => {
+    if (!accountSheet) return;
+    setXHandleDraft(store.user?.xHandle || '');
+    setXHandlePublicDraft(store.user?.xHandlePublic !== false);
+    setXHandleMsg(null);
+  }, [accountSheet]);
+
+  useEffectSet(() => {
+    if (!friendsSheet) return;
+    // Friends loads asynchronously when the feature is enabled. Do not turn
+    // that loading gap into an empty draft: saving one would overwrite the
+    // user's visible profile with blank defaults before the dashboard arrives.
+    const friendsSnapshotLoaded = !!store.friends?.loadedAt;
+    const profile = store.friends?.profile;
+    if (!friendsSnapshotLoaded) {
+      setSocialProfileDraft(null);
+      setSocialProfileMsg(null);
+      return;
+    }
+    setSocialProfileLoadError(null);
+    setSocialProfileLoading(false);
+    setSocialProfileDraft(profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] });
+    setSocialProfileMsg(null);
+  }, [friendsSheet, !!store.friends?.loadedAt, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
+
+  useEffectSet(() => {
+    if (!friendsSheet || !store.settings?.showFriendsTab || store.friends?.loadedAt || !userId) return;
+    let live = true;
+    setSocialProfileLoading(true);
+    setSocialProfileLoadError(null);
+    LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force: socialProfileRetry > 0 }).then(friends => {
+      if (live) setStore(s => s ? {
+        ...s,
+        friends: {
+          ...friends,
+          liveWorkouts: s.friends?.liveWorkouts || [],
+          workoutHistory: s.friends?.workoutHistory || [],
+        },
+      } : s);
+    }).catch(e => {
+      if (live) setSocialProfileLoadError(e.message || 'Could not load your social profile.');
+    }).finally(() => {
+      if (live) setSocialProfileLoading(false);
+    });
+    return () => { live = false; };
+  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends?.loadedAt, userId, socialProfileRetry]);
+
+  const saveSocialProfile = async next => {
+    if (!next || socialProfileSaving) return;
+    if (!store.friends?.loadedAt) {
+      setSocialProfileMsg({ ok: false, text: 'Loading your social profile. Please try again in a moment.' });
+      return;
+    }
+    setSocialProfileSaving(true);
+    setSocialProfileMsg(null);
+    try {
+      const profile = await LB.updateSocialProfile(userId, next);
+      setSocialProfileDraft(profile);
+      setStore(s => s?.friends ? { ...s, friends: { ...s.friends, profile } } : s);
+      setSocialProfileMsg({ ok: true, text: 'Social profile saved.' });
+    } catch (e) {
+      setSocialProfileMsg({ ok: false, text: e.message || 'Could not save social profile.' });
+    } finally {
+      setSocialProfileSaving(false);
+    }
+  };
+
+  const toggleSocialMetric = async metric => {
+    if (!socialProfileDraft || socialProfileSaving) return;
+    const visible = !!socialProfileDraft.metricVisibility?.[metric.key];
+    const nextVisibility = { ...(socialProfileDraft.metricVisibility || {}), [metric.key]: !visible };
+    const next = {
+      ...socialProfileDraft,
+      metricVisibility: nextVisibility,
+      ...(metric.key === 'steps' ? { stepsVisible: !visible } : {}),
+      ...(metric.key === 'workouts' ? { workoutsVisible: !visible } : {}),
+      ...(metric.key === 'adherence' ? { adherenceVisible: !visible } : {}),
+    };
+    setSocialProfileDraft(next);
+    setSocialProfileSaving(true);
+    setSocialProfileMsg(null);
+    try {
+      const profile = await LB.updateSocialMetricPreferences(userId, {
+        metricVisibility: nextVisibility,
+        metricSlots: next.metricSlots || LB.socialDefaultMetricSlots,
+      });
+      setSocialProfileDraft(profile);
+      setStore(s => s?.friends ? { ...s, friends: { ...s.friends, profile } } : s);
+      setSocialProfileMsg({ ok: true, text: 'Metric sharing saved.' });
+    } catch (e) {
+      setSocialProfileMsg({ ok: false, text: e.message || 'Could not save metric sharing.' });
+    } finally {
+      setSocialProfileSaving(false);
+    }
+  };
+
+  const closeFriendsSettings = () => {
+    setFriendsSharingSheet(false);
+    setFriendsNotificationsSheet(false);
+    setFriendsSheet(false);
+  };
+
+  const saveXHandle = () => {
+    const raw = xHandleDraft.trim();
+    if (!raw) {
+      setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: true } } : s);
+      setXHandleDraft('');
+      setXHandleMsg({ ok: true, text: 'X handle removed. We will not ask again automatically.' });
+      return;
+    }
+    const normalized = LB.normalizeXHandle(raw);
+    if (!normalized) {
+      setXHandleMsg({ ok: false, text: 'Enter a valid X handle, for example @yourname.' });
+      return;
+    }
+    setStore(s => s ? { ...s, user: { ...s.user, xHandle: normalized, xHandlePublic: xHandlePublicDraft, xHandlePromptOptedOut: true } } : s);
+    setXHandleDraft(normalized);
+    setXHandleMsg({ ok: true, text: 'X handle saved.' });
+  };
+
+  const toggleXHandlePublic = () => {
+    const next = !xHandlePublicDraft;
+    setXHandlePublicDraft(next);
+    setStore(s => s ? { ...s, user: { ...s.user, xHandlePublic: next } } : s);
+  };
+
+  const optOutXHandle = () => {
+    setXHandleDraft('');
+    setXHandlePublicDraft(false);
+    setStore(s => s ? { ...s, user: { ...s.user, xHandle: null, xHandlePublic: false, xHandlePromptOptedOut: true } } : s);
+    setXHandleMsg({ ok: true, text: 'Got it. We will not ask again.' });
+  };
 
   useEffectSet(() => {
     if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
@@ -928,12 +1206,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     }
   }, [supportSheet]);
 
-  // Load notes + mark read when user opens a ticket thread, then keep polling
-  // for new ones every 12s while it stays open. Support tickets aren't wired
-  // into the live unreadNotes/Realtime path regular coach chats use (see
-  // app.jsx's subscribeToChanges, which only bumps the unread badge for a
-  // support note instead of pushing it into an open thread), without this
-  // poll, a reply only ever showed up after closing and reopening the sheet.
+  // Load notes + mark read when a user opens a ticket. Private Broadcast
+  // invalidations refresh the open thread; the slow poll remains a recovery
+  // path for a suspended or reconnecting channel.
   // `first` gates the loading spinner + support-ticket-list badge clear to
   // just the initial open, so background refreshes don't flash "Loading…" or
   // redundantly re-zero an already-cleared unread count.
@@ -944,7 +1219,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const load = () => {
       if (first) setSupportActiveLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, attachments')
+        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
         .eq('coaching_id', supportActiveTicketId)
         .order('created_at', { ascending: true })
         .then(({ data }) => {
@@ -976,15 +1251,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         });
     };
     load();
-    const poll = setInterval(load, 12000);
-    return () => { mounted = false; clearInterval(poll); };
+    const onInvalidate = event => {
+      const resource = event?.detail?.resource;
+      if (resource === 'support' || resource === 'authoritative') load();
+    };
+    window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    const poll = setInterval(load, 60000);
+    return () => {
+      mounted = false;
+      window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      clearInterval(poll);
+    };
   }, [supportActiveTicketId]);
 
-  // Load admin ticket notes + mark user messages read, then keep polling for
-  // new ones every 12s while the ticket stays open (see the client-side
-  // support effect above for why this can't just ride the Realtime
-  // unreadNotes path coach chats use). `first` gates the loading spinner to
-  // the initial open only.
+  // Admin tickets use the same Broadcast invalidation plus a slow fallback.
+  // `first` gates the loading spinner to the initial open only.
   useEffectSet(() => {
     if (!supportTicket) { setSupportTicketNotes([]); return; }
     let mounted = true;
@@ -992,7 +1273,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const load = () => {
       if (first) setSupportTicketLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, attachments')
+        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
         .eq('coaching_id', supportTicket.coachingId)
         .order('created_at', { ascending: true })
         .then(({ data }) => {
@@ -1015,8 +1296,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         });
     };
     load();
-    const poll = setInterval(load, 12000);
-    return () => { mounted = false; clearInterval(poll); };
+    const onInvalidate = event => {
+      const resource = event?.detail?.resource;
+      if (resource === 'support' || resource === 'authoritative') load();
+    };
+    window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    const poll = setInterval(load, 60000);
+    return () => {
+      mounted = false;
+      window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      clearInterval(poll);
+    };
   }, [supportTicket]);
 
   // Admin-only: load all admin state on mount (support inbox).
@@ -1686,7 +1976,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (error || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       setSupportActiveNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
@@ -1724,7 +2014,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (noteErr || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
       {
         const preview = attachments ? (body || '📷 Image') : body;
@@ -1765,13 +2055,75 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, attachments').single();
+      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
       if (error || !note) { restore(); UI.alert('Reply failed to send. Please try again.'); return; }
       setSupportTicketNotes(prev => [...prev, note]);
       const preview = attachments ? (body || '📷 Image') : body;
       LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
     } catch (e) { restore(); UI.alert(e.message || 'Reply failed to send. Please try again.'); }
     finally { setSupportAdminSending(false); }
+  };
+
+  const canModifySupportNote = note => {
+    const createdAt = Date.parse(note?.created_at || '');
+    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
+  };
+
+  const supportNoteWindowError = 'Messages can only be edited or deleted within 60 minutes of sending.';
+
+  const beginSupportEdit = async note => {
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      return;
+    }
+    setSupportEditingNoteId(note.id);
+    setSupportEditingBody(note.body || '');
+  };
+
+  const cancelSupportEdit = () => {
+    setSupportEditingNoteId(null);
+    setSupportEditingBody('');
+  };
+
+  const saveSupportEdit = async note => {
+    if (supportNoteActionBusy || !supportEditingBody.trim()) return;
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      cancelSupportEdit();
+      return;
+    }
+    setSupportNoteActionBusy(true);
+    try {
+      const updated = await LB.updateCoachingNote(note.id, userId, supportEditingBody);
+      const patchNote = { body: updated.body, edited_at: updated.editedAt };
+      setSupportActiveNotes(prev => prev.map(item => item.id === note.id ? { ...item, ...patchNote } : item));
+      setSupportTicketNotes(prev => prev.map(item => item.id === note.id ? { ...item, ...patchNote } : item));
+      cancelSupportEdit();
+    } catch (e) {
+      UI.alert(e.message || 'Could not edit message');
+    } finally {
+      setSupportNoteActionBusy(false);
+    }
+  };
+
+  const removeSupportNote = async note => {
+    if (supportNoteActionBusy) return;
+    if (!canModifySupportNote(note)) {
+      await confirm(supportNoteWindowError, { title: 'Message window expired', ok: 'OK' });
+      return;
+    }
+    if (!await confirm('Delete this message?', { title: 'Delete message', ok: 'Delete', danger: true })) return;
+    setSupportNoteActionBusy(true);
+    try {
+      await LB.deleteCoachingNote(note.id, userId);
+      setSupportActiveNotes(prev => prev.filter(item => item.id !== note.id));
+      setSupportTicketNotes(prev => prev.filter(item => item.id !== note.id));
+      if (supportEditingNoteId === note.id) cancelSupportEdit();
+    } catch (e) {
+      UI.alert(e.message || 'Could not delete message');
+    } finally {
+      setSupportNoteActionBusy(false);
+    }
   };
 
   const sendBroadcast = async () => {
@@ -1796,10 +2148,56 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       // The broadcast has no per-user exclusion, without this, the device
       // that sent it would see its own banner too. Mark the freshly-set nonce
       // as already seen on THIS device before checkForceUpdate ever polls it.
-      const { data: nonce } = await LB.supabase.rpc('get_force_update_nonce');
+      const config = await LB.fetchRuntimeConfig().catch(() => null);
+      const nonce = config?.forceUpdateNonce;
       if (nonce) { try { localStorage.setItem('logbook-force-nonce-seen', nonce); } catch (_) {} }
     }
     await confirm(error ? (error.message || 'Could not trigger the broadcast.') : 'All connected clients will see the update banner shortly.', { title: error ? 'Error' : 'Sent', ok: 'OK' });
+  };
+
+  const setSocialMode = async mode => {
+    if (socialModeBusy || !['normal', 'maintenance'].includes(mode)) return;
+    if (mode === 'maintenance' && !await confirm('Friends will stop querying immediately. Login, training and sync stay available.', { title: 'Pause Friends?', ok: 'Pause' })) return;
+    setSocialModeBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_social_mode', { p_mode: mode });
+      if (error) throw error;
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: mode === 'maintenance' ? 'Friends is now paused.' : 'Friends is back in normal mode.' });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change social mode.' });
+    } finally { setSocialModeBusy(false); }
+  };
+
+  const setSocialTransport = async transport => {
+    if (socialTransportBusy || !['legacy', 'broadcast'].includes(transport)) return;
+    if (transport === 'legacy' && !await confirm('All Friends users will switch back to Postgres Changes within two minutes. Use this only as a Broadcast rollback.', { title: 'Use legacy Realtime?', ok: 'Switch' })) return;
+    setSocialTransportBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_social_transport', { p_transport: transport });
+      if (error) throw error;
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: transport === 'broadcast' ? 'All current and future Friends users now use Broadcast.' : 'All Friends users now use legacy Realtime.' });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the Social transport.' });
+    } finally { setSocialTransportBusy(false); }
+  };
+
+  const setCoachingTransport = async transport => {
+    if (coachingTransportBusy || !['legacy', 'broadcast'].includes(transport)) return;
+    if (transport === 'legacy' && !await confirm('Coaching, support and coach-status updates will switch back to Postgres Changes within two minutes. The rollback publication is restored first.', { title: 'Use legacy Coaching?', ok: 'Switch' })) return;
+    setCoachingTransportBusy(true);
+    setDbStabilityMsg(null);
+    try {
+      const { error } = await LB.supabase.rpc('admin_set_coaching_transport', { p_transport: transport });
+      if (error) throw error;
+      await LB.fetchRuntimeConfig();
+      setDbStabilityMsg({ ok: true, text: transport === 'broadcast' ? 'All current and future users now receive Coaching updates through Broadcast.' : 'Coaching now uses legacy Realtime.' });
+    } catch (error) {
+      setDbStabilityMsg({ ok: false, text: error.message || 'Could not change the Coaching transport.' });
+    } finally { setCoachingTransportBusy(false); }
   };
 
   const sendAdminEmail = async () => {
@@ -2029,6 +2427,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
           <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
+          <NavRow label="Friends" onTap={() => setFriendsSheet(true)} />
           <NavRow label="Health & Nutrition" onTap={() => setHealthSheet(true)} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
@@ -2215,6 +2614,126 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           toggleable sub-categories. Each has its OWN "Show tab" switch (see
           each sub-sheet below) instead of one bundled switch that used to
           turn Health, Water and Food on or off together. ══ */}
+      <SettingsSheet open={friendsSheet} onClose={closeFriendsSettings} title="Friends">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Friends tab" first>
+            <Toggle on={!!store.settings?.showFriendsTab} onToggle={() => {
+              const enabling = !store.settings?.showFriendsTab;
+              patchSettings({ showFriendsTab: enabling });
+            }} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing, live workout feedback and plan snapshots. Friends and Coaching share one navigation slot; use the social tab's long press to choose between them. You choose which metrics and workout details are visible.
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <NavRow
+              label="Notifications"
+              hint={`${[
+                store.settings?.socialPushMessages ?? true,
+                store.settings?.socialPushFriendRequests ?? true,
+                store.settings?.socialPushFinishedComments ?? false,
+                store.settings?.socialPushFriendStarted ?? false,
+              ].filter(Boolean).length} of 4 on`}
+              onTap={() => setFriendsNotificationsSheet(true)}
+              first
+            />
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 5 }}>
+              Choose which friend activity may reach you as a push notification.
+            </div>
+          </div>
+          {!!store.settings?.showFriendsTab && !socialProfileDraft && socialProfileLoadError && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>
+            <div>{socialProfileLoadError}</div>
+            <button type="button" onClick={() => setSocialProfileRetry(value => value + 1)} style={{ marginTop: 9, padding: '7px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Retry</button>
+          </div>}
+          {!!store.settings?.showFriendsTab && !socialProfileDraft && !socialProfileLoadError && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
+            {socialProfileLoading ? 'Loading your social profile...' : 'Social profile is not available yet.'}
+          </div>}
+          {!!store.settings?.showFriendsTab && socialProfileDraft && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 9 }}>YOUR SOCIAL PROFILE</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={socialProfileDraft.handle || ''}
+                onChange={e => setSocialProfileDraft(p => ({ ...(p || {}), handle: e.target.value }))}
+                placeholder="@zane_handle"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                style={{ ...SETTINGS_INPUT_STYLE, flex: 1 }}
+              />
+              <Btn onClick={() => saveSocialProfile(socialProfileDraft)} disabled={socialProfileSaving} style={{ padding: '10px 12px', minHeight: 0, fontSize: 10 }}>
+                {socialProfileSaving ? 'Saving' : 'Save'}
+              </Btn>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>FRIEND CODE</span>
+              <span className="num" style={{ color: UI.ink, letterSpacing: '0.12em' }}>{socialProfileDraft.friendCode || '...'}</span>
+              <button onClick={() => navigator.clipboard?.writeText(socialProfileDraft.friendCode || '')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: UI.gold, cursor: 'pointer', fontSize: 11 }}>Copy</button>
+            </div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: 10 }}>
+              Use your handle or friend code to connect. Metric sharing is opt-in and can be changed here any time.
+            </div>
+            {socialProfileMsg && !friendsSharingSheet && <div style={{ marginTop: 10, color: socialProfileMsg.ok ? UI.ok : UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{socialProfileMsg.text}</div>}
+            <div style={{ marginTop: 16 }}>
+              <NavRow
+                label="Metric sharing"
+                hint={`${socialMetricCatalog.filter(metric => !!socialProfileDraft.metricVisibility?.[metric.key]).length} of ${socialMetricCatalog.length}`}
+                onTap={() => setFriendsSharingSheet(true)}
+                first
+              />
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 5 }}>
+                Choose which health values friends can see.
+              </div>
+            </div>
+          </div>}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={closeFriendsSettings}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      <SettingsSheet open={friendsNotificationsSheet} onClose={() => setFriendsNotificationsSheet(false)} title="Notifications">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>
+            These are native push notifications. Friends' live workout updates and in-app badges are not changed by these switches. Push notifications must also be enabled for this device.
+          </div>
+          <Row label="Direct and group messages" first>
+            <Toggle on={store.settings?.socialPushMessages ?? true} onToggle={() => patchSettings({ socialPushMessages: !(store.settings?.socialPushMessages ?? true) })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            On by default. A message never opens a live workout overlay.
+          </div>
+          <Row label="Friend requests">
+            <Toggle on={store.settings?.socialPushFriendRequests ?? true} onToggle={() => patchSettings({ socialPushFriendRequests: !(store.settings?.socialPushFriendRequests ?? true) })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            On by default, so a request cannot quietly get missed.
+          </div>
+          <Row label="Comments on finished workouts">
+            <Toggle on={!!store.settings?.socialPushFinishedComments} onToggle={() => patchSettings({ socialPushFinishedComments: !store.settings?.socialPushFinishedComments })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            Off by default. Live comments and cheers never send a push.
+          </div>
+          <Row label="Friends starting a workout">
+            <Toggle on={!!store.settings?.socialPushFriendStarted} onToggle={() => patchSettings({ socialPushFriendStarted: !store.settings?.socialPushFriendStarted })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            Off by default. Only one quiet start notification is sent per workout.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFriendsNotificationsSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      <SocialMetricSharingSheet
+        open={friendsSharingSheet}
+        onClose={() => setFriendsSharingSheet(false)}
+        profile={socialProfileDraft}
+        catalog={socialMetricCatalog}
+        message={socialProfileMsg}
+        saving={socialProfileSaving}
+        onToggleMetric={toggleSocialMetric}
+      />
+
       <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health & Nutrition">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
@@ -2347,7 +2866,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {store.settings?.showFoodTab && (
             <>
               <NavRow label="Meal Planning" first hint={store.settings?.planMode ? 'On' : 'Off'} onTap={() => setMealPlanningSheet(true)} />
-              <NavRow label="Meal Times" hint={store.settings?.mealWindows ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
+              <NavRow label="Meal Times" hint={mealCategoriesCustomized ? 'Customized' : null} onTap={() => setMealTimesSheet(true)} />
               <NavRow label="Intermittent Fasting" hint={store.settings?.fastingProtocol ? (store.settings.fastingProtocol === 'omad' ? 'OMAD' : store.settings.fastingProtocol) : 'Off'} onTap={() => setFastingSheet(true)} />
               {/* Only meaningful for the imperial unit preference: on kg (or
                   mixed) the food tracker is already grams, there's nothing to
@@ -2407,7 +2926,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Health › Food › Meal Times: the display toggle and the time
           boundaries live together, "hide categories" is really "stop
           grouping by these very boundaries". ══ */}
-      <SettingsSheet open={mealTimesSheet} onClose={() => setMealTimesSheet(false)} title="Meal Times">
+      <SettingsSheet open={mealTimesSheet} onClose={closeMealTimes} title="Meal Times">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Hide meal categories" first>
             <Toggle on={!!store.settings?.hideFoodCategories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, hideFoodCategories: !s.settings?.hideFoodCategories } }))} />
@@ -2415,46 +2934,57 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Show the Food Tracker's daily timeline as one flat hour list instead of grouping it under Breakfast/Lunch/Dinner header cards. Every hour still has its own "+" to log or plan something.
           </div>
-          {/* Meal-time boundaries (migration 0206). These used to be fixed at
-              00:00-09:00 Breakfast and so on, which only fits a conventional
-              eating day: shift work, a late household or any fasting window
-              made the timeline group meals under headings nobody would use.
-              Editing START hours (each meal runs to the next one's start) is
-              what keeps a gap or an overlap unrepresentable. Breakfast is
-              pinned to 00:00 so the day is always covered end to end. */}
+          {/* User-defined meal categories. Editing START hours (each category
+              runs to the next one's start) keeps gaps and overlaps impossible.
+              The first category is pinned to 00:00 so the day is covered end
+              to end. */}
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.5 }}>
-              When each meal starts. Each one runs until the next begins.
+              Name your meal groups and choose when each one starts. Each runs until the next begins.
             </div>
-            {mealCats.map((cat, i) => (
-              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
-                <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</span>
+            {draftMealCats.map((cat, i) => (
+              <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+                <input value={cat.label} onChange={e => updateMealCategoryLabel(i, e.target.value)}
+                  onBlur={() => persistMealCategories(draftMealCats)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  aria-label={`Name for meal category ${i + 1}`} style={{ ...SETTINGS_INPUT_STYLE, flex: 1, minWidth: 0, padding: '7px 9px', fontSize: 13 }} />
                 {i === 0 ? (
                   <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>00:00</span>
                 ) : (
                   <>
-                    <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= mealCats[i - 1].startHour + 1}
-                      aria-label={`${cat.label} earlier`} style={mealStepBtn(cat.startHour <= mealCats[i - 1].startHour + 1)}>
+                    <button onClick={() => shiftMealStart(i, -1)} disabled={cat.startHour <= draftMealCats[i - 1].startHour + 1}
+                      aria-label={`${cat.label} earlier`} style={mealStepBtn(cat.startHour <= draftMealCats[i - 1].startHour + 1)}>
                       <i className="fa-solid fa-minus" style={{ fontSize: 10 }} />
                     </button>
                     <span className="num" style={{ width: 44, textAlign: 'center', fontSize: 13, color: UI.ink }}>{String(cat.startHour).padStart(2, '0')}:00</span>
-                    <button onClick={() => shiftMealStart(i, 1)} disabled={cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1)}
-                      aria-label={`${cat.label} later`} style={mealStepBtn(cat.startHour >= (i === mealCats.length - 1 ? 23 : mealCats[i + 1].startHour - 1))}>
+                    <button onClick={() => shiftMealStart(i, 1)} disabled={cat.startHour >= (i === draftMealCats.length - 1 ? 23 : draftMealCats[i + 1].startHour - 1)}
+                      aria-label={`${cat.label} later`} style={mealStepBtn(cat.startHour >= (i === draftMealCats.length - 1 ? 23 : draftMealCats[i + 1].startHour - 1))}>
                       <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
                     </button>
                   </>
                 )}
+                {draftMealCats.length > 1 && (
+                  <button onClick={() => removeMealCategory(i)} aria-label={`Remove ${cat.label}`} style={{ ...mealStepBtn(false), color: UI.inkFaint }}>
+                    <i className="fa-solid fa-xmark" style={{ fontSize: 11 }} />
+                  </button>
+                )}
               </div>
             ))}
-            {store.settings?.mealWindows && (
-              <button onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, mealWindows: null } }))} style={{
-                marginTop: 10, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
-              }}>Reset to default times</button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+              <button onClick={addMealCategory} disabled={draftMealCats.length >= 24} style={{
+                background: 'none', border: 'none', padding: 0, cursor: draftMealCats.length >= 24 ? 'default' : 'pointer',
+                color: draftMealCats.length >= 24 ? UI.inkGhost : 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+              }}><i className="fa-solid fa-plus" style={{ marginRight: 6, fontSize: 10 }} />Add meal category</button>
+              {mealCategoriesCustomized && (
+                <button onClick={resetMealCategories} style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, WebkitTapHighlightColor: 'transparent',
+                }}>Reset defaults</button>
+              )}
+            </div>
           </div>
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setMealTimesSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={closeMealTimes}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
@@ -2739,6 +3269,42 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Account Sheet ══ */}
       <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
+          <div style={{ padding: '4px 0 18px' }}>
+            <div className="micro" style={{ marginBottom: 7, color: UI.inkFaint }}>X HANDLE</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 9 }}>
+              Add your handle for future social features and public thanks when we share updates.
+            </div>
+            <input
+              value={xHandleDraft}
+              onChange={e => { setXHandleDraft(e.target.value); if (xHandleMsg) setXHandleMsg(null); }}
+              onKeyDown={e => { if (e.key === 'Enter') saveXHandle(); }}
+              placeholder="@yourhandle or x.com/yourhandle"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={SETTINGS_INPUT_STYLE}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <Btn onClick={saveXHandle} style={{ flex: 1, padding: '10px 14px', minHeight: 0, fontSize: 11 }}>
+                Save handle
+              </Btn>
+              <Toggle on={xHandlePublicDraft} onToggle={toggleXHandlePublic} label="Show handle in future public social features" />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginTop: 7 }}>
+              <div style={{ flex: 1, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.45 }}>
+                {xHandlePublicDraft ? 'Public display is on for future social features.' : 'Public display is off. Admin support views can still see your handle.'}
+              </div>
+              <button onClick={optOutXHandle} style={{ flexShrink: 0, padding: '3px 0', border: 'none', background: 'none', color: UI.inkFaint, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, WebkitTapHighlightColor: 'transparent' }}>
+                I don&apos;t use X
+              </button>
+            </div>
+            {xHandleMsg && (
+              <div style={{ marginTop: 8, fontSize: 11, color: xHandleMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi }}>
+                {xHandleMsg.text}
+              </div>
+            )}
+          </div>
+          <div className="knurl" />
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
@@ -3188,6 +3754,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             ))}
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Row label="Open rest timer automatically" first>
+              <Toggle on={!!store.settings?.autoOpenRestTimer} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, autoOpenRestTimer: !s.settings?.autoOpenRestTimer } }))} />
+            </Row>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+              Open the rest sheet as soon as a rest starts after a completed set. Off by default.
+            </div>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}` }}>
             {[['BIG', 'Heavy compounds, squat, deadlift, overhead press'], ['MEDIUM', 'Moderate compounds, bench, pull-up, lunge'], ['SMALL', 'Isolation, bicep curl, lateral raise, tricep extension']].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
@@ -3368,6 +3942,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
+                <NavRow label="Database stability" hint={runtimeConfig?.socialMode === 'maintenance' ? 'Friends paused' : (runtimeConfig?.socialTransport === 'broadcast' && runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Mixed')} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
@@ -3384,6 +3959,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Message all users (admin) ══ */}
+      <SettingsSheet open={dbStabilitySheet} onClose={() => setDbStabilitySheet(false)} title="Database Stability">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+            The emergency switch stops all Friends reads, polls and channels. Use it first when database pressure rises. Training and login are unaffected.
+          </div>
+          <Frame style={{ padding: '0 14px' }}>
+            <NavRow label="Social mode" first hint={runtimeConfig?.socialMode === 'maintenance' ? 'Maintenance' : 'Normal'} />
+            <NavRow label="Social transport" hint={runtimeConfig?.socialTransport === 'broadcast' ? 'Broadcast' : 'Legacy'} />
+            <NavRow label="Coaching transport" hint={runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Legacy'} />
+          </Frame>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => setSocialMode('maintenance')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'maintenance'}>Pause Friends</Btn>
+            <Btn onClick={() => setSocialMode('normal')} disabled={socialModeBusy || runtimeConfig?.socialMode === 'normal'}>Resume Friends</Btn>
+          </div>
+          <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>SOCIAL TRANSPORT</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+              Broadcast applies automatically to every current and future Friends user. Legacy is the global rollback if Broadcast has a problem.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+              <Btn kind="ghost" onClick={() => setSocialTransport('legacy')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'legacy'}>Use Legacy</Btn>
+              <Btn onClick={() => setSocialTransport('broadcast')} disabled={socialTransportBusy || runtimeConfig?.socialTransport === 'broadcast'}>Use Broadcast</Btn>
+            </div>
+          </div>
+          <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COACHING TRANSPORT</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+              Broadcast covers coaching invitations, messages, support and coach-status badges. Legacy restores the four Postgres Changes tables before clients switch.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+              <Btn kind="ghost" onClick={() => setCoachingTransport('legacy')} disabled={coachingTransportBusy || runtimeConfig?.coachingTransport === 'legacy'}>Use Legacy</Btn>
+              <Btn onClick={() => setCoachingTransport('broadcast')} disabled={coachingTransportBusy || runtimeConfig?.coachingTransport === 'broadcast'}>Use Broadcast</Btn>
+            </div>
+          </div>
+          {dbStabilityMsg && <div style={{ fontSize: 12, color: dbStabilityMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: dbStabilityMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>{dbStabilityMsg.text}</div>}
+        </div>
+      </SettingsSheet>
+
       <SettingsSheet open={broadcastSheet} onClose={() => setBroadcastSheet(false)} title="Message All Users">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
@@ -3606,19 +4219,38 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
                     return supportActiveNotes.map(n => {
                       const isMe = n.author_id === userId;
+                      const editing = supportEditingNoteId === n.id;
+                      const modifiable = isMe && canModifySupportNote(n);
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                           <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `var(--hair-width) solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
-                            {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
-                            ))}
-                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            {editing ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                                <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
+                                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                                  <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                                  <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>
+                                </div>
+                              </div>
+                            ) : <>
+                              {hasImg && n.attachments.map((a, i) => (
+                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              ))}
+                              {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            </>}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                            {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
+                          {modifiable && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                            <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+                          </div>}
                         </div>
                       );
                     });
@@ -3734,6 +4366,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     ← Back
                   </button>
                   <span className="micro" style={{ color: UI.inkFaint }}>{supportTicket.clientEmail}</span>
+                  {supportTicket.xHandle && <a href={LB.xHandleUrl(supportTicket.xHandle)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{supportTicket.xHandle}</a>}
                   {supportTicket.category && <span className="micro" style={{ color: UI.inkFaint }}>· {CATS[supportTicket.category] || supportTicket.category}</span>}
                 </div>
                 {/* Status picker */}
@@ -3760,6 +4393,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
                     return supportTicketNotes.map(n => {
                       const isAdminMsg = n.author_id === userId;
+                      const editing = supportEditingNoteId === n.id;
+                      const modifiable = isAdminMsg && canModifySupportNote(n);
                       const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
@@ -3769,15 +4404,32 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             border: `var(--hair-width) solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
                             overflow: 'hidden',
                           }}>
-                            {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
-                            ))}
-                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            {editing ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 190 }}>
+                                <textarea value={supportEditingBody} onChange={e => setSupportEditingBody(e.target.value)} rows={3} autoFocus
+                                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveSupportEdit(n); } }}
+                                  style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                                  <button onClick={cancelSupportEdit} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                                  <Btn onClick={() => saveSupportEdit(n)} disabled={supportNoteActionBusy || !supportEditingBody.trim()} style={{ minHeight: 26, padding: '4px 8px', fontSize: 10 }}>{supportNoteActionBusy ? '...' : 'Save'}</Btn>
+                                </div>
+                              </div>
+                            ) : <>
+                              {hasImg && n.attachments.map((a, i) => (
+                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              ))}
+                              {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                            </>}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                            {n.edited_at && <span style={{ color: UI.inkFaint }}>edited</span>}
                           </div>
+                          {modifiable && !editing && <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            {n.body && <button onClick={() => beginSupportEdit(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Edit</button>}
+                            <button onClick={() => removeSupportNote(n)} disabled={supportNoteActionBusy} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Delete</button>
+                          </div>}
                         </div>
                       );
                     });
@@ -3857,7 +4509,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               )}
               {filtered.map(t => (
                 <AdminTicketRow key={t.coaching_id} t={t} catLabel={CATS[t.support_category] || t.support_category}
-                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
+                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, xHandle: t.x_handle, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
@@ -3879,7 +4531,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic', padding: '8px 0' }}>No archived tickets.</div>
                     : archivedInbox.map(t => (
                       <AdminTicketRow key={t.coaching_id} t={t} archived catLabel={CATS[t.support_category] || t.support_category}
-                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
+                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, xHandle: t.x_handle, category: t.support_category, status: t.support_status })} />
                     ))
                 )}
               </div>
@@ -3902,10 +4554,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
             if (allUsersRecentOnly && !(u.last_workout && new Date(u.last_workout).getTime() >= recentCutoff)) return false;
             if (!q) return true;
-            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.x_handle || '').toLowerCase().includes(q);
           });
           const openUserDetail = (u) => {
-            setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
+            setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, xHandle: u.x_handle, xHandlePublic: u.x_handle_public, plans: null, exercises: null });
             setAdminUserDetailLoading(true);
             setAdminUserDetailSheet(true);
             setAdminEmailSubject('');
@@ -3914,7 +4566,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
               .then(({ data, error }) => {
                 if (error || !data) { setAdminUserDetailLoading(false); return; }
-                setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
+                setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, xHandle: data.x_handle ?? u.x_handle, xHandlePublic: data.x_handle_public ?? u.x_handle_public, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
                 setAdminUserDetailLoading(false);
               }).catch(() => setAdminUserDetailLoading(false));
           };
@@ -3923,7 +4575,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <input
                 value={allUsersSearch}
                 onChange={e => setAllUsersSearch(e.target.value)}
-                placeholder="Search by name or email…"
+                placeholder="Search by name, email or X handle…"
                 style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
               />
               <Frame style={{ padding: '0 14px' }}>
@@ -3974,6 +4626,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             )}
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
+                          {u.x_handle && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <a href={LB.xHandleUrl(u.x_handle)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{u.x_handle}</a>
+                            {u.x_handle_public === false && <span className="micro" style={{ color: UI.inkGhost }}>PRIVATE</span>}
+                          </div>}
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'} · joined {fmtAgo(u.created_at)} · last workout {u.last_workout ? fmtAgo(u.last_workout) : 'never'}
                           </div>
@@ -4002,6 +4658,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
           : adminUserDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {adminUserDetail.xHandle && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 0 16px' }}>
+                  <span className="micro" style={{ color: UI.inkGhost }}>X HANDLE</span>
+                  <a href={LB.xHandleUrl(adminUserDetail.xHandle)} target="_blank" rel="noreferrer" className="micro" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{adminUserDetail.xHandle}</a>
+                  {adminUserDetail.xHandlePublic === false && <span className="micro" style={{ color: UI.inkGhost }}>PRIVATE</span>}
+                </div>
+              )}
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>SEND EMAIL</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>To {adminUserDetail.email}</div>

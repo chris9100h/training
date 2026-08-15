@@ -1,10 +1,10 @@
-const CACHE = 'zane-v2.760';
+const CACHE = 'zane-v2.799';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
 // change, so a routine deploy never re-downloads ~7MB of unchanged images.
 // activate() below intentionally never deletes this cache.
-const PHOTOS_CACHE = 'zane-photos-v1';
+const PHOTOS_CACHE = 'zane-photos-v2';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -31,6 +31,7 @@ const ASSETS = [
   BASE + '/src/screens-coaching-client.jsx',
   BASE + '/src/screens-coaching-detail.jsx',
   BASE + '/src/screens-coaching-tabs.jsx',
+  BASE + '/src/screens-friends.jsx',
   BASE + '/src/screens-health.jsx',
   BASE + '/src/screens-water.jsx',
   BASE + '/src/screens-food.jsx',
@@ -85,6 +86,7 @@ const PHOTO_ASSETS = [
   BASE + '/Background/IMG_6950.png',
   BASE + '/Background/Diane.PNG',
   BASE + '/Background/JClow.png',
+  BASE + '/Background/WS.png',
   BASE + '/Background/index.json',
 ];
 

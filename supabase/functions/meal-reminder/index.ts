@@ -78,7 +78,22 @@ async function sendReminders() {
       `zane_food_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=id,date,time,food_name`
     );
     if (!eRes.ok) { console.error(`[meal-reminder] food log query failed for ${row.user_id}: ${eRes.status}`); continue; }
-    const entries: { id: string; date: string | null; time: string | null; food_name: string | null }[] = await eRes.json().catch(() => []);
+    const entryPayload = await eRes.json().catch(() => []);
+    const allEntries: { id: string; date: string | null; time: string | null; food_name: string | null }[] = Array.isArray(entryPayload) ? entryPayload : [];
+    if (!allEntries.length) continue;
+
+    // A user who explicitly finished the day may still keep planned meals in
+    // the timeline for reference. Only query the synced day-close flag when
+    // there are entries to filter; empty users otherwise cost one avoidable DB
+    // round-trip on every hourly cron tick.
+    const closedRes = await dbFetch(
+      `zane_daily_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&select=date,food_day_closed`
+    );
+    if (!closedRes.ok) { console.error(`[meal-reminder] daily log query failed for ${row.user_id}: ${closedRes.status}`); continue; }
+    const closedPayload = await closedRes.json().catch(() => []);
+    const closedRows: { date: string; food_day_closed: boolean | null }[] = Array.isArray(closedPayload) ? closedPayload : [];
+    const closedDates = new Set(closedRows.filter(log => log.food_day_closed).map(log => log.date));
+    const entries = allEntries.filter(entry => !entry.date || !closedDates.has(entry.date));
     const ids = entries.map(entry => entry.id);
     if (!ids.length) continue;
     const deliveryRes = await dbFetch(`zane_meal_reminder_deliveries?user_id=eq.${row.user_id}&food_log_id=in.(${ids.join(',')})&select=food_log_id,last_attempt_at,delivered_at`);

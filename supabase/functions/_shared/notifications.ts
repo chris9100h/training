@@ -84,7 +84,11 @@ export async function sendNotification(args: NotificationArgs): Promise<boolean>
       },
       body: JSON.stringify({ userId: args.userId, title: args.title, message: args.message }),
     });
-    if (!response.ok) {
+    // zane_social-notify uses the immediate path, which now waits for the
+    // provider result and returns 200 only when at least one subscription was
+    // accepted. A 202 is reserved for delayed reminder scheduling and must
+    // stay retryable for this delivery ledger.
+    if (response.status !== 200) {
       console.error(`[${args.logPrefix}] web-push handoff failed for ${args.userId}: ${response.status}`);
       return false;
     }

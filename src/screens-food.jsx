@@ -20,6 +20,18 @@
    (source: 'recipe'), not N separate ones. */
 
 const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef: useRefFd } = React;
+
+// Any deliberate Food change on today's timeline reopens a day that the user
+// previously marked complete. This helper must stay module-scoped because the
+// template screen can trigger it without mounting the main Food screen.
+function reopenFoodDay(s, dateStr, dailyLogs = s.dailyLogs) {
+  if (dateStr !== LB.todayISO()) return dailyLogs;
+  const existing = (dailyLogs || []).find(l => l.date === dateStr);
+  if (!existing?.foodDayClosed) return dailyLogs;
+  const log = { ...existing, foodDayClosed: false, updatedAt: new Date().toISOString() };
+  return [log, ...(dailyLogs || []).filter(l => l.date !== dateStr)];
+}
+
 // Every calendar date from `from` to `to` inclusive, 'YYYY-MM-DD' strings.
 // Used by the Stats sheet to build a chart series with a bar (or gap) for
 // every day in the period, not just days that happen to have a log.
@@ -590,8 +602,9 @@ const FD_QUICK_TABS = [
 ];
 // The Log tab's timeline groups its hourly rows under a read-only per-meal
 // summary card. The boundaries are a user setting since migration 0206
-// (settings.mealWindows, edited in Settings > Health > Food), resolved through
-// LB.mealCategories, which also owns the labels and the defaults.
+// (settings.mealCategories / legacy settings.mealWindows, edited in Settings
+// > Health > Food), resolved through LB.mealCategories, which also owns the
+// labels, validation and defaults.
 
 // Build the planned food-log entry a template slot materializes into on a
 // given date. Shared by the auto-fill effect (opening a day) and the immediate
@@ -1388,9 +1401,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (by day-type: any / training / rest) as a planned entry at its fixed
   // hour, for today AND the next FD_PLAN_LOOKAHEAD_DAYS - 1 days, unless a
   // given day already has one from that slot. Runs once per day, tracked
-  // CROSS-DEVICE by a synced marker row per date (store.foodTemplateDays, id
-  // `<userId>_<date>`), so deleting an auto-planned entry never makes it
-  // reappear on reopen, on any device, and a day already filled elsewhere
+  // CROSS-DEVICE by a synced marker row per active plan/date
+  // (store.foodTemplateDays, id `<userId>_<activePlanId>_<date>`), so deleting an auto-planned entry never
+  // makes it reappear on reopen, on any device, and a day already filled elsewhere
   // isn't redone here. Independent of curDate (which date is currently being
   // viewed): the whole point is that tomorrow's plan is already sitting in
   // the log before the user ever navigates to it, not materialized on
@@ -1410,14 +1423,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (!existingByDate.has(l.date)) existingByDate.set(l.date, new Set());
       existingByDate.get(l.date).add(l.templateSlotId);
     });
-    // One entry per not-yet-marked date in the window, slots already resolved
-    // so the setStore updater below only has to re-check markers, not redo
-    // the filtering, on a double-run race.
+    // One pending record per not-yet-marked date in the window. The updater
+    // revalidates the current plan slots as well, so a double-run race or a
+    // slot edit landing between render and commit cannot append stale rows.
     const pending = [];
     for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
       const date = LB.shiftDate(today, i);
-      const markerId = `${userId}_${date}`;
-      if (markedDates.has(markerId)) continue;
+      // Scope the once-per-day marker to the active plan. A user can switch
+      // from Cut to Bulk while looking at the same date; a user/date-only
+      // marker from Cut would otherwise suppress Bulk's slots forever until
+      // they manually used "Apply to today's plan".
+      const markerId = LB.foodTemplateDayMarkerId(userId, activePlanId, date);
+      // Accounts upgraded from the pre-named-plan schema still have the old
+      // user/date marker. It represents the migration-created default plan,
+      // not an arbitrary plan the user may select later.
+      const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, date);
+      const hasLegacyDefaultMarker = activePlanId === `mp_${userId}` && markedDates.has(legacyMarkerId);
+      if (markedDates.has(markerId) || hasLegacyDefaultMarker) continue;
+      // A completed current day is immutable to automation. The manual Apply
+      // action can explicitly reopen it first.
+      if (date === today && LB.foodDayIsClosed(store.dailyLogs, date)) continue;
       const existingSlotIds = existingByDate.get(date) || new Set();
       const entries = slots
         .filter(s => fdSlotMatchesDate(s, store, date) && !existingSlotIds.has(s.id))
@@ -1426,11 +1451,35 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     if (!pending.length) return;
     setStore(s => {
+      // The active plan can change between calculating `pending` and React
+      // applying this updater (for example while a settings sync is landing).
+      // Never materialize the old plan into the newly selected one.
+      if (s.activeMealTemplateId !== activePlanId) return s;
       const already = new Set((s.foodTemplateDays || []).map(d => d.id));
-      const stillPending = pending.filter(p => !already.has(p.markerId));
+      const stillPending = pending.filter(p => {
+        if (already.has(p.markerId)) return false;
+        if (p.date === today && LB.foodDayIsClosed(s.dailyLogs, p.date)) return false;
+        const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, p.date);
+        return !(activePlanId === `mp_${userId}` && already.has(legacyMarkerId));
+      });
       if (!stillPending.length) return s;
       const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
-      const newEntries = stillPending.flatMap(p => p.entries);
+      const slotsForPlan = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === activePlanId);
+      const existingSlotIdsByDate = new Map();
+      (s.foodLogs || []).forEach(log => {
+        if (!log.templateSlotId) return;
+        if (!existingSlotIdsByDate.has(log.date)) existingSlotIdsByDate.set(log.date, new Set());
+        existingSlotIdsByDate.get(log.date).add(log.templateSlotId);
+      });
+      const newEntries = stillPending.flatMap(p => {
+        const existingIds = existingSlotIdsByDate.get(p.date) || new Set();
+        return slotsForPlan.filter(slot => {
+          if (existingIds.has(slot.id)) return false;
+          if (!fdSlotMatchesDate(slot, s, p.date)) return false;
+          existingIds.add(slot.id);
+          return true;
+        }).map(slot => fdMaterializeSlotEntry(slot, p.date));
+      });
       return {
         ...s,
         foodTemplateDays: [...(s.foodTemplateDays || []), ...newMarkers],
@@ -1438,7 +1487,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         foodLogs: newEntries.length ? [...newEntries, ...(s.foodLogs || [])] : (s.foodLogs || []),
       };
     });
-  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
+  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId, store.dailyLogs]);
 
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
@@ -1486,6 +1535,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [fastingState, fastingProtocol]);
   // { name } while the meal-of-choice sheet is open, null otherwise.
   const [mocSheet, setMocSheet] = useStateFd(null);
+  // Category summary card currently open in the meal-detail sheet. Keep only
+  // the category id here so the sheet always reflects live edits to the day's
+  // entries while it is open.
+  const [mealDetailCatId, setMealDetailCatId] = useStateFd(null);
+  const [mealDetailExpandedRecipes, setMealDetailExpandedRecipes] = useStateFd({});
+  const [mealDetailCapturing, setMealDetailCapturing] = useStateFd(false);
+  const mealDetailCaptureRef = useRefFd(null);
   const [dayMenu, setDayMenu] = useStateFd(false);
   const [statsOpen, setStatsOpen] = useStateFd(false);
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -2342,6 +2398,56 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const dayLog = useMemoFd(
     () => (store.dailyLogs || []).find(l => l.date === curDate) || null,
     [store.dailyLogs, curDate]);
+
+  // A day can be closed explicitly even when the user has no entries in one
+  // or more configured meal categories. Keep the flag on the daily log so it
+  // follows the same sync, refresh, and backup path as the rest of the day.
+  function setFoodDayClosed(closed) {
+    if (curDate !== today) return;
+    const now = new Date().toISOString();
+    setStore(s => {
+      const existing = (s.dailyLogs || []).find(l => l.date === curDate);
+      const statusMode = LB.statusModeForDate(s, curDate);
+      const isTraining = LB.isTrainingDayForDate(s, curDate);
+      const frozen = closed && !LB.isNutritionUnscoredMode(statusMode)
+        ? LB.dailyLogAdherence({
+          ...(existing || {}),
+          calories: dayTotals.calories, protein: dayTotals.protein,
+          carbs: dayTotals.carbs, fat: dayTotals.fat,
+        }, macroTargets, isTraining)
+        : closed ? { adherence: null, targetsSnap: null } : {
+          adherence: existing?.adherence ?? null,
+          targetsSnap: existing?.targetsSnap ?? null,
+        };
+      const log = existing
+        ? { ...existing, foodDayClosed: closed, adherence: frozen.adherence, targetsSnap: frozen.targetsSnap, updatedAt: now }
+        : {
+            id: LB.uid(), date: curDate, weight: null, steps: null,
+            calories: null, protein: null, carbs: null, fat: null, fiber: null,
+            waterMl: null, note: null, offPlanNote: null, coachFields: null,
+            mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: closed,
+            adherence: frozen.adherence, targetsSnap: frozen.targetsSnap, updatedAt: now, createdAt: now,
+          };
+      return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
+    });
+  }
+
+  async function toggleFoodDayClosed() {
+    if (curDate !== today) return;
+    if (dayLog?.foodDayClosed) {
+      setFoodDayClosed(false);
+      return;
+    }
+    if (plannedEntries.length) {
+      const ok = await confirm(
+        `${plannedEntries.length} planned ${plannedEntries.length === 1 ? 'meal is' : 'meals are'} still open. Finish the day anyway?`,
+        { title: 'Finish today?', ok: 'Finish day', cancel: 'Keep planned' }
+      );
+      if (!ok) return;
+    }
+    setFoodDayClosed(true);
+  }
+
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
   // personal ones, and training/rest day pick different targets. null when
@@ -2361,7 +2467,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // day is still in progress, e.g. self-coached macros configured after
     // already logging food earlier today. Future days have no snap either,
     // so they fall through to the live target the same way.
-    const snap = curDate !== today ? dayLog?.targetsSnap : null;
+    const snap = (curDate !== today || dayLog?.foodDayClosed) ? dayLog?.targetsSnap : null;
     const storedTarget = snap && (snap.protein != null || snap.carbs != null || snap.fat != null) ? snap : null;
     if (storedTarget) return storedTarget;
     const isTraining = LB.isTrainingDayForDate(store, curDate);
@@ -2383,8 +2489,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // same day.
   const isMealOfChoice = !!dayLog?.mealOfChoice;
   const dayAdherence = useMemoFd(
-    () => (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
-    [dayTarget, dayTotals, isMealOfChoice],
+    () => dayLog?.foodDayClosed
+      ? (dayLog.adherence ?? null)
+      : (dayTarget && !isMealOfChoice) ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
+    [dayTarget, dayTotals, isMealOfChoice, dayLog?.foodDayClosed, dayLog?.adherence],
   );
   // Same formula, but against the Plan+Logged projection instead of the
   // logged truth: "if you eat everything still planned today, where does
@@ -2405,7 +2513,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     [dayTarget, projectedTotals]);
   // Deterministic id so two devices confirming the same meal collide into one
   // row instead of duplicating, the same reason foodTemplateDays' marker id is
-  // `${userId}_${today}` (this file, above). id is the PRIMARY KEY on
+  // `${userId}_${store.activeMealTemplateId}_${today}` (this file, above). id is the PRIMARY KEY on
   // zane_food_logs, a table shared by every user, so date alone is not
   // enough: two different users marking a meal of choice on the same
   // calendar day would otherwise both compute the exact same id and collide
@@ -2434,7 +2542,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Category summary cards reflect the logged truth only: a planned entry
   // shows in the timeline rows below (visually distinct) but must not inflate
   // its meal category's kcal, same reason dayTotals excludes planned.
-  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealWindows]);
+  const mealCats = useMemoFd(() => LB.mealCategories(store.settings), [store.settings?.mealCategories, store.settings?.mealWindows]);
   // Where the derived meal-of-choice row sits in the timeline. Defaults to the
   // dinner window (that is what a meal of choice usually is), changed in the
   // sheet. Must stay BELOW mealCats: these are const, so reading mealCats from
@@ -2480,6 +2588,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     () => store.settings?.hideFoodCategories ? [{ id: 'all', label: null, startHour: 0, endHour: 24 }] : categoryTotals,
     [store.settings?.hideFoodCategories, categoryTotals]
   );
+  const mealDetail = useMemoFd(() => {
+    if (!mealDetailCatId) return null;
+    const cat = mealCats.find(c => c.id === mealDetailCatId);
+    if (!cat) return null;
+    const entries = [];
+    for (let h = cat.startHour; h < cat.endHour; h++) entries.push(...(byHour[h] || []));
+    const totals = entries.reduce((sum, e) => ({
+      calories: sum.calories + (e.calories || 0),
+      protein: sum.protein + (e.protein || 0),
+      carbs: sum.carbs + (e.carbs || 0),
+      fat: sum.fat + (e.fat || 0),
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    return { ...cat, entries, totals };
+  }, [mealDetailCatId, mealCats, byHour]);
+  // A day switch should never leave a sheet showing the previous day's meal.
+  useEffectFd(() => { setMealDetailCatId(null); setMealDetailExpandedRecipes({}); }, [curDate]);
 
   // Yesterday's entries grouped by meal category, so an empty category can
   // offer to repeat it in one tap. Reads the store only: nothing is fetched
@@ -2544,7 +2668,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // silently wipe manually-entered Health-tab macros, the exact case the
       // guard above skips the warning for because planning is supposed to
       // leave the day untouched.
-      const dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      let dailyLogs = planned ? s.dailyLogs : patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      dailyLogs = reopenFoodDay(s, curDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setRepeat(null);
@@ -2684,9 +2809,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // tab's own save() and its food reconciler both preserve exactly this.
     const keptDayType = existing?.targetsSnap?.dayType;
     const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
+    const reopened = dateStr === today ? { foodDayClosed: false } : {};
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
-      : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
+      : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: false, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
 
@@ -2742,6 +2868,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // entries) null the day's macros and silently wipe manually-entered Health
       // macros. loggedDates already excludes planned-only dates.
       for (const d of loggedDates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      for (const d of dates) dailyLogs = reopenFoodDay(s, d, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setPendingHour(null);
@@ -2785,7 +2912,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // and calling patchDaily anyway rewrites the day from its logged entries.
       // On a day with none, that means writing nulls over macros the user typed
       // into the Health tab by hand.
-      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      let dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date));
+      dailyLogs = reopenFoodDay(s, entry.date, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
@@ -2805,7 +2933,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (planned && entry.id === mocEntryId) {
       setStore(s => {
         const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
-        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+        const dailyLogs = reopenFoodDay(s, entry.date, patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)));
+        return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       return;
     }
@@ -2874,10 +3003,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ? { adherence: null, targetsSnap: existing?.targetsSnap ?? null }
         : LB.dailyLogAdherence({ ...(existing || {}), mealOfChoice: on }, macroTargets, isTraining, dayTargetOverride);
       const log = existing
-        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, updatedAt: now }
+        ? { ...existing, mealOfChoice: on, mealOfChoiceHour: on ? hour : null, offPlanNote, adherence, targetsSnap, foodDayClosed: curDate === today ? false : !!existing.foodDayClosed, updatedAt: now }
         : { id: LB.uid(), date: curDate, weight: null, steps: null, calories: null, protein: null, carbs: null,
             fat: null, fiber: null, waterMl: null, note: null, offPlanNote, coachFields: null,
             mealOfChoice: on, mealOfChoiceHour: on ? hour : null,
+            foodDayClosed: false,
             adherence, targetsSnap, updatedAt: now, createdAt: now };
       return { ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== curDate)] };
     });
@@ -2913,10 +3043,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // different hour bucket), so no patchDaily call is needed here.
   function moveEntryToHour(entry, hour) {
     const hh = String(hour).padStart(2, '0');
-    setStore(s => ({
-      ...s,
-      foodLogs: (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l),
-    }));
+    setStore(s => {
+      const foodLogs = (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l);
+      return { ...s, foodLogs, dailyLogs: reopenFoodDay(s, entry.date, s.dailyLogs) };
+    });
   }
   // fixedSlots: true (see UI.useDragReorder in ui.jsx) hands back the raw
   // drop-line index as `to`, not one adjusted for a conventional array
@@ -3002,6 +3132,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         { title: 'Export failed', ok: 'OK', cancel: null });
     } else if (res.saved) {
       await confirm('Food log image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
+  const takeMealDetailScreenshot = async () => {
+    if (!mealDetail) return;
+    const slug = (mealDetail.label || 'meal').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'meal';
+    const res = await captureNodeAsPng(mealDetailCaptureRef.current, {
+      filename: `meal-${slug}-${curDate}.png`,
+      setCapturing: setMealDetailCapturing,
+    });
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Meal image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
     }
   };
 
@@ -3104,9 +3250,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = [...clones, ...remaining];
       let dailyLogs = s.dailyLogs || [];
       if (anyLandsLogged) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
+      dailyLogs = reopenFoodDay(s, targetDate, dailyLogs);
       if (anyLeavesLogged) {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
+      dailyLogs = reopenFoodDay(s, sourceDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
@@ -3127,7 +3275,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // selection of nothing but planned entries leaves the day's totals exactly
       // as they were, so recomputing them can only do damage.
       const anyLoggedDeleted = (s.foodLogs || []).some(l => ids.includes(l.id) && !l.planned);
-      const dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      let dailyLogs = anyLoggedDeleted ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) : s.dailyLogs;
+      dailyLogs = reopenFoodDay(s, curDate, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setCopyMoveOpen(false);
@@ -3724,7 +3873,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // anyway rewrites the row from the logged entries: on a day with none,
         // that nulls macros the user typed into the Health tab.
         const touchesDaily = !editingEntry.planned || !savePlanned;
-        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        let dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
         return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       closeQtySheet();
@@ -4294,7 +4444,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // planned is carried through unchanged here, so a planned entry stays out
       // of the daily log and recomputing it would only risk overwriting manual
       // Health-tab macros, see deleteEntry.
-      const dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      let dailyLogs = entry.planned ? s.dailyLogs : patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date));
+      dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     closeIngredientEditor();
@@ -4435,7 +4586,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // anyway rewrites the row from the logged entries: on a day with none,
         // that nulls macros the user typed into the Health tab.
         const touchesDaily = !editingEntry.planned || !savePlanned;
-        const dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        let dailyLogs = touchesDaily ? patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) : s.dailyLogs;
+        dailyLogs = reopenFoodDay(s, updated.date, dailyLogs);
         return { ...s, foodLogs: nextLogs, dailyLogs };
       });
       setEditingEntry(null);
@@ -5005,6 +5157,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         </div>
       </div>
 
+      {/* Meal detail poster: kept outside the animated Sheet so html2canvas
+          measures a stable tree. It mounts with the selected meal and only
+          becomes visible while the camera capture is running; the ref is
+          therefore already available when the button is tapped. */}
+      {mealDetail && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: mealDetailCapturing ? 'block' : 'none' }}>
+          <FdMealDetailPoster captureRef={mealDetailCaptureRef} meal={mealDetail} expandedRecipes={mealDetailExpandedRecipes}
+            logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
+        </div>,
+        document.body
+      )}
+
       <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
 
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -5051,6 +5215,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 projected={planMode && plannedEntries.length ? projectedTotals : null}
                 projectedAdherence={projectedAdherence}
                 unscored={isMealOfChoice ? 'Meal of choice' : null}
+                dayClosed={!!dayLog?.foodDayClosed}
+                onToggleDayComplete={curDate === today ? toggleFoodDayClosed : null}
                 // Health is an independently-toggleable tab now: only route into
                 // it if it's actually enabled, else Home is the safe fallback.
                 onSetTargets={() => go(store.settings?.showHealthTab ? { name: 'health', openMacroTargets: true } : { name: 'home' })} />
@@ -5101,9 +5267,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
                 read-only per-meal summary card (LB.mealCategories). Adding
-                still only ever happens through an hour's own "+", the
-                category card itself has no tap target. The category card
-                sits full-width; only its hour rows are indented, with a
+                still only ever happens through an hour's own "+". When a
+                category contains entries, tapping its card opens the full
+                meal detail sheet; an empty card may offer Repeat yesterday.
+                The category card sits full-width; only its hour rows are indented, with a
                 tree-style trunk line (FdHourTrunk, spanning the whole
                 indented block) and a short branch tick per row (FdHourTick)
                 connecting each one back to the trunk, so the card visually
@@ -5122,7 +5289,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 {timelineGroups.map(cat => (
                   <div key={cat.id}>
                     {cat.label && (
-                      <div style={fdCategoryCard}>
+                      <div
+                        role={cat.count > 0 ? 'button' : undefined}
+                        tabIndex={cat.count > 0 ? 0 : undefined}
+                        aria-label={cat.count > 0 ? `Open ${cat.label} details` : undefined}
+                        onClick={cat.count > 0 ? () => { setMealDetailExpandedRecipes({}); setMealDetailCatId(cat.id); } : undefined}
+                        onKeyDown={cat.count > 0 ? e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault(); setMealDetailExpandedRecipes({}); setMealDetailCatId(cat.id);
+                          }
+                        } : undefined}
+                        style={{ ...fdCategoryCard, ...(cat.count > 0 ? { cursor: 'pointer' } : null) }}
+                      >
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                           <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
@@ -5132,7 +5310,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                             anything is logged here the button is gone, so the
                             card goes back to being a pure read-only summary. */}
                         {cat.count === 0 && (prevDayByCategory[cat.id] || []).length > 0 ? (
-                          <button className="micro-gold" onClick={() => openRepeatYesterday(cat)} style={{
+                          <button className="micro-gold" onClick={e => { e.stopPropagation(); openRepeatYesterday(cat); }} style={{
                             display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
                             padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                           }}>
@@ -5593,6 +5771,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           </>
         )}
       </div>
+
+      {/* ── Meal detail sheet ── */}
+      <Sheet open={!!mealDetail} onClose={() => setMealDetailCatId(null)} title={mealDetail?.label || 'Meal'} titleColor="var(--accent)"
+        titleRight={mealDetail && (
+          <button onClick={takeMealDetailScreenshot} disabled={mealDetailCapturing} aria-label="Share meal as image"
+            style={{ ...fdTopAddBtn, cursor: mealDetailCapturing ? 'default' : 'pointer', color: mealDetailCapturing ? UI.inkGhost : UI.inkSoft }}>
+            {mealDetailCapturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>...</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+          </button>
+        )}
+        renderContent={() => mealDetail ? (
+        <FdMealDetailContent meal={mealDetail} expandedRecipes={mealDetailExpandedRecipes} onToggleRecipe={entryId => setMealDetailExpandedRecipes(open => ({ ...open, [entryId]: !open[entryId] }))} />
+      ) : null} />
 
       {/* ── Quantity sheet ── */}
       {/* zIndex bumped while editing one row of the "Describe a meal" review
@@ -7302,6 +7492,13 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
   // it). Closes back to the log so the result is visible right away.
   async function applyToToday() {
     const todayISO = LB.todayISO();
+    if (LB.foodDayIsClosed(store.dailyLogs, todayISO)) {
+      const reopen = await confirm(
+        "Today is marked done. Reopen it and apply the active meal plan?",
+        { title: 'Reopen today?', ok: 'Reopen and apply', cancel: 'Cancel' }
+      );
+      if (!reopen) return;
+    }
     // Applies the ACTIVE plan (that's what auto-fills the log), regardless of
     // which plan is being viewed.
     const inActive = slot => slot.mealPlanId === activeId;
@@ -7314,7 +7511,8 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
     setStore(s => {
       const present2 = new Set((s.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
       const entries = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
-      return entries.length ? { ...s, foodLogs: [...entries, ...(s.foodLogs || [])] } : s;
+      if (!entries.length) return s;
+      return { ...s, foodLogs: [...entries, ...(s.foodLogs || [])], dailyLogs: reopenFoodDay(s, todayISO, s.dailyLogs) };
     });
     onClose();
   }
@@ -7412,7 +7610,7 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
       // effect from adding a second copy.
       let foodLogs = s.foodLogs || [];
       const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
-      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
+      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday && !LB.foodDayIsClosed(s.dailyLogs, todayISO)) {
         foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
       }
       return { ...s, foodTemplateSlots: [...list, slot], foodLogs };
@@ -11393,6 +11591,273 @@ function FdRing({ percent, size = 128, color = UI.gold, label }) {
 // fixed token instead of a per-accent special case.
 const FD_MACRO_COLORS = { protein: UI.info, carbs: UI.ok, fat: UI.danger };
 
+// Meal-level macro visual: the ring is weighted by macro calories (protein
+// and carbs 4 kcal/g, fat 9 kcal/g), while the labels show the familiar grams.
+// That keeps the burst visually honest without making the user do the math.
+function FdMealMacroBurst({ calories, protein, carbs, fat }) {
+  const values = [
+    { key: 'protein', short: 'P', label: 'Protein', grams: protein || 0, kcal: (protein || 0) * 4, color: FD_MACRO_COLORS.protein },
+    { key: 'carbs', short: 'C', label: 'Carbs', grams: carbs || 0, kcal: (carbs || 0) * 4, color: FD_MACRO_COLORS.carbs },
+    { key: 'fat', short: 'F', label: 'Fat', grams: fat || 0, kcal: (fat || 0) * 9, color: FD_MACRO_COLORS.fat },
+  ];
+  const totalMacroKcal = values.reduce((sum, item) => sum + item.kcal, 0);
+  const radius = 49;
+  const circumference = 2 * Math.PI * radius;
+  // The arcs use round caps, so a small dash gap is visually consumed by the
+  // caps themselves. This deliberately leaves a real background break at
+  // every boundary instead of a ring that only looks separated mathematically.
+  const gap = 24;
+  let cursor = 0;
+  const arcs = values.map(item => {
+    const span = totalMacroKcal > 0 ? circumference * item.kcal / totalMacroKcal : 0;
+    const start = cursor;
+    cursor += span;
+    return { ...item, start, visible: Math.max(0, span - gap), percent: totalMacroKcal > 0 ? Math.round(item.kcal / totalMacroKcal * 100) : 0 };
+  });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '4px 0 2px' }}>
+      <div style={{ position: 'relative', width: 184, height: 184 }} aria-label={`${Math.round(calories || 0)} calories, ${Math.round(protein || 0)} grams protein, ${Math.round(carbs || 0)} grams carbs, ${Math.round(fat || 0)} grams fat`}>
+        <svg width="184" height="184" viewBox="0 0 140 140" aria-hidden="true">
+          <circle cx="70" cy="70" r={radius} fill="none" stroke={UI.hair} strokeWidth="11" opacity="0.28" />
+          {arcs.map(item => (
+            <circle key={item.key} cx="70" cy="70" r={radius} fill="none" stroke={item.color} strokeWidth="11" strokeLinecap="round"
+              strokeDasharray={`${item.visible} ${circumference - item.visible}`} strokeDashoffset={-item.start}
+              style={{ transition: 'stroke-dasharray 0.65s cubic-bezier(0.22,1,0.36,1), stroke-dashoffset 0.65s cubic-bezier(0.22,1,0.36,1)' }} />
+          ))}
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <span className="num" style={{ fontSize: 38, fontWeight: 300, color: UI.gold, lineHeight: 1 }}>{Math.round(calories || 0)}</span>
+          <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3 }}>kcal</span>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', width: '100%', maxWidth: 330, gap: 8 }}>
+        {arcs.map(item => (
+          <div key={item.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: item.color, fontFamily: UI.fontUi }}>{item.short} · {item.label}</span>
+            <span className="num" style={{ fontSize: 16, fontWeight: 700, color: item.color }}>{Math.round(item.grams)}g</span>
+            <span className="micro" style={{ fontSize: 8 }}>{item.percent}% kcal</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FdMealDetailContentLegacy({ meal }) {
+  const plannedCount = meal.entries.filter(e => e.planned).length;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div className="micro" style={{ marginBottom: 4 }}>MEAL WINDOW</div>
+          <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 - {String(meal.endHour % 24).padStart(2, '0')}:00</div>
+        </div>
+        <div className="micro" style={{ textAlign: 'right' }}>
+          {meal.entries.length} {meal.entries.length === 1 ? 'item' : 'items'}
+          {plannedCount > 0 && <><br /><span className="micro-gold">{plannedCount} planned</span></>}
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 12px 14px', background: 'rgba(var(--accent-rgb),0.05)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+        <FdMealMacroBurst calories={meal.totals.calories} protein={meal.totals.protein} carbs={meal.totals.carbs} fat={meal.totals.fat} />
+      </div>
+
+      <div>
+        <div className="micro" style={{ marginBottom: 8 }}>INGREDIENTS</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {meal.entries.map(entry => (
+            <div key={entry.id} style={entry.planned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={fdEntryName}>{entry.foodName}</span>
+                    {entry.planned && <span className="micro-gold" style={{ flexShrink: 0, fontSize: 8 }}>PLANNED</span>}
+                  </div>
+                  <span style={fdEntryMeta}>
+                    {fdDisplayG(entry) ? `${fdMassOf(entry)}${fdUnitCountLabel(entry) ? ` (${fdUnitCountLabel(entry)})` : ''} · ` : ''}
+                    <span className="num" style={{ color: UI.warn }}>{Math.round(entry.calories || 0)} kcal</span>
+                  </span>
+                </div>
+                <FdMacroBits protein={entry.protein} carbs={entry.carbs} fat={entry.fat} strong />
+              </div>
+              {entry.recipeItems?.length > 0 && (
+                <div style={{ position: 'relative', marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div className="micro" style={{ fontSize: 8 }}>RECIPE INGREDIENTS</div>
+                  {fdSortIngredientsByQty(entry.recipeItems).map((item, index) => (
+                    <div key={`${entry.id}-ingredient-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FdIngredientTick />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{item.foodName}</div>
+                        <span style={fdEntryMeta}>
+                          {fdMass(item.quantityG)}{fdUnitCountLabel(item) ? ` (${fdUnitCountLabel(item)})` : ''} · <span className="num" style={{ color: UI.warn }}>{Math.round(item.calories || 0)} kcal</span>
+                        </span>
+                      </div>
+                      <FdMacroBits protein={item.protein} carbs={item.carbs} fat={item.fat} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      {plannedCount > 0 && (
+        <div className="micro" style={{ lineHeight: '15px', paddingTop: 4, borderTop: `1px dashed ${UI.hairStrong}` }}>
+          Dashed items are planned and are included in the meal total, but not yet counted as eaten.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Refined meal detail presentation. The live sheet folds recipe ingredients
+// away by default; the screenshot poster reuses the same expandedRecipes map
+// so the exported image reflects exactly what was visible when captured.
+function FdMealDetailContent({ meal, screenshot = false, expandedRecipes = {}, onToggleRecipe }) {
+  const plannedCount = meal.entries.filter(e => e.planned).length;
+  const mealMacroGrid = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 40px 40px 40px',
+    columnGap: 7,
+    alignItems: 'center',
+  };
+  const macroValue = (value, color, label) => (
+    <span className="num" style={{ fontSize: 11, fontWeight: 700, color, textAlign: 'right', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 9, marginRight: 2 }}>{label}</span>{Math.round(value || 0)}g
+    </span>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* The hero stays focused on the meal identity and timing; calories live
+          in the Macro Burst directly below. */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, padding: '2px 0 14px', borderBottom: `var(--hair-width) solid ${UI.hairStrong}` }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="micro" style={{ marginBottom: 4 }}>MEAL WINDOW</div>
+          <div className="num" style={{ fontSize: 16, color: UI.ink }}>{String(meal.startHour).padStart(2, '0')}:00 - {String(meal.endHour % 24).padStart(2, '0')}:00</div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div className="micro">
+            {meal.entries.length} {meal.entries.length === 1 ? 'item' : 'items'}
+            {plannedCount > 0 && <><span style={{ color: UI.inkGhost }}> · </span><span className="micro-gold">{plannedCount} planned</span></>}
+          </div>
+        </div>
+      </div>
+
+      {/* Macro Burst stays in its own section, away from the calmer hero. */}
+      <div>
+        <div style={{ padding: '16px 12px 14px', background: 'rgba(var(--accent-rgb),0.05)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+          <FdMealMacroBurst calories={meal.totals.calories} protein={meal.totals.protein} carbs={meal.totals.carbs} fat={meal.totals.fat} />
+        </div>
+      </div>
+
+      <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {meal.entries.map(entry => {
+            const hasRecipe = entry.recipeItems?.length > 0;
+            const recipeOpen = !!expandedRecipes[entry.id];
+            const toggleRecipe = () => onToggleRecipe?.(entry.id);
+            const entryCardStyle = entry.planned
+              ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' }
+              : screenshot
+                ? { ...fdEntryCard, background: 'var(--surface-tint-lg)' }
+                : fdEntryCard;
+            return (
+              <div key={entry.id} style={entryCardStyle}>
+                <div style={mealMacroGrid}>
+                  <div style={{ minWidth: 0 }}>
+                    {hasRecipe && !screenshot ? (
+                      <button onClick={toggleRecipe} aria-expanded={recipeOpen} aria-label={`${recipeOpen ? 'Hide' : 'Show'} ingredients for ${entry.foodName}`} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0, padding: 0, border: 'none', background: 'none', color: UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <i className={`fa-solid fa-chevron-${recipeOpen ? 'down' : 'right'}`} style={{ flexShrink: 0, fontSize: 9, color: UI.inkFaint }} />
+                        <span style={{ ...fdEntryName, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.foodName}</span>
+                        {entry.planned && <span className="micro-gold" style={{ flexShrink: 0, fontSize: 8 }}>PLANNED</span>}
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                        <span style={{ ...fdEntryName, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.foodName}</span>
+                        {entry.planned && <span className="micro-gold" style={{ flexShrink: 0, fontSize: 8 }}>PLANNED</span>}
+                      </div>
+                    )}
+                    <span style={fdEntryMeta}>
+                      <span className="num" style={{ color: UI.inkSoft }}>{entry.time}</span>
+                      <span style={fdMetaDivider} />
+                      {fdDisplayG(entry) ? `${fdMassOf(entry)}${fdUnitCountLabel(entry) ? ` (${fdUnitCountLabel(entry)})` : ''} · ` : ''}
+                      <span className="num" style={{ color: UI.warn }}>{Math.round(entry.calories || 0)} kcal</span>
+                    </span>
+                  </div>
+                  {macroValue(entry.protein, FD_MACRO_COLORS.protein, 'P')}
+                  {macroValue(entry.carbs, FD_MACRO_COLORS.carbs, 'C')}
+                  {macroValue(entry.fat, FD_MACRO_COLORS.fat, 'F')}
+                </div>
+
+                {hasRecipe && recipeOpen && (
+                  <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${UI.hairStrong}` }}>
+                    <div className="micro" style={{ fontSize: 8, paddingBottom: 6 }}>RECIPE INGREDIENTS</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {fdSortIngredientsByQty(entry.recipeItems).map((item, index) => (
+                        <div key={`${entry.id}-ingredient-${index}`} style={{ ...mealMacroGrid, paddingLeft: 8 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ ...fdEntryName, fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.foodName}</div>
+                            <span style={fdEntryMeta}>
+                              {fdMass(item.quantityG)}{fdUnitCountLabel(item) ? ` (${fdUnitCountLabel(item)})` : ''} · <span className="num" style={{ color: UI.warn }}>{Math.round(item.calories || 0)} kcal</span>
+                            </span>
+                          </div>
+                          {macroValue(item.protein, FD_MACRO_COLORS.protein, 'P')}
+                          {macroValue(item.carbs, FD_MACRO_COLORS.carbs, 'C')}
+                          {macroValue(item.fat, FD_MACRO_COLORS.fat, 'F')}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {plannedCount > 0 && (
+        <div className="micro" style={{ lineHeight: '15px', paddingTop: 4, borderTop: `1px dashed ${UI.hairStrong}` }}>
+          Dashed items are planned and are included in the meal total, but not yet counted as eaten.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Meal detail poster follows the RecipePoster geometry exactly: its own
+// stable root, explicit watermark layer and content layer above it. Keeping
+// this outside the animated Sheet prevents html2canvas from inheriting the
+// sheet transform and makes the watermark part of the captured poster.
+function FdMealDetailPoster({ captureRef, meal, expandedRecipes, logo, logoStyle, grid }) {
+  // Keep the same centered logo treatment as RecipePoster, but soften it a
+  // little for this denser poster so the watermark supports the content.
+  const sourceOpacity = Number(logoStyle?.opacity);
+  const visibleLogoStyle = { ...logoStyle, opacity: Math.min(Number.isFinite(sourceOpacity) ? sourceOpacity : 0.08, 0.08) };
+  return (
+    <div ref={captureRef} style={{
+      padding: '34px 28px 22px', width: 480, margin: '0 auto', position: 'relative',
+      background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none',
+    }}>
+      {grid && <SvgGrid />}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src={logo} data-shot-avatar="1" style={visibleLogoStyle} />
+      </div>
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 16 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', fontSize: 26, lineHeight: 1.1, color: UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {meal.label}
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', marginTop: 4, marginLeft: 12, flexShrink: 0, whiteSpace: 'nowrap' }}>ZANE</div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <FdMealDetailContent meal={meal} screenshot expandedRecipes={expandedRecipes} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // One metric row in the dense hero (KCAL/PROTEIN/CARBS/FAT): label, a thin
 // fill bar showing actual vs target, the actual/target pair, and the delta
 // as a signed percent. The delta is intentionally neutral-colored rather
@@ -11434,7 +11899,25 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // resolvable the hero can only show a bare total, which is also the exact
 // moment the question "what should this number be?" comes up. Omitted by the
 // poster, so the button never renders into an exported image.
-function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored }) {
+function FdDayCloseAction({ closed, onToggle }) {
+  if (!onToggle) return null;
+  return (
+    <button onClick={onToggle} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+      width: '100%', marginTop: 14, padding: '8px 10px', borderRadius: 4,
+      border: `var(--hair-width) solid ${closed ? UI.ok : UI.hairStrong}`,
+      background: closed ? 'rgba(var(--ok-rgb),0.08)' : 'transparent',
+      color: closed ? UI.ok : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11,
+      letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
+      WebkitTapHighlightColor: 'transparent',
+    }}>
+      <i className={`fa-solid fa-${closed ? 'rotate-left' : 'check'}`} style={{ fontSize: 10 }} />
+      {closed ? 'Reopen today' : 'Done for today'}
+    </button>
+  );
+}
+
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected, projectedAdherence, onSetTargets, unscored, dayClosed, onToggleDayComplete }) {
   const projectionLine = projected ? (
     <FdProjectionLine macros={{
       calories: { delta: projected.calories - dayTotals.calories, total: projected.calories },
@@ -11443,6 +11926,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
       fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
     }} goalCalories={goalCalories} adherence={projectedAdherence} />
   ) : null;
+  const dayCloseAction = <FdDayCloseAction closed={dayClosed} onToggle={onToggleDayComplete} />;
   return dayTarget ? (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -11469,6 +11953,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         </div>
       </div>
       {projectionLine}
+      {dayCloseAction}
     </>
   ) : (
     <div>
@@ -11487,6 +11972,7 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
         </button>
       )}
       {projectionLine}
+      {dayCloseAction}
     </div>
   );
 }
@@ -11706,7 +12192,7 @@ function FdScanner({ onClose, onDetect }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000', display: 'flex', flexDirection: 'column', animation: 'sheet-up 0.22s ease' }}>
-      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 28px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
+      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 28px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style={{ flex: 1, color: '#fff', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600 }}>Scan barcode</span>
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>

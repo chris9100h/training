@@ -714,7 +714,131 @@ function TrainingScreen(props) {
   return <TrainingScreenInner {...props} session={session} />;
 }
 
-function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncStatus, storageFull, onRetrySync }) {
+function TrainingSocialFeedback({ sessionId, userId }) {
+  const [comments, setComments] = useStateT([]);
+  const [toast, setToast] = useStateT(null);
+  const [open, setOpen] = useStateT(false);
+  const seenRef = useRefT(new Set());
+  const toastTimerRef = useRefT(null);
+
+  const cheerMessageText = body => String(body || '').replace(/^\s*(?:💥|💪|🙌|🚀|🔥)\s*/u, '').trim();
+
+  const cheerEmoji = body => {
+    const text = cheerMessageText(body).toLowerCase();
+    if (text.includes('let') && text.includes('go')) return '💥';
+    if (text.includes('strong')) return '💪';
+    if (text.includes('finish')) return '🙌';
+    if (text.includes('you got')) return '🚀';
+    if (text.includes('one more')) return '🔥';
+    return '🔥';
+  };
+
+  useEffectT(() => {
+    let live = true;
+    let seeded = false;
+
+    const refresh = async () => {
+      try {
+        const detail = await LB.loadSocialWorkoutDetail(userId, sessionId);
+        if (!live) return true;
+        const next = detail?.comments || [];
+        if (!seeded) {
+          next.forEach(comment => seenRef.current.add(comment.id));
+          seeded = true;
+        } else {
+          const fresh = next.filter(comment => comment.id && !seenRef.current.has(comment.id));
+          fresh.forEach(comment => seenRef.current.add(comment.id));
+          if (fresh.length) {
+            const latest = fresh[fresh.length - 1];
+            setToast(latest);
+            window.clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = window.setTimeout(() => setToast(null), 5500);
+          }
+        }
+        setComments(next);
+        return true;
+      } catch {
+        // Social feedback is an enhancement to the workout flow. A transient
+        // social/RPC failure must never interrupt logging the session.
+        return false;
+      }
+    };
+
+    let timer = null;
+    let failures = 0;
+    const run = async () => {
+      const ok = await refresh();
+      if (!live) return;
+      failures = ok ? 0 : failures + 1;
+      const retryDelay = [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
+      timer = window.setTimeout(run, failures ? retryDelay : 5000);
+    };
+    run();
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+      window.clearTimeout(toastTimerRef.current);
+    };
+  }, [sessionId, userId]);
+
+  const dismissToast = () => {
+    window.clearTimeout(toastTimerRef.current);
+    setToast(null);
+  };
+
+  const openComments = () => {
+    dismissToast();
+    setOpen(true);
+  };
+
+  return <>
+    {toast && ReactDOM.createPortal(
+      <div role="status" aria-live="polite" style={{
+        position: 'fixed', inset: 0, zIndex: 180, padding: 16,
+        pointerEvents: 'none', color: UI.ink,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'improvedFade 5.5s ease forwards', WebkitTapHighlightColor: 'transparent',
+      }}>
+        <button type="button" onClick={dismissToast} aria-label="Dismiss social feedback" className={toast.kind === 'cheer' ? 'intensity-glow-raw' : ''} style={{
+          width: 'min(100%, 320px)', boxSizing: 'border-box', padding: '28px 22px 25px',
+          borderRadius: 8, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
+          background: toast.kind === 'cheer' ? `linear-gradient(145deg, rgba(var(--accent-rgb),0.26), ${UI.bgRaised})` : UI.bgRaised,
+          boxShadow: toast.kind === 'cheer' ? undefined : '0 8px 32px rgba(0,0,0,0.45)',
+          color: UI.ink, cursor: 'pointer', pointerEvents: 'auto',
+          textAlign: 'center', animation: 'fadeUp 0.7s ease both', WebkitTapHighlightColor: 'transparent',
+        }}>
+          {toast.kind === 'cheer' ? (
+            <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 17 }}>{cheerEmoji(toast.body)}</div>
+          ) : (
+            <i className="fa-solid fa-comment" style={{ display: 'block', color: UI.inkSoft, fontSize: 36, marginBottom: 18 }} />
+          )}
+
+          <div style={{ color: toast.kind === 'cheer' ? UI.gold : UI.ink, fontFamily: UI.fontUi, fontSize: 22, lineHeight: 1.25, fontWeight: 800, overflowWrap: 'anywhere' }}>{toast.kind === 'cheer' ? cheerMessageText(toast.body) : toast.body}</div>
+          <div className="micro" style={{ color: toast.kind === 'cheer' ? UI.goldSoft : UI.inkFaint, marginTop: 13 }}>{toast.kind === 'cheer' ? 'CHEER' : 'COMMENT'} {'\u00b7'} {toast.authorName || 'Friend'}</div>
+        </button>
+      </div>,
+      document.body
+    )}
+    {comments.length > 0 && <button type="button" onClick={openComments} aria-label={`View ${comments.length} training comments`} style={{
+      padding: '6px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap',
+      WebkitTapHighlightColor: 'transparent',
+    }}>
+      <i className="fa-solid fa-comment" style={{ color: UI.gold, marginRight: 5 }} /> {comments.length}
+    </button>}
+    <Sheet open={open} onClose={() => setOpen(false)} title="Training feedback">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {!comments.length && <div className="micro" style={{ color: UI.inkFaint }}>No feedback yet.</div>}
+        {[...comments].reverse().map(comment => <div key={comment.id} style={{ padding: '9px 10px', borderRadius: 4, background: comment.kind === 'cheer' ? UI.goldFaint : UI.bgInset, border: `var(--hair-width) solid ${comment.kind === 'cheer' ? UI.goldSoft : UI.hair}`, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}><strong style={{ color: comment.kind === 'cheer' ? UI.gold : UI.ink }}>{comment.authorName || 'Friend'}</strong><span className="micro" style={{ color: UI.inkGhost }}>{comment.kind === 'cheer' ? 'CHEER' : 'COMMENT'}</span></div>
+          <div style={{ marginTop: 4 }}>{comment.body}</div>
+        </div>)}
+      </div>
+    </Sheet>
+  </>;
+}
+
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, runtimeConfig, syncStatus, storageFull, onRetrySync }) {
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
   // sessions finished on other devices since boot). Offline keeps the cached
@@ -1405,7 +1529,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
-        persistRestStart(Date.now(), restDef);
+        persistRestStart(Date.now(), restDef, { openModal: true });
         const allGroupDone = updatedSets.every(resolved) && partners.every(({ e }) => partnerWorkingSets(e).every(resolved));
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
@@ -1428,7 +1552,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     } else {
       if (!entry.sets[setIdx]?.warmup) {
-        persistRestStart(Date.now(), restDef);
+        persistRestStart(Date.now(), restDef, { openModal: true });
       }
       if (updatedSets.every(resolved)) {
         const nextEntry = session.entries[exIdx + 1];
@@ -1834,7 +1958,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     finishSetNavigation(setIdx, updatedSets, overlayHoldMs, advanceFocus);
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
     if (isLastWarmupSet && !session.startedAt) {
-      persistRestStart(Date.now(), 180);
+      persistRestStart(Date.now(), 180, { openModal: true });
     }
   };
 
@@ -2293,7 +2417,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), jumpDelayMs);
       return true;
     }
-    persistRestStart(Date.now(), restDef);
+    persistRestStart(Date.now(), restDef, { openModal: true });
     const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
     setTimeout(() => {
       if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
@@ -2714,11 +2838,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
   const [restDuration, setRestDuration] = useStateT(() => session.restDuration ?? null);
 
-  const persistRestStart = (val, dur) => {
+  const persistRestStart = (val, dur, { openModal = false } = {}) => {
     setRestStart(val);
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
+    // The preference is opt-in. Only the actual start of a rest (not the
+    // +/-30s controls inside the sheet) opens the sheet, and a zero-second
+    // rest remains a no-op from the user's point of view.
+    if (val !== null && openModal && newDur > 0 && store.settings?.autoOpenRestTimer) {
+      setRestModalOpen(true);
+    }
     if (val !== null) {
       if (store.settings?.pushEnabled) {
         const def = newDur ?? restDef;
@@ -4459,6 +4589,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wasPostWarmup = !sessionRef.current.startedAt;
     if (wasPostWarmup) {
       updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+      void LB.notifySocialFriendStarted(sessionRef.current.id);
     } else {
       setRestModalOpen(true);
     }
@@ -6254,7 +6385,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Empty freestyle/bonus session, show exercise picker immediately
     return (
       <Screen scroll={false}>
-        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0', display: 'flex' }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
+        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0', display: 'flex' }}>
           <button onClick={abandon} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.danger, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>×</button>
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 }}>
@@ -6378,16 +6509,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
         : e),
     }));
-    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef); return; }
+    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef, { openModal: true }); return; }
     // Superset/giant-set aware: jump to whichever partner still has open
     // sets instead of blindly advancing past the whole group.
     if (!advanceIntoGroupOrPartner(300)) {
-      persistRestStart(Date.now(), restDef);
+      persistRestStart(Date.now(), restDef, { openModal: true });
       setTimeout(() => navigate(1), 600);
     }
   };
 
   const skipWarmup = () => {
+    const sessionId = session.id;
     updateSession(sess => {
       // The warmup-carrying entry isn't necessarily at index 0, superset
       // linking / reorder can move it. Find it by content, like warmupEntry.
@@ -6401,11 +6533,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ),
       };
     });
+    void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
   const startNow = () => {
+    const sessionId = session.id;
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+    void LB.notifySocialFriendStarted(sessionId);
     persistRestStart(null);
   };
 
@@ -6619,7 +6754,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       )}
 
       {/* Top: close + session timer */}
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',
@@ -7931,6 +8066,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </button>
             )}
             <div style={{ flex: 1 }} />
+            {store.settings?.showFriendsTab && runtimeConfig?.socialMode === 'normal' && <TrainingSocialFeedback sessionId={sessionId} userId={userId} />}
             <button onClick={() => { if (entry.note) { setSessionNoteVal(entry.note || ''); setSessionNoteOpen(true); } else { setNotePicker(true); } }} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,

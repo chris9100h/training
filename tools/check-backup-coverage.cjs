@@ -68,6 +68,20 @@ const EXCLUDED = {
   zane_coaching_notes: 'coaching (export archive only)',
   zane_coaching_macros: 'coaching (export archive only)',
   zane_checkins: 'coaching (export archive only)',
+  zane_social_profiles: 'friends identity/privacy state is shared social account data and can be regenerated from server state; it is not personal workout backup data',
+  zane_social_friendships: 'friends relationships reference other users, not personal workout backup data',
+  zane_social_blocks: 'friends safety relationships reference other users, not personal workout backup data',
+  zane_social_groups: 'private social groups reference other users, not personal workout backup data',
+  zane_social_group_members: 'private social group membership reference other users, not personal workout backup data',
+  zane_social_messages: 'social conversations reference other users, not personal workout backup data',
+  zane_social_message_attachments: 'social message media metadata and storage objects are server-side conversation data',
+  zane_social_message_reads: 'social conversation read receipts are device/server state, not workout content',
+  zane_social_plan_shares: 'plan shares are immutable cross-user snapshots, not part of the sender backup',
+  zane_social_plan_share_imports: 'plan-share import receipts are cross-user social state, not personal workout backup data',
+  zane_social_reports: 'moderation reports are server-side safety records, not personal workout backup data',
+  zane_social_workout_comments: 'friends workout comments and cheers reference other users, not personal workout backup data',
+  zane_social_notification_deliveries: 'server-side Friends push delivery ledger, derived provider state rather than user content',
+  zane_social_notification_attempts: 'server-side Friends rate-limit window, derived operational state rather than user content',
   zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',
@@ -198,7 +212,9 @@ function parseSelectedColumns(src) {
 function parseLoadedSettingsColumns(src) {
   const start = src.indexOf('async function loadFromSupabase(');
   const end = src.indexOf('\nasync function autoArchiveMissedDays(', start);
-  const body = src.slice(start, end);
+  const mapStart = src.indexOf('function mapUserSettings(');
+  const mapEnd = src.indexOf('\nfunction ', mapStart + 1);
+  const body = src.slice(start, end) + '\n' + (mapStart >= 0 ? src.slice(mapStart, mapEnd > mapStart ? mapEnd : undefined) : '');
   const map = new Map(); // db column -> store field
   // ".*?" so a wrapped value (normalizeHiddenHealthCards(sett.x), the
   // Array.isArray(sett.x) ? sett.x : [] ternaries) still resolves to its own

@@ -20,6 +20,9 @@ if (!fs.existsSync(dist)) {
 const sourceHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
 const builtSw = fs.readFileSync(path.join(dist, 'sw.js'), 'utf8');
+if (!sourceHtml.includes('window.__ZANE_COLD_BOOT = coldBoot;') || !builtHtml.includes('window.__ZANE_COLD_BOOT = coldBoot;')) {
+  fail('index.html does not pass the deliberate cold-boot handoff to app.jsx.');
+}
 if (!builtHtml.includes('var PRECOMPILED_BUILD = true;')) {
   fail('dist/index.html is not marked as a precompiled build.');
 }

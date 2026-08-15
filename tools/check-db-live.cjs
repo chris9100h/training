@@ -100,7 +100,10 @@ const docSections = new Map();
 
 // Realtime publication: expected zane_ members. Foreign (non-zane) tables in
 // the same database are reported as info only.
-const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes', 'zane_user_settings', 'zane_checkins']);
+// Social and Coaching use private Broadcast invalidations. Their Postgres
+// Changes tables are deliberately absent from the normal publication; the
+// reversible admin transport switch restores them only during an emergency.
+const EXPECTED_REALTIME = new Set();
 
 // Functions where anon EXECUTE is intentional (documented in docs/database.md,
 // "Grant-Fallen"). Every other function must have anon_exec === false.
@@ -129,6 +132,12 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
   'bump_api_usage(uuid, text, integer)',
   'collapse_water_logs()',
   'admin_schema_inventory()',
+  'db_health()',
+  'social_take_notification_rate_limit(uuid)',
+  'social_can_notify_message(uuid, uuid)',
+  'social_can_notify_finished_comment(uuid, uuid)',
+  'social_can_notify_friend_started(text, uuid)',
+  'social_can_notify_friend_request(uuid, uuid)',
 ]);
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -136,14 +145,14 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
 function fromStoreJs(re, label) {
   const m = read('src/store.js').match(re);
   if (!m) throw new Error(`could not parse ${label} from src/store.js`);
-  return m[1];
+  return m[1] || m[2];
 }
 
 const SUPABASE_URL =
-  process.env.SUPABASE_URL || fromStoreJs(/const SUPABASE_URL = '([^']+)'/, 'SUPABASE_URL');
+  process.env.SUPABASE_URL || fromStoreJs(/const SUPABASE_URL\s*=\s*[\s\S]*?['"]([^'"]+)['"]/, 'SUPABASE_URL');
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
-  fromStoreJs(/const SUPABASE_ANON_KEY = '([^']+)'/, 'SUPABASE_ANON_KEY');
+  fromStoreJs(/const SUPABASE_ANON_KEY\s*=\s*[\s\S]*?['"]([^'"]+)['"]/, 'SUPABASE_ANON_KEY');
 const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 const args = process.argv.slice(2);

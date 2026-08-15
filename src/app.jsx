@@ -12,6 +12,8 @@ const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
 // and must not be allowed to wipe the local pending diff.
 const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 
+const ADMIN_SUPPORT_EMAIL = 'office@btc-prime.biz';
+
 // Entries newer than the last-seen id. New users / first run after the feature
 // shipped (no stored id) get just the latest, not the whole back catalogue.
 function unseenWhatsNew() {
@@ -169,6 +171,35 @@ function askControllerSwVersion(timeoutMs = 1500) {
   });
 }
 
+// App-shell versions are intentionally monotonic. A late response from an old
+// worker, or a briefly stale network read, must never move the durable marker
+// backwards and turn that old version into a fresh update forever.
+function compareSwVersions(a, b) {
+  const parse = (value) => {
+    const m = String(value || '').match(/^zane-v(\d+)\.(\d+)$/);
+    return m ? [Number(m[1]), Number(m[2])] : null;
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (!left || !right) return null;
+  return left[0] - right[0] || left[1] - right[1];
+}
+
+function isNewerSwVersion(candidate, current) {
+  const compared = compareSwVersions(candidate, current);
+  return compared == null ? candidate !== current : compared > 0;
+}
+
+function rememberAppliedSwVersion(version) {
+  if (!version) return;
+  try {
+    const stored = localStorage.getItem('logbook-sw-version');
+    if (!stored || isNewerSwVersion(version, stored)) {
+      localStorage.setItem('logbook-sw-version', version);
+    }
+  } catch (_) {}
+}
+
 // Records which app-shell version is now actually running, so the banner is not
 // re-offered for an update that has already been applied.
 //
@@ -190,7 +221,10 @@ function askControllerSwVersion(timeoutMs = 1500) {
 //     stores the raw `const CACHE = '...'` string, hence putting it back on.
 async function persistAppliedSwVersion(fallback) {
   let applied = await askControllerSwVersion();
-  if (!applied) applied = fallback || null;
+  // During controllerchange the message can still reach the old worker for a
+  // moment. The network version that triggered this update is the stronger
+  // signal when it is newer than that response.
+  if (fallback && (!applied || isNewerSwVersion(fallback, applied))) applied = fallback;
   if (!applied) {
     try {
       const version = await Promise.race([
@@ -200,10 +234,64 @@ async function persistAppliedSwVersion(fallback) {
       if (version) applied = 'zane-' + version;
     } catch (_) {}
   }
-  if (applied) { try { localStorage.setItem('logbook-sw-version', applied); } catch (_) {} }
+  rememberAppliedSwVersion(applied);
 }
 
-function UpdateBanner({ onUpdate }) {
+const DEFERRED_UPDATE_STORAGE = 'logbook-update-deferred';
+
+function readDeferredUpdate() {
+  try { return localStorage.getItem(DEFERRED_UPDATE_STORAGE); } catch (_) { return null; }
+}
+
+function isDeferredUpdateKey(key) {
+  const deferred = readDeferredUpdate();
+  return deferred === key || deferred === 'waiting';
+}
+
+function writeDeferredUpdate(value) {
+  try {
+    if (value) localStorage.setItem(DEFERRED_UPDATE_STORAGE, value);
+    else localStorage.removeItem(DEFERRED_UPDATE_STORAGE);
+  } catch (_) {}
+}
+
+function isTextEntryElement(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
+function UpdateBanner({ onUpdate, onDefer, updating, compact = false }) {
+  if (compact) {
+    return (
+      <div style={{
+        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+        left: 14, right: 14, zIndex: 9999,
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 12px', borderRadius: 6,
+        background: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
+        border: `1px solid ${UI.goldSoft}`,
+        boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+        textShadow: 'var(--text-lift)',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em' }}>
+            UPDATE READY
+          </div>
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.35, marginTop: 2 }}>
+            We will offer it again on Home when you are done here.
+          </div>
+        </div>
+        <button onClick={onDefer} disabled={updating} style={{
+          flexShrink: 0, padding: '8px 10px', borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+          letterSpacing: '0.06em', cursor: updating ? 'default' : 'pointer',
+          opacity: updating ? 0.45 : 1, textShadow: 'none',
+        }}>
+          LATER
+        </button>
+      </div>
+    );
+  }
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
@@ -240,15 +328,25 @@ function UpdateBanner({ onUpdate }) {
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
           A fresh update is ready to install. This only takes a second.
         </div>
-        <button onClick={onUpdate} style={{
+        <button onClick={onUpdate} disabled={updating} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', textShadow: 'none',
+          letterSpacing: '0.06em', textShadow: 'none', opacity: updating ? 0.65 : 1,
         }}>
-          UPDATE NOW
+          {updating ? 'UPDATING...' : 'UPDATE NOW'}
+        </button>
+        <button onClick={onDefer} disabled={updating} style={{
+          width: '100%', padding: '10px 0',
+          borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+          background: 'transparent', color: UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', cursor: updating ? 'default' : 'pointer',
+          opacity: updating ? 0.45 : 1, textShadow: 'none',
+        }}>
+          LATER
         </button>
       </div>
     </div>
@@ -388,6 +486,25 @@ function mergeStagedCollection(key, freshRows, curRows, baseRows) {
   return [...localOnly, ...LB.mergeCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds)];
 }
 
+// Profile identity edits can happen while the staged boot payload is still
+// hydrating. Merge only fields that changed locally; never let a stale local
+// email/tier or an old cache without the new fields replace the fresh profile.
+function mergeProfileIdentity(fresh, cur, base) {
+  const merged = { ...(fresh || {}) };
+  const keys = ['name', 'xHandle', 'xHandlePublic', 'xHandlePromptOptedOut'];
+  if (!cur?.user) return merged;
+  if (!base?.user) {
+    if (cur.user.name) merged.name = cur.user.name;
+    return merged;
+  }
+  for (const key of keys) {
+    if (cur.user[key] !== undefined && JSON.stringify(cur.user[key]) !== JSON.stringify(base.user?.[key])) {
+      merged[key] = cur.user[key];
+    }
+  }
+  return merged;
+}
+
 // A first-install boot renders its essential payload while secondary tables
 // hydrate. Any edit made during that short window must survive the full server
 // response exactly like an edit made against the normal persisted cache.
@@ -417,13 +534,17 @@ function mergeStagedBootStore(fresh, cur, base) {
   if (JSON.stringify(cur.nextReminderAt) !== JSON.stringify(base.nextReminderAt)) {
     merged.nextReminderAt = cur.nextReminderAt;
   }
-  if (JSON.stringify(cur.user?.name) !== JSON.stringify(base.user?.name)) {
-    merged.user = { ...fresh.user, name: cur.user?.name || fresh.user?.name || '' };
-  }
+  merged.user = mergeProfileIdentity(fresh.user, cur, base);
   merged.planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base.planDrafts);
   merged.adaptiveTdeeHistory = LB.mergeAdaptiveTdeeHistory(
     fresh.adaptiveTdeeHistory || [], cur.adaptiveTdeeHistory || []
   );
+  // The admin support badge is an in-memory server-derived value, so it is not
+  // present in either boot payload. Keep it when staged hydration replaces the
+  // essential store after the app has already started rendering.
+  if (Object.prototype.hasOwnProperty.call(cur, 'adminSupportUnread')) {
+    merged.adminSupportUnread = cur.adminSupportUnread;
+  }
   for (const key of Object.keys(cur)) {
     if (!(key in fresh) && JSON.stringify(cur[key]) !== JSON.stringify(base[key])) merged[key] = cur[key];
   }
@@ -433,6 +554,7 @@ function mergeStagedBootStore(fresh, cur, base) {
 function App() {
   const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
+  const [authStatus, setAuthStatus] = useStateA('booting'); // 'booting' | 'online' | 'recovering' | 'reauth-required'
   // Detect invite/password-reset link before Supabase clears the hash
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
@@ -442,10 +564,17 @@ function App() {
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
+  const [runtimeConfig, setRuntimeConfig] = useStateA(() => LB.getCachedRuntimeConfig());
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
-  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings "Test update banner" bypasses the in-progress/onboarding hold-backs below
+  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings test queues the banner for the next safe Home view
+  const [updateApplying, setUpdateApplying] = useStateA(false);
+  const [openSheetCount, setOpenSheetCount] = useStateA(0);
+  const [textEntryFocused, setTextEntryFocused] = useStateA(false);
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
+  const [whatsNewSettled, setWhatsNewSettled] = useStateA(false);
+  const [xHandlePromptPending, setXHandlePromptPending] = useStateA(false);
+  const [xHandlePromptOpen, setXHandlePromptOpen] = useStateA(false);
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
@@ -456,6 +585,11 @@ function App() {
   // exactly like before whatsnew.js became a lazy load.
   const storeRefA = useRefA(store);
   storeRefA.current = store;
+  // Support unread counts are UI state, not part of the persisted user store.
+  // Keep a synchronous copy so a boot merge cannot race a realtime callback
+  // that has not rendered yet.
+  const adminSupportUnreadRef = useRefA(null);
+  adminSupportUnreadRef.current = store?.adminSupportUnread ?? 0;
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
@@ -469,10 +603,13 @@ function App() {
     } catch (_) { return null; }
   });
   const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
+  const xHandlePromptCheckedUser  = useRefA(null); // once per user per boot, never re-prompt after onboarding completes in-place
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
+  const updateApplyInFlight       = useRefA(false);
+  const updateReloadStarted       = useRefA(false);
   const intentionalSignOut        = useRefA(null);  // ms timestamp, set right before a user-initiated LB.signOut() call
   const swReg                     = useRefA(null);
   const prevStore                 = useRefA(null);
@@ -482,34 +619,118 @@ function App() {
   const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
+  const authStatusRef             = useRefA('booting'); // blocks writes while Auth is unavailable
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
   const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
+  const previousRouteName         = useRefA(null);
   const foregroundRefresh         = useRefA(null); // one in-flight health refresh across all foreground events
   const lastForegroundRefreshAt   = useRefA(0);    // start time of the last accepted soft refresh
   const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
   const stagedBootHydrating       = useRefA(false); // prevents feature-on effects duplicating stage two queries
   const previousMedsEnabled       = useRefA(null);
+  const adminSupportUnreadRevision = useRefA(0);
+  const adminSupportUnreadRequest  = useRefA(0);
 
   useEffectA(() => {
     userIdRef.current = userId;
     previousMedsEnabled.current = null;
+    adminSupportUnreadRevision.current += 1;
+    adminSupportUnreadRequest.current += 1;
+    adminSupportUnreadRef.current = null;
   }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
+  useEffectA(() => { authStatusRef.current = authStatus; }, [authStatus]);
+  // React state updates are batched. Recovery code often needs to start a
+  // pending sync in the same tick as it marks Auth online, so update the ref
+  // synchronously as well as the visible state.
+  const setAuthState = useCallbackA((next) => {
+    authStatusRef.current = next;
+    setAuthStatus(next);
+  }, []);
   useEffectA(() => { routeRef.current = route; }, [route]);
+  useEffectA(() => {
+    const onRuntimeConfig = event => setRuntimeConfig(event.detail || LB.getCachedRuntimeConfig());
+    window.addEventListener('zane-runtime-config', onRuntimeConfig);
+    return () => window.removeEventListener('zane-runtime-config', onRuntimeConfig);
+  }, []);
+
+  useEffectA(() => {
+    const onAuthDegraded = () => {
+      setAuthState('recovering');
+      setSyncStatus('error');
+    };
+    const onAuthRecovered = () => {
+      setAuthState('online');
+    };
+    window.addEventListener('zane-auth-degraded', onAuthDegraded);
+    window.addEventListener('zane-auth-recovered', onAuthRecovered);
+    return () => {
+      window.removeEventListener('zane-auth-degraded', onAuthDegraded);
+      window.removeEventListener('zane-auth-recovered', onAuthRecovered);
+    };
+  }, [setAuthState]);
+
+  // A route name alone cannot tell whether the Home screen is covered by a
+  // quick-action sheet or whether a native field still owns the keyboard.
+  // Sheet publishes its stack depth through this tiny app-wide signal so an
+  // update can wait for a genuinely safe surface before reloading.
+  useEffectA(() => {
+    const syncSheetAndFocus = () => {
+      const count = Number(window.__zaneOpenSheetCount || 0);
+      const typing = isTextEntryElement(document.activeElement);
+      setOpenSheetCount(n => n === count ? n : count);
+      setTextEntryFocused(v => v === typing ? v : typing);
+    };
+    syncSheetAndFocus();
+    window.addEventListener('zane-sheet-state', syncSheetAndFocus);
+    window.addEventListener('focusin', syncSheetAndFocus);
+    window.addEventListener('focusout', syncSheetAndFocus);
+    return () => {
+      window.removeEventListener('zane-sheet-state', syncSheetAndFocus);
+      window.removeEventListener('focusin', syncSheetAndFocus);
+      window.removeEventListener('focusout', syncSheetAndFocus);
+    };
+  }, []);
   useEffectA(() => {
     if (phase === 'ready') window.__startScreenWarmup?.();
   }, [phase]);
 
+  // Support unread counts are intentionally not persisted, because they are a
+  // server-derived inbox value. The revision guard prevents an RPC started
+  // before a realtime note from overwriting the newer local increment.
+  const refreshAdminSupportUnread = useCallbackA(() => {
+    if (storeRefA.current?.user?.email !== ADMIN_SUPPORT_EMAIL) return Promise.resolve();
+    const revision = adminSupportUnreadRevision.current;
+    const request = ++adminSupportUnreadRequest.current;
+    return LB.supabase.rpc('get_support_chats').then(({ data, error }) => {
+      if (error || request !== adminSupportUnreadRequest.current || revision !== adminSupportUnreadRevision.current) return;
+      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
+      adminSupportUnreadRef.current = unread;
+      setStore(s => {
+        if (!s || s.user?.email !== ADMIN_SUPPORT_EMAIL) return s;
+        return (s.adminSupportUnread || 0) === unread ? s : { ...s, adminSupportUnread: unread };
+      });
+    }).catch(() => {});
+  }, []);
+
   // Boot-time admin support unread count
   useEffectA(() => {
-    if (store?.user?.email !== 'office@btc-prime.biz') return;
-    LB.supabase.rpc('get_support_chats').then(({ data }) => {
-      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
-      setStore(s => s ? { ...s, adminSupportUnread: unread } : s);
-    }).catch(() => {});
-  }, [store?.user?.email]);
+    if (store?.user?.email !== ADMIN_SUPPORT_EMAIL) return;
+    refreshAdminSupportUnread();
+  }, [store?.user?.email, refreshAdminSupportUnread]);
+
+  // Reconcile once the admin returns to the foreground as a recovery path for
+  // a realtime channel that was suspended while the tab was hidden.
+  useEffectA(() => {
+    if (store?.user?.email !== ADMIN_SUPPORT_EMAIL) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshAdminSupportUnread();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [store?.user?.email, refreshAdminSupportUnread]);
 
   // Auto-seed the system CARDIO exercise once per user (if missing or deleted).
   useEffectA(() => {
@@ -912,6 +1133,32 @@ function App() {
     return () => document.removeEventListener('visibilitychange', clearDelivered);
   }, []);
 
+  const deferUpdate = useCallbackA(() => {
+    // The local test banner has no real pending version. It is only a preview
+    // of the UI, so closing it should not create a phantom update reminder.
+    if (forceShowUpdateBanner && !updateAvailable) {
+      setForceShowUpdateBanner(false);
+      return;
+    }
+    const key = pendingSwVersion.current
+      || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+    writeDeferredUpdate(key);
+    setUpdateAvailable(false);
+    setForceShowUpdateBanner(false);
+  }, [forceShowUpdateBanner, updateAvailable]);
+
+  // All successful handoffs, including the timeout recovery path, use this
+  // single gate. The old flow had one reload in controllerchange and another
+  // in applyUpdate's timeout branch, so a fast controllerchange could trigger
+  // two navigations for one tap.
+  const reloadAfterUpdate = useCallbackA(() => {
+    if (updateReloadStarted.current) return;
+    updateReloadStarted.current = true;
+    writeDeferredUpdate(null);
+    persistAppliedSwVersion(pendingSwVersion.current)
+      .finally(() => window.location.reload());
+  }, []);
+
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
@@ -923,7 +1170,9 @@ function App() {
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed') {
             waitingWorker.current = worker;
-            setUpdateAvailable(true);
+            const key = pendingSwVersion.current
+              || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+            if (!isDeferredUpdateKey(key)) setUpdateAvailable(true);
           }
         });
       };
@@ -935,12 +1184,14 @@ function App() {
         // update moments ago, so take the worker silently. onControllerChange then
         // records the version without reloading, because intentionalUpdate is false.
         let coldBoot = false;
-        try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; } catch (_) {}
+        try { coldBoot = window.__ZANE_COLD_BOOT === true; } catch (_) {}
         if (coldBoot) {
           reg.waiting.postMessage({ type: 'SKIP_WAITING' });
         } else {
           waitingWorker.current = reg.waiting;
-          setUpdateAvailable(true);
+          const key = pendingSwVersion.current
+            || (pendingForceNonce.current ? `force:${pendingForceNonce.current}` : 'waiting');
+          if (!isDeferredUpdateKey(key)) setUpdateAvailable(true);
         }
       } else if (!reg.installing) {
         // Nothing pending: whatever controls this page right now IS the current
@@ -964,16 +1215,20 @@ function App() {
       // Only the RELOAD is gated on this tab having asked for it. Persisting
       // here rather than on the click is what keeps an update that never
       // activates (tab closed, SKIP_WAITING lost) being re-offered later.
-      const persisted = persistAppliedSwVersion(pendingSwVersion.current);
-      // .finally, so a failure or timeout while recording the version can never
-      // cost the user the reload they actually asked for.
-      if (intentionalUpdate.current) persisted.finally(() => window.location.reload());
+      if (intentionalUpdate.current) reloadAfterUpdate();
+      else persistAppliedSwVersion(pendingSwVersion.current);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
+    if (updateApplyInFlight.current || updateReloadStarted.current) return;
+    updateApplyInFlight.current = true;
+    setUpdateApplying(true);
+    setUpdateAvailable(false);
+    setForceShowUpdateBanner(false);
+
     // A force-update broadcast (admin_force_update) isn't tied to an actual
     // SW change, so there's no "wait for activation" step to persist it
     // after, clicking Update always leads to a fresh reload one way or
@@ -1016,17 +1271,11 @@ function App() {
       const controllerBefore = navigator.serviceWorker.controller;
       const waitingBefore = swReg.current?.waiting || null;
       intentionalUpdate.current = true;
-      worker.postMessage({ type: 'SKIP_WAITING' });
-      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
-      // this page almost immediately, but a backgrounded/suspended tab (iOS
-      // throttles a PWA the instant it loses foreground, which can happen
-      // right after this tap) can swallow that event entirely: intentionalUpdate
-      // stays true forever with nothing to reload it, and the version is never
-      // persisted, so the next foreground/route check (checkSwUpdate) sees the
-      // exact same "new" version again and re-shows the banner, forever
-      // (confirmed: this produced a repeating update-banner loop). Race a
-      // timeout against the real event so this path always resolves.
-      activatedViaWorker = await new Promise(resolve => {
+      // Register before posting. A fast worker can claim this page in the same
+      // turn; registering afterwards was the second half of the double-reload
+      // race because the global handler saw controllerchange while this local
+      // timeout path missed it.
+      const activation = new Promise(resolve => {
         const t = setTimeout(() => {
           navigator.serviceWorker.removeEventListener('controllerchange', h);
           resolve(false);
@@ -1038,6 +1287,17 @@ function App() {
         }
         navigator.serviceWorker.addEventListener('controllerchange', h);
       });
+      worker.postMessage({ type: 'SKIP_WAITING' });
+      // skipWaiting()/clients.claim() should fire 'controllerchange' back on
+      // this page almost immediately, but a backgrounded/suspended tab (iOS
+      // throttles a PWA the instant it loses foreground, which can happen
+      // right after this tap) can swallow that event entirely: intentionalUpdate
+      // stays true forever with nothing to reload it, and the version is never
+      // persisted, so the next foreground/route check (checkSwUpdate) sees the
+      // exact same "new" version again and re-shows the banner, forever
+      // (confirmed: this produced a repeating update-banner loop). Race a
+      // timeout against the real event so this path always resolves.
+      activatedViaWorker = await activation;
       // A timeout is NOT proof the handoff failed. The suspended-page case this
       // exists for swallows the event while the worker activates normally with
       // a fully populated cache, and falling through to the wipe below would
@@ -1062,8 +1322,7 @@ function App() {
           && waitingBefore.state !== 'redundant'
           && waitingBefore.state !== 'installed';
         if (controllerMoved || waitingCleared) {
-          await persistAppliedSwVersion(pendingSwVersion.current);
-          window.location.reload();
+          reloadAfterUpdate();
           return;
         }
       }
@@ -1086,6 +1345,7 @@ function App() {
       if (pendingSwVersion.current) {
         try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
       }
+      writeDeferredUpdate(null);
       await LB.clearCachesAndReload();
     }
   }, []);
@@ -1140,6 +1400,10 @@ function App() {
     // scheduled with the old uid could otherwise fire after an account switch
     // and upsert one account's data stamped with another's user_id.
     if (uid !== userIdRef.current) return;
+    // Auth recovery must finish before an RLS write is attempted. Keeping the
+    // pending snapshot local is safer than firing a burst of guaranteed 401s
+    // while the refresh endpoint is recovering.
+    if (authStatusRef.current !== 'online') return;
     if (syncing.current) return;
     const target = pendingStore.current;
     if (!target || target === syncBase.current || !uid) return;
@@ -1213,7 +1477,47 @@ function App() {
   // session, dead network) and the local cache/pending diff is preserved.
   const markIntentionalSignOut = useCallbackA(() => { intentionalSignOut.current = Date.now(); }, []);
 
-  const loadData = async (uid) => {
+  // A transient Auth outage gets a quiet, jitter-free retry loop. The first
+  // attempt is five seconds out, then backs off to one minute. There is never
+  // a parallel refresh storm: the Auth client itself serializes refreshes and
+  // this effect owns the outer retry timer.
+  useEffectA(() => {
+    if (authStatus !== 'recovering') return undefined;
+    let cancelled = false;
+    let delay = 5000;
+    let timer = null;
+    const attempt = async () => {
+      if (cancelled) return;
+      if (!navigator.onLine) {
+        timer = setTimeout(attempt, delay);
+        return;
+      }
+      const session = await LB.recoverAuthSession();
+      if (cancelled) return;
+      if (session?.user?.id) {
+        const uid = session.user.id;
+        LB.rememberOfflineUser(uid);
+        LB.clearAuthRecovery();
+        setAuthState('online');
+        if (userIdRef.current !== uid) {
+          userIdRef.current = uid;
+          setUserId(uid);
+        }
+        loadData(uid);
+        if (pendingStore.current !== syncBase.current) flushSync(uid);
+        return;
+      }
+      delay = Math.min(delay * 2, 60000);
+      timer = setTimeout(attempt, delay);
+    };
+    // Do not immediately compete with the failed boot request. The online
+    // event handler below may probe sooner when the browser has just regained
+    // connectivity; ordinary Auth failures wait five seconds first.
+    timer = setTimeout(attempt, delay);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [authStatus, flushSync, setAuthState]);
+
+  const loadData = async (uid, { offlineOnly = false } = {}) => {
     // Generation stamp: SIGNED_OUT and every newer loadData bump this, and
     // nothing below writes to the store, the diff base or the local cache
     // unless it is still the newest load for the CURRENT user. Without it a
@@ -1231,9 +1535,28 @@ function App() {
       // tell apart locally-changed-but-unsynced settings from server state.
       const base = localState.base;
       syncBase.current = base || cached;
+      pendingStore.current = cached;
       setStore(cached);
       setPhase('ready');
-      const bootRefresh = LB.loadFromSupabase(uid);
+      if (offlineOnly) {
+        // Cached training remains usable while Auth is recovering. Do not
+        // start the normal boot refresh here: every request would be rejected
+        // without a usable JWT and would only add pressure to the outage.
+        setSyncStatus('error');
+        return;
+      }
+      // Cached devices render immediately, then spread their background boot
+      // refresh over 15 seconds. A fleet-wide reload can no longer turn into
+      // one synchronized request spike.
+      const bootRefresh = new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 15001)))
+        .then(() => {
+          if (isStale()) {
+            const error = new Error('Stale boot refresh');
+            error.code = 'STALE_BOOT';
+            throw error;
+          }
+          return LB.loadFromSupabase(uid);
+        });
       foregroundRefresh.current = bootRefresh;
       lastForegroundRefreshAt.current = Date.now();
       bootRefresh
@@ -1513,6 +1836,10 @@ function App() {
             if (!base && fresh.settings.unit == null) mergedSettings.unit = null;
             merged = {
               ...fresh,
+              // This admin-only counter is deliberately omitted from the
+              // server payload and local snapshots. Preserve the live value
+              // while replacing the rest of the boot state.
+              adminSupportUnread: adminSupportUnreadRef.current ?? cur?.adminSupportUnread ?? 0,
               // Local cache is authoritative for scalar settings (preserves
               // offline edits), except a server-side unit of null (admin reset
               // / not chosen) must win so the picker re-fires, since the cache
@@ -1520,7 +1847,7 @@ function App() {
               settings: mergedSettings,
               ...bootScalars,
               statusPeriods,
-              user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
+              user: mergeProfileIdentity(fresh.user, cur, base),
               inProgress: activeExists ? inProgressId : null,
               sessions,
               exercises: [...localOnlyExercises, ...mergeById(fresh.exercises, cur.exercises, base?.exercises, delExIds)],
@@ -1563,12 +1890,17 @@ function App() {
           }
           prevStore.current = merged;
           setStore(merged);
+          refreshAdminSupportUnread();
         })
         .catch(err => { if (!isStale()) console.error(err); })
         .finally(() => {
           if (foregroundRefresh.current === bootRefresh) foregroundRefresh.current = null;
         });
     } else {
+      if (offlineOnly) {
+        setPhase('error');
+        return;
+      }
       setPhase('loading');
       let essentialBase = null;
       stagedBootHydrating.current = true;
@@ -1602,6 +1934,7 @@ function App() {
         pendingStore.current = hydrated;
         setStore(hydrated);
         setPhase('ready');
+        refreshAdminSupportUnread();
       } catch (e) {
         if (isStale()) { stagedBootHydrating.current = false; return; }
         stagedBootHydrating.current = false;
@@ -1614,17 +1947,45 @@ function App() {
     }
   };
 
+  // Reopen the last authenticated account's local cache without pretending
+  // that the browser currently has a server-valid JWT. This is intentionally
+  // limited to the short recovery lease written by store.js and never runs
+  // after an explicit logout or a permanent Auth rejection.
+  const enterOfflineCache = (uid) => {
+    if (!uid) { setPhase('error'); return; }
+    userIdRef.current = uid;
+    setUserId(uid);
+    setAuthState('recovering');
+    setSyncStatus('error');
+    loadData(uid, { offlineOnly: true });
+  };
+
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) {
+          LB.rememberOfflineUser(session.user.id);
+          LB.clearAuthRecovery();
+          setAuthState('online');
           setUserId(session.user.id);
           if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
           else loadData(session.user.id);
         }
-        // Offline with no restorable session: show the error screen, not the
-        // login screen, you can't sign in offline, and a retry recovers.
-        else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
+        else {
+          const offlineUser = LB.getOfflineUser();
+          const recovery = LB.getAuthRecoveryState();
+          // A fresh transient-auth marker means the SDK retained the session
+          // but could not refresh it. When the browser is genuinely offline,
+          // the same cached boot is safe even without that marker.
+          if (offlineUser && (recovery || !navigator.onLine)) enterOfflineCache(offlineUser.userId);
+          // With no recovery lease, this is a real first boot or a permanent
+          // Auth rejection. Do not expose cached health data as if the user
+          // were still server-authenticated.
+          else {
+            setAuthState('reauth-required');
+            setPhase(navigator.onLine ? 'unauthed' : 'error');
+          }
+        }
       } else if (event === 'SIGNED_IN') {
         // Re-arm the onboarding check for the freshly signed-in user. The ref is
         // a one-shot guard that survives in-session account switches (logout →
@@ -1639,15 +2000,33 @@ function App() {
         // stale pending state.
         clearTimeout(retryTimer.current);
         pendingStore.current = null;
+        LB.rememberOfflineUser(session.user.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
+      } else if (event === 'TOKEN_REFRESHED') {
+        const wasRecovering = authStatusRef.current !== 'online';
+        LB.rememberOfflineUser(session?.user?.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
+        if (wasRecovering && session?.user?.id && session.user.id === userIdRef.current) {
+          // The offline cache was intentionally not refreshed while Auth was
+          // down. Re-enter the normal cache-first boot path now that the JWT
+          // is valid again; its merge preserves any local pending edits.
+          loadData(session.user.id);
+          if (pendingStore.current !== syncBase.current) flushSync(session.user.id);
+        }
       } else if (event === 'PASSWORD_RECOVERY') {
         // Supabase fires this (in addition to or instead of SIGNED_IN) when a
         // recovery link is clicked, handle it explicitly so the reset screen
         // always appears regardless of whether the implicit-flow hash is present.
         recoveryInProgress.current = true;
         isRecoveryFlow.current = true;
+        LB.rememberOfflineUser(session.user.id);
+        LB.clearAuthRecovery();
+        setAuthState('online');
         setUserId(session.user.id);
         setPhase('invite');
       } else if (event === 'SIGNED_OUT') {
@@ -1670,7 +2049,18 @@ function App() {
         const armedAt = intentionalSignOut.current;
         const armed = !!armedAt && (Date.now() - armedAt) < INTENTIONAL_SIGNOUT_TTL_MS;
         intentionalSignOut.current = null;
-        if (!armed) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
+        if (!armed) {
+          setAuthState('reauth-required');
+          setSyncStatus('error');
+          const offlineUser = LB.getOfflineUser();
+          const recovery = LB.getAuthRecoveryState();
+          if (phaseRef.current === 'ready') return;
+          if (offlineUser && recovery) enterOfflineCache(offlineUser.userId);
+          else setPhase('error');
+          return;
+        }
+        LB.clearOfflineUser();
+        LB.clearAuthRecovery();
         LB.clearLocal(userIdRef.current);
         clearTimeout(retryTimer.current);
         setStore(null);
@@ -1729,10 +2119,18 @@ function App() {
   // same reasoning as before: this only ever needs to run once per
   // ready-transition, not on every store update.
   useEffectA(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready') {
+      setWhatsNewSettled(false);
+      return;
+    }
     const s = storeRefA.current;
-    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) return;
+    if (s && !onboardingChecked.current && onboardingOwnsBoot(s)) {
+      setWhatsNewSettled(true);
+      return;
+    }
+    setWhatsNewSettled(false);
     let live = true;
+    const settled = () => { if (live) setWhatsNewSettled(true); };
     window.__ensureWhatsNew().then(() => {
       if (!live) return;
       // Re-check after the await, not only before it: the onboarding effect
@@ -1741,10 +2139,11 @@ function App() {
       // its synchronous setWhatsNew(null) would otherwise be overwritten right
       // here, leaving a What's New card mounted behind the onboarding overlay
       // that surfaces the moment onboarding is dismissed.
-      if (onboardingOwnsBoot(storeRefA.current)) return;
+      if (onboardingOwnsBoot(storeRefA.current)) { settled(); return; }
       const unseen = unseenWhatsNew();
       if (unseen.length) setWhatsNew(unseen);
-    }).catch(() => {}); // best-effort: a failed lazy fetch just means no What's New this session
+      settled();
+    }, settled); // best-effort: a failed lazy fetch just means no What's New this session
     return () => { live = false; };
   }, [phase]);
 
@@ -1796,6 +2195,42 @@ function App() {
     if (phase === 'ready' && store && store.settings?.unit == null) setUnitPromptOpen(true);
   }, [phase, store?.settings?.unit]);
 
+  // X handle prompt: evaluate only once per signed-in user per boot. A fresh
+  // account deliberately gets no prompt in this boot: the Unit Picker and
+  // onboarding own the first-run flow, and the handle prompt starts on the
+  // next normal app start instead. Returning users become pending here and
+  // wait for What's New and every higher-priority overlay to clear below.
+  useEffectA(() => {
+    if (phase !== 'ready' || !store || !userId) return;
+    if (xHandlePromptCheckedUser.current === userId) return;
+    xHandlePromptCheckedUser.current = userId;
+    if (store.settings?.unit == null || !store.settings?.onboardingCompleted || onboardingOwnsBoot(store)) return;
+    if (store.user?.xHandle || store.user?.xHandlePromptOptedOut) return;
+    setXHandlePromptPending(true);
+  }, [phase, userId, store?.settings?.unit, store?.settings?.onboardingCompleted, store?.user?.xHandle, store?.user?.xHandlePromptOptedOut]);
+
+  // Do not stack the prompt over What's New, an update, a share link, a sheet,
+  // a keyboard, or an in-progress session. The pending flag survives all of
+  // those surfaces and opens as soon as the user is back on a quiet Home tab.
+  useEffectA(() => {
+    if (!xHandlePromptPending || phase !== 'ready' || !store || route.name !== 'home') return;
+    if (!whatsNewSettled || whatsNew || onboardingState || unitPromptOpen || pendingShare ||
+        autoCloseNotify || forceShowUpdateBanner || updateAvailable || openSheetCount > 0 ||
+        textEntryFocused || store.inProgress) return;
+    setXHandlePromptPending(false);
+    setXHandlePromptOpen(true);
+  }, [xHandlePromptPending, phase, store, route.name, whatsNewSettled, whatsNew, onboardingState, unitPromptOpen, pendingShare, autoCloseNotify, forceShowUpdateBanner, updateAvailable, openSheetCount, textEntryFocused]);
+
+  // Sign-out/account switches must not carry a modal or a once-per-boot latch
+  // into the next identity.
+  useEffectA(() => {
+    if (phase !== 'ready') {
+      xHandlePromptCheckedUser.current = null;
+      setXHandlePromptPending(false);
+      setXHandlePromptOpen(false);
+    }
+  }, [phase]);
+
   // Detect an admin-side unit reset on a session that's already open. The
   // cache-first merge keeps the locally cached unit, so a server-side flip to
   // null wouldn't surface on its own. Re-fetch the unit on foreground (like the
@@ -1820,110 +2255,266 @@ function App() {
     return () => document.removeEventListener('visibilitychange', recheck);
   }, [phase, userId, store?.settings?.unit]);
 
-
-
-  // was removed, the local store is the single source of truth for a session.)
-  //
-  // activeCoachClients feeds the two coach-status realtime listeners below
-  // (client training-status / check-in pushes) added to the same channel.
-  // Keyed separately as coachClientsKey (stable string of coachingId:clientId
-  // pairs) so the effect only tears down and re-subscribes when the actual
-  // set of active clients changes (invite accepted/ended), not on every
-  // store update: reloadCoachingState always returns a fresh asCoach array
-  // reference even when its contents are unchanged.
-  // Excludes support_-prefixed pseudo-coaching entries (admin support tickets,
-  // status forced 'active' forever, see store.js's isNoteFromClient/
-  // unreadCoachingNotes for the same established filter): without this the
-  // admin account's list grows roughly one entry per registered user with an
-  // open ticket, churning coachClientsKey (and the whole channel resubscribe)
-  // on every unrelated support chat, and realistically risking the 100-id
-  // in.() filter cap this isn't meant to hit.
-  const activeCoachClients = React.useMemo(() => (
-    (store?.coaching?.asCoach || [])
-      .filter(c => c.status === 'active' && c.clientId && c.id && !c.id.startsWith('support_'))
-      .map(c => ({ clientId: c.clientId, coachingId: c.id }))
-  ), [store?.coaching?.asCoach]);
-  const coachClientsKey = activeCoachClients.map(c => `${c.coachingId}:${c.clientId}`).sort().join(',');
-  // Set by the isCoachActive poll effect below to whatever its current
-  // `poll` closure is; read here (lazily, at event time) so the realtime
-  // listener can trigger a re-poll without a second status-aggregation path.
+  // Coaching Broadcast carries only invalidation types. All relationship,
+  // message, support, and status data is reconciled through RLS/RPC here.
+  // pollFnRef keeps live-client aggregation in the existing status RPC path.
   const pollFnRef = useRefA(null);
   useEffectA(() => {
     if (!userId) return;
-    // A burst of realtime events (several clients finishing sets around the
-    // same time, or one client's settings row updating repeatedly) should
-    // still only trigger one re-poll, not one per event.
+    let disposed = false;
     let debounceTimer = null;
     const triggerPoll = () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => { pollFnRef.current?.(); }, 400);
     };
-    const unsubscribe = LB.subscribeToChanges(
-      userId,
-      (note) => {
-        setStore(s => {
-          if (!s?.coaching) return s;
-          if (note.coachingId?.startsWith('support_')) {
-            // Own support ticket reply → update badge and ticket list
-            const myTicket = (s.supportTickets || []).some(t => t.coachingId === note.coachingId);
-            if (myTicket) {
-              return {
-                ...s,
-                supportUnread: (s.supportUnread || 0) + 1,
-                supportTickets: (s.supportTickets || []).map(t =>
-                  t.coachingId === note.coachingId
-                    ? { ...t, unreadCount: t.unreadCount + 1, lastMessageAt: note.createdAt, lastMessageBody: note.body }
-                    : t
-                ),
-              };
-            }
-            // Admin inbox: increment admin unread counter
-            return { ...s, adminSupportUnread: (s.adminSupportUnread || 0) + 1 };
-          }
-          if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
-          return {
-            ...s,
-            coaching: { ...s.coaching, unreadNotes: [note, ...(s.coaching.unreadNotes || [])] },
-          };
-        });
-      },
-      (eventType, coachingId, newRow) => {
-        if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
-          setStore(s => s ? {
-            ...s,
-            supportTickets: (s.supportTickets || []).filter(t => t.coachingId !== coachingId),
-            supportUnread: Math.max(0, (s.supportUnread || 0) - ((s.supportTickets || []).find(t => t.coachingId === coachingId)?.unreadCount || 0)),
-          } : s);
-          return;
-        }
-        if (eventType === 'UPDATE' && coachingId?.startsWith('support_') && newRow?.support_status) {
-          setStore(s => s ? {
-            ...s,
-            supportTickets: (s.supportTickets || []).map(t =>
-              t.coachingId === coachingId ? { ...t, status: newRow.support_status } : t
-            ),
-          } : s);
-          return;
-        }
-        LB.reloadCoachingState(userId).then(coaching => {
-          // reloadCoachingState rebuilds the relationship data only. Two
-          // fields on store.coaching come from the 60s status poll instead
-          // (anyClientLive, pendingCheckinsCount), and that poll skips its own
-          // setStore while the values look unchanged, so replacing the object
-          // wholesale dropped the live dot and the check-in badge until the
-          // next real change.
-          setStore(s => s ? { ...s, coaching: {
+
+    let coachingInFlight = false;
+    let coachingPending = false;
+    const refreshCoaching = async () => {
+      if (coachingInFlight) { coachingPending = true; return; }
+      coachingInFlight = true;
+      do {
+        coachingPending = false;
+        try {
+          const coaching = await LB.reloadCoachingState(userId);
+          if (!disposed) setStore(s => s ? { ...s, coaching: {
             ...coaching,
             anyClientLive: s.coaching?.anyClientLive,
             pendingCheckinsCount: s.coaching?.pendingCheckinsCount,
           } } : s);
-        }).catch(() => {});
-      },
-      activeCoachClients,
-      triggerPoll,
-    );
-    return () => { clearTimeout(debounceTimer); unsubscribe(); };
-  }, [userId, coachClientsKey]);
+        } catch (_) {}
+      } while (!disposed && coachingPending);
+      coachingInFlight = false;
+    };
+
+    let supportInFlight = false;
+    let supportPending = false;
+    const refreshSupport = async () => {
+      if (supportInFlight) { supportPending = true; return; }
+      supportInFlight = true;
+      do {
+        supportPending = false;
+        if (storeRefA.current?.user?.email === ADMIN_SUPPORT_EMAIL) {
+          adminSupportUnreadRevision.current += 1;
+          await refreshAdminSupportUnread();
+        } else {
+          try {
+            const tickets = await LB.loadUserSupportChats();
+            if (!disposed) setStore(s => s ? {
+              ...s,
+              supportTickets: tickets,
+              supportUnread: tickets.reduce((sum, ticket) => sum + Number(ticket.unreadCount || 0), 0),
+            } : s);
+          } catch (_) {}
+        }
+      } while (!disposed && supportPending);
+      supportInFlight = false;
+    };
+
+    const onChange = resource => {
+      if (resource === 'relationships' || resource === 'notes' || resource === 'authoritative') refreshCoaching();
+      if (resource === 'support' || resource === 'authoritative') refreshSupport();
+      if (resource === 'status' || resource === 'authoritative') triggerPoll();
+    };
+    const unsubscribe = LB.subscribeToChanges(userId, onChange, { transport: runtimeConfig.coachingTransport });
+    return () => {
+      disposed = true;
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
+  }, [userId, runtimeConfig.coachingTransport, refreshAdminSupportUnread]);
+
+  // Social data is deliberately feature-gated. A user who has not enabled the
+  // Friends tab should not trigger any social RPC, table query, realtime
+  // channel, or local-store hydration. Toggling it on while the app is alive
+  // starts the same load path without requiring a remount.
+  const friendsTabEnabled = phase === 'ready' && !!store?.settings?.showFriendsTab;
+  const friendsDataEnabled = friendsTabEnabled && runtimeConfig.socialMode === 'normal';
+  useEffectA(() => {
+    if (!friendsDataEnabled || !userId) {
+      if (storeRefA.current?.friends) setStore(s => s ? { ...s, friends: null } : s);
+      return;
+    }
+    let live = true;
+    let refreshTimer = null;
+    let feedTimer = null;
+    let badgeTimer = null;
+    let socialRefreshInFlight = null;
+    let socialRefreshQueued = false;
+    let feedRefreshInFlight = null;
+    let feedRefreshQueued = false;
+    let messageRefreshInFlight = null;
+    let messageRefreshQueued = false;
+    let badgeRefreshInFlight = null;
+    let liveWorkoutRefreshInFlight = null;
+    const pendingResources = new Set();
+    let feedFailures = 0;
+    let badgeFailures = 0;
+    const refreshWorkoutFeed = (force = false) => {
+      if (!live || routeRef.current.name !== 'friends' || (!force && !storeRefA.current?.friends)) return Promise.resolve();
+      if (feedRefreshInFlight) {
+        feedRefreshQueued = feedRefreshQueued || force;
+        return feedRefreshInFlight;
+      }
+      feedRefreshInFlight = LB.loadSocialWorkoutFeed().then(feed => {
+        if (!live) return;
+        feedFailures = 0;
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...feed } } : s);
+      }).catch(() => { feedFailures += 1; }).finally(() => {
+        feedRefreshInFlight = null;
+        if (feedRefreshQueued && live) {
+          feedRefreshQueued = false;
+          setTimeout(() => refreshWorkoutFeed(true), 0);
+        }
+      });
+      return feedRefreshInFlight;
+    };
+    const refreshMessages = (force = false) => {
+      if (!live) return Promise.resolve();
+      if (messageRefreshInFlight) {
+        messageRefreshQueued = messageRefreshQueued || force;
+        return messageRefreshInFlight;
+      }
+      messageRefreshInFlight = LB.loadSocialMessageState(userId).then(messageState => {
+        if (!live) return;
+        setStore(s => s?.friends ? { ...s, friends: { ...s.friends, ...messageState } } : s);
+      }).catch(() => {}).finally(() => {
+        messageRefreshInFlight = null;
+        if (messageRefreshQueued && live) {
+          messageRefreshQueued = false;
+          setTimeout(() => refreshMessages(true), 0);
+        }
+      });
+      return messageRefreshInFlight;
+    };
+    const refreshBadge = () => {
+      if (!live || badgeRefreshInFlight) return badgeRefreshInFlight || Promise.resolve();
+      badgeRefreshInFlight = LB.loadSocialBadge().then(badge => {
+        badgeFailures = 0;
+        if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...badge } } : s);
+      }).catch(() => { badgeFailures += 1; }).finally(() => { badgeRefreshInFlight = null; });
+      return badgeRefreshInFlight;
+    };
+    // Home only needs the live cards for its small "friend is working out"
+    // banner. Keep the full Friends dashboard and history feed lazy, but make
+    // the live-only snapshot available as soon as the app boots.
+    const refreshLiveWorkoutFeed = () => {
+      if (!live || liveWorkoutRefreshInFlight) return liveWorkoutRefreshInFlight || Promise.resolve();
+      liveWorkoutRefreshInFlight = LB.loadSocialLiveWorkoutFeed().then(feed => {
+        if (!live) return;
+        feedFailures = 0;
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...(s.friends || {}),
+            liveWorkouts: feed?.liveWorkouts || [],
+          },
+        } : s);
+      }).catch(() => { feedFailures += 1; }).finally(() => {
+        liveWorkoutRefreshInFlight = null;
+      });
+      return liveWorkoutRefreshInFlight;
+    };
+    const refreshFriends = (force = false) => {
+      if (!live) return Promise.resolve();
+      if (socialRefreshInFlight) {
+        socialRefreshQueued = socialRefreshQueued || force;
+        return socialRefreshInFlight;
+      }
+      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force }).then(friends => {
+        if (!live) return;
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...friends,
+            liveWorkouts: s.friends?.liveWorkouts || [],
+            workoutHistory: s.friends?.workoutHistory || [],
+          },
+        } : s);
+        // Feed summaries are intentionally staged after Circle and Groups
+        // have their core data, so the first render is not feed-bound.
+        if (routeRef.current.name === 'friends') refreshWorkoutFeed(true);
+      }).catch(() => {}).finally(() => {
+        socialRefreshInFlight = null;
+        if (socialRefreshQueued && live) {
+          socialRefreshQueued = false;
+          clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => refreshFriends(true), 250);
+        }
+      });
+      return socialRefreshInFlight;
+    };
+    if (route.name === 'friends') {
+      if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
+    } else {
+      refreshBadge();
+      if (route.name === 'home') refreshLiveWorkoutFeed();
+    }
+    const nextFailureDelay = failures => [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
+    const scheduleFeed = delay => {
+      clearTimeout(feedTimer);
+      if (!live || routeRef.current.name !== 'friends') return;
+      feedTimer = setTimeout(async () => {
+        await refreshWorkoutFeed();
+        scheduleFeed(feedFailures ? nextFailureDelay(feedFailures) : 10000);
+      }, delay);
+    };
+    if (route.name === 'friends') scheduleFeed(10000);
+
+    const scheduleBadge = delay => {
+      clearTimeout(badgeTimer);
+      if (!live || routeRef.current.name === 'friends') return;
+      badgeTimer = setTimeout(async () => {
+        await refreshBadge();
+        scheduleBadge(badgeFailures ? nextFailureDelay(badgeFailures) : 120000 + Math.floor(Math.random() * 15001));
+      }, delay);
+    };
+    if (route.name !== 'friends') scheduleBadge(120000 + Math.floor(Math.random() * 15001));
+
+    const flushResources = () => {
+      refreshTimer = null;
+      const resources = new Set(pendingResources);
+      pendingResources.clear();
+      if (routeRef.current.name !== 'friends') {
+        refreshBadge();
+        if (routeRef.current.name === 'home'
+            && (resources.has('feed') || resources.has('dashboard') || resources.has('relationships') || resources.has('authoritative'))) {
+          refreshLiveWorkoutFeed();
+        }
+        return;
+      }
+      const onlyTargeted = [...resources].every(resource => resource === 'messages' || resource === 'feed');
+      if (!onlyTargeted || resources.has('authoritative')) refreshFriends(true);
+      else {
+        if (resources.has('messages')) refreshMessages(true);
+        if (resources.has('feed')) refreshWorkoutFeed(true);
+      }
+    };
+    const unsubscribe = LB.subscribeToFriends(userId, resource => {
+      pendingResources.add(resource || 'dashboard');
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(flushResources, 250);
+    }, { transport: runtimeConfig.socialTransport });
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      pendingResources.add('authoritative');
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(flushResources, 250);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      live = false;
+      clearTimeout(refreshTimer);
+      clearTimeout(feedTimer);
+      clearTimeout(badgeTimer);
+      document.removeEventListener('visibilitychange', onVisible);
+      unsubscribe?.();
+    };
+  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name]);
+
+  useEffectA(() => {
+    if (phase === 'ready' && route.name === 'friends' && !friendsTabEnabled) go({ name: 'home' });
+  }, [phase, route.name, friendsTabEnabled]);
 
   // Sync to Supabase + save to localStorage on every store change.
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
@@ -1989,13 +2580,13 @@ function App() {
           try { localStorage.setItem('logbook-sw-version', v); } catch (_) {}
           return;
         }
-        if (v !== stored) {
+        if (v !== stored && isNewerSwVersion(v, stored)) {
           // An update is available. Do NOT advance the stored version here,
           // only applyUpdate persists it. Otherwise after an iOS cold start
           // (in-memory state wiped) stored would already equal v and the
           // update would never be re-offered.
           pendingSwVersion.current = v;
-          setUpdateAvailable(true);
+          if (!isDeferredUpdateKey(v)) setUpdateAvailable(true);
           swReg.current?.update().catch(() => {});
         }
       })
@@ -2016,8 +2607,9 @@ function App() {
     // just logs a guaranteed permission-denied server-side for no reason.
     // Nobody's watching for a force-update broadcast before they're signed in.
     if (phaseRef.current !== 'ready') return;
-    LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
-      if (error || !data) return;
+    return LB.fetchRuntimeConfig().then(config => {
+      const data = config?.forceUpdateNonce;
+      if (!data) return;
       let stored = null;
       try { stored = localStorage.getItem('logbook-force-nonce-seen'); } catch (_) {}
       if (!stored) {
@@ -2026,7 +2618,7 @@ function App() {
       }
       if (data !== stored) {
         pendingForceNonce.current = data;
-        setUpdateAvailable(true);
+        if (!isDeferredUpdateKey(`force:${data}`)) setUpdateAvailable(true);
       }
     }).catch(() => {});
   }, []);
@@ -2034,7 +2626,36 @@ function App() {
   useEffectA(() => { checkSwUpdate(); checkForceUpdate(); }, [route]);
 
   useEffectA(() => {
-    const onVisible = () => { if (document.visibilityState === 'visible') { checkSwUpdate(); checkForceUpdate(); } };
+    if (phase !== 'ready' || !userId) return;
+    let live = true;
+    let timer = null;
+    const poll = async () => {
+      await checkForceUpdate();
+      if (live) timer = setTimeout(poll, 120000);
+    };
+    timer = setTimeout(poll, 120000);
+    return () => { live = false; clearTimeout(timer); };
+  }, [phase, userId, checkForceUpdate]);
+
+  // "Later" is deliberately a one-home-visit deferral. The banner stays out
+  // of an editor or another tab, then returns when the user actually enters
+  // Home again, where applying it cannot discard the flow they were in.
+  useEffectA(() => {
+    const previous = previousRouteName.current;
+    previousRouteName.current = route.name;
+    if (route.name !== 'home' || previous === 'home') return;
+    if (!readDeferredUpdate()) return;
+    writeDeferredUpdate(null);
+    setUpdateAvailable(true);
+  }, [route.name]);
+
+  useEffectA(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      checkSwUpdate();
+      checkForceUpdate();
+      if (phaseRef.current === 'ready') LB.flushSocialNotificationOutbox?.();
+    };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
@@ -2042,9 +2663,19 @@ function App() {
   // Connectivity tracking: offline → red immediately, online → retry or clear
   useEffectA(() => {
     const onOffline = () => setSyncStatus('error');
-    const onOnline  = () => {
-      if (!userId) return;
-      if (pendingStore.current !== syncBase.current) flushSync(userId);
+    const onOnline  = async () => {
+      const session = await LB.recoverAuthSession();
+      const uid = session?.user?.id || userIdRef.current;
+      if (!session && authStatusRef.current !== 'online') {
+        setAuthState('recovering');
+        setSyncStatus('error');
+        return;
+      }
+      if (!uid) return;
+      setAuthState('online');
+      checkForceUpdate();
+      LB.flushSocialNotificationOutbox?.();
+      if (pendingStore.current !== syncBase.current) flushSync(uid);
       else setSyncStatus('synced');
     };
     if (!navigator.onLine) setSyncStatus('error');
@@ -2154,14 +2785,24 @@ function App() {
   window.__goHome = () => go({ name: 'home' });
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
-  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching'];
+  // An update may be installed while the user is anywhere in the app, but a
+  // reload is only safe on a quiet Home surface. Route checks protect editors;
+  // the sheet and focus checks protect quick actions and unsaved text entry.
+  const safeToApplyUpdate = route?.name === 'home'
+    && !store?.inProgress
+    && !onboardingState
+    && openSheetCount === 0
+    && !textEntryFocused;
+
+  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water,
   // food and (opt-in) medications trackers live under the Health tab: keep
   // the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
     : (route.name === 'water' || route.name === 'food' || route.name === 'medications') ? 'health'
+    : (route.name === 'coaching' || route.name === 'friends') ? 'social'
     : route.name;
   const showMeds = !!store?.settings?.medsEnabled;
 
@@ -2174,9 +2815,13 @@ function App() {
   const showHealth = !!store?.settings?.showHealthTab;
   const showWater = !!store?.settings?.showWaterTab;
   const showFood = !!store?.settings?.showFoodTab;
+  const showFriends = !!store?.settings?.showFriendsTab;
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
+  const friendsBadge = showFriends && runtimeConfig.socialMode === 'normal' ? {
+    count: (store?.friends?.unreadCount || 0) + (store?.friends?.incomingCount ?? store?.friends?.incoming?.length ?? 0),
+  } : null;
 
   let screen;
   switch (route.name) {
@@ -2201,11 +2846,14 @@ function App() {
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setForceShowUpdateBanner(true)} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => { setForceShowUpdateBanner(true); go({ name: 'home' }); }} />; break;
     case 'featuremap':        screen = <window.Screens.FeatureMapScreen {...props} />; break;
     case 'autoreg-guide':     screen = <window.Screens.AutoregGuideScreen {...props} mode={route.mode} back={route.back} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} back={route.back} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
+    case 'friends':             screen = runtimeConfig.socialMode === 'maintenance'
+      ? <window.Screens.FriendsMaintenanceScreen {...props} />
+      : <window.Screens.FriendsScreen {...props} initialTab={route.initialTab} />; break;
     case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
@@ -2247,7 +2895,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showFriends={showFriends} friendsBadge={friendsBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
@@ -2259,7 +2907,7 @@ function App() {
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
-      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />}
+      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showFriends={showFriends} friendsBadge={friendsBadge} showHealth={showHealth} showWater={showWater} showFood={showFood} showMeds={showMeds} />}
     </>
   );
 
@@ -2271,21 +2919,20 @@ function App() {
   return (
     <>
       {layout}
-      {/* Hold the update banner back while a session is live (never interrupt a
-          workout), and also across the just-finished "Well done" summary, which
-          runs after inProgress has already cleared. Otherwise the banner pops the
-          moment a session ends and updating skips the summary (and its share
-          image). It shows once the user leaves that screen (justFinished clears).
-          route.name !== 'train' additionally covers the gap in between: finish()
-          clears inProgress synchronously but can stay on route 'train' for a
-          while longer (the meso gains sheet, mesocycle-complete confirms, etc.)
-          before it navigates to the justFinished session route, and neither of
-          the two checks above sees that in-between window on its own.
-          forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
-      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && route?.name !== 'train' && !(route?.name === 'session' && route?.justFinished) && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
+      {/* The compact notice can reach an active flow without blocking it. The
+          full modal only appears on Home, where Update Now is safe. */}
+      {(forceShowUpdateBanner || updateAvailable) && !onboardingState && (
+        <UpdateBanner
+          compact={!safeToApplyUpdate}
+          onUpdate={applyUpdate}
+          onDefer={deferUpdate}
+          updating={updateApplying}
+        />
+      )}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
+      {store && friendsTabEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
           onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
@@ -2306,6 +2953,39 @@ function App() {
             unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
             setUnitPromptOpen(false);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
+      {xHandlePromptOpen && window.Screens?.XHandlePrompt && (
+        <window.Screens.XHandlePrompt
+          onSave={(handle) => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              xHandle: handle,
+              xHandlePublic: s.user?.xHandlePublic !== false,
+              // The prompt is a one-time request. Saving a handle completes it
+              // permanently, even if the profile write is briefly delayed.
+              xHandlePromptOptedOut: true,
+            } } : s);
+          }}
+          onLater={() => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              // "Later" means this one-time prompt has been handled; do not
+              // bring it back on the next boot.
+              xHandlePromptOptedOut: true,
+            } } : s);
+          }}
+          onOptOut={() => {
+            setXHandlePromptOpen(false);
+            setStore(s => s ? { ...s, user: {
+              ...s.user,
+              xHandle: null,
+              xHandlePublic: false,
+              xHandlePromptOptedOut: true,
+            } } : s);
           }}
         />
       )}

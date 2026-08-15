@@ -2411,6 +2411,100 @@ const TOUR_VISUALS = {
   pwaAndroidAddToHome: TourVisualPwaAndroidAddToHome, pwaAndroidInstall: TourVisualPwaAndroidInstall,
 };
 
+// ─── XHandlePrompt ───────────────────────────────────────────────────
+function XHandlePrompt({ onSave, onLater, onOptOut }) {
+  const [draft, setDraft] = useStateOB('');
+  const [error, setError] = useStateOB(null);
+  const submit = () => {
+    const handle = LB.normalizeXHandle(draft);
+    if (!handle) {
+      setError('Enter a valid X handle, for example @yourname.');
+      return;
+    }
+    onSave(handle);
+  };
+  const tap = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9998,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 340,
+        background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
+        border: `1px solid ${UI.goldSoft}`,
+        borderRadius: 6,
+        padding: '28px 24px',
+        display: 'flex', flexDirection: 'column', gap: 14,
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 var(--hair-width) rgba(var(--accent-rgb),0.2)',
+        animation: 'fadeUp 0.3s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="fa-brands fa-x-twitter" style={{ fontSize: 21, color: UI.ink }} />
+          </div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 25, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+            Stay connected
+          </div>
+        </div>
+        <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+          Add your X handle so we can include you in future social features and thank you publicly when we share updates.
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          Optional. You can change this anytime in Account settings.
+        </div>
+        <div>
+          <input
+            value={draft}
+            onChange={e => { setDraft(e.target.value); if (error) setError(null); }}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+            placeholder="@yourhandle"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            style={{
+              width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+              border: `1px solid ${error ? UI.danger : UI.hairStrong}`, borderRadius: 4,
+              padding: '11px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 15,
+              outline: 'none',
+            }}
+          />
+          {error && <div style={{ color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, marginTop: 6 }}>{error}</div>}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+          <button onPointerDown={tap(submit)} style={{
+            width: '100%', padding: '13px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)', textShadow: 'none',
+            color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700,
+            letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+          }}>
+            SAVE HANDLE
+          </button>
+          <button onPointerDown={tap(onLater)} style={{
+            width: '100%', padding: '11px 0', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+            cursor: 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi,
+            fontSize: 13, fontWeight: 500, WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+          }}>
+            Later
+          </button>
+          <button onPointerDown={tap(onOptOut)} style={{
+            alignSelf: 'center', marginTop: 2, padding: '5px 8px', border: 'none', background: 'none',
+            color: UI.inkFaint, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11,
+            WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+          }}>
+            I don&apos;t use X
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── OnboardingPrompt ────────────────────────────────────────────────
 function OnboardingPrompt({ onStart, onSkip }) {
   return (
@@ -2684,4 +2778,4 @@ function OnboardingTourInner({ tourKey, onDone }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { OnboardingPrompt, OnboardingTour });
+Object.assign(window.Screens, { XHandlePrompt, OnboardingPrompt, OnboardingTour });

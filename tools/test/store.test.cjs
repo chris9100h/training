@@ -10,7 +10,12 @@ const assert = require('assert');
 let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
+let testClientOptions = null;
+let testRpc = async () => ({ data: null, error: null });
 const rpcLog = []; // records every rpc(name, args) call
+const channelLog = [];
+const removedChannels = [];
+const windowEventLog = [];
 // The sandbox's own `window`, exposed so a test can set the globals store.js
 // reads (window.__DELOAD / window.__CLEANUP). The test file's own `global.window`
 // is a different object entirely, setting that one has no effect in here.
@@ -24,13 +29,22 @@ function loadStore() {
       getSession: async () => ({ data: { session: testSession } }),
     },
     from: (...args) => testFrom(...args),
-    rpc: async (name, args) => { rpcLog.push({ name, args }); return { data: null, error: null }; },
-    channel: () => ({ on() { return this; }, subscribe() { return this; } }),
-    removeChannel: () => {},
+    rpc: async (name, args) => { rpcLog.push({ name, args }); return testRpc(name, args); },
+    channel: (name, options) => {
+      const channel = {
+        name, options, handlers: [], statusCallback: null,
+        on(type, filter, callback) { this.handlers.push({ type, filter, callback }); return this; },
+        subscribe(callback) { this.statusCallback = callback || null; return this; },
+      };
+      channelLog.push(channel);
+      return channel;
+    },
+    removeChannel: channel => { removedChannels.push(channel); },
   };
   const sandbox = {
-    window: { supabase: { createClient: () => fakeClient }, addEventListener() {} },
+    window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, dispatchEvent(event) { windowEventLog.push(event); }, __STORE_TEST__: true },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
   };
   sandbox.global = sandbox;
@@ -60,6 +74,109 @@ async function testAsync(name, fn) {
 
 (async () => {
   const LB = loadStore();
+
+  await testAsync('runtime config exposes global Social and Coaching transports in both directions', async () => {
+    testRpc = async name => {
+      assert.strictEqual(name, 'get_runtime_config');
+      return { data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'broadcast', coachingTransport: 'broadcast' }, error: null };
+    };
+    const broadcast = await LB.fetchRuntimeConfig();
+    assert.strictEqual(broadcast.socialTransport, 'broadcast');
+    assert.strictEqual(broadcast.coachingTransport, 'broadcast');
+
+    testRpc = async () => ({ data: { forceUpdateNonce: null, socialMode: 'normal', socialTransport: 'legacy', coachingTransport: 'legacy' }, error: null });
+    const legacy = await LB.fetchRuntimeConfig();
+    assert.strictEqual(legacy.socialTransport, 'legacy');
+    assert.strictEqual(legacy.coachingTransport, 'legacy');
+    testRpc = async () => ({ data: null, error: null });
+  });
+
+  test('Social mappers accept both RPC camelCase and legacy PostgREST snake_case rows', () => {
+    const profile = LB.mapSocialProfile({ user_id: 'u1', steps_visible: true, workouts_visible: false, adherence_visible: true, metric_visibility: { weight: true }, metric_slots: ['weight', 'steps', 'weight'] });
+    assert.strictEqual(profile.userId, 'u1');
+    assert.strictEqual(profile.metricVisibility.weight, true);
+    assert.strictEqual(profile.metricVisibility.steps, true);
+    assert.deepStrictEqual([...profile.metricSlots], ['steps', 'workouts', 'adherence'], 'invalid/duplicate slots fall back to the safe default');
+
+    const friend = LB.mapSocialFriend({ id: 'f1', user_id: 'u2', steps: 12, steps_visible: true, accepted_at: '2026-01-01T00:00:00Z' });
+    assert.strictEqual(friend.friendshipId, 'f1');
+    assert.strictEqual(friend.userId, 'u2');
+    assert.strictEqual(friend.steps, 12);
+    assert.strictEqual(friend.metricVisibility.steps, true);
+
+    const modern = LB.mapSocialFriend({ friendshipId: 'f2', userId: 'u3', metricVisibility: { workouts: true }, metrics: { workouts: 4 } });
+    assert.strictEqual(modern.userId, 'u3');
+    assert.strictEqual(modern.metricVisibility.workouts, true);
+    assert.strictEqual(modern.workouts, 4);
+  });
+
+  await testAsync('Home live workout loader uses the live-only RPC and keeps the summary shape', async () => {
+    rpcLog.length = 0;
+    testRpc = async name => {
+      assert.strictEqual(name, 'social_get_live_workouts');
+      return {
+        data: [{ session_id: 's-live', owner_id: 'friend-1', owner_name: 'Friend', live: true, sets_done: 2, sets_total: 5, exercise_count: 3 }],
+        error: null,
+      };
+    };
+    const result = await LB.loadSocialLiveWorkoutFeed();
+    assert.deepStrictEqual(result.liveWorkouts.map(workout => workout.ownerId), ['friend-1']);
+    assert.strictEqual(result.liveWorkouts[0].setsDone, 2);
+    assert.strictEqual(result.liveWorkouts[0].setsTotal, 5);
+    assert.deepStrictEqual(rpcLog.map(call => call.name), ['social_get_live_workouts']);
+    testRpc = async () => ({ data: null, error: null });
+  });
+
+  test('Social workout/message mappers preserve snake_case fields and safe defaults', () => {
+    const detail = LB.mapSocialWorkoutDetail({
+      session: { session_id: 's1', owner_id: 'u1', ended: null, sets_done: 2 },
+      entries: [{ planned_sets: 3, sets: [{ reps_l: 4, reps_r: 5, time_sec: 30, done: 1 }] }],
+      comments: [{ author_id: 'u2', created_at: '2026-01-01T00:00:00Z', body: 'nice' }],
+    });
+    assert.strictEqual(detail.session.sessionId, 's1');
+    assert.strictEqual(detail.session.live, true);
+    assert.strictEqual(detail.entries[0].plannedSets, 3);
+    assert.strictEqual(detail.entries[0].sets[0].repsL, 4);
+    assert.strictEqual(detail.comments[0].authorId, 'u2');
+    const message = LB.mapSocialMessage({ id: 'm1', sender_id: 'u2', group_id: 'g1', created_at: '2026-01-01T00:00:00Z' }, [LB.mapSocialAttachment({ id: 'a1', message_id: 'm1', storage_path: 'u2/m1/a.png' })]);
+    assert.strictEqual(message.senderId, 'u2');
+    assert.strictEqual(message.groupId, 'g1');
+    assert.strictEqual(message.attachments[0].storagePath, 'u2/m1/a.png');
+  });
+
+  await testAsync('Coaching Broadcast uses one private user topic and coalesces content-free invalidations', async () => {
+    const resources = [];
+    const channelStart = channelLog.length;
+    const eventStart = windowEventLog.length;
+    const unsubscribe = LB.subscribeToChanges('coach-user', resource => resources.push(resource), { transport: 'broadcast' });
+    const channel = channelLog[channelStart];
+    assert.strictEqual(channel.name, 'coaching:user:coach-user');
+    assert.strictEqual(channel.options.config.private, true);
+    assert.strictEqual(channel.handlers.length, 1);
+    assert.strictEqual(channel.handlers[0].type, 'broadcast');
+    assert.strictEqual(channel.handlers[0].filter.event, 'coaching_invalidate');
+
+    channel.statusCallback('SUBSCRIBED');
+    channel.handlers[0].callback({ payload: { resource: 'notes' } });
+    channel.handlers[0].callback({ payload: { resource: 'notes' } });
+    channel.handlers[0].callback({ payload: { resource: 'status' } });
+    await new Promise(resolve => setTimeout(resolve, 320));
+
+    assert.deepStrictEqual(resources, ['authoritative', 'notes', 'status']);
+    assert.deepStrictEqual(windowEventLog.slice(eventStart).map(event => event.detail.resource), resources);
+    unsubscribe();
+    assert.strictEqual(removedChannels.at(-1), channel);
+  });
+
+  test('Coaching legacy rollback keeps the four Postgres Changes resources available', () => {
+    const channelStart = channelLog.length;
+    const unsubscribe = LB.subscribeToChanges('legacy-user', () => {}, { transport: 'legacy' });
+    const channel = channelLog[channelStart];
+    assert.strictEqual(channel.name, 'coaching-legacy:legacy-user');
+    const tables = channel.handlers.filter(item => item.type === 'postgres_changes').map(item => item.filter.table);
+    assert.deepStrictEqual([...new Set(tables)].sort(), ['zane_checkins', 'zane_coaching', 'zane_coaching_notes', 'zane_user_settings']);
+    unsubscribe();
+  });
 
   // ── todayISO: local calendar date, not UTC ───────────────────────────────
   test('todayISO returns local YYYY-MM-DD matching local getDate', () => {
@@ -139,7 +256,236 @@ async function testAsync(name, fn) {
     assert.strictEqual(queried.filter(table => table.startsWith('zane_medication')).length, 6);
   });
 
+  await testAsync('Supabase transport never starts more than four HTTP requests', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    let active = 0;
+    let maxActive = 0;
+    const releases = [];
+    testFetch = () => new Promise(resolve => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      releases.push(() => { active -= 1; resolve({ ok: true }); });
+    });
+    const requests = Array.from({ length: 9 }, (_, index) => testClientOptions.global.fetch(`/request-${index}`));
+    await tick();
+    assert.strictEqual(active, 4);
+    while (active || releases.length) {
+      releases.splice(0).forEach(release => release());
+      await tick();
+    }
+    await Promise.all(requests);
+    assert.strictEqual(maxActive, 4);
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('Auth transport has its own single lane and never consumes DB slots', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    let authActive = 0;
+    let dbActive = 0;
+    let maxAuth = 0;
+    let maxDb = 0;
+    const releases = [];
+    testFetch = input => new Promise(resolve => {
+      const auth = String(input).includes('/auth/v1/');
+      if (auth) { authActive += 1; maxAuth = Math.max(maxAuth, authActive); }
+      else { dbActive += 1; maxDb = Math.max(maxDb, dbActive); }
+      releases.push(() => {
+        if (auth) authActive -= 1;
+        else dbActive -= 1;
+        resolve({ ok: true, status: 200 });
+      });
+    });
+    const authRequests = Array.from({ length: 3 }, (_, i) => testClientOptions.global.fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token?test=${i}`));
+    const dbRequests = Array.from({ length: 6 }, (_, i) => testClientOptions.global.fetch(`/rest/v1/request-${i}`));
+    await tick();
+    assert.strictEqual(maxAuth, 1);
+    assert.strictEqual(maxDb, 4);
+    while (releases.length) {
+      releases.splice(0).forEach(release => release());
+      await tick();
+    }
+    await Promise.all([...authRequests, ...dbRequests]);
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('transient Auth failures become retryable without clearing the recovery lease', async () => {
+    LB.authRecoveryTest.clear();
+    testFetch = async () => ({ ok: false, status: 500 });
+    await assert.rejects(
+      testClientOptions.global.fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token'),
+      /Temporary Supabase Auth failure/,
+    );
+    assert.strictEqual(LB.authRecoveryTest.state().reason, 'http-500');
+
+    LB.authRecoveryTest.clear();
+    testFetch = async () => ({ ok: false, status: 400 });
+    const permanent = await testClientOptions.global.fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/auth/v1/token');
+    assert.strictEqual(permanent.status, 400);
+    assert.strictEqual(LB.authRecoveryTest.state(), null);
+
+    LB.authRecoveryTest.rememberUser('offline-user');
+    assert.strictEqual(LB.authRecoveryTest.offlineUser().userId, 'offline-user');
+    LB.authRecoveryTest.clearUser();
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('DB scheduler enforces four total, two background and two write tasks', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    const runControlled = async (definitions, expected) => {
+      let active = 0;
+      let backgroundActive = 0;
+      let writesActive = 0;
+      let maxActive = 0;
+      let maxBackground = 0;
+      let maxWrites = 0;
+      const releases = [];
+      const promises = definitions.map(definition => LB.scheduleDbTask(() => new Promise(resolve => {
+        active += 1;
+        if (definition.priority === 'background') backgroundActive += 1;
+        if (definition.kind === 'write') writesActive += 1;
+        maxActive = Math.max(maxActive, active);
+        maxBackground = Math.max(maxBackground, backgroundActive);
+        maxWrites = Math.max(maxWrites, writesActive);
+        releases.push(() => {
+          active -= 1;
+          if (definition.priority === 'background') backgroundActive -= 1;
+          if (definition.kind === 'write') writesActive -= 1;
+          resolve();
+        });
+      }), definition));
+      while (releases.length < expected.total) await tick();
+      while (active || releases.length || maxActive < Math.min(definitions.length, 4)) {
+        const batch = releases.splice(0);
+        batch.forEach(release => release());
+        await tick();
+        if (!active && releases.length === 0) break;
+      }
+      await Promise.all(promises);
+      assert.strictEqual(maxActive, expected.total);
+      assert.strictEqual(maxBackground, expected.background);
+      assert.strictEqual(maxWrites, expected.writes);
+    };
+
+    await runControlled(
+      Array.from({ length: 8 }, () => ({ priority: 'foreground', kind: 'read' })),
+      { total: 4, background: 0, writes: 0 },
+    );
+    await runControlled(
+      Array.from({ length: 6 }, () => ({ priority: 'background', kind: 'read' })),
+      { total: 2, background: 2, writes: 0 },
+    );
+    await runControlled(
+      Array.from({ length: 6 }, () => ({ priority: 'critical', kind: 'write' })),
+      { total: 2, background: 0, writes: 2 },
+    );
+  });
+
+  await testAsync('DB scheduler starts critical work before queued foreground and background work', async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    const starts = [];
+    const releases = [];
+    const task = label => () => new Promise(resolve => {
+      starts.push(label);
+      releases.push(resolve);
+    });
+    const running = Array.from({ length: 4 }, (_, index) => LB.scheduleDbTask(task(`running-${index}`), { priority: 'foreground' }));
+    await tick();
+    const background = LB.scheduleDbTask(task('background'), { priority: 'background' });
+    const foreground = LB.scheduleDbTask(task('foreground'), { priority: 'foreground' });
+    const critical = LB.scheduleDbTask(task('critical'), { priority: 'critical' });
+    releases.shift()();
+    await tick();
+    assert.strictEqual(starts[4], 'critical');
+    while (releases.length) {
+      releases.splice(0).forEach(resolve => resolve());
+      await tick();
+    }
+    await Promise.all([...running, background, foreground, critical]);
+  });
+
+  await testAsync('optional DB breaker opens for five minutes and a failed probe extends it to fifteen', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    const pressure = Object.assign(new Error('server timeout'), { status: 503 });
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    assert.strictEqual(api.breakerState().openUntil, 0, 'one pressure failure is not enough');
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    let state = api.breakerState();
+    assert.ok(state.openUntil - Date.now() > 4.9 * 60 * 1000, 'second failure opens the five-minute pause');
+    api.forceHalfOpen();
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(pressure)));
+    state = api.breakerState();
+    assert.ok(state.openUntil - Date.now() > 14.9 * 60 * 1000, 'failed half-open probe extends the pause');
+    assert.strictEqual(state.longPause, true);
+    api.resetBreaker();
+  });
+
+  await testAsync('aborted database requests count as pressure even after Supabase wraps the error', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    const abortError = new Error('AbortError: This operation was aborted');
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(abortError)));
+    await assert.rejects(api.runOptionalDbTask(() => Promise.reject(abortError)));
+    assert.ok(api.breakerState().openUntil > Date.now(), 'an aborted request must open the optional-work breaker');
+    api.resetBreaker();
+  });
+
+  await testAsync('social maintenance rejects optional work before its task starts', async () => {
+    const api = LB.dbStabilityTest;
+    api.resetBreaker();
+    api.setSocialMode('maintenance');
+    let started = false;
+    await assert.rejects(
+      api.runOptionalDbTask(async () => { started = true; }, { social: true }),
+      error => error.code === 'SOCIAL_MAINTENANCE',
+    );
+    assert.strictEqual(started, false);
+    api.setSocialMode('normal');
+  });
+
+  test('foodTemplateDayMarkerId scopes the fill marker to the active meal plan', () => {
+    const cut = LB.foodTemplateDayMarkerId('u1', 'cut', '2026-08-12');
+    const bulk = LB.foodTemplateDayMarkerId('u1', 'bulk', '2026-08-12');
+    assert.notStrictEqual(cut, bulk, 'switching plans must not reuse the old plan marker');
+    assert.strictEqual(cut, LB.foodTemplateDayMarkerId('u1', 'cut', '2026-08-12'));
+  });
+
+  test('foodTemplateDayLegacyMarkerId preserves the pre-plan marker shape', () => {
+    assert.strictEqual(LB.foodTemplateDayLegacyMarkerId('u1', '2026-08-12'), 'u1_2026-08-12');
+    assert.notStrictEqual(
+      LB.foodTemplateDayLegacyMarkerId('u1', '2026-08-12'),
+      LB.foodTemplateDayMarkerId('u1', 'mp_u1', '2026-08-12'),
+      'legacy and plan-scoped markers must stay distinguishable',
+    );
+  });
+
+  test('upsertMedicationLog revives a skipped tombstone without duplicate ids', () => {
+    const tombstone = { id: 'md_2026-08-12_slot-1', skipped: true, planned: false, doseQty: 1 };
+    const entry = { id: tombstone.id, medicationId: 'm1', date: '2026-08-12', planned: false, doseQty: 2 };
+    const next = LB.upsertMedicationLog([tombstone, { id: 'other' }, { ...tombstone }], entry);
+    assert.strictEqual(next.filter(row => row.id === entry.id).length, 1);
+    assert.strictEqual(next[0].skipped, false);
+    assert.strictEqual(next[0].doseQty, 2);
+    assert.strictEqual(next[1].id, 'other');
+  });
+
   // ── validateBackup ───────────────────────────────────────────────────────
+  // X handle normalization
+  test('normalizeXHandle accepts common pasted forms and stores @name', () => {
+    assert.strictEqual(LB.normalizeXHandle('Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('@Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('https://x.com/Chris_1'), '@Chris_1');
+    assert.strictEqual(LB.normalizeXHandle('www.x.com/Chris_1/'), '@Chris_1');
+    assert.strictEqual(LB.xHandleUrl('Chris_1'), 'https://x.com/Chris_1');
+  });
+  test('normalizeXHandle rejects invalid handles and treats blank input as clear', () => {
+    assert.strictEqual(LB.normalizeXHandle(''), null);
+    assert.strictEqual(LB.normalizeXHandle('   '), null);
+    assert.strictEqual(LB.normalizeXHandle('name with spaces'), null);
+    assert.strictEqual(LB.normalizeXHandle('x.com/name/extra'), null);
+    assert.strictEqual(LB.normalizeXHandle('1234567890123456'), null);
+  });
+
   test('validateBackup accepts a well-formed backup', () => {
     assert.strictEqual(LB.validateBackup({
       sessions: [{ id: 's1', entries: [] }],
@@ -156,6 +502,11 @@ async function testAsync(name, fn) {
     assert.ok(LB.validateBackup({ sessions: [], exercises: [{ id: 'e1', tags: 'nope' }], schedules: [] })));
   test('validateBackup rejects a session with non-array entries', () =>
     assert.ok(LB.validateBackup({ sessions: [{ id: 's', entries: {} }], exercises: [], schedules: [] })));
+  test('validateBackup rejects malformed X profile fields', () => {
+    const base = { sessions: [], exercises: [], schedules: [] };
+    assert.ok(LB.validateBackup({ ...base, user: { xHandle: 'not valid' } }));
+    assert.ok(LB.validateBackup({ ...base, user: { xHandlePublic: 'yes' } }));
+  });
 
   // ── syncStore error propagation (THE core fix) ───────────────────────────
   const settings = {};
@@ -1149,6 +1500,27 @@ async function testAsync(name, fn) {
     // Labels stay put whatever the boundaries are.
     assert.strictEqual(JSON.stringify(LB.mealCategories({ mealWindows: late }).map(c => c.id)),
       JSON.stringify(['breakfast', 'snack1', 'lunch', 'snack2', 'dinner', 'snack3']));
+    const custom = [
+      { id: 'first', label: 'First meal', startHour: 0 },
+      { id: 'training', label: 'Post training', startHour: 12 },
+      { id: 'late', label: 'Late meal', startHour: 19 },
+    ];
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: custom })), JSON.stringify([
+      { id: 'first', label: 'First meal', startHour: 0, endHour: 12 },
+      { id: 'training', label: 'Post training', startHour: 12, endHour: 19 },
+      { id: 'late', label: 'Late meal', startHour: 19, endHour: 24 },
+    ]));
+    // A broken richer config falls back to a valid legacy config, so a bad
+    // sync payload never makes an entry disappear from the timeline.
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: [{ id: 'bad', label: 'Bad', startHour: 1 }], mealWindows: late }).map(c => c.startHour)), JSON.stringify(late));
+    assert.strictEqual(JSON.stringify(LB.mealCategories({ mealCategories: [{ id: 'same', label: 'A', startHour: 0 }, { id: 'same', label: 'B', startHour: 4 }] }).map(c => c.startHour)), DEFAULTS);
+  });
+
+  test('foodDayIsClosed: explicit completion is independent of meal categories', () => {
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: false }], '2026-08-13'), false);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: true }], '2026-08-13'), true);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-12', foodDayClosed: true }], '2026-08-13'), false);
+    assert.strictEqual(LB.foodDayIsClosed([{ date: '2026-08-13', foodDayClosed: true }], '2026-08-13'), true);
   });
 
   test('estimateTdee: Mifflin-St Jeor, both sex constants, activity multiplier', () => {

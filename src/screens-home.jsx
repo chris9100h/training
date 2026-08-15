@@ -184,7 +184,7 @@ function LoginScreen() {
     <Screen scroll style={{ position: 'relative' }}>
       <div className="guilloche" style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }} />
 
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}> {/* +16 iOS status-bar-blur delta, see ui.jsx TopBar */}
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">ZANE TRAINING</span>
       </div>
 
@@ -2651,6 +2651,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      // The preference belongs to each recipient, not to the athlete starting
+      // the session. Always hand off the event; the server filters recipients.
+      void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
@@ -2700,6 +2703,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       inProgress: session.id,
       ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
     }));
+    // A warm-up session is not visible as "started" until the first working
+    // set begins. The training screen sends the notification at that point.
+    if (startedAt) void LB.notifySocialFriendStarted(session.id);
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2821,6 +2827,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    void LB.notifySocialFriendStarted(session.id);
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2856,6 +2863,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries, currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    void LB.notifySocialFriendStarted(session.id);
     loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
@@ -2887,6 +2895,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         ended: null, entries, currentExIdx: 0, cyclePos: null, ...extra,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
@@ -2915,6 +2924,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         inProgress: session.id,
         ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
       }));
+      void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
@@ -2970,6 +2980,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     () => (mesoBadgeState ? LB.mesoCurrentWeek(mesoBadgeState, store) : null),
     [mesoBadgeState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods]);
 
+  const liveFriendCount = new Set((store.friends?.liveWorkouts || []).map(workout => workout.ownerId).filter(Boolean)).size;
+  const friendsLiveBanner = liveFriendCount > 0 ? (
+    <button onClick={() => go({ name: 'friends', initialTab: 'activity' })} style={{
+      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10,
+      width: 'calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))',
+      marginLeft: 'env(safe-area-inset-left, 0px)', boxSizing: 'border-box',
+      padding: '10px 14px', border: `var(--hair-width) solid ${UI.goldSoft}`,
+      borderRadius: 6, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.16), ${UI.bgRaised})`,
+      color: UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    }}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="micro" style={{ display: 'block', color: UI.gold }}>FRIENDS · LIVE</span>
+        <span style={{ display: 'block', marginTop: 3, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {liveFriendCount} friend{liveFriendCount === 1 ? '' : 's'} working out right now
+        </span>
+      </span>
+      <i className="fa-solid fa-chevron-right" style={{ color: UI.gold, fontSize: 11 }} />
+    </button>
+  ) : null;
+
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -2999,6 +3030,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>}
           />
           <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
+          {friendsLiveBanner}
           <div style={{ padding: 22 }}>
             {hasPlans
               ? <Empty title="No active plan" sub="You have plans ready, just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
@@ -3011,15 +3043,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {sch && <>
       <div style={{
         flexShrink: 0,
-        // +28px, not the original +12px: this is the actual header shown in
-        // the reported iOS status-bar bleed-through (this branch renders
-        // whenever a plan is active, TopBar in ui.jsx is only the no-plan
-        // fallback a few lines up). +40px confirmed on-device that pushing
-        // this header down clears the blur; +20px and +25px both undershot
-        // by a bit.
-        padding: `calc(env(safe-area-inset-top, 0px) + 28px) 22px 0`,
+        // Preview experiment: reserve only the system-reported safe area and
+        // keep the blur layer off this sticky Home header. The former +28px
+        // workaround, and then the compact +12px inset, both consumed useful
+        // vertical space; this keeps only the OS-required clearance.
+        padding: `env(safe-area-inset-top, 0px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
-        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
@@ -3077,6 +3106,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       {/* Pull-down indicator, right below plan header */}
       <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
+      {friendsLiveBanner}
 
       {/* In-progress banner */}
       {store.inProgress && (() => {
