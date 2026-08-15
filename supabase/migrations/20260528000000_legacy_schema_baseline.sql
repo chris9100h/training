@@ -1885,35 +1885,6 @@ CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_sets
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_user_settings;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_user_settings
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
--- Migration 0213: the coach-writable meal-plan tables (0197/0199/0200) repeat
--- the same shape and were missing the guard.
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_meal_plans;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_meal_plans
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_template_slots;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_template_slots
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_recipes;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_recipes
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
--- Migration 0220: the coach-writable medication tables (0218) repeat the
--- same shape and were missing the guard.
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plans;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plans
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medications;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medications
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_schedule_slots;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_schedule_slots
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_logs;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
--- Migration 0221: new table gets the guard from day one.
-DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
-CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
-  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_adaptive_tdee_history;
 CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_adaptive_tdee_history
   FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
@@ -3022,6 +2993,33 @@ CREATE POLICY "coach can read client medication logs"   ON zane_medication_logs 
 CREATE POLICY "coach can write client medication logs"  ON zane_medication_logs FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
 CREATE POLICY "coach can update client medication logs" ON zane_medication_logs FOR UPDATE USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can delete client medication logs" ON zane_medication_logs FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- Migration 0213/0220/0221: all coach-writable food and medication tables
+-- receive the same immutable user_id guard after their tables exist.
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_recipes;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_recipes
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_template_slots;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_template_slots
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_food_meal_plans;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_food_meal_plans
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plans;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plans
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medications;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medications
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_plan_items;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_plan_items
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_schedule_slots;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_schedule_slots
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_medication_logs;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_medication_logs
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- Weekly Prep pillbox-packing checklist (migration 0223): which (date,
 -- schedule slot) pairs have already been packed this week, cross-device.
