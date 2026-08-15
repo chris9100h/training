@@ -11192,15 +11192,6 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
       fat: fdRound1(sum('fat')),
     };
   }, [explodeRecipe, explodeFactor, store.foodRecipes, store.settings?.netCarbs]);
-  const explodeRecipeProjection = useMemoFd(() => {
-    if (!recipeBaseTotals || !explodePreview) return null;
-    return {
-      calories: (recipeBaseTotals.calories || 0) + stagedTotals.calories + explodePreview.calories,
-      protein: fdRound1((recipeBaseTotals.protein || 0) + stagedTotals.protein + explodePreview.protein),
-      carbs: fdRound1((recipeBaseTotals.carbs || 0) + stagedTotals.carbs + explodePreview.carbs),
-      fat: fdRound1((recipeBaseTotals.fat || 0) + stagedTotals.fat + explodePreview.fat),
-    };
-  }, [recipeBaseTotals, stagedTotals, explodePreview]);
   // "Add N ingredients" on the explode sheet: the exploded rows join staged
   // like any other pick, so the batch totals above and the commit contract
   // below need zero changes. Food rows only get ensureFoodCached fired for
@@ -11310,6 +11301,15 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     carbs: fdRound1(staged.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(staged.reduce((a, i) => a + (i.fat || 0), 0)),
   }), [staged]);
+  const explodeRecipeProjection = useMemoFd(() => {
+    if (!recipeBaseTotals || !explodePreview) return null;
+    return {
+      calories: (recipeBaseTotals.calories || 0) + stagedTotals.calories + explodePreview.calories,
+      protein: fdRound1((recipeBaseTotals.protein || 0) + stagedTotals.protein + explodePreview.protein),
+      carbs: fdRound1((recipeBaseTotals.carbs || 0) + stagedTotals.carbs + explodePreview.carbs),
+      fat: fdRound1((recipeBaseTotals.fat || 0) + stagedTotals.fat + explodePreview.fat),
+    };
+  }, [recipeBaseTotals, stagedTotals, explodePreview]);
   // When this picker is opened from FoodScreen's logged-recipe editor, the
   // chosen ingredient is part of that existing entry, not a new day entry.
   // Include the current recipe total and any already-picked rows, then add
