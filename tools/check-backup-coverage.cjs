@@ -80,6 +80,7 @@ const EXCLUDED = {
   zane_social_plan_share_imports: 'plan-share import receipts are cross-user social state, not personal workout backup data',
   zane_social_reports: 'moderation reports are server-side safety records, not personal workout backup data',
   zane_social_workout_comments: 'friends workout comments and cheers reference other users, not personal workout backup data',
+  zane_social_notification_deliveries: 'server-side Friends push delivery ledger, derived provider state rather than user content',
   zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',

@@ -422,6 +422,10 @@ CREATE TABLE public.zane_user_settings (
   show_water_tab boolean NOT NULL DEFAULT false,   -- 0222: independent of show_health_tab, see docs/database.md
   show_food_tab boolean NOT NULL DEFAULT false,    -- 0222
   show_friends_tab boolean NOT NULL DEFAULT false, -- 0264: opt-in Friends preview tab
+  social_push_messages boolean NOT NULL DEFAULT true, -- 20260815090000: direct/group message push
+  social_push_friend_requests boolean NOT NULL DEFAULT true, -- 20260815090000
+  social_push_finished_comments boolean NOT NULL DEFAULT false, -- 20260815090000
+  social_push_friend_started boolean NOT NULL DEFAULT false, -- 20260815090000
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
@@ -3658,6 +3662,24 @@ CREATE TABLE public.zane_social_workout_comments (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Server-only idempotency ledger for Friends push delivery. This is derived
+-- provider state, not user content, and is intentionally excluded from user
+-- backups.
+CREATE TABLE public.zane_social_notification_deliveries (
+  event_key        text NOT NULL,
+  recipient_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  event_kind       text NOT NULL,
+  last_attempt_at  timestamptz,
+  delivered_at     timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT zane_social_notification_deliveries_pkey PRIMARY KEY (event_key, recipient_id),
+  CONSTRAINT zane_social_notification_deliveries_kind_check
+    CHECK (event_kind = ANY (ARRAY['message'::text, 'friend_request'::text, 'finished_workout_comment'::text, 'friend_started'::text]))
+);
+
+CREATE INDEX zane_social_notification_deliveries_recipient_idx
+  ON public.zane_social_notification_deliveries(recipient_id, delivered_at);
+
 CREATE INDEX zane_social_friendships_addressee_idx ON public.zane_social_friendships(addressee_id, status);
 CREATE INDEX zane_social_friendships_requester_idx ON public.zane_social_friendships(requester_id, status);
 CREATE INDEX zane_social_group_members_user_idx ON public.zane_social_group_members(user_id, group_id);
@@ -3948,6 +3970,10 @@ ALTER TABLE public.zane_social_message_reads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_plan_shares ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_plan_share_imports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_social_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_social_notification_deliveries ENABLE ROW LEVEL SECURITY;
+-- No client policies: only the service role may read or write delivery state.
+REVOKE ALL ON public.zane_social_notification_deliveries FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.zane_social_notification_deliveries TO service_role;
 
 -- Profile and relationship changes flow through the guarded RPCs. Direct
 -- table access is intentionally not exposed for these identity tables.

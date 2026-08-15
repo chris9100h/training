@@ -687,6 +687,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [friendsSheet, setFriendsSheet] = useStateSet(false);
   const [friendsSharingSheet, setFriendsSharingSheet] = useStateSet(false);
+  const [friendsNotificationsSheet, setFriendsNotificationsSheet] = useStateSet(false);
   const [socialProfileDraft, setSocialProfileDraft] = useStateSet(null);
   const [socialProfileSaving, setSocialProfileSaving] = useStateSet(false);
   const [socialProfileMsg, setSocialProfileMsg] = useStateSet(null);
@@ -1116,6 +1117,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   const closeFriendsSettings = () => {
     setFriendsSharingSheet(false);
+    setFriendsNotificationsSheet(false);
     setFriendsSheet(false);
   };
 
@@ -2623,6 +2625,22 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Friends is in preview. Turn this on to test friends, private groups, messaging, metric sharing, live workout feedback and plan snapshots. Friends and Coaching share one navigation slot; use the social tab's long press to choose between them. You choose which metrics and workout details are visible.
           </div>
+          <div style={{ marginTop: 16 }}>
+            <NavRow
+              label="Notifications"
+              hint={`${[
+                store.settings?.socialPushMessages ?? true,
+                store.settings?.socialPushFriendRequests ?? true,
+                store.settings?.socialPushFinishedComments ?? false,
+                store.settings?.socialPushFriendStarted ?? false,
+              ].filter(Boolean).length} of 4 on`}
+              onTap={() => setFriendsNotificationsSheet(true)}
+              first
+            />
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 5 }}>
+              Choose which friend activity may reach you as a push notification.
+            </div>
+          </div>
           {!!store.settings?.showFriendsTab && !socialProfileDraft && socialProfileLoadError && <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>
             <div>{socialProfileLoadError}</div>
             <button type="button" onClick={() => setSocialProfileRetry(value => value + 1)} style={{ marginTop: 9, padding: '7px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Retry</button>
@@ -2667,6 +2685,41 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={closeFriendsSettings}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      <SettingsSheet open={friendsNotificationsSheet} onClose={() => setFriendsNotificationsSheet(false)} title="Notifications">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>
+            These are native push notifications. Friends' live workout updates and in-app badges are not changed by these switches. Push notifications must also be enabled for this device.
+          </div>
+          <Row label="Direct and group messages" first>
+            <Toggle on={store.settings?.socialPushMessages ?? true} onToggle={() => patchSettings({ socialPushMessages: !(store.settings?.socialPushMessages ?? true) })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            On by default. A message never opens a live workout overlay.
+          </div>
+          <Row label="Friend requests">
+            <Toggle on={store.settings?.socialPushFriendRequests ?? true} onToggle={() => patchSettings({ socialPushFriendRequests: !(store.settings?.socialPushFriendRequests ?? true) })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            On by default, so a request cannot quietly get missed.
+          </div>
+          <Row label="Comments on finished workouts">
+            <Toggle on={!!store.settings?.socialPushFinishedComments} onToggle={() => patchSettings({ socialPushFinishedComments: !store.settings?.socialPushFinishedComments })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            Off by default. Live comments and cheers never send a push.
+          </div>
+          <Row label="Friends starting a workout">
+            <Toggle on={!!store.settings?.socialPushFriendStarted} onToggle={() => patchSettings({ socialPushFriendStarted: !store.settings?.socialPushFriendStarted })} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45, margin: '3px 0 8px' }}>
+            Off by default. Only one quiet start notification is sent per workout.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFriendsNotificationsSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>

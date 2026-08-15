@@ -10,6 +10,7 @@ const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cC
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+const SOCIAL_NOTIFY_URL     = `${SUPABASE_URL}/functions/v1/zane_social-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 // One endpoint each, whichever AI backend the device is set to. Both used to
@@ -984,6 +985,10 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
     show_coaching_tab: sett.showCoachingTab ?? false,
     show_friends_tab: sett.showFriendsTab ?? false,
+    social_push_messages: sett.socialPushMessages ?? true,
+    social_push_friend_requests: sett.socialPushFriendRequests ?? true,
+    social_push_finished_comments: sett.socialPushFinishedComments ?? false,
+    social_push_friend_started: sett.socialPushFriendStarted ?? false,
     be_your_own_coach: sett.beYourOwnCoach ?? false,
     session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     macro_targets: sett.macroTargets ?? null,
@@ -1777,6 +1782,10 @@ function mapUserSettings(sett = {}) {
     pinAllNotes: sett.pin_all_notes ?? false,
     showCoachingTab: sett.show_coaching_tab ?? false,
     showFriendsTab: sett.show_friends_tab ?? false,
+    socialPushMessages: sett.social_push_messages ?? true,
+    socialPushFriendRequests: sett.social_push_friend_requests ?? true,
+    socialPushFinishedComments: sett.social_push_finished_comments ?? false,
+    socialPushFriendStarted: sett.social_push_friend_started ?? false,
     beYourOwnCoach: sett.be_your_own_coach ?? false,
     sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
     defaultCheckinSchema: sett.default_checkin_schema ?? null,
@@ -3336,6 +3345,10 @@ async function syncStore(prev, next, userId) {
     prev.settings?.pinAllNotes          !== next.settings?.pinAllNotes          ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.showFriendsTab       !== next.settings?.showFriendsTab       ||
+    prev.settings?.socialPushMessages   !== next.settings?.socialPushMessages   ||
+    prev.settings?.socialPushFriendRequests !== next.settings?.socialPushFriendRequests ||
+    prev.settings?.socialPushFinishedComments !== next.settings?.socialPushFinishedComments ||
+    prev.settings?.socialPushFriendStarted !== next.settings?.socialPushFriendStarted ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
@@ -3419,6 +3432,10 @@ async function syncStore(prev, next, userId) {
       pin_all_notes: next.settings?.pinAllNotes ?? false,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       show_friends_tab: next.settings?.showFriendsTab ?? false,
+      social_push_messages: next.settings?.socialPushMessages ?? true,
+      social_push_friend_requests: next.settings?.socialPushFriendRequests ?? true,
+      social_push_finished_comments: next.settings?.socialPushFinishedComments ?? false,
+      social_push_friend_started: next.settings?.socialPushFriendStarted ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
@@ -6536,6 +6553,18 @@ async function loadSocialMessageState(userId) {
   }, { social: true });
 }
 
+// Push delivery is deliberately detached from the social write. The social
+// row is already committed before this best-effort handoff starts, and a
+// provider outage can therefore never roll back or slow the user's action.
+async function notifySocialEvent(event, eventId) {
+  if (!event || !eventId) return null;
+  const response = await fnFetch(SOCIAL_NOTIFY_URL, { event, id: eventId });
+  if (response && !response.ok && response.status !== 409) {
+    console.warn('social notification handoff failed:', response.status);
+  }
+  return response;
+}
+
 async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
   const text = String(body || '').trim();
   if (!sessionId || !text) throw new Error('Comment cannot be empty');
@@ -6543,7 +6572,9 @@ async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
     p_session_id: sessionId, p_body: text, p_kind: kind,
   });
   if (error) throw error;
-  return mapSocialWorkoutComment(data);
+  const mapped = mapSocialWorkoutComment(data);
+  void notifySocialEvent('finished_workout_comment', mapped?.id);
+  return mapped;
 }
 
 async function updateSocialProfile(userId, patch = {}) {
@@ -6590,6 +6621,7 @@ async function lookupSocialProfile(query) {
 async function sendSocialFriendRequest(targetUserId) {
   const { data, error } = await _supabase.rpc('social_send_friend_request', { p_target_id: targetUserId });
   if (error) throw error;
+  void notifySocialEvent('friend_request', data);
   return data;
 }
 
@@ -6637,7 +6669,20 @@ async function sendSocialMessage({ senderId, recipientId = null, groupId = null,
     sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
   }).select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').single();
   if (error) throw error;
+  void notifySocialEvent('message', data?.id);
   return mapSocialMessage(data);
+}
+
+async function notifySocialFriendStarted(sessionId) {
+  // Session rows are written by the offline-aware sync queue after the local
+  // workout is created. Retry a few times so the edge function sees the
+  // authoritative row without adding any polling or blocking the start UI.
+  for (const delay of [0, 3000, 8000]) {
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    const response = await notifySocialEvent('friend_started', sessionId);
+    if (!response || response.status !== 409) return response;
+  }
+  return null;
 }
 
 async function updateSocialMessage(messageId, userId, body) {
@@ -12091,7 +12136,7 @@ window.LB = {
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
-  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,

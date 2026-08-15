@@ -2651,6 +2651,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
@@ -2700,6 +2701,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       inProgress: session.id,
       ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
     }));
+    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2821,6 +2823,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2856,6 +2859,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries, currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
     loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
@@ -2887,6 +2891,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         ended: null, entries, currentExIdx: 0, cyclePos: null, ...extra,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
@@ -2915,6 +2920,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         inProgress: session.id,
         ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
       }));
+      if (store.settings?.socialPushFriendStarted) void LB.notifySocialFriendStarted(session.id);
       go({ name: 'train', sessionId: session.id });
       return;
     }
