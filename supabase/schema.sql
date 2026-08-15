@@ -4161,6 +4161,32 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.social_workout_access(p_owner_id uuid, p_started_at timestamptz)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT auth.uid() IS NOT NULL AND (
+    auth.uid() = p_owner_id
+    OR EXISTS (
+      SELECT 1
+      FROM zane_social_friendships f
+      JOIN zane_social_profiles sp ON sp.user_id = p_owner_id
+      WHERE f.status = 'accepted'
+        AND f.accepted_at IS NOT NULL
+        AND p_started_at IS NOT NULL
+        AND f.accepted_at <= p_started_at
+        AND sp.workouts_visible
+        AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = auth.uid() AND b.blocked_id = p_owner_id) OR (b.blocker_id = p_owner_id AND b.blocked_id = auth.uid()))
+        AND ((f.requester_id = auth.uid() AND f.addressee_id = p_owner_id) OR (f.requester_id = p_owner_id AND f.addressee_id = auth.uid()))
+    )
+  );
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.social_workout_access(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
+
 
 CREATE OR REPLACE FUNCTION public.social_can_view_workout_session(p_session_id text)
  RETURNS boolean
@@ -4742,32 +4768,6 @@ BEGIN
   RETURN v_group_id;
 END;
 $function$;
-
-CREATE OR REPLACE FUNCTION public.social_workout_access(p_owner_id uuid, p_started_at timestamptz)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path TO 'public', 'pg_temp'
-AS $function$
-  SELECT auth.uid() IS NOT NULL AND (
-    auth.uid() = p_owner_id
-    OR EXISTS (
-      SELECT 1
-      FROM zane_social_friendships f
-      JOIN zane_social_profiles sp ON sp.user_id = p_owner_id
-      WHERE f.status = 'accepted'
-        AND f.accepted_at IS NOT NULL
-        AND p_started_at IS NOT NULL
-        AND f.accepted_at <= p_started_at
-        AND sp.workouts_visible
-        AND NOT EXISTS (SELECT 1 FROM zane_social_blocks b WHERE (b.blocker_id = auth.uid() AND b.blocked_id = p_owner_id) OR (b.blocker_id = p_owner_id AND b.blocked_id = auth.uid()))
-        AND ((f.requester_id = auth.uid() AND f.addressee_id = p_owner_id) OR (f.requester_id = p_owner_id AND f.addressee_id = auth.uid()))
-    )
-  );
-$function$;
-
-REVOKE EXECUTE ON FUNCTION public.social_workout_access(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 
 -- Keep profile changes visible through the already subscribed friendship rows.
 CREATE OR REPLACE FUNCTION public.social_profile_touch_friendships()
